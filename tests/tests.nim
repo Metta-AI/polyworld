@@ -33,6 +33,7 @@ import
   test_player,
   test_rngs,
   test_rtscameras,
+  test_static_scenes,
   test_tapes,
   test_tile_paths,
   test_viewers,
