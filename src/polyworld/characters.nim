@@ -19,6 +19,10 @@ type
   CharacterShading* = enum
     PbrCharacters, ToonCharacters
 
+  HandSlot* = enum
+    RightHandSlot = "handslot.r"
+    LeftHandSlot = "handslot.l"
+
   CharacterModel* = ref object
     file*: GltfFile
     clips*: OrderedTable[string, int]  # animation clip name -> index
@@ -33,6 +37,14 @@ type
     toon*: ToonContext
     shading*: CharacterShading
     sunDepthPass*: bool  ## drawCharacter renders into the sun map instead
+    gearFiles: Table[string, GltfFile]
+
+  CharacterGear* = ref object
+    ## One separate glTF model bound to a character's declared hand node.
+    file*: GltfFile
+    slot*: HandSlot
+    character: CharacterModel
+    socket: Node
 
 const ToonRimStrength* = 0.6'f32  ## the rim light every game shares
 
@@ -119,6 +131,29 @@ proc clipDuration*(model: CharacterModel, clip: int): float32 =
   ## Returns the duration in seconds of an animation clip.
   model.file.root.animations[clip].duration
 
+proc attachGear*(
+    scene: CharacterScene, model: CharacterModel,
+    path: string, slot: HandSlot
+): CharacterGear =
+  ## Loads a separate gear model and binds it to one canonical hand socket.
+  ## Gear is authored in socket-local space; no runtime correction transform
+  ## is applied.
+  let socketName = $slot
+  var socket: Node
+  for node in model.file.root.walkNodes:
+    if node.name == socketName:
+      doAssert socket == nil, "duplicate character socket " & socketName
+      socket = node
+  doAssert socket != nil, "character has no socket " & socketName
+  if path notin scene.gearFiles:
+    scene.gearFiles[path] = readGltfFile(path)
+  CharacterGear(
+    file: scene.gearFiles[path],
+    slot: slot,
+    character: model,
+    socket: socket
+  )
+
 proc newCharacterScene*(window: Window): CharacterScene =
   ## Creates the shared PBR renderer and attaches its environment map, plus
   ## the toon renderer; `shading` picks which one draws.
@@ -196,15 +231,9 @@ proc beginCharacters*(
   toon.cameraPosition = cameraEye
   scene.renderer.beginFrame(window, window.size)
 
-proc drawCharacter*(
-    scene: CharacterScene, model: CharacterModel,
-    position: Vec3, facing: float32, clip: int, animTime: float32,
-    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
+proc setCharacterPose(
+    model: CharacterModel, clip: int, animTime: float32
 ) =
-  ## Poses the shared model at the given clip time and draws one instance.
-  ## Looping clips may pass any time (playback wraps); one-shot clips like
-  ## Death should clamp animTime to clipDuration to hold the last frame.
-  ## Keep tint.a at 1.0 — lower alpha reroutes into the blended pass.
   let root = model.file.root
   if model.partNodes.len > 0:
     # Modular: the shared tree shows exactly this model's outfit.
@@ -219,27 +248,99 @@ proc drawCharacter*(
   root.activeClips[0] = clip
   root.animTime = animTime
   root.updateAnimation(0)
-  let transform =
-    translate(position) * rotateY(facing) *
+
+proc characterTransform(
+    model: CharacterModel,
+    position: Vec3, facing, sizeFactor: float32
+): Mat4 =
+  translate(position) * rotateY(facing) *
     scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
+
+proc socketTransform*(
+    gear: CharacterGear,
+    position: Vec3, facing: float32, clip: int, animTime: float32,
+    sizeFactor = 1.0'f32
+): Mat4 =
+  ## Returns the sampled world transform of an attachment's hand socket.
+  ## This is useful for headless validation and other socket-local effects.
+  let model = gear.character
+  model.setCharacterPose(clip, animTime)
+  model.file.root.updateTransforms(
+    model.characterTransform(position, facing, sizeFactor))
+  gear.socket.mat
+
+proc drawGear(
+    scene: CharacterScene, gear: CharacterGear,
+    transform: Mat4, tint: Color
+) =
   if scene.sunDepthPass:
-    # Same pose, but rendered into the sun's shadow map: games run their
-    # character loop once inside the depth pass and once for the camera.
     scene.toon.transform = transform
-    scene.toon.drawSunDepth(model.file.root)
+    scene.toon.drawSunDepth(gear.file.root)
     return
   case scene.shading
   of PbrCharacters:
     scene.context.transform = transform
     scene.context.tint = tint
-    scene.context.draw(root)
+    scene.context.draw(gear.file.root)
   of ToonCharacters:
-    let toon = scene.toon
-    for name in model.unlitParts:
-      toon.unlitNodes.incl name
-    toon.transform = transform
-    toon.tint = tint
-    toon.draw(root)
+    scene.toon.transform = transform
+    scene.toon.tint = tint
+    scene.toon.draw(gear.file.root)
+
+proc drawCharacterImpl(
+    scene: CharacterScene, model: CharacterModel,
+    position: Vec3, facing: float32, clip: int, animTime: float32,
+    gear: openArray[CharacterGear], tint: Color, sizeFactor: float32
+) =
+  model.setCharacterPose(clip, animTime)
+  let
+    root = model.file.root
+    transform = model.characterTransform(position, facing, sizeFactor)
+  if gear.len > 0:
+    root.updateTransforms(transform)
+    for attachment in gear:
+      doAssert attachment.character == model,
+        "character gear belongs to a different model"
+  if scene.sunDepthPass:
+    scene.toon.transform = transform
+    scene.toon.drawSunDepth(root)
+  else:
+    case scene.shading
+    of PbrCharacters:
+      scene.context.transform = transform
+      scene.context.tint = tint
+      scene.context.draw(root)
+    of ToonCharacters:
+      let toon = scene.toon
+      for name in model.unlitParts:
+        toon.unlitNodes.incl name
+      toon.transform = transform
+      toon.tint = tint
+      toon.draw(root)
+  for attachment in gear:
+    scene.drawGear(attachment, attachment.socket.mat, tint)
+
+proc drawCharacter*(
+    scene: CharacterScene, model: CharacterModel,
+    position: Vec3, facing: float32, clip: int, animTime: float32,
+    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
+) =
+  ## Poses the shared model at the given clip time and draws one instance.
+  ## Looping clips may pass any time (playback wraps); one-shot clips like
+  ## Death should clamp animTime to clipDuration to hold the last frame.
+  ## Keep tint.a at 1.0 — lower alpha reroutes into the blended pass.
+  scene.drawCharacterImpl(
+    model, position, facing, clip, animTime, [], tint, sizeFactor)
+
+proc drawCharacter*(
+    scene: CharacterScene, model: CharacterModel,
+    position: Vec3, facing: float32, clip: int, animTime: float32,
+    gear: openArray[CharacterGear],
+    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
+) =
+  ## Poses and draws a character plus socket-local hand gear in one pass.
+  scene.drawCharacterImpl(
+    model, position, facing, clip, animTime, gear, tint, sizeFactor)
 
 proc finishCharacters*(scene: CharacterScene) =
   ## Finishes the character renderer's current frame.
@@ -305,21 +406,8 @@ proc pickCharacter*(
   ## Ray distance to one posed character's triangles, or -1 when they miss.
   result = -1
   let root = model.file.root
-  if model.partNodes.len > 0:
-    for node in model.partNodes:
-      node.baseVisible = false
-      node.visible = false
-    for node in model.shownParts:
-      node.baseVisible = true
-      node.visible = true
-  if root.activeClips.len != 1:
-    root.activeClips.setLen(1)
-  root.activeClips[0] = clip
-  root.animTime = animTime
-  root.updateAnimation(0)
-  let transform =
-    translate(position) * rotateY(facing) *
-    scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
+  model.setCharacterPose(clip, animTime)
+  let transform = model.characterTransform(position, facing, sizeFactor)
   root.updateTransforms(transform)
   for node in root.walkNodes:
     if node.mesh == nil or not node.visible:

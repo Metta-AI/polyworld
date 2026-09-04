@@ -7,6 +7,7 @@ import
   test_bodies,
   test_body_layers,
   test_chrome,
+  test_characters,
   test_cli,
   test_clickmarks,
   test_controllers,
