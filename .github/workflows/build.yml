@@ -66,11 +66,12 @@ jobs:
           agent-browser session list
           python3 -m http.server 8897 --bind 127.0.0.1 --directory tmp/model-render-proof > /tmp/polyworld-proof-http.log 2>&1 &
           proof_http_pid=$!
-          trap 'agent-browser --session polyworld-pr-audit close; kill "$proof_http_pid"' EXIT
+          trap 'agent-browser --session polyworld-pr-audit console; agent-browser --session polyworld-pr-audit errors; agent-browser --session polyworld-pr-audit close; kill "$proof_http_pid"' EXIT
           agent-browser --session polyworld-pr-audit open http://127.0.0.1:8897/index.html
           agent-browser --session polyworld-pr-audit wait --fn 'window.__modelProof && window.__modelProof.passed'
           agent-browser --session polyworld-pr-audit eval '(() => window.__modelProof)()'
-          agent-browser --session polyworld-pr-audit screenshot tmp/model-render-proof/webgl.png
+          agent-browser --session polyworld-pr-audit wait --fn 'Array.from(document.images).every(image => image.complete)'
+          agent-browser --session polyworld-pr-audit screenshot --full tmp/model-render-proof/webgl.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

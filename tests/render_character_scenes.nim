@@ -130,4 +130,23 @@ echo "Model GPU proof passed"
 
 when defined(emscripten):
   proc runScript(script: cstring) {.importc: "emscripten_run_script", header: "<emscripten.h>".}
-  runScript("window.__modelProof = {passed: true};")
+  runScript("""
+    const names = ['PbrCharacters-static', 'PbrCharacters-gear-start',
+      'PbrCharacters-gear-finish', 'ToonCharacters-static',
+      'ToonCharacters-gear-start', 'ToonCharacters-gear-finish',
+      'animation-quarter', 'animation-paused', 'animation-resumed'];
+    const gallery = document.createElement('div');
+    gallery.style = 'display:grid;grid-template-columns:repeat(3,256px);gap:12px;background:white;color:black;padding:12px';
+    for (const name of names) {
+      const figure = document.createElement('figure');
+      figure.style.margin = '0';
+      const caption = document.createElement('figcaption');
+      caption.textContent = name;
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(new Blob([FS.readFile('tmp/model-render-proof/' + name + '.png')], {type:'image/png'}));
+      figure.append(caption, img);
+      gallery.append(figure);
+    }
+    document.body.prepend(gallery);
+    window.__modelProof = {passed: true, captures: names.length};
+  """)
