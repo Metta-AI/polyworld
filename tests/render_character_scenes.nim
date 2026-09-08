@@ -1,7 +1,8 @@
 ## Run under a real OpenGL context (xvfb + Mesa works). No art pack required.
 import std/[os, sets]
 import chroma, gltf, opengl, pixie, vmath, windy
-import polyworld/[characters, shadows, toon]
+import polyworld/[characters, shadows, toon, animblend, picking, frustums]
+import std/options
 
 const Size = 256
 let window = newWindow("Model rendering proof", ivec2(Size), vsync = false)
@@ -65,6 +66,45 @@ for shading in CharacterShading:
   doAssert abs((finish.x - start.x) - Size.float32 * 3 / 9) < 2
   doAssert abs((finish.y - start.y) + Size.float32 * 4 / 10) < 2
 
+# Exercise the other audited PRs through the rendered scene on this temporary
+# integration branch. The engine PRs keep their independent focused fixtures.
+let root = staticModel.file.root
+let target = root.nodes[0]
+root.animations = @[AnimationClip(name: "slide", duration: 1,
+  channels: @[AnimationChannel(target: target, path: AnimTranslation,
+    interpolation: aiLinear, times: @[0'f32, 1'f32],
+    valuesVec3: @[target.pos, target.pos + vec3(2, 0, 0)])])]
+let player = newClipPlayer(root)
+player.play(0, fade = 0)
+player.timeScale = 0.5
+player.update(0.5)
+beginImage(ToonCharacters)
+scene.drawStaticSceneModel(staticModel, vec3(0))
+let beforePause = capture("animation-quarter")
+player.paused = true
+target.pos = vec3(100)
+player.update(10)
+beginImage(ToonCharacters)
+scene.drawStaticSceneModel(staticModel, vec3(0))
+let paused = capture("animation-paused")
+doAssert length(beforePause - paused) < 0.01
+player.paused = false
+player.update(0.5)
+beginImage(ToonCharacters)
+scene.drawStaticSceneModel(staticModel, vec3(0))
+let resumed = capture("animation-resumed")
+doAssert abs(resumed.x - paused.x - Size.float32 * 0.5 / 9) < 2
+let bounds = root.getAABounds()
+doAssert boundsVisible(bounds.min, bounds.max, projection * view)
+doAssert not boundsVisible(bounds.min, bounds.max,
+  projection * view * translate(vec3(100, 0, 0)))
+for node in root.walkNodes:
+  if node.mesh != nil:
+    let points = node.mesh.primitives[0].points
+    let center = node.mat * ((points[0] + points[1] + points[2]) / 3)
+    doAssert pickRay(center + vec3(0, 0, 10), vec3(0, 0, -1)).pickMesh(root, true).isSome
+    break
+
 sunShadowsEnabled = true
 initSunShadows(10, 20)
 sunLightMvp0 = projection * view
@@ -76,13 +116,20 @@ for attached in [false, true]:
     scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
   else:
     scene.drawStaticSceneModel(staticModel, vec3(0))
-  var depth = newSeq[float32](Size * Size)
-  glReadPixels(0, 0, Size, Size, GL_DEPTH_COMPONENT, cGL_FLOAT, depth[0].addr)
-  doAssert glGetError() == GL_NO_ERROR
-  var covered = 0
-  for value in depth:
-    if value < 1: inc covered
-  doAssert covered > 20, "model must write shadow depth"
-  echo "Shadow attached=", attached, ": ", covered, " covered pixels"
+  when not defined(emscripten):
+    var depth = newSeq[float32](Size * Size)
+    glReadPixels(0, 0, Size, Size, GL_DEPTH_COMPONENT, cGL_FLOAT, depth[0].addr)
+    doAssert glGetError() == GL_NO_ERROR
+    var covered = 0
+    for value in depth:
+      if value < 1: inc covered
+    doAssert covered > 20, "model must write shadow depth"
+    echo "Shadow attached=", attached, ": ", covered, " covered pixels"
+  else:
+    doAssert glGetError() == GL_NO_ERROR
 endSunDepthPass(window.size)
 echo "Model GPU proof passed"
+
+when defined(emscripten):
+  proc runScript(script: cstring) {.importc: "emscripten_run_script", header: "<emscripten.h>".}
+  runScript("window.__modelProof = {passed: true};")

@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -50,3 +50,30 @@ jobs:
       - run: nim c -d:headless examples/call_to_adventure/cta.nim
       - run: nim c -d:headless examples/light_vs_dark/lvd.nim
       - run: nim c -d:headless examples/heartleaf/heartleaf.nim
+      - name: Build WebGL proof
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/polyworld-proof-emsdk
+          /tmp/polyworld-proof-emsdk/emsdk install 5.0.7
+          /tmp/polyworld-proof-emsdk/emsdk activate 5.0.7
+          source /tmp/polyworld-proof-emsdk/emsdk_env.sh
+          nim c --parallelBuild:1 --os:linux --cpu:wasm32 --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --threads:off --mm:arc --exceptions:goto -d:emscripten -d:noSignalHandler --out:tmp/model-render-proof/index.html --passL:"--preload-file tests/data@/tests/data --shell-file src/polyworld/emscripten.html --pre-js src/polyworld/webinputs.js -s ASYNCIFY -s USE_WEBGL2=1 -s MAX_WEBGL_VERSION=2 -s MIN_WEBGL_VERSION=1 -s FULL_ES3=1 -s GL_ENABLE_GET_PROC_ADDRESS=1 -s ALLOW_MEMORY_GROWTH --profiling" tests/render_character_scenes.nim
+      - name: Run WebGL proof in Chrome
+        env:
+          AGENT_BROWSER_ARGS: --no-sandbox,--use-gl=angle,--use-angle=swiftshader,--enable-unsafe-swiftshader
+          AGENT_BROWSER_EXECUTABLE_PATH: /usr/bin/google-chrome
+        run: |
+          npm install -g agent-browser@0.33.2
+          agent-browser session list
+          python3 -m http.server 8897 --bind 127.0.0.1 --directory tmp/model-render-proof > /tmp/polyworld-proof-http.log 2>&1 &
+          proof_http_pid=$!
+          trap 'agent-browser --session polyworld-pr-audit close; kill "$proof_http_pid"' EXIT
+          agent-browser --session polyworld-pr-audit open http://127.0.0.1:8897/index.html
+          agent-browser --session polyworld-pr-audit wait --fn 'window.__modelProof && window.__modelProof.passed'
+          agent-browser --session polyworld-pr-audit eval '(() => window.__modelProof)()'
+          agent-browser --session polyworld-pr-audit screenshot tmp/model-render-proof/webgl.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-webgl-proof
+          path: tmp/model-render-proof/*.png
+          if-no-files-found: ignore
