@@ -63,7 +63,7 @@ proc timeScale*(player: ClipPlayer): float32 = player.rate
 proc `timeScale=`*(player: ClipPlayer, value: float32) =
   ## Scales clip and fade clocks together. Zero freezes time; reverse playback
   ## is not supported by the one-shot chaining contract.
-  if value < 0 or classify(value) in {fcNan, fcInf, fcNegInf}:
+  if not (value >= 0 and value < Inf):
     raise newException(ValueError, "animation time scale must be finite and nonnegative")
   player.rate = value
 
