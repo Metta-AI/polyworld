@@ -31,6 +31,12 @@ type
     shownParts*: seq[Node]      # modular only: the outfit this model shows
     unlitParts*: seq[string]    # modular only: eyes, mouth, brows
 
+  StaticSceneModel* = ref object
+    ## One static glTF scene. Node hierarchy and authored relative transforms
+    ## stay intact; callers place and uniformly scale the composed root.
+    file*: GltfFile
+    bounds*: AABounds
+
   CharacterScene* = ref object
     renderer*: Renderer
     context*: PbrContext
@@ -66,6 +72,12 @@ proc loadCharacterModel*(
     result.clips[clip.name] = i
   result.baseTransform =
     baseTransformFor(result.file.root.getAABounds(), targetHeight)
+
+proc loadStaticSceneModel*(path: string): StaticSceneModel =
+  ## Loads one non-animated glTF scene without flattening or independently
+  ## normalizing its mesh nodes. Texture upload remains deferred until draw.
+  let file = readGltfFile(path)
+  StaticSceneModel(file: file, bounds: file.root.getAABounds())
 
 proc loadModularFile(path: string): CharacterModel =
   ## Returns a model wrapping the shared glb for this path.
@@ -341,6 +353,42 @@ proc drawCharacter*(
   ## Poses and draws a character plus socket-local hand gear in one pass.
   scene.drawCharacterImpl(
     model, position, facing, clip, animTime, gear, tint, sizeFactor)
+
+proc staticSceneTransform*(
+    model: StaticSceneModel,
+    position: Vec3,
+    facing = 0.0'f32,
+    sizeFactor = 1.0'f32
+): Mat4 =
+  ## Returns the single placement transform applied around the authored root.
+  ## Individual node translations, rotations, and scales remain untouched.
+  translate(position) * rotateY(facing) *
+    scale(vec3(sizeFactor, sizeFactor, sizeFactor))
+
+proc drawStaticSceneModel*(
+    scene: CharacterScene,
+    model: StaticSceneModel,
+    position: Vec3,
+    facing = 0.0'f32,
+    tint = color(1, 1, 1, 1),
+    sizeFactor = 1.0'f32
+) =
+  ## Draws the complete static root through the same PBR, toon, and sun-depth
+  ## passes as characters, without inventing an animation clip.
+  let transform = model.staticSceneTransform(position, facing, sizeFactor)
+  if scene.sunDepthPass:
+    scene.toon.transform = transform
+    scene.toon.drawSunDepth(model.file.root)
+    return
+  case scene.shading
+  of PbrCharacters:
+    scene.context.transform = transform
+    scene.context.tint = tint
+    scene.context.draw(model.file.root)
+  of ToonCharacters:
+    scene.toon.transform = transform
+    scene.toon.tint = tint
+    scene.toon.draw(model.file.root)
 
 proc finishCharacters*(scene: CharacterScene) =
   ## Finishes the character renderer's current frame.
