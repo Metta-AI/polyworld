@@ -41,7 +41,6 @@ proc capture(label: string): Vec2 =
         inc count
         result += vec2(x.float32, y.float32)
   image.writeFile("tmp/model-render-proof/" & label & ".png")
-  echo label, ": ", count, " visible pixels"
   doAssert count > 20, label & " must render visible geometry"
   result /= count.float32
   echo label, ": ", count, " visible pixels, center ", result
@@ -56,7 +55,6 @@ for shading in CharacterShading:
   discard capture($shading & "-static")
   beginImage(shading)
   scene.drawCharacter(character, vec3(0), 0, 0, 0, [gear])
-  echo "Gear world origin: ", gear.file.root.nodes[0].mat.pos
   let start = capture($shading & "-gear-start")
   beginImage(shading)
   scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])

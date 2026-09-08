@@ -1,6 +1,7 @@
 import std/os
 
 import vmath
+import gltf
 import polyworld/characters
 
 const
@@ -21,6 +22,12 @@ block:
   doAssert model.bounds.min.y.close(0'f32)
   doAssert model.bounds.max.x.close(2.5'f32)
   doAssert model.bounds.max.y.close(2'f32)
+  for node in model.file.root.walkNodes:
+    if node.mesh != nil:
+      for primitive in node.mesh.primitives:
+        doAssert primitive.normals.len == primitive.points.len
+        for normal in primitive.normals:
+          doAssert length(normal - vec3(0, 0, 1)) < 0.0001
 
 echo "Testing composed static glTF scenes receive one root placement"
 block:
