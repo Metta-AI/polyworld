@@ -23,6 +23,18 @@ jobs:
           nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
+      - name: Render model fixtures with Mesa
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb libgl1-mesa-dri
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a nim r --parallelBuild:1 tests/render_character_scenes.nim
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux' && always()
+        with:
+          name: model-render-proof
+          path: tmp/model-render-proof/*.png
+          if-no-files-found: ignore
       - run: >-
           nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2
           tests/test_profiles.nim
