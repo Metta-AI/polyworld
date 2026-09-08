@@ -281,28 +281,32 @@ proc socketTransform*(
     model.characterTransform(position, facing, sizeFactor))
   gear.socket.mat
 
-proc drawGear(
-    scene: CharacterScene, gear: CharacterGear,
-    transform: Mat4, tint: Color
+proc drawModel(
+    scene: CharacterScene, root: Node,
+    transform: Mat4, tint: Color, unlitParts: openArray[string] = []
 ) =
   if scene.sunDepthPass:
     scene.toon.transform = transform
-    scene.toon.drawSunDepth(gear.file.root)
+    scene.toon.drawSunDepth(root)
     return
   case scene.shading
   of PbrCharacters:
     scene.context.transform = transform
     scene.context.tint = tint
-    scene.context.draw(gear.file.root)
+    scene.context.draw(root)
   of ToonCharacters:
+    scene.toon.unlitNodes.clear()
+    for name in unlitParts:
+      scene.toon.unlitNodes.incl name
     scene.toon.transform = transform
     scene.toon.tint = tint
-    scene.toon.draw(gear.file.root)
+    scene.toon.draw(root)
 
-proc drawCharacterImpl(
+proc drawCharacter*(
     scene: CharacterScene, model: CharacterModel,
     position: Vec3, facing: float32, clip: int, animTime: float32,
-    gear: openArray[CharacterGear], tint: Color, sizeFactor: float32
+    gear: openArray[CharacterGear],
+    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
 ) =
   model.setCharacterPose(clip, animTime)
   let
@@ -313,24 +317,9 @@ proc drawCharacterImpl(
     for attachment in gear:
       doAssert attachment.character == model,
         "character gear belongs to a different model"
-  if scene.sunDepthPass:
-    scene.toon.transform = transform
-    scene.toon.drawSunDepth(root)
-  else:
-    case scene.shading
-    of PbrCharacters:
-      scene.context.transform = transform
-      scene.context.tint = tint
-      scene.context.draw(root)
-    of ToonCharacters:
-      let toon = scene.toon
-      for name in model.unlitParts:
-        toon.unlitNodes.incl name
-      toon.transform = transform
-      toon.tint = tint
-      toon.draw(root)
+  scene.drawModel(root, transform, tint, model.unlitParts)
   for attachment in gear:
-    scene.drawGear(attachment, attachment.socket.mat, tint)
+    scene.drawModel(attachment.file.root, attachment.socket.mat, tint)
 
 proc drawCharacter*(
     scene: CharacterScene, model: CharacterModel,
@@ -341,21 +330,10 @@ proc drawCharacter*(
   ## Looping clips may pass any time (playback wraps); one-shot clips like
   ## Death should clamp animTime to clipDuration to hold the last frame.
   ## Keep tint.a at 1.0 — lower alpha reroutes into the blended pass.
-  scene.drawCharacterImpl(
+  scene.drawCharacter(
     model, position, facing, clip, animTime, [], tint, sizeFactor)
 
-proc drawCharacter*(
-    scene: CharacterScene, model: CharacterModel,
-    position: Vec3, facing: float32, clip: int, animTime: float32,
-    gear: openArray[CharacterGear],
-    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
-) =
-  ## Poses and draws a character plus socket-local hand gear in one pass.
-  scene.drawCharacterImpl(
-    model, position, facing, clip, animTime, gear, tint, sizeFactor)
-
 proc staticSceneTransform*(
-    model: StaticSceneModel,
     position: Vec3,
     facing = 0.0'f32,
     sizeFactor = 1.0'f32
@@ -375,20 +353,8 @@ proc drawStaticSceneModel*(
 ) =
   ## Draws the complete static root through the same PBR, toon, and sun-depth
   ## passes as characters, without inventing an animation clip.
-  let transform = model.staticSceneTransform(position, facing, sizeFactor)
-  if scene.sunDepthPass:
-    scene.toon.transform = transform
-    scene.toon.drawSunDepth(model.file.root)
-    return
-  case scene.shading
-  of PbrCharacters:
-    scene.context.transform = transform
-    scene.context.tint = tint
-    scene.context.draw(model.file.root)
-  of ToonCharacters:
-    scene.toon.transform = transform
-    scene.toon.tint = tint
-    scene.toon.draw(model.file.root)
+  let transform = staticSceneTransform(position, facing, sizeFactor)
+  scene.drawModel(model.file.root, transform, tint)
 
 proc finishCharacters*(scene: CharacterScene) =
   ## Finishes the character renderer's current frame.

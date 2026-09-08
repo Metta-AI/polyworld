@@ -26,7 +26,7 @@ echo "Testing composed static glTF scenes receive one root placement"
 block:
   let
     model = loadStaticSceneModel(SamplePath)
-    transform = model.staticSceneTransform(
+    transform = staticSceneTransform(
       vec3(10, 4, -3), sizeFactor = 2'f32)
     placedMinimum = transform * model.bounds.min
     placedMaximum = transform * model.bounds.max
