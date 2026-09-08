@@ -22,6 +22,8 @@ block:
 
   doAssert gear.file.root.hasGeometry()
   doAssert leftGear.file == gear.file
+  for normal in gear.file.root.nodes[0].mesh.primitives[0].normals:
+    doAssert normal.close(vec3(0, 0, 1))
   doAssert leftGear.socketTransform(vec3(5, 0, 0), 0, 0, 0).pos.close(
     vec3(14, 22, 33))
   doAssert gear.socketTransform(vec3(5, 0, 0), 0, 0, 0).pos.close(

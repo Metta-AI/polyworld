@@ -77,6 +77,7 @@ proc loadStaticSceneModel*(path: string): StaticSceneModel =
   ## Loads one non-animated glTF scene without flattening or independently
   ## normalizing its mesh nodes. Texture upload remains deferred until draw.
   let file = readGltfFile(path)
+  file.root.ensureNormals()
   StaticSceneModel(file: file, bounds: file.root.getAABounds())
 
 proc loadModularFile(path: string): CharacterModel =
@@ -159,6 +160,7 @@ proc attachGear*(
   doAssert socket != nil, "character has no socket " & socketName
   if path notin scene.gearFiles:
     scene.gearFiles[path] = readGltfFile(path)
+    scene.gearFiles[path].root.ensureNormals()
   CharacterGear(
     file: scene.gearFiles[path],
     slot: slot,
