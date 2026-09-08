@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import
   test_actioncam,
+  test_animblend_controls,
   test_basic,
   test_bodies,
   test_body_layers,
