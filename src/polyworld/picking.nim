@@ -23,10 +23,12 @@ proc pickRay*(origin, direction: Vec3;
     near = 0'f32; far = Inf.float32): PickRay =
   ## Constructs a ray with a normalized direction and inclusive distance range.
   let magnitude = direction.length
-  if magnitude <= 0 or classify(magnitude) in {fcNan, fcInf, fcNegInf} or
-      near < 0 or classify(near) in {fcNan, fcInf, fcNegInf} or
-      far < near or classify(far) == fcNan:
+  if not (magnitude > 0 and magnitude < Inf and
+      near >= 0 and near < Inf and far >= near):
     raise newException(ValueError, "invalid pick ray direction or distance range")
+  for value in [origin.x, origin.y, origin.z]:
+    if not (abs(value) < Inf):
+      raise newException(ValueError, "pick ray origin must be finite")
   PickRay(origin: origin, direction: direction / magnitude, near: near, far: far)
 
 proc pickRayFromScreen*(viewProjection: Mat4; ndc: Vec2): PickRay =
@@ -63,11 +65,11 @@ proc intersectTriangle*(ray: PickRay; a, b, c: Vec3;
   some(MeshHit(distance: distance, point: ray.origin + ray.direction * distance,
     barycentric: vec3(1 - u - v, u, v)))
 
-proc pickMesh*(ray: PickRay; root: Node): Option[MeshHit] =
+proc pickMesh*(ray: PickRay; root: Node; doubleSided = false): Option[MeshHit] =
   ## Finds the nearest triangle in a visible subtree, retaining traversal order
   ## for equal distances. Uses current (including morphed) points and joint
   ## matrices. Alpha masks and non-triangle primitive modes are not sampled.
-  var closest = ray.far
+  var query = ray
   var nearest: Option[MeshHit]
   proc visit(node: Node) =
     if node == nil or not node.visible:
@@ -98,11 +100,9 @@ proc pickMesh*(ray: PickRay; root: Node): Option[MeshHit] =
           let a = index(triangle * 3)
           let b = index(triangle * 3 + 1)
           let c = index(triangle * 3 + 2)
-          var clippedRay = ray
-          clippedRay.far = closest
-          let hit = clippedRay.intersectTriangle(points[a], points[b], points[c],
-            primitive.material != nil and primitive.material.doubleSided)
-          if hit.isSome and (nearest.isNone or hit.get.distance < closest):
+          let hit = query.intersectTriangle(points[a], points[b], points[c],
+            doubleSided or (primitive.material != nil and primitive.material.doubleSided))
+          if hit.isSome and (nearest.isNone or hit.get.distance < query.far):
             var value = hit.get
             value.node = node
             value.primitive = primitive
@@ -111,7 +111,7 @@ proc pickMesh*(ray: PickRay; root: Node): Option[MeshHit] =
               let weights = value.barycentric
               value.uv = some(primitive.uvs[a] * weights.x +
                 primitive.uvs[b] * weights.y + primitive.uvs[c] * weights.z)
-            closest = value.distance
+            query.far = value.distance
             nearest = some(value)
     for child in node.nodes:
       visit(child)

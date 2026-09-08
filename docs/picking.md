@@ -27,7 +27,7 @@ For several independent roots, compare the returned world-space distances; the
 nearest returned hit is the selected presentation object.
 
 The query supports indexed and non-indexed triangle meshes, current morphed
-points, skin matrices, material back-face settings, and interpolated UVs. An
+points, skin matrices, material back-face settings (or an explicit double-sided query), and interpolated UVs. An
 invisible node excludes its subtree. Equal-distance triangles retain traversal
 order. UVs are mesh coordinates before material texture transforms.
 
@@ -44,3 +44,6 @@ invertible with finite clip planes. Games with large scenery sets should filter
 candidate roots using their existing scene visibility or spatial owner first.
 
 Run the headless behavioral fixture with `nim r tests/test_picking.nim`.
+
+`pickCharacter` uses this query after its normal pose update, retaining its
+legacy double-sided selection and `-1` miss result.

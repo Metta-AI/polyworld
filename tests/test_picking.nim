@@ -2,6 +2,7 @@ import std/[math, options]
 import vmath
 import gltf/[common, models]
 import polyworld/picking
+import polyworld/characters
 
 proc triangle(z = 0'f32): Node =
   Node(visible: true, scale: vec3(1), rot: quat(), mesh: Mesh(primitives: @[
@@ -79,6 +80,55 @@ block:
     var rejected = false
     try:
       discard pickRay(vec3(0), invalid)
+    except ValueError:
+      rejected = true
+    doAssert rejected
+
+echo "Screen rays agree with perspective and orthographic cameras"
+block:
+  let eye = vec3(3, 2, 5)
+  let view = lookAt(eye, vec3(3, 2, 0), vec3(0, 1, 0))
+  let perspectiveRay = pickRayFromScreen(perspective(60'f32, 1'f32, 0.1'f32, 20'f32) * view, vec2(0))
+  doAssert length(perspectiveRay.origin - vec3(3, 2, 4.9)) < 1e-4
+  doAssert length(perspectiveRay.direction - vec3(0, 0, -1)) < 1e-4
+  let projection = ortho(-2'f32, 2'f32, -2'f32, 2'f32, 0.1'f32, 20'f32)
+  let left = pickRayFromScreen(projection * view, vec2(-0.5, 0))
+  let right = pickRayFromScreen(projection * view, vec2(0.5, 0))
+  doAssert length(left.direction - right.direction) < 1e-6
+  doAssert abs(right.origin.x - left.origin.x - 2) < 1e-6
+
+echo "Character consumer picks the skinned pose and preserves double-sided hits"
+block:
+  let root = triangle()
+  root.baseVisible = true
+  root.baseScale = vec3(1)
+  root.baseRot = quat()
+  let joint = Node(visible: true, baseVisible: true,
+    scale: vec3(1), baseScale: vec3(1), rot: quat(), baseRot: quat(),
+    pos: vec3(4, 0, 0), basePos: vec3(4, 0, 0))
+  root.nodes = @[joint]
+  root.skin = Skin(joints: @[joint], inverseBindMatrices: @[mat4()])
+  let primitive = root.mesh.primitives[0]
+  primitive.jointIds = @[[0'u16, 0, 0, 0], [0'u16, 0, 0, 0], [0'u16, 0, 0, 0]]
+  primitive.jointWeights = @[vec4(1, 0, 0, 0), vec4(1, 0, 0, 0), vec4(1, 0, 0, 0)]
+  let model = CharacterModel(file: GltfFile(root: root), baseTransform: mat4())
+  doAssert model.pickCharacter(vec3(0, 0, 5), vec3(0, 0, -1), vec3(0), 0, 0, 0) == -1
+  doAssert abs(model.pickCharacter(vec3(4, 0, 5), vec3(0, 0, -1), vec3(0), 0, 0, 0) - 5) < 1e-6
+  doAssert abs(model.pickCharacter(vec3(4, 0, -5), vec3(0, 0, 1), vec3(0), 0, 0, 0) - 5) < 1e-6
+
+echo "Picking rejects non-finite origins and invalid distance intervals"
+block:
+  for origin in [vec3(NaN.float32, 0, 0), vec3(0, Inf.float32, 0)]:
+    var rejected = false
+    try:
+      discard pickRay(origin, vec3(0, 0, 1))
+    except ValueError:
+      rejected = true
+    doAssert rejected
+  for limits in [(-1'f32, 10'f32), (2'f32, 1'f32), (0'f32, NaN.float32)]:
+    var rejected = false
+    try:
+      discard pickRay(vec3(0), vec3(0, 0, 1), limits[0], limits[1])
     except ValueError:
       rejected = true
     doAssert rejected
