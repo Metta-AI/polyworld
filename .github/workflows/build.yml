@@ -67,6 +67,8 @@ jobs:
           python3 -m http.server 8897 --bind 127.0.0.1 --directory tmp/model-render-proof > /tmp/polyworld-proof-http.log 2>&1 &
           proof_http_pid=$!
           trap 'agent-browser --session polyworld-pr-audit console; agent-browser --session polyworld-pr-audit errors; agent-browser --session polyworld-pr-audit close; kill "$proof_http_pid"' EXIT
+          agent-browser --session polyworld-pr-audit open about:blank
+          agent-browser --session polyworld-pr-audit set viewport 256 256
           agent-browser --session polyworld-pr-audit open http://127.0.0.1:8897/index.html
           agent-browser --session polyworld-pr-audit wait --fn 'window.__modelProof && window.__modelProof.passed'
           agent-browser --session polyworld-pr-audit eval '(() => window.__modelProof)()'
