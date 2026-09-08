@@ -44,8 +44,8 @@ proc parseGameOptions(): GameOptions =
     maximumTicks: DefaultDurationTicks,
     spawnIntervalTicks: 10 * TickRate.int32,
     speed: 1,
-    windowWidth: 1024,
-    windowHeight: 576
+    windowWidth: 1920,
+    windowHeight: 1080
   )
   let arguments = commandLineParams()
   var index = 0
@@ -88,7 +88,7 @@ let options* = parseGameOptions()
 var run*: Game
 
 block:
-  startProfileTrace()
+  startGameProfile()
   var
     replayMode = options.replayPath.len > 0
     mapSeed = options.seed
@@ -171,14 +171,12 @@ proc startReplayRecording*(maximumTicks: uint32) =
   )
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
-proc saveRecording*() =
+proc saveRecording*(path = options.recordPath) =
   ## Finalizes and saves a requested action replay.
-  if run.recorder == nil or options.recordPath.len == 0:
+  if run.recorder == nil or path.len == 0:
     return
-  run.recorder.data.header.setup.maximumTicks =
-    max(uint32(run.world.tick), 1'u32)
-  saveReplay(options.recordPath, run.recorder.data)
-  echo &"replay saved: {options.recordPath} " &
+  saveReplay(path, run.recorder.data)
+  echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
 
 when defined(headless):
@@ -225,15 +223,15 @@ when defined(headless):
     let
       stepLimit =
         if run.replayMode:
-          int(run.replayData.header.setup.maximumTicks)
+          run.replayData.hashes.len
         else:
           int(options.maximumTicks)
       started = epochTime()
     if not run.replayMode:
       startReplayRecording(uint32(stepLimit))
-    startProfileTrace()
+    startGameProfile()
     defer:
-      finishProfileTrace()
+      finishGameProfile()
     var steps = 0
     while steps < stepLimit and
         (run.replayMode or not run.world.gameOver) and
@@ -241,15 +239,14 @@ when defined(headless):
       advanceGame()
       inc steps
       if profileShouldDump(steps):
-        finishProfileTrace()
+        finishGameProfile()
     if run.recordingError.len > 0:
       raise newException(ReplayError, run.recordingError)
     if run.replayMode:
-      if uint32(run.world.tick) != run.replayData.header.setup.maximumTicks:
-        raise newException(
-          ReplayError,
-          "replay simulation ended at a different tick"
-        )
+      run.hashCheck.requireReplayComplete(
+        uint32(run.world.tick),
+        run.replayData.hashes.len
+      )
       if not run.replayPlayer.finished:
         raise newException(
           ReplayError,

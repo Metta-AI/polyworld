@@ -1,9 +1,9 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, times],
+  std/[math, strutils, times],
   chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, profiles, rtscameras
+  gameuis, inputs, profiles, quadterrain, rtscameras
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -20,6 +20,9 @@ const
   BarTrackPatch = 7
   BarFillPatch = 5
   BarInset = 3.0'f32
+  KeyPipName = "pip.medium"
+  KeyPipSize = 28.0'f32
+  KeyPipInset = 2.0'f32
   UiScaleSteps* = [
     0.25'f32, 0.5'f32, 1.0'f32, 1.25'f32, 2.0'f32, 2.5'f32, 4.0'f32
   ]
@@ -28,7 +31,7 @@ const
     ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
-  DebugWindowSize* = vec2(460, 230)
+  DebugWindowSize* = vec2(460, 380)
   FpsLimitMin* = 15
   FpsLimitMax* = 240
   FpsAvgTau = 1.0'f32
@@ -390,11 +393,22 @@ proc drawWellImage*(
     name: string,
     color = rgbx(255, 255, 255, 255),
     pad = 4.0'f32,
-    selected = false
+    selected = false,
+    iconSize = 0.0'f32
 ) =
-  ## Draws one atlas image inside a theme slot.
+  ## Draws one atlas image inside a theme slot. A positive iconSize draws
+  ## the image at that fixed size centered in the well; power-of-two sizes
+  ## land on exact mip levels of the 128 and 256 px art and stay crisp.
   sk.drawSlot(well, selected)
   if name.len == 0:
+    return
+  if iconSize > 0:
+    sk.drawSprite(
+      name,
+      well.origin + (well.size - vec2(iconSize)) * 0.5'f32,
+      vec2(iconSize),
+      color
+    )
     return
   let inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
   sk.drawSprite(name, inner.origin, inner.size, color)
@@ -432,7 +446,8 @@ proc drawBadge*(
     pos,
     size: Vec2,
     text: string,
-    image = "badge"
+    image = "badge",
+    font = "Small"
 ) =
   ## Draws a circular level badge with a centered number.
   sk.drawSprite(
@@ -446,9 +461,18 @@ proc drawBadge*(
     pos,
     size,
     rgbx(255, 255, 255, 255),
-    "Small",
+    font,
     CenterAlign
   )
+
+proc drawKeyPip*(
+    sk: Silky,
+    well: GameUiPanel,
+    key: string
+) =
+  ## Draws one hotkey letter on a ringed pip in a well's bottom-right corner.
+  let pos = well.origin + well.size - vec2(KeyPipSize + KeyPipInset)
+  sk.drawBadge(pos, vec2(KeyPipSize), key, KeyPipName, "Hud")
 
 proc clicked*(
     window: Window,
@@ -677,6 +701,17 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
         FpsLimitMax,
         $framePaceHz
       )
+      text "terrainScaleCaption":
+        characters "Terrain texture scale"
+      scrubber(
+        "terrainTextureScale",
+        terrainTextureScale,
+        0.01'f,
+        1.0'f,
+        terrainTextureScale.formatFloat(ffDecimal, 3)
+      )
+      text "terrainScaleHint":
+        characters "Lower values make larger texture patterns."
       checkBox "Interpolation", interpolateVisuals
       checkBox "Show paths", showPaths
       checkBox "Show tiles", showTiles
