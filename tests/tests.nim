@@ -32,6 +32,7 @@ import
   test_lvd_sim,
   test_noises,
   test_pathing,
+  test_picking,
   test_player,
   test_profiles,
   test_rngs,

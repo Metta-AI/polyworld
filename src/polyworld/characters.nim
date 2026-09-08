@@ -11,9 +11,9 @@
 ## Outfits share the loaded file.
 
 import
-  std/[tables, json, strutils, sets, os],
+  std/[tables, json, strutils, sets, os, options],
   chroma, gltf, vmath, windy,
-  pathing, shadows, toon
+  pathing, picking, shadows, toon
 
 type
   CharacterShading* = enum
@@ -360,53 +360,6 @@ proc finishCharacters*(scene: CharacterScene) =
   ## Finishes the character renderer's current frame.
   scene.renderer.endFrame()
 
-proc pickPrimitive(
-    primitive: Primitive,
-    world: Mat4,
-    origin,
-    dir: Vec3
-): float32 =
-  ## Ray distance to one mesh primitive, or -1 when it misses.
-  result = -1
-  if primitive == nil or primitive.points.len == 0:
-    return
-  template consider(ia, ib, ic: int) =
-    if ia < primitive.points.len and
-        ib < primitive.points.len and
-        ic < primitive.points.len:
-      let distance = rayTriangle(
-        origin,
-        dir,
-        world * primitive.points[ia],
-        world * primitive.points[ib],
-        world * primitive.points[ic]
-      )
-      if distance > 0 and (result < 0 or distance < result):
-        result = distance
-  if primitive.indices32.len > 0:
-    var i = 0
-    while i + 2 < primitive.indices32.len:
-      consider(
-        primitive.indices32[i].int,
-        primitive.indices32[i + 1].int,
-        primitive.indices32[i + 2].int
-      )
-      i += 3
-  elif primitive.indices16.len > 0:
-    var i = 0
-    while i + 2 < primitive.indices16.len:
-      consider(
-        primitive.indices16[i].int,
-        primitive.indices16[i + 1].int,
-        primitive.indices16[i + 2].int
-      )
-      i += 3
-  else:
-    var i = 0
-    while i + 2 < primitive.points.len:
-      consider(i, i + 1, i + 2)
-      i += 3
-
 proc pickCharacter*(
     model: CharacterModel,
     origin,
@@ -423,10 +376,6 @@ proc pickCharacter*(
   model.setCharacterPose(clip, animTime)
   let transform = model.characterTransform(position, facing, sizeFactor)
   root.updateTransforms(transform)
-  for node in root.walkNodes:
-    if node.mesh == nil or not node.visible:
-      continue
-    for primitive in node.mesh.primitives:
-      let distance = pickPrimitive(primitive, node.mat, origin, dir)
-      if distance > 0 and (result < 0 or distance < result):
-        result = distance
+  let hit = pickRay(origin, dir).pickMesh(root, doubleSided = true)
+  if hit.isSome and hit.get.distance > 0:
+    result = hit.get.distance
