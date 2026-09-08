@@ -19,6 +19,8 @@ let character = CharacterModel(
 let gear = scene.attachGear(character, "tests/data/socket_gear.gltf", RightHandSlot)
 # Enlarge the tiny fixture mesh, retaining its independently authored offset.
 gear.file.root.nodes[0].scale = vec3(8)
+# A diffuse fixture needs no external environment map to be visible in PBR.
+gear.file.root.nodes[0].mesh.primitives[0].material.metallicFactor = 0
 createDir("tmp/model-render-proof")
 
 proc beginImage(shading: CharacterShading) =
@@ -38,9 +40,10 @@ proc capture(label: string): Vec2 =
       if max(pixel.r, max(pixel.g, pixel.b)) > 8:
         inc count
         result += vec2(x.float32, y.float32)
+  image.writeFile("tmp/model-render-proof/" & label & ".png")
+  echo label, ": ", count, " visible pixels"
   doAssert count > 20, label & " must render visible geometry"
   result /= count.float32
-  image.writeFile("tmp/model-render-proof/" & label & ".png")
   echo label, ": ", count, " visible pixels, center ", result
 
 sunShadowsEnabled = false
@@ -53,6 +56,7 @@ for shading in CharacterShading:
   discard capture($shading & "-static")
   beginImage(shading)
   scene.drawCharacter(character, vec3(0), 0, 0, 0, [gear])
+  echo "Gear world origin: ", gear.file.root.nodes[0].mat.pos
   let start = capture($shading & "-gear-start")
   beginImage(shading)
   scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
