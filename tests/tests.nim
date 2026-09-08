@@ -36,6 +36,7 @@ import
   test_profiles,
   test_rngs,
   test_rtscameras,
+  test_static_scenes,
   test_tapes,
   test_terrains,
   test_terrainmaps,
