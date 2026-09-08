@@ -14,6 +14,7 @@ import
   test_cta_maps,
   test_cta_sim,
   test_fixed,
+  test_frustums,
   test_fxmeshes,
   test_gameuis,
   test_gota_content,
