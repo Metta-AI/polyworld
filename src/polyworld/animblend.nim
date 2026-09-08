@@ -9,6 +9,7 @@
 ## looping clip that was playing before it (walk, attack, back to walk).
 
 import
+  std/math,
   vmath, gltf
 
 type
@@ -19,6 +20,8 @@ type
   Pose = seq[tuple[pos: Vec3, rot: Quat, scale: Vec3]]
 
   ClipPlayer* = ref object
+    paused*: bool             ## Freeze playback clocks but still pose the tree.
+    rate: float32             ## Nonnegative presentation time multiplier.
     root: Node
     nodes: seq[Node]
     rules: seq[ClipRule]        ## per clip index in root.animations
@@ -33,7 +36,7 @@ type
 proc newClipPlayer*(root: Node): ClipPlayer =
   ## Every clip loops until `setRule` says otherwise.
   result = ClipPlayer(root: root, nodes: root.walkNodes, current: -1,
-    previous: -1, lastLoop: -1)
+    previous: -1, lastLoop: -1, rate: 1)
   result.rules = newSeq[ClipRule](root.animations.len)
   for rule in result.rules.mitems:
     rule.loop = true
@@ -54,6 +57,15 @@ proc setRule*(player: ClipPlayer, name: string, rule: ClipRule) =
 proc current*(player: ClipPlayer): int = player.current
 proc currentTime*(player: ClipPlayer): float32 = player.currentTime
 proc fading*(player: ClipPlayer): bool = player.previous >= 0
+
+proc timeScale*(player: ClipPlayer): float32 = player.rate
+
+proc `timeScale=`*(player: ClipPlayer, value: float32) =
+  ## Scales clip and fade clocks together. Zero freezes time; reverse playback
+  ## is not supported by the one-shot chaining contract.
+  if value < 0 or classify(value) in {fcNan, fcInf, fcNegInf}:
+    raise newException(ValueError, "animation time scale must be finite and nonnegative")
+  player.rate = value
 
 proc play*(player: ClipPlayer, clip: int, fade = 0.2'f32) =
   ## Starts a clip (or the bind pose for -1), fading from whatever is
@@ -93,10 +105,11 @@ proc capture(player: ClipPlayer, pose: var Pose) =
 proc update*(player: ClipPlayer, dt: float32) =
   ## Advances time, chains finished one-shots, and poses the tree.
   let root = player.root
-  player.currentTime += dt
+  let elapsed = if player.paused: 0'f32 else: dt * player.rate
+  player.currentTime += elapsed
   if player.previous >= 0:
-    player.previousTime += dt
-    player.fadeTime += dt
+    player.previousTime += elapsed
+    player.fadeTime += elapsed
     if player.fadeTime >= player.fadeDuration:
       player.previous = -1
 
