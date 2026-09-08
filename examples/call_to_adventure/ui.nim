@@ -3,50 +3,20 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras],
-  content, maps, sim, game, controls
+  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+    stackpanels],
+  content, maps, sim, game, controls, layouts
 
 const
-  PanelPartyCard = vec2(316, 104)
-  PartyGap = 6.0'f32
-  PanelParty = vec2(
-    316,
-    PanelPartyCard.y * 4 + PartyGap * 3
-  )
-  PanelMinimap = vec2(252, 252)
-  PanelQuest = vec2(448, 132)
-  PanelChat = vec2(337, 177)
-  PanelAbilities = vec2(947, 157)
-  PanelMenu = vec2(407, 71)
   HudClearance = 48.0'f32
-  AbilitySlotXs = [
-    30.0'f32, 127, 222, 315, 620, 702
-  ]
-  AbilitySlotYs = [
-    15.0'f32, 15, 15, 15, 23, 23
-  ]
-  AbilitySlotWs = [
-    79.0'f32, 76, 75, 77, 62, 63
-  ]
-  AbilitySlotHs = [
-    82.0'f32, 82, 82, 82, 64, 64
-  ]
-  MenuSlotXs = [
-    16.0'f32, 72, 127, 183, 238, 293, 349
-  ]
+  ## Icons draw at power-of-two sizes so the 128 and 256 px source art
+  ## lands on exact mip levels and stays crisp.
+  IconTiny = 16.0'f32
+  IconSmall = 64.0'f32
+  DividerColor = rgbx(94, 80, 56, 255)
   ActionKeys = [
     "Q", "W", "E", "R", "F", "G"
   ]
-  MenuIcons = [
-    "inventory",
-    "armor",
-    "waypoint",
-    "map_marker",
-    "units",
-    "abilities",
-    "settings"
-  ]
-  MenuIconTint = rgbx(245, 230, 190, 255)
   HeroNames: array[HeroClass, string] = [
     "Brom", "Nyra", "Fenn", "Zyra"
   ]
@@ -64,7 +34,7 @@ type
     minimap: GameUiPanel
     quest: GameUiPanel
     abilities: GameUiPanel
-    menu: GameUiPanel
+    inventory: GameUiPanel
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
@@ -77,14 +47,17 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
     GameUiRegion.BottomCenter,
     PanelAbilities
   )
-  result.menu = layout.panel(GameUiRegion.BottomRight, PanelMenu)
+  result.inventory = layout.panel(
+    GameUiRegion.BottomRight,
+    PanelInventory
+  )
 
 proc hudLayoutFits(layoutSize: Vec2): bool =
   ## Returns whether native HUD plates fit this layout without overlap.
   let
     layout = initGameUiLayout(layoutSize, TransportHeight)
     chrome = placeChrome(layout)
-  layoutFits(
+  layoutSize.x >= TransportMinWidth and layoutFits(
     layout,
     [
       chrome.party,
@@ -92,7 +65,7 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
       chrome.minimap,
       chrome.quest,
       chrome.abilities,
-      chrome.menu
+      chrome.inventory
     ],
     HudClearance
   )
@@ -116,16 +89,6 @@ proc currentLayout*(window: Window): GameUiLayout =
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
-
-proc partyCard(panel: GameUiPanel, slot: int): GameUiPanel =
-  ## Returns one stacked party portrait plate inside the party column.
-  GameUiPanel(
-    origin: panel.origin + vec2(
-      0,
-      slot.float32 * (PanelPartyCard.y + PartyGap)
-    ),
-    size: PanelPartyCard
-  )
 
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
   ## Returns the square that bounds the circular minimap well.
@@ -157,7 +120,7 @@ proc mouseOverUi*(window: Window, mouse: Vec2): bool =
       chrome.chat,
       chrome.quest,
       chrome.abilities,
-      chrome.menu
+      chrome.inventory
     ]
   )
 
@@ -403,22 +366,27 @@ proc drawUi*(
     chatPanel = sk.beginFrame(chrome.chat)
     questPanel = sk.beginFrame(chrome.quest)
     detailsPanel = sk.beginFrame(chrome.abilities)
-    menuPanel = sk.beginFrame(chrome.menu)
+    inventoryPanel = sk.beginFrame(chrome.inventory)
     selectedActor = run.world.actors[primaryId]
     selectedClass = selectedActor.heroClass
     shownLevel = run.viewLevel(selectedIds)
     experience = run.progressExperience
     experienceInLevel = experience mod 250
     nextExperience = 250
+    party = chrome.party.partyPanels()
+    chat = chatPanel.chatPanels()
+    quest = questPanel.questPanels()
+    abilities = detailsPanel.abilityPanels()
+    inventory = inventoryPanel.inventoryPanels()
   for slot in 0 ..< PartySize:
     let
       actor = run.world.actors[slot]
       class = actor.heroClass
-      card = chrome.party.partyCard(slot)
-      portrait = card.imageSlot(6, 7, 86, 91)
-      nameBox = card.imageSlot(111, 10, 193, 28)
-      hpBar = card.imageSlot(111, 44, 193, 20)
-      manaBar = card.imageSlot(111, 67, 193, 25)
+      card = party[slot].card
+      portrait = party[slot].portrait
+      nameBox = party[slot].name
+      hpBar = party[slot].hp
+      manaBar = party[slot].mana
     discard sk.beginFrame(card)
     sk.drawWellImage(
       portrait,
@@ -427,7 +395,8 @@ proc drawUi*(
         rgbx(255, 255, 255, 255)
       else:
         rgbx(140, 140, 148, 255),
-      selected = selectedIds[slot]
+      selected = selectedIds[slot],
+      iconSize = IconSmall
     )
     sk.drawLabel(
       HeroNames[class],
@@ -446,7 +415,7 @@ proc drawUi*(
     sk.drawSprite(
       "health",
       hpBar.origin + vec2(2, 2),
-      vec2(16),
+      vec2(IconTiny),
       healthColor(actor)
     )
     writeRatio(
@@ -492,8 +461,8 @@ proc drawUi*(
       )
     sk.drawSprite(
       "mana",
-      manaBar.origin + vec2(2, 4),
-      vec2(16),
+      manaBar.origin + vec2(2, 2),
+      vec2(IconTiny),
       rgbx(186, 214, 255, 255)
     )
     if window.clicked(sk, card):
@@ -511,9 +480,9 @@ proc drawUi*(
           slot == options.playerSlot - 1:
         focusPlayerHero = true
   let
-    generalTab = chatPanel.imageSlot(8, 4, 72, 28)
-    combatTab = chatPanel.imageSlot(88, 4, 128, 28)
-    chatBody = chatPanel.imageSlot(12, 40, 312, 124)
+    generalTab = chat.general
+    combatTab = chat.combat
+    chatBody = chat.body
   sk.drawLabel(
     "General",
     generalTab.origin,
@@ -544,12 +513,13 @@ proc drawUi*(
       if chatTab == 0 or line.isCombatLine:
         shown.add line
   let firstLine = max(shown.len - 6, 0)
+  var logRows = chatBody.stack(TopToBottom)
   for index in firstLine ..< shown.len:
-    let row = index - firstLine
+    let row = logRows.takeRow(18)
     sk.drawLabel(
       shown[index],
-      chatBody.origin + vec2(0, row.float32 * 18),
-      vec2(chatBody.size.x, 18),
+      row.origin,
+      row.size,
       if index == shown.high:
         rgbx(229, 215, 167, 255)
       else:
@@ -627,10 +597,10 @@ proc drawUi*(
     cameraDistance
   )
   let
-    themeName = questPanel.imageSlot(18, 10, 412, 22)
-    questTitleBox = questPanel.imageSlot(18, 56, 412, 22)
-    clockRow = questPanel.imageSlot(18, 80, 412, 20)
-    enemyRow = questPanel.imageSlot(18, 102, 412, 18)
+    themeName = quest.theme
+    questTitleBox = quest.title
+    clockRow = quest.clock
+    enemyRow = quest.enemies
   sk.drawLabel(
     Themes[shownLevel].name,
     themeName.origin,
@@ -641,8 +611,8 @@ proc drawUi*(
   )
   sk.drawLabel(
     "Quests",
-    questPanel.origin + vec2(18, 32),
-    vec2(412, 22),
+    quest.heading.origin,
+    quest.heading.size,
     rgbx(198, 158, 77, 255),
     "Small"
   )
@@ -691,17 +661,17 @@ proc drawUi*(
     rgbx(160, 171, 188, 255),
     "Small"
   )
-  for index in 0 .. 5:
-    let slotPanel = detailsPanel.imageSlot(
-      AbilitySlotXs[index],
-      AbilitySlotYs[index],
-      AbilitySlotWs[index],
-      AbilitySlotHs[index]
-    )
+  sk.drawRect(
+    abilities.divider.origin + vec2(0, 1),
+    abilities.divider.size - vec2(0, 1),
+    DividerColor
+  )
+  for index, slotPanel in abilities.slots:
     if index < 4:
       sk.drawWellImage(
         slotPanel,
-        abilityIconKey(HeroAbilities[selectedClass][index])
+        abilityIconKey(HeroAbilities[selectedClass][index]),
+        iconSize = IconSmall
       )
     else:
       let
@@ -713,7 +683,7 @@ proc drawUi*(
         let ability = LootAbilities[run.world.items[itemIndex].kind]
         if ability != NoAbility:
           icon = abilityIconKey(ability)
-      sk.drawWellImage(slotPanel, icon)
+      sk.drawWellImage(slotPanel, icon, iconSize = IconSmall)
       if options.playerSlot > 0 and
           not run.replayMode and
           primaryId == options.playerSlot - 1:
@@ -722,18 +692,8 @@ proc drawUi*(
         elif window.buttonReleased[MouseRight] and
             slotPanel.contains(sk.mousePos):
           queueDropItem(int32(primaryId), int32(bag))
-    sk.drawLabel(
-      ActionKeys[index],
-      slotPanel.origin + vec2(0, slotPanel.size.y - 16),
-      vec2(slotPanel.size.x, 16),
-      rgbx(186, 192, 205, 255),
-      "Small",
-      CenterAlign
-    )
-  let
-    xpBar = detailsPanel.imageSlot(29, 124, 741, 21)
-    goldBox = detailsPanel.imageSlot(783, 116, 74, 24)
-    gemBox = detailsPanel.imageSlot(869, 116, 57, 24)
+    sk.drawKeyPip(slotPanel, ActionKeys[index])
+  let xpBar = abilities.xp
   sk.drawValueBar(
     xpBar.origin,
     xpBar.size,
@@ -744,36 +704,51 @@ proc drawUi*(
   )
   sk.drawSprite(
     "essence",
-    xpBar.origin + vec2(2, 1),
-    vec2(18)
+    xpBar.origin + vec2(2, 2),
+    vec2(IconTiny)
   )
-  sk.drawSprite(
-    "gold",
-    goldBox.origin + vec2(0, -2),
-    vec2(28)
-  )
+
   sk.drawLabel(
-    formatAmount(selectedActor.carriedValue.int),
-    goldBox.origin + vec2(28, 0),
-    vec2(goldBox.size.x - 30, goldBox.size.y),
-    rgbx(232, 196, 86, 255),
+    "INVENTORY",
+    inventory.title.origin,
+    inventory.title.size,
+    rgbx(200, 205, 216, 255),
     "Small"
   )
-  sk.drawSprite(
-    "crystal",
-    gemBox.origin + vec2(-2, -2),
-    vec2(28)
-  )
-  sk.drawLabel(
-    $run.world.collected,
-    gemBox.origin + vec2(26, 0),
-    vec2(gemBox.size.x - 28, gemBox.size.y),
-    rgbx(220, 120, 120, 255),
-    "Small"
-  )
-  for i, icon in MenuIcons:
-    let slot = menuPanel.imageSlot(MenuSlotXs[i], 13, 39, 40)
-    sk.drawWellImage(slot, icon, MenuIconTint)
+  for bag, well in inventory.slots:
+    var icon = ""
+    if bag < InventorySlots:
+      let itemIndex = run.world.itemIndex(selectedActor.inventory[bag])
+      if itemIndex >= 0:
+        let ability = LootAbilities[run.world.items[itemIndex].kind]
+        if ability != NoAbility:
+          icon = abilityIconKey(ability)
+    sk.drawWellImage(well, icon, iconSize = IconSmall)
+    if bag < InventorySlots and
+        options.playerSlot > 0 and
+        not run.replayMode and
+        primaryId == options.playerSlot - 1:
+      if window.clicked(sk, well):
+        queueUseItem(int32(primaryId), int32(bag))
+      elif window.buttonReleased[MouseRight] and
+          well.contains(sk.mousePos):
+        queueDropItem(int32(primaryId), int32(bag))
+  let counters = [
+    ("gold", formatAmount(selectedActor.carriedValue.int),
+      rgbx(232, 196, 86, 255)),
+    ("crystal", $run.world.collected, rgbx(220, 120, 120, 255))
+  ]
+  for i, counter in counters:
+    let box = inventory.counters[i]
+    sk.drawSprite(counter[0], box.origin, vec2(20))
+    sk.drawLabel(
+      counter[1],
+      box.origin + vec2(31, 0),
+      vec2(box.size.x - 31, box.size.y),
+      counter[2],
+      "Hud",
+      RightAlign
+    )
   transport.drawTransport(
     sk,
     window,

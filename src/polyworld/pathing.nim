@@ -496,6 +496,28 @@ proc edgeLink*(layerIndex, x, z, direction: int): EdgeLink =
   edgeLinks[index][direction] = result
   edgeKnown[index][direction] = true
 
+proc edgeMask*(
+    layerIndex, x, z: int,
+    blockers: openArray[seq[int32]] = []
+): uint8 =
+  ## Returns open edge bits, east to north, including optional layer blockers.
+  ## Nonzero blockers close both sides without changing cached terrain links.
+  if not isWalkable(layerIndex, x, z):
+    return
+  if layerIndex < blockers.len and blockers[layerIndex].len > 0:
+    doAssert blockers[layerIndex].len == layers[layerIndex].tiles.len
+    if blockers[layerIndex][z * layers[layerIndex].width + x] != 0:
+      return
+  for direction in 0 .. 3:
+    let link = edgeLink(layerIndex, x, z, direction)
+    if not link.open:
+      continue
+    if link.layer < blockers.len and blockers[link.layer].len > 0:
+      doAssert blockers[link.layer].len == layers[link.layer].tiles.len
+      if blockers[link.layer][link.z * layers[link.layer].width + link.x] != 0:
+        continue
+    result = result or uint8(1 shl direction)
+
 ## Queries
 
 proc tileCenter*(layerIndex, x, z: int): Vec3 =
@@ -677,9 +699,15 @@ proc searchEdges(query: PathQuery): PathKeys =
     goalPathY = int64(nodePathYs[goalKey])
     goalPathZ = int64(nodePathZs[goalKey])
   template distanceToGoal(node: int): int64 =
-    abs(int64(nodePathXs[node]) - goalPathX) +
-      abs(int64(nodePathYs[node]) - goalPathY) +
-      abs(int64(nodePathZs[node]) - goalPathZ)
+    block:
+      let
+        key = node
+        planar = abs(int64(nodePathXs[key]) - goalPathX) +
+          abs(int64(nodePathZs[key]) - goalPathZ)
+      if query.orthogonalCost > 0:
+        planar div int64(PathUnitsPerTile) * int64(query.orthogonalCost)
+      else:
+        planar + abs(int64(nodePathYs[key]) - goalPathY)
   beginSearch()
   let generation = pathGeneration
   clearFrontier(pathFrontierEdges)
