@@ -23,7 +23,10 @@ block:
   doAssert boundsVisible(vec3(-1, -1, -1), vec3(1, 1, 1), projection)
   doAssert boundsVisible(vec3(-0.01, -0.01, -0.2), vec3(0.01, 0.01, -0.05), projection)
   doAssert not boundsVisible(vec3(-1, -1, 2), vec3(1, 1, 4), projection)
-  doAssert not boundsVisible(vec3(-1, -1, -110), vec3(1, 1, -105), projection)
+  # Perspective compresses far depth. Stay beyond the documented clip-space
+  # tolerance when asserting rejection, and separately retain the boundary.
+  doAssert not boundsVisible(vec3(-1, -1, -120), vec3(1, 1, -110), projection)
+  doAssert boundsVisible(vec3(0, 0, -100), vec3(0, 0, -100), projection)
   doAssert not boundsVisible(vec3(100, 0, -4), vec3(101, 1, -2), projection)
 
 echo "Model-local bounds and orthographic projections"
