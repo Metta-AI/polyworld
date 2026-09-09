@@ -1,5 +1,5 @@
 ## A runnable game UI built from the same Silky controls on desktop and WebGL.
-import std/[json, unicode]
+import std/[json, tables, unicode]
 import bumpy, chroma, pixie, vmath, silky
 import polyworld/gameuis
 
@@ -140,6 +140,7 @@ when isMainModule:
       proc runScript(script: cstring) {.importc: "emscripten_run_script", header: "<emscripten.h>".}
       var snapshot = state.gallerySnapshot(window.size.vec2)
       snapshot["frame"] = %frame
+      snapshot["scrollY"] = %frameStates["content"].scrollPos.y
       runScript(("window.__polyworldUiGalleryState = " & $snapshot &
         "; window.__polyworldUiGallery = {snapshot: () => window.__polyworldUiGalleryState};").cstring)
   while not window.closeRequested:
