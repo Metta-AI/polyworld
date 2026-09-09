@@ -83,3 +83,32 @@ transport.rewind()
 doAssert transport.tick == 0
 
 echo "Game UI tests passed"
+
+block:
+  echo "Safe insets and transport share one usable rectangle"
+  let layout = initGameUiLayout(vec2(800, 600), 40, 10, vec4(30, 20, 50, 60))
+  doAssert layout.gameArea.origin == vec2(30, 20)
+  doAssert layout.gameArea.size == vec2(720, 480)
+  doAssert layout.panel(GameUiRegion.TopLeft, vec2(100)).origin == vec2(40, 30)
+  doAssert layout.panel(GameUiRegion.BottomRight, vec2(100)).origin == vec2(640, 390)
+  doAssert layout.transportPanel.origin == vec2(30, 500)
+  doAssert layout.transportPanel.size == vec2(720, 40)
+  doAssert not layout.layoutFits([GameUiPanel(origin: vec2(0), size: vec2(10))])
+  let collapsed = initGameUiLayout(vec2(40, 30), 100, safeInsets = vec4(60, 40, 60, 40))
+  doAssert collapsed.gameArea.size == vec2(0)
+  doAssert collapsed.transportPanel.size == vec2(0)
+
+block:
+  echo "Popups flip at edges and oversize content stays within usable bounds"
+  let area = GameUiPanel(origin: vec2(20, 30), size: vec2(300, 200))
+  let low = GameUiPanel(origin: vec2(290, 200), size: vec2(20))
+  doAssert area.popupPanel(low, vec2(100, 80)).origin == vec2(220, 112)
+  let high = GameUiPanel(origin: vec2(30, 40), size: vec2(20))
+  doAssert area.popupPanel(high, vec2(100, 80)).origin == vec2(30, 68)
+  let huge = area.popupPanel(low, vec2(600, 400))
+  doAssert huge.origin == area.origin and huge.size == area.size
+  for x in [-100'f32, 0, 200, 500]:
+    for y in [-100'f32, 0, 200, 500]:
+      let placed = area.fitPanel(vec2(x, y), vec2(80, 60))
+      doAssert GameUiPanel(origin: placed.origin - area.origin, size: placed.size).inside(area.size)
+      doAssert placed.contains(placed.origin + placed.size * 0.5)
