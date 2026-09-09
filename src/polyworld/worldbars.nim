@@ -150,6 +150,17 @@ proc initWorldBarRenderer*(): WorldBarRenderer =
     )
   glBindVertexArray(0)
 
+proc closeWorldBarRenderer*(renderer: var WorldBarRenderer) =
+  ## Releases this renderer's GPU resources while its context is current.
+  ## Safe to repeat. Initialize a new renderer before drawing again.
+  if renderer.program != 0:
+    glDeleteProgram(renderer.program)
+  if renderer.vertexArray != 0:
+    glDeleteVertexArrays(1, renderer.vertexArray.addr)
+  if renderer.vertexBuffer != 0:
+    glDeleteBuffers(1, renderer.vertexBuffer.addr)
+  renderer = WorldBarRenderer()
+
 proc clear*(renderer: var WorldBarRenderer) =
   ## Starts one empty bar batch while retaining its vertex allocation.
   renderer.vertices.setLen(0)

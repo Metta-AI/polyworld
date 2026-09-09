@@ -1,0 +1,57 @@
+name: Renderer lifecycle
+on:
+  pull_request:
+    paths:
+      - 'src/polyworld/worldbars.nim'
+      - 'src/polyworld/selectionoutlines.nim'
+      - 'examples/*/graphics.nim'
+      - 'tests/render_resource_lifecycle.nim'
+      - 'tests/prove_resource_lifecycle.py'
+      - 'nimby.lock'
+      - '.github/workflows/resource-lifecycle.yml'
+  workflow_dispatch:
+jobs:
+  resources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: treeform/setup-nim-action@v6
+      - name: Install pinned dependencies
+        run: |
+          cd ..
+          nimby create
+          nimby install polyworld/polyworld.nimble
+          nimby sync polyworld/nimby.lock
+      - name: Compile the graphical callers
+        run: |
+          nim c --parallelBuild:1 examples/call_to_adventure/cta.nim
+          nim c --parallelBuild:1 examples/gods_of_the_arena/gota.nim
+          nim c --parallelBuild:1 examples/light_vs_dark/lvd.nim
+      - name: Verify native GPU lifetime and pixels
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb libgl1-mesa-dri
+          nim c --parallelBuild:1 tests/render_resource_lifecycle.nim
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a tests/render_resource_lifecycle
+      - name: Build WebGL proof
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/polyworld-resource-emsdk
+          /tmp/polyworld-resource-emsdk/emsdk install 5.0.7
+          /tmp/polyworld-resource-emsdk/emsdk activate 5.0.7
+          source /tmp/polyworld-resource-emsdk/emsdk_env.sh
+          nim c --parallelBuild:1 --os:linux --cpu:wasm32 --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --threads:off --mm:arc --exceptions:goto -d:emscripten -d:noSignalHandler --out:tmp/resource-lifecycle/index.html --passL:"--shell-file src/polyworld/emscripten.html --pre-js src/polyworld/webinputs.js -s ASYNCIFY -s FETCH=1 -s USE_WEBGL2=1 -s MAX_WEBGL_VERSION=2 -s MIN_WEBGL_VERSION=1 -s FULL_ES3=1 -s GL_ENABLE_GET_PROC_ADDRESS=1 -s ALLOW_MEMORY_GROWTH --profiling" tests/render_resource_lifecycle.nim
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify live WebGL lifetime and pixels
+        env:
+          AGENT_BROWSER_ARGS: --no-sandbox,--use-gl=angle,--use-angle=swiftshader,--enable-unsafe-swiftshader
+          AGENT_BROWSER_EXECUTABLE_PATH: /usr/bin/google-chrome
+        run: |
+          npm install -g agent-browser@0.33.2
+          python3 tests/prove_resource_lifecycle.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: renderer-lifecycle-proof
+          path: tmp/resource-lifecycle/*.png

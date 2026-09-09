@@ -2017,5 +2017,7 @@ proc runGraphics*() =
 
   if not run.replayMode:
     saveRecording()
+  worldBarRenderer.closeWorldBarRenderer()
+  selectionOutline.closeSelectionOutline()
   particles.closeParticles()
   finishGameProfile()
