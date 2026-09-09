@@ -92,4 +92,70 @@ block:
     doAssert rejected
     doAssert f.player.timeScale == 1
 
+echo "Seeking samples immediately and preserves pause and speed"
+block:
+  let f = fixture()
+  f.player.timeScale = 0.5
+  f.player.paused = true
+  f.player.seek(4)
+  doAssert f.root.pos.x == 4
+  doAssert f.player.currentTime == 4
+  doAssert f.player.paused and f.player.timeScale == 0.5
+  f.player.seek(12)
+  doAssert abs(f.root.pos.x - 2) < 1e-6
+  f.player.setRule("clip0", ClipRule(loop: false, next: "clip1"))
+  f.player.seek(20)
+  doAssert f.root.pos.x == 10
+  doAssert f.player.current == 0 and f.player.currentTime == 10
+  f.player.update(1)
+  doAssert f.player.current == 0 and f.root.pos.x == 10
+  f.player.paused = false
+  f.player.update(0)
+  doAssert f.player.current == 0
+  for invalid in [-1'f32, NaN.float32, Inf.float32]:
+    var rejected = false
+    try: f.player.seek(invalid)
+    except ValueError: rejected = true
+    doAssert rejected and f.player.currentTime == 10
+  f.player.update(0.1)
+  doAssert f.player.current == 1
+
+echo "Interrupted transitions preserve the displayed composite pose"
+block:
+  let f = fixture()
+  f.player.update(1)
+  f.player.play(1, fade = 2)
+  f.player.update(0.5)
+  let composed = f.root.pos
+  doAssert abs(composed.x - 6.25) < 1e-6
+  f.player.play(0, fade = 1)
+  f.player.update(0)
+  doAssert length(f.root.pos - composed) < 1e-6
+  f.player.update(0.5)
+  doAssert abs(f.root.pos.x - 3.375) < 1e-6
+  f.player.play(-1, fade = 1)
+  f.player.update(0)
+  doAssert abs(f.root.pos.x - 3.375) < 1e-6
+  f.player.update(0.5)
+  let fadingToBind = f.root.pos
+  f.player.play(1, fade = 1)
+  f.player.update(0)
+  doAssert length(f.root.pos - fadingToBind) < 1e-6
+  f.player.seek(2)
+  doAssert not f.player.fading and f.root.pos.x == 22
+
+echo "Invalid playback deltas and fades leave the pose unchanged"
+block:
+  let f = fixture()
+  f.player.update(1)
+  for invalid in [-1'f32, NaN.float32, Inf.float32]:
+    var rejected = false
+    try: f.player.update(invalid)
+    except ValueError: rejected = true
+    doAssert rejected and f.player.currentTime == 1
+    rejected = false
+    try: f.player.play(0, fade = invalid)
+    except ValueError: rejected = true
+    doAssert rejected and f.player.currentTime == 1
+
 echo "Animation playback control tests passed"
