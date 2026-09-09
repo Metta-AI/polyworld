@@ -1590,6 +1590,8 @@ proc runGraphics*() =
 
   if not run.replayMode:
     saveRecording()
+  worldBarRenderer.closeWorldBarRenderer()
+  selectionOutline.closeSelectionOutline()
   particles.closeParticles()
   finishGameProfile()
   echo "run ended: ", run.world.phase, " with ", run.world.banked, " gold banked"
