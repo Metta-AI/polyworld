@@ -34,3 +34,7 @@ The lockfile temporarily pins the interaction fix from
 [Silky #67](https://github.com/treeform/silky/pull/67). It preserves a complete
 click whose press and release arrive between two rendered frames. Replace that
 pin with the upstream commit when the dependency PR merges.
+
+The browser build also pins [Windy #194](https://github.com/treeform/windy/pull/194),
+which restores printable key events for canvas text entry. Both fixes live in
+their dependency owners and should return to upstream pins after merging.
