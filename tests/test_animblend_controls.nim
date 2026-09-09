@@ -158,4 +158,26 @@ block:
     except ValueError: rejected = true
     doAssert rejected and f.player.currentTime == 1
 
+echo "Automatic chaining cannot capture another player's shared-root pose"
+for next in ["", "clip0"]:
+  let shared = fixture()
+  let isolated = fixture()
+  for f in [shared, isolated]:
+    f.root.animations[1].duration = 0.4
+    f.root.animations[1].channels[0].times[1] = 0.4
+    f.player.setRule("clip1", ClipRule(loop: false, next: next))
+    f.player.update(1)
+    f.player.play(1, fade = 2)
+    f.player.update(0.1)
+  let other = newClipPlayer(shared.root)
+  other.play(1, fade = 0)
+  other.update(0)
+  doAssert shared.root.pos != isolated.root.pos
+  for dt in [0.4'f32, 0.1, 0.2]:
+    shared.player.update(dt)
+    isolated.player.update(dt)
+    doAssert shared.player.current == 0
+    doAssert length(shared.root.pos - isolated.root.pos) < 1e-6
+    other.update(0)
+
 echo "Animation playback control tests passed"
