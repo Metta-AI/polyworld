@@ -27,7 +27,8 @@ type
     rules: seq[ClipRule]        ## per clip index in root.animations
     current: int                ## clip index, -1 for bind pose
     currentTime: float32
-    previous: int               ## clip fading out, -1 when not fading
+    previous: int               ## outgoing clip, -1 for the bind pose
+    outgoingFrozen: bool        ## interrupted fades retain their composed pose
     previousTime: float32
     fadeTime, fadeDuration: float32
     lastLoop: int               ## the looping clip one-shots return to
@@ -56,7 +57,11 @@ proc setRule*(player: ClipPlayer, name: string, rule: ClipRule) =
 
 proc current*(player: ClipPlayer): int = player.current
 proc currentTime*(player: ClipPlayer): float32 = player.currentTime
-proc fading*(player: ClipPlayer): bool = player.previous >= 0
+proc fading*(player: ClipPlayer): bool = player.fadeTime < player.fadeDuration
+
+proc capture(player: ClipPlayer, pose: var Pose) =
+  for i, node in player.nodes:
+    pose[i] = (node.pos, node.rot, node.scale)
 
 proc timeScale*(player: ClipPlayer): float32 = player.rate
 
@@ -70,16 +75,22 @@ proc `timeScale=`*(player: ClipPlayer, value: float32) =
 proc play*(player: ClipPlayer, clip: int, fade = 0.2'f32) =
   ## Starts a clip (or the bind pose for -1), fading from whatever is
   ## posed now. Restarting the current clip just rewinds it.
+  if not (fade >= 0 and fade < Inf):
+    raise newException(ValueError, "animation fade must be finite and nonnegative")
   if clip == player.current:
     player.currentTime = 0
     return
-  if fade > 0 and (player.current >= 0 or player.previous >= 0):
+  if fade > 0 and (player.current >= 0 or player.fading):
+    player.outgoingFrozen = player.fading
+    if player.outgoingFrozen:
+      player.capture(player.outgoing)
     player.previous = player.current
     player.previousTime = player.currentTime
     player.fadeTime = 0
     player.fadeDuration = fade
   else:
-    player.previous = -1
+    player.fadeTime = 0
+    player.fadeDuration = 0
   player.current = clip
   player.currentTime = 0
   if clip >= 0 and player.rules[clip].loop:
@@ -98,22 +109,32 @@ proc clipTime(player: ClipPlayer, clip: int, time: float32): float32 =
   else:
     min(time, player.root.animations[clip].duration)
 
-proc capture(player: ClipPlayer, pose: var Pose) =
-  for i, node in player.nodes:
-    pose[i] = (node.pos, node.rot, node.scale)
+proc seek*(player: ClipPlayer, time: float32) =
+  ## Samples the selected clip immediately, ending any transition. One-shot
+  ## seeks clamp at the final pose without chaining; looping seeks wrap.
+  if not (time >= 0 and time < Inf):
+    raise newException(ValueError, "animation seek time must be finite and nonnegative")
+  player.currentTime = if player.current >= 0:
+    player.clipTime(player.current, time)
+  else: 0
+  player.fadeTime = 0
+  player.fadeDuration = 0
+  player.root.resetToBase()
+  if player.current >= 0:
+    applyClipAt(player.root.animations[player.current], player.currentTime)
 
 proc update*(player: ClipPlayer, dt: float32) =
   ## Advances time, chains finished one-shots, and poses the tree.
+  if not (dt >= 0 and dt < Inf):
+    raise newException(ValueError, "animation delta must be finite and nonnegative")
   let root = player.root
   let elapsed = if player.paused: 0'f32 else: dt * player.rate
   player.currentTime += elapsed
-  if player.previous >= 0:
+  if player.fading:
     player.previousTime += elapsed
     player.fadeTime += elapsed
-    if player.fadeTime >= player.fadeDuration:
-      player.previous = -1
 
-  if player.current >= 0 and not player.rules[player.current].loop and
+  if elapsed > 0 and player.current >= 0 and not player.rules[player.current].loop and
       player.currentTime >= root.animations[player.current].duration:
     let rule = player.rules[player.current]
     if rule.next.len > 0:
@@ -122,19 +143,20 @@ proc update*(player: ClipPlayer, dt: float32) =
       player.play(player.lastLoop)
 
   root.resetToBase()
-  if player.current < 0 and player.previous < 0:
-    return
-  if player.previous < 0:
-    applyClipAt(
-      root.animations[player.current],
-      player.clipTime(player.current, player.currentTime))
+  if not player.fading:
+    if player.current >= 0:
+      applyClipAt(
+        root.animations[player.current],
+        player.clipTime(player.current, player.currentTime))
     return
 
   # Fade: sample both clips against the base pose, then blend per node.
-  applyClipAt(
-    root.animations[player.previous],
-    player.clipTime(player.previous, player.previousTime))
-  player.capture(player.outgoing)
+  if not player.outgoingFrozen:
+    if player.previous >= 0:
+      applyClipAt(
+        root.animations[player.previous],
+        player.clipTime(player.previous, player.previousTime))
+    player.capture(player.outgoing)
   root.resetToBase()
   if player.current >= 0:
     applyClipAt(
