@@ -20,6 +20,10 @@ jobs:
           nimby create
           nimby install polyworld/polyworld.nimble
           nimby sync polyworld/nimby.lock
+      - name: Verify batched input regression
+        run: |
+          cd ../silky
+          nim r --parallelBuild:1 -d:silkyTesting tests/test_interactions.nim
       - name: Build atlas and test actual widgets
         run: |
           nim r --parallelBuild:1 examples/ui_gallery/build_atlas.nim

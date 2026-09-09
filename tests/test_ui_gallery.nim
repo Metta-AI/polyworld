@@ -23,12 +23,16 @@ doAssert not state.showHints
 window.clickButton(sk, "Quest")
 doAssert state.tab == 2
 window.clickButton(sk, "Claim reward")
-doAssert state.claimed
+doAssert not state.claimed and state.gold == 0
+window.clickText(sk, "Find the river crossing", "CheckBox")
+doAssert state.crossingFound
+window.clickButton(sk, "Claim reward")
+doAssert state.claimed and state.gold == 25
 window.pumpFrame(sk)
 let claim = sk.semantic.root.findByText("Claim reward", "Button")
 doAssert claim != nil and not claim.state.enabled
 window.clickButton(sk, "Claim reward")
-doAssert state.claimed
+doAssert state.claimed and state.gold == 25
 for size in [vec2(360, 640), vec2(960, 720), vec2(1920, 1080)]:
   let panels = galleryPanels(size)
   doAssert panels.content.inside(size)

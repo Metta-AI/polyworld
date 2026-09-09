@@ -11,6 +11,7 @@ type GalleryState* = object
   volume*: float32
   difficulty*: string
   claimed*: bool
+  gold*: int
   inspected*: bool
   crossingFound*: bool
 
@@ -61,7 +62,7 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
       itemSpacing 12
       case state.tab
       of 0:
-        h1text "Mira / Pathfinder"
+        h1text state.playerName & " / Pathfinder"
         text "Explorer of the northern wilds."
         group "health":
           box 260, 30
@@ -102,8 +103,9 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
         text "Objectives"
         checkBox "Find the river crossing", state.crossingFound
         text "Reward / 25 gold + travel ration"
-        button "Claim reward", not state.claimed:
+        button "Claim reward", state.crossingFound and not state.claimed:
           state.claimed = true
+          state.gold += 25
         if state.claimed:
           text "Reward claimed.\nReady for the next adventure."
         for name in ["River crossing", "The mossy stair", "Keeper's door", "North road", "Return to camp"]:
@@ -113,7 +115,8 @@ proc gallerySnapshot*(state: GalleryState, size: Vec2): JsonNode =
   let panels = galleryPanels(size)
   %* {"tab": state.tab, "theme": state.theme, "playerName": state.playerName,
     "hints": state.showHints, "volume": state.volume, "difficulty": state.difficulty,
-    "claimed": state.claimed, "inspected": state.inspected,
+    "claimed": state.claimed, "gold": state.gold, "inspected": state.inspected,
+    "crossingFound": state.crossingFound,
     "width": size.x, "height": size.y,
     "content": {"x": panels.content.origin.x, "y": panels.content.origin.y,
       "width": panels.content.size.x, "height": panels.content.size.y}}
@@ -129,8 +132,6 @@ when isMainModule:
   var frame = 0
   window.onFrame = proc() =
     inc frame
-    if window.buttonPressed[MouseLeft] or window.buttonReleased[MouseLeft]:
-      echo "Pointer ", window.mousePos, " pressed=", window.buttonPressed[MouseLeft], " released=", window.buttonReleased[MouseLeft]
     sk.beginUI(window, window.size)
     sk.drawGallery(window, state)
     sk.endUi()
