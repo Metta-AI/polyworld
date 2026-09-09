@@ -1,6 +1,6 @@
 ## A runnable game UI built from the same Silky controls on desktop and WebGL.
 import std/[json, unicode]
-import bumpy, chroma, vmath, silky
+import bumpy, chroma, pixie, vmath, silky
 import polyworld/gameuis
 
 type GalleryState* = object
