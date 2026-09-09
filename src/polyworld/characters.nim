@@ -304,6 +304,15 @@ proc drawModel(
     scene.toon.tint = tint
     scene.toon.draw(root)
 
+proc visibleIn(node, root: Node): bool =
+  if not root.visible:
+    return false
+  if root == node:
+    return true
+  for child in root.nodes:
+    if node.visibleIn(child):
+      return true
+
 proc drawCharacter*(
     scene: CharacterScene, model: CharacterModel,
     position: Vec3, facing: float32, clip: int, animTime: float32,
@@ -321,7 +330,8 @@ proc drawCharacter*(
         "character gear belongs to a different model"
   scene.drawModel(root, transform, tint, model.unlitParts)
   for attachment in gear:
-    scene.drawModel(attachment.file.root, attachment.socket.mat, tint)
+    if attachment.socket.visibleIn(root):
+      scene.drawModel(attachment.file.root, attachment.socket.mat, tint)
 
 proc drawCharacter*(
     scene: CharacterScene, model: CharacterModel,
