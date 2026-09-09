@@ -114,12 +114,12 @@ for cycle in 0 ..< 8:
 echo "GPU release, repeated close, peer isolation and recreation proof passed"
 
 when defined(emscripten):
-  # Keep a fresh live pair visible for a real browser capture after the proof.
+  # Keep a fresh live set visible for a real browser capture after the proof.
   var bars = initWorldBarRenderer()
   var outline = initSelectionOutline()
-  var shapes = initShapeRenderer()
+  var previewShapes = initShapeRenderer()
   window.onFrame = proc() =
-    bars.render(outline, shapes)
+    bars.render(outline, previewShapes)
     window.swapBuffers()
     proc runScript(script: cstring) {.importc: "emscripten_run_script", header: "<emscripten.h>".}
     runScript("window.__polyworldResourceProof = {passed: true};")
@@ -127,4 +127,4 @@ when defined(emscripten):
     pollEvents()
   bars.closeWorldBarRenderer()
   outline.closeSelectionOutline()
-  shapes.closeShapeRenderer()
+  previewShapes.closeShapeRenderer()
