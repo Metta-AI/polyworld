@@ -56,4 +56,6 @@ jobs:
         if: always()
         with:
           name: ui-gallery-proof
-          path: tmp/ui-gallery/*.png
+          path: |
+            tmp/ui-gallery/*.png
+            !tmp/ui-gallery/atlas.png

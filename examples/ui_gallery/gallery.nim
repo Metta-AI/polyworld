@@ -1,5 +1,5 @@
 ## A runnable game UI built from the same Silky controls on desktop and WebGL.
-import std/[json, tables, unicode]
+import std/json
 import bumpy, chroma, pixie, vmath, silky
 import polyworld/gameuis
 
@@ -122,6 +122,7 @@ proc gallerySnapshot*(state: GalleryState, size: Vec2): JsonNode =
       "width": panels.content.size.x, "height": panels.content.size.y}}
 
 when isMainModule:
+  import std/[tables, unicode]
   let window = newWindow("Polyworld UI gallery", ivec2(960, 720), vsync = true)
   window.makeContextCurrent()
   loadExtensions()
