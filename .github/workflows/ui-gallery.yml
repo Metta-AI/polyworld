@@ -30,7 +30,7 @@ jobs:
           /tmp/polyworld-ui-emsdk/emsdk install 5.0.7
           /tmp/polyworld-ui-emsdk/emsdk activate 5.0.7
           source /tmp/polyworld-ui-emsdk/emsdk_env.sh
-          nim c --parallelBuild:1 --os:linux --cpu:wasm32 --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --threads:off --mm:arc --exceptions:goto -d:emscripten -d:noSignalHandler --out:tmp/ui-gallery/index.html --passL:"--preload-file tmp/ui-gallery/atlas.png@/tmp/ui-gallery/atlas.png --shell-file src/polyworld/emscripten.html --pre-js src/polyworld/webinputs.js -s ASYNCIFY -s USE_WEBGL2=1 -s MAX_WEBGL_VERSION=2 -s MIN_WEBGL_VERSION=1 -s FULL_ES3=1 -s GL_ENABLE_GET_PROC_ADDRESS=1 -s ALLOW_MEMORY_GROWTH --profiling" examples/ui_gallery/gallery.nim
+          nim c --parallelBuild:1 --os:linux --cpu:wasm32 --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --threads:off --mm:arc --exceptions:goto -d:emscripten -d:noSignalHandler --out:tmp/ui-gallery/index.html --passL:"--preload-file tmp/ui-gallery/atlas.png@/tmp/ui-gallery/atlas.png --shell-file src/polyworld/emscripten.html --pre-js src/polyworld/webinputs.js -s ASYNCIFY -s FETCH=1 -s USE_WEBGL2=1 -s MAX_WEBGL_VERSION=2 -s MIN_WEBGL_VERSION=1 -s FULL_ES3=1 -s GL_ENABLE_GET_PROC_ADDRESS=1 -s ALLOW_MEMORY_GROWTH --profiling" examples/ui_gallery/gallery.nim
       - uses: actions/setup-node@v4
         with:
           node-version: 24
