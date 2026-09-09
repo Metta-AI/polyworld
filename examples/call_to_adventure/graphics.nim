@@ -1646,6 +1646,8 @@ proc runGraphics*() =
 
   if not run.replayMode:
     saveRecording()
+  clickMarks.closeClickMarks()
+  worldShapes.closeShapeRenderer()
   worldBarRenderer.closeWorldBarRenderer()
   selectionOutline.closeSelectionOutline()
   particles.closeParticles()
