@@ -323,11 +323,9 @@ proc drawCharacter*(
   let
     root = model.file.root
     transform = model.characterTransform(position, facing, sizeFactor)
-  if gear.len > 0:
-    root.updateTransforms(transform)
-    for attachment in gear:
-      doAssert attachment.character == model,
-        "character gear belongs to a different model"
+  for attachment in gear:
+    doAssert attachment.character == model,
+      "character gear belongs to a different model"
   scene.drawModel(root, transform, tint, model.unlitParts)
   for attachment in gear:
     if attachment.socket.visibleIn(root):
