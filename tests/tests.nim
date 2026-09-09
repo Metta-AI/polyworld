@@ -16,6 +16,7 @@ import
   test_fxmeshes,
   test_gameuis,
   test_gota_content,
+  test_gota_editor,
   test_gota_replays,
   test_gota_world,
   test_hashes,

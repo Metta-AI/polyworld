@@ -31,21 +31,6 @@ const
 
 ## Lane waypoints
 
-type LaneStop = tuple[layer, x, z: int]
-
-const LaneRoutes: array[3, seq[LaneStop]] = [
-  @[(GroundLayer, 23, 20), (GroundLayer, 29, 20),
-    (GroundLayer, 107, 21), (GroundLayer, 107, 32),
-    (GroundLayer, 107, 98), (GroundLayer, 107, 104)],
-  @[(GroundLayer, 23, 21), (GroundLayer, 29, 21),
-    (GroundLayer, 48, 54), (GroundLayer, 65, 61),
-    (GroundLayer, 82, 68), (GroundLayer, 98, 106),
-    (GroundLayer, 104, 106)],
-  @[(GroundLayer, 20, 23), (GroundLayer, 20, 29),
-    (GroundLayer, 21, 107), (GroundLayer, 32, 107),
-    (GroundLayer, 98, 107), (GroundLayer, 104, 107)],
-]
-
 var
   lanePathPoints*: array[3, seq[PathPoint]]
   lanePathTiles: array[3, seq[PathTile]]
@@ -332,10 +317,10 @@ proc laneWorldPlacement(
   result.position = center
   result.position.y = fixedSurfaceHeight(result.position)
 
-proc initTowers(world: World) =
+proc initTowers(world: World, paths: array[3, seq[PathPoint]]) =
   ## Creates the lane tower records used by simulation UI and rendering.
   for lane in 0 .. 2:
-    let path = lanePathPoints[lane]
+    let path = paths[lane]
     for definition in [
       (team: RedTeam, tier: OuterTower,
         ratio: 380'i32, offset: 180_000'i32),
@@ -366,6 +351,79 @@ proc initTowers(world: World) =
         hp: hitPoints,
         maxHp: hitPoints
       )
+
+proc defaultBuildings*(): seq[MapBuilding] =
+  ## Seeds editable structures from the same lane placement as generated games.
+  var paths: array[3, seq[PathPoint]]
+  for lane in 0 .. 2:
+    for i in 0 ..< LaneRoutes[lane].len - 1:
+      let
+        a = LaneRoutes[lane][i]
+        b = LaneRoutes[lane][i + 1]
+        segment = findPathPoints(a.layer, a.x, a.z, b.layer, b.x, b.z)
+      if segment.len == 0:
+        paths[lane].add pathPoint(a.layer, a.x, a.z)
+        paths[lane].add pathPoint(b.layer, b.x, b.z)
+      else:
+        for j, point in segment:
+          if paths[lane].len == 0 or j > 0:
+            paths[lane].add point
+  var world = World()
+  world.initTowers(paths)
+  for tower in world.towers:
+    result.add MapBuilding(
+      kind: TowerBuilding, team: tower.team.ord,
+      lane: tower.lane, tier: tower.tier.ord,
+      x: floorWorldTile(tower.position.x) + GridTiles div 2,
+      z: floorWorldTile(tower.position.z) + GridTiles div 2,
+      rotation: (if tower.team == RedTeam: 45 else: 225)
+    )
+  for team in 0 .. 1:
+    let fort = if team == 0: RedFortTile else: BlueFortTile
+    result.add MapBuilding(
+      kind: GodBuilding, team: team, layer: team + 1,
+      x: fort, z: fort, rotation: (if team == 0: 45 else: 225)
+    )
+    for lane in 0 .. 2:
+      let
+        stop = if team == 0: LaneRoutes[lane][0] else: LaneRoutes[lane][^1]
+        offset = [4, -4, 4][lane] * (if team == 0: 1 else: -1)
+        placement = laneWorldPlacement(
+          paths[lane], (if team == 0: 0'i32 else: 1000'i32),
+          offset.int32 * WorldScale
+        )
+      result.add MapBuilding(
+        kind: BarracksBuilding, team: team, lane: lane,
+        layer: stop.layer,
+        x: floorWorldTile(placement.position.x) + GridTiles div 2,
+        z: floorWorldTile(placement.position.z) + GridTiles div 2,
+        rotation: (if team == 0: 45 else: 225)
+      )
+
+proc buildingPoint(building: MapBuilding): WorldPoint =
+  ## Samples a structure's selected navigation surface using integer heights.
+  let stop = building.buildingStop()
+  worldPoint(pathPoint(stop.layer, stop.x, stop.z))
+
+proc initAuthoredTowers(world: World, buildings: seq[MapBuilding]) =
+  ## Creates simulation towers from the saved team, lane, tier, and position.
+  const Directions = [
+    (0'i32, 1'i32), (1'i32, 1'i32), (1'i32, 0'i32), (1'i32, -1'i32),
+    (0'i32, -1'i32), (-1'i32, -1'i32), (-1'i32, 0'i32), (-1'i32, 1'i32)
+  ]
+  for building in buildings:
+    if building.kind != TowerBuilding:
+      continue
+    let
+      tier = TowerTier(building.tier)
+      direction = Directions[((building.rotation + 22) div 45) mod 8]
+    world.towers.add Tower(
+      id: FirstTowerId + world.towers.len.int32,
+      team: Team(building.team), lane: building.lane, tier: tier,
+      position: building.buildingPoint(),
+      facing: heading(direction[0], direction[1]),
+      hp: TowerHitPoints[tier], maxHp: TowerHitPoints[tier]
+    )
 
 const
   FootmanHp* = 60'i32
@@ -2545,14 +2603,15 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       game.recordingError = error.msg
 
 proc initLanePaths(seed: int32) =
-  ## Builds shared lane polylines on the generated map.
+  ## Builds shared lane polylines between saved barracks and lane anchors.
+  let routes = battleRoutes()
   for lane in 0 .. 2:
     lanePathPoints[lane].setLen(0)
     lanePathTiles[lane].setLen(0)
-    for i in 0 ..< LaneRoutes[lane].len - 1:
+    for i in 0 ..< routes[lane].len - 1:
       let
-        a = LaneRoutes[lane][i]
-        b = LaneRoutes[lane][i + 1]
+        a = routes[lane][i]
+        b = routes[lane][i + 1]
         segment = findTilePath(a.layer, a.x, a.z, b.layer, b.x, b.z)
       doAssert segment.len > 0,
         &"lane {lane} seed {seed}: no path {a} -> {b}; " &
@@ -2647,7 +2706,13 @@ proc newGame*(
   world.spawnIntervalTicks = spawnInterval
   world.rng = initRng(map.seed)
   initLanePaths(map.seed)
-  initTowers(world)
+  if map.authoredBuildings:
+    world.initAuthoredTowers(map.buildings)
+    for building in map.buildings:
+      if building.kind == GodBuilding:
+        world.forts[building.team].center = building.buildingPoint()
+  else:
+    world.initTowers(lanePathPoints)
   for lane in 0 .. 2:
     world.barracksSpawns[RedTeam.ord][lane] = worldPoint(lanePathPoints[lane][0])
     world.barracksSpawns[BlueTeam.ord][lane] = worldPoint(lanePathPoints[lane][^1])
@@ -2666,8 +2731,9 @@ proc newGame*(
         int(tile.z)
       ))
       laneWorldLayers[lane].add tile.layer
-  for fort in world.forts.mitems:
-    fort.center.y = fixedSurfaceHeight(fort.center)
+  if not map.authoredBuildings:
+    for fort in world.forts.mitems:
+      fort.center.y = fixedSurfaceHeight(fort.center)
   let heroSetup =
     if replayMode:
       replayData.header.setup.heroes
