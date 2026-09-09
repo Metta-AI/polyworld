@@ -274,6 +274,7 @@ proc pickCharacter*(
     translate(position) * rotateY(facing) *
     scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
   root.updateTransforms(transform)
-  let hit = pickRay(origin, dir).pickMesh(root, doubleSided = true)
-  if hit.isSome and hit.get.distance > 0:
+  # The smallest positive float excludes zero without a world-space epsilon.
+  let hit = pickRay(origin, dir, near = 1e-45'f32).pickMesh(root, doubleSided = true)
+  if hit.isSome:
     result = hit.get.distance
