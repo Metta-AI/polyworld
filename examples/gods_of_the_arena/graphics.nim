@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  content, sim, game, maps, replays, ui, controls,
+  content, sim, game, maps, replays, ui, controls, buildings,
   polyworld/actioncam, polyworld/characters, polyworld/clickmarks,
   polyworld/common, polyworld/pathing,
   polyworld/tapes,
@@ -325,7 +325,15 @@ proc runGraphics*() =
     (path[index], facing)
 
   proc placeStaticStructures(pack: PropPack) =
-    ## Places one permanent barracks at each end of every lane.
+    ## Places saved barracks, or the generated lane defaults.
+    if run.map.authoredBuildings:
+      for building in run.map.buildings:
+        if building.kind == BarracksBuilding:
+          pack.placeProp(
+            building.buildingModel(), building.buildingPosition(),
+            building.buildingRotation(), building.buildingScale()
+          )
+      return
     for lane in 0 .. 2:
       let path = laneRenderPath(lane)
       let
@@ -355,17 +363,18 @@ proc runGraphics*() =
     ]:
       doAssert towerPack.hasProp(name), "missing tower kit prop: " & name
     towerPack.placeStaticStructures()
-    towerPack.placeProp(
-      "magiccrystal1",
-      tileCenter(RedFortLayer, FortOuterRadius, FortOuterRadius),
-      scale = FountainScale
-    )
-    towerPack.placeProp(
-      "magiccrystal1",
-      tileCenter(BlueFortLayer, FortOuterRadius, FortOuterRadius),
-      rotation = PI.float32,
-      scale = FountainScale
-    )
+    if not run.map.authoredBuildings:
+      towerPack.placeProp(
+        "magiccrystal1",
+        tileCenter(RedFortLayer, FortOuterRadius, FortOuterRadius),
+        scale = FountainScale
+      )
+      towerPack.placeProp(
+        "magiccrystal1",
+        tileCenter(BlueFortLayer, FortOuterRadius, FortOuterRadius),
+        rotation = PI.float32,
+        scale = FountainScale
+      )
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
   drawSplash(sk, window, splash.name)
@@ -386,12 +395,18 @@ proc runGraphics*() =
         vec3(-3.5, 0, -3.5)
       else:
         vec3(3.5, 0, 3.5)
-    god.position = renderPoint(run.world.forts[i].center) + offset
-    god.position.y = surfaceHeightNear(
-      god.position.x,
-      god.position.z,
-      renderPoint(run.world.forts[i].center).y
-    )
+    if run.map.authoredBuildings:
+      god.position = renderPoint(run.world.forts[i].center)
+      for building in run.map.buildings:
+        if building.kind == GodBuilding and building.team == i:
+          god.facing = building.buildingRotation()
+    else:
+      god.position = renderPoint(run.world.forts[i].center) + offset
+      god.position.y = surfaceHeightNear(
+        god.position.x,
+        god.position.z,
+        renderPoint(run.world.forts[i].center).y
+      )
 
   proc godClip(god: God): int =
     ## Selects the god animation for the current game state.

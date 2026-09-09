@@ -49,6 +49,8 @@ type
     kind*: uint32
 
   QuadLayer* = ref object
+    blocking*: bool
+      ## Solid authored volumes block overlapping navigation surfaces.
     originX*, originZ*: int  # placement in world tile coordinates
     width*, depth*: int
     slab*: bool   # slab layers close their sides and underside down to
@@ -218,6 +220,28 @@ proc computeWalkable*() {.measure.} =
     layerNodeOffsets[i] = totalNodes
     totalNodes += layer.tiles.len
   layerNodeOffsets[layers.len] = totalNodes
+
+  for wall in layers:
+    if not wall.blocking:
+      continue
+    for z in 0 ..< wall.depth:
+      for x in 0 ..< wall.width:
+        let solid = wall.tiles[z * wall.width + x]
+        if not solid.exists:
+          continue
+        for i, layer in layers:
+          let
+            localX = x + wall.originX - layer.originX
+            localZ = z + wall.originZ - layer.originZ
+          if localX < 0 or localZ < 0 or localX >= layer.width or
+            localZ >= layer.depth:
+              continue
+          let
+            index = localZ * layer.width + localX
+            surface = layer.tiles[index]
+          if max(surface.tops) >= min(solid.bottoms) and
+            min(surface.tops) <= max(solid.tops):
+              layerWalkable[i][index] = false
 
   nodeLayers = newSeq[int](totalNodes)
   nodeXs = newSeq[int](totalNodes)

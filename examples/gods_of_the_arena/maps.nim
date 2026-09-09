@@ -19,6 +19,7 @@ const
   RedFortLayer* = 1
   BlueFortLayer* = 2
   WaterLayer* = 3
+  WallLayer* = 4
   RedFortKind* = 6'u32
   BlueFortKind* = 7'u32
   TerrainAmplitudeSteps = 11'i32
@@ -38,9 +39,34 @@ const
   ForestPatchRadius = 4'i32
     ## Fills neighbouring tiles into compact, solid patches of woods.
 
-type MapData* = object
-  seed*: int32
-  hash*: uint64
+type
+  BuildingKind* = enum TowerBuilding, BarracksBuilding, GodBuilding
+  MapBuilding* = object
+    kind*: BuildingKind
+    team*, lane*, tier*, layer*, x*, z*, rotation*: int
+  MapData* = object
+    seed*: int32
+    hash*: uint64
+    authoredBuildings*: bool
+    buildings*: seq[MapBuilding]
+  LaneStop* = tuple[layer, x, z: int]
+
+var
+  mapBuildings*: seq[MapBuilding]
+  authoredBuildings*: bool
+
+const LaneRoutes*: array[3, seq[LaneStop]] = [
+  @[(GroundLayer, 23, 20), (GroundLayer, 29, 20),
+    (GroundLayer, 107, 21), (GroundLayer, 107, 32),
+    (GroundLayer, 107, 98), (GroundLayer, 107, 104)],
+  @[(GroundLayer, 23, 21), (GroundLayer, 29, 21),
+    (GroundLayer, 48, 54), (GroundLayer, 65, 61),
+    (GroundLayer, 82, 68), (GroundLayer, 98, 106),
+    (GroundLayer, 104, 106)],
+  @[(GroundLayer, 20, 23), (GroundLayer, 20, 29),
+    (GroundLayer, 21, 107), (GroundLayer, 32, 107),
+    (GroundLayer, 98, 107), (GroundLayer, 104, 107)],
+]
 
 proc triangleWave(value, period: int): int32 =
   ## Returns a deterministic signed triangle wave in fixed integer units.
@@ -67,6 +93,8 @@ proc mapFingerprint(): uint64 =
     hash.addHashy(layer.depth)
     hash.addHashy(layer.slab)
     hash.addHashy(layer.water)
+    if layer.blocking:
+      hash.addHashy(true)
     for tileIndex, tile in layer.tiles:
       hash.addHashy(uint32(tile.flags))
       hash.addHashy(uint32(tile.kind))
@@ -75,12 +103,122 @@ proc mapFingerprint(): uint64 =
       for value in tile.bottoms:
         hash.addHashy(value)
       hash.addHashy(layerWalkable[layerIndex][tileIndex])
+  if authoredBuildings:
+    hash.addHashy(true)
+    hash.addHashy(mapBuildings.len)
+    for building in mapBuildings:
+      hash.addHashy(building.kind.ord)
+      for value in [building.team, building.lane, building.tier,
+        building.layer, building.x, building.z, building.rotation]:
+          hash.addHashy(value)
   uint64(hash)
 
 var battleMapHash*: uint64
 
+proc finishMap*(seed: int32): MapData =
+  ## Rebuilds derived navigation and the deterministic terrain fingerprint.
+  computeWalkable()
+  result = MapData(
+    seed: seed, hash: mapFingerprint(),
+    authoredBuildings: authoredBuildings, buildings: mapBuildings
+  )
+  battleMapHash = result.hash
+
+proc buildingStop*(building: MapBuilding): LaneStop =
+  ## Converts a building's map coordinates into local navigation coordinates.
+  let layer = layers[building.layer]
+  (building.layer, building.x - layer.originX, building.z - layer.originZ)
+
+proc battleRoutes*(): array[3, seq[LaneStop]] =
+  ## Connects authored barracks to the established lane waypoints.
+  for lane in 0 .. 2:
+    for stop in LaneRoutes[lane]:
+      result[lane].add stop
+  if authoredBuildings:
+    for building in mapBuildings:
+      if building.kind == BarracksBuilding:
+        let stop = building.buildingStop()
+        if building.team == 0:
+          result[building.lane].insert(stop, 0)
+        else:
+          result[building.lane].add stop
+
+proc ensureWallLayer*() =
+  ## Adds independent castle geometry without changing existing terrain.
+  if layers.len == WallLayer:
+    layers.add QuadLayer(
+      width: GridTiles, depth: GridTiles, slab: true, blocking: true,
+      tiles: newSeq[Tile](GridTiles * GridTiles)
+    )
+
+proc arenaIssues*(): seq[string] =
+  ## Reports disconnected lanes and required fort access on live terrain.
+  const LaneNames = ["Top", "Middle", "Bottom"]
+  if authoredBuildings:
+    for team in 0 .. 1:
+      var
+        gods = 0
+        barracks: array[3, int]
+      for building in mapBuildings:
+        if building.team != team:
+          continue
+        case building.kind
+        of GodBuilding:
+          inc gods
+        of BarracksBuilding:
+          inc barracks[building.lane]
+        of TowerBuilding:
+          discard
+        let stop = building.buildingStop()
+        if not isWalkable(stop.layer, stop.x, stop.z):
+          result.add $building.kind & " at " & $building.x & ", " &
+            $building.z & " needs walkable ground."
+        else:
+          let
+            lane = if building.kind == GodBuilding: 1 else: building.lane
+            start = if team == 0: LaneRoutes[lane][0]
+              else: LaneRoutes[lane][^1]
+          if findTilePath(
+            start.layer, start.x, start.z, stop.layer, stop.x, stop.z
+          ).len == 0:
+            result.add $building.kind & " at " & $building.x & ", " &
+              $building.z & " needs a route to its lane."
+      if gods != 1:
+        result.add "Team " & $(team + 1) & " needs exactly one god."
+      for lane in 0 .. 2:
+        if barracks[lane] != 1:
+          result.add "Team " & $(team + 1) & " needs " &
+            LaneNames[lane] & " barracks."
+  let routes = battleRoutes()
+  for lane in 0 .. 2:
+    for i in 0 ..< routes[lane].len - 1:
+      let
+        a = routes[lane][i]
+        b = routes[lane][i + 1]
+      if findTilePath(a.layer, a.x, a.z, b.layer, b.x, b.z).len == 0:
+        result.add LaneNames[lane] & " lane is blocked at segment " &
+          $(i + 1) & "."
+        break
+  for (fort, direction, layer) in [
+    (RedFortTile, 1, RedFortLayer), (BlueFortTile, -1, BlueFortLayer)
+  ]:
+    for (a, b) in [
+      ((GroundLayer, fort + direction * (FortOuterRadius + 1), fort),
+        (GroundLayer, fort + direction * 3, fort)),
+      ((GroundLayer, fort + direction, fort - direction * 4),
+        (layer, FortOuterRadius + direction * FortWallRadius,
+          FortOuterRadius - direction * 4)),
+      ((GroundLayer, fort + direction * (FortOuterRadius + 1), fort),
+        (layer, FortOuterRadius, FortOuterRadius))
+    ]:
+      if findTilePath(a[0], a[1], a[2], b[0], b[1], b[2]).len == 0:
+        result.add "Fort " & $layer & " has a blocked entrance or ramp."
+        break
+
 proc generateMap*(seed: int32): MapData {.measure.} =
   ## Builds a shallow river over walkable marsh, forests, and two forts.
+  mapBuildings = @[]
+  authoredBuildings = false
   proc ground(cx, cz: int): int32 =
     let value =
       valueNoise(seed, 0xA0761D6478BD642F'u64, cx, cz, 24) * 4 +
@@ -451,7 +589,4 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     )
 
   layers = @[groundLayer, redFort, blueFort, water]
-  computeWalkable()
-  result.seed = seed
-  result.hash = mapFingerprint()
-  battleMapHash = result.hash
+  result = finishMap(seed)

@@ -8,11 +8,13 @@ import
   std/[math, os, strformat, strutils, times],
   polyworld/[cli, profiles, tapes],
   content,
-  maps,
+  maps, mapfiles,
   sim,
   bots,
   controls,
   replays
+
+var mapPath*: string
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
@@ -27,6 +29,7 @@ proc usage() =
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
   echo "  --minutes NUMBER        Duration in minutes (default 20)."
   echo "  --ticks NUMBER          Duration in ticks (default 28800)."
+  echo "  --map PATH              Load an authored JSON map."
   echo "  --seed NUMBER           Live game map seed."
   echo "  --spawn-interval NUMBER Seconds between waves."
   echo "  --play=false            Start the graphical transport paused."
@@ -55,6 +58,8 @@ proc parseGameOptions(): GameOptions =
       discard
     else:
       case argument
+      of "--map":
+        mapPath = arguments.argumentValue(index, "--map")
       of "--spawn-interval":
         var seconds: float64
         try:
@@ -99,7 +104,9 @@ block:
     mapSeed = replayData.header.setup.mapSeed
   var gameMap: MapData
   profileBlock "map":
-    gameMap = generateMap(mapSeed)
+    gameMap =
+      if mapPath.len > 0: loadMap(mapPath)
+      else: generateMap(mapSeed)
   run = newGame(
     gameMap,
     if replayMode:
