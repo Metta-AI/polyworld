@@ -1,4 +1,5 @@
 """Exercise real canvas input with agent-browser and retain actual screenshots."""
+import json
 import subprocess
 
 SESSION = "polyworld-ui-gallery"
@@ -14,10 +15,22 @@ def wait(expression):
     browser("wait", "--fn", expression)
 
 
+def snapshot():
+    return json.loads(browser("eval", "(() => window.__polyworldUiGallery.snapshot())()"))
+
+
+def frames():
+    frame = snapshot()["frame"]
+    wait(f"window.__polyworldUiGallery.snapshot().frame >= {frame + 2}")
+
+
 def click(x, y):
     browser("mouse", "move", str(x), str(y))
+    frames()
     browser("mouse", "down")
+    frames()
     browser("mouse", "up")
+    frames()
 
 
 subprocess.run(["agent-browser", "session", "list"], check=True)
@@ -31,8 +44,6 @@ try:
     wait("window.__polyworldUiGallery && window.__polyworldUiGallery.snapshot().tab === 0")
     browser("screenshot", "tmp/ui-gallery/character.png")
     click(180, 130)
-    print(browser("eval", "(() => ({canvas: document.querySelector('canvas').getBoundingClientRect().toJSON(), state: window.__polyworldUiGallery.snapshot()}))()"), flush=True)
-    browser("screenshot", "tmp/ui-gallery/after-settings-click.png")
     wait("window.__polyworldUiGallery.snapshot().tab === 1")
     browser("screenshot", "tmp/ui-gallery/settings.png")
     click(290, 130)
@@ -44,6 +55,7 @@ try:
     print(browser("eval", "(() => window.__polyworldUiGallery.snapshot())()"))
     print("Live gallery navigation and resize proof passed")
 finally:
+    subprocess.run(["agent-browser", "--session", SESSION, "screenshot", "tmp/ui-gallery/final.png"], check=False)
     for command in ["console", "errors", "close"]:
         subprocess.run(["agent-browser", "--session", SESSION, command], check=False)
     server.terminate()

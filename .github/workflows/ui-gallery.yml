@@ -5,6 +5,7 @@ on:
       - 'src/polyworld/gameuis.nim'
       - 'examples/ui_gallery/**'
       - 'tests/test_ui_gallery.nim'
+      - 'tests/render_ui_gallery.nim'
       - '.github/workflows/ui-gallery.yml'
   workflow_dispatch:
 jobs:
@@ -24,6 +25,12 @@ jobs:
           nim r --parallelBuild:1 examples/ui_gallery/build_atlas.nim
           nim r --parallelBuild:1 -d:silkyTesting tests/test_ui_gallery.nim
           nim c --parallelBuild:1 examples/ui_gallery/gallery.nim
+      - name: Render the native UI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb libgl1-mesa-dri
+          nim c --parallelBuild:1 tests/render_ui_gallery.nim
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a tests/render_ui_gallery
       - name: Build WebGL gallery
         run: |
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/polyworld-ui-emsdk
