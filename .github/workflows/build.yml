@@ -22,6 +22,8 @@ jobs:
           nimby create
           nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
+      - name: Test animation playback
+        run: nim r --parallelBuild:1 tests/test_animblend_controls.nim
       - name: Build WebGL proof
         run: |
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/polyworld-proof-emsdk
