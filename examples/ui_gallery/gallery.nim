@@ -31,11 +31,12 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
     panels = galleryPanels(window.size.vec2 / sk.uiScale)
     paper = state.theme == "Parchment"
     background = if paper: rgbx(225, 216, 194, 255) else: rgbx(17, 26, 35, 255)
-    foreground = if paper: rgbx(42, 46, 45, 255) else: rgbx(235, 239, 234, 255)
+    controlText = rgbx(235, 239, 234, 255)
+    foreground = if paper: rgbx(42, 46, 45, 255) else: controlText
     muted = if paper: rgbx(78, 87, 80, 255) else: rgbx(164, 185, 188, 255)
   sk.theme.textColor = foreground
   sk.theme.textH1Color = foreground
-  sk.theme.defaultTextColor = rgbx(235, 239, 234, 255)
+  sk.theme.defaultTextColor = controlText
   sk.clearScreen(background)
   ui:
     group "heading":
@@ -87,8 +88,12 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
       of 1:
         h1text "Your settings"
         text "Player name"
+        sk.theme.textColor = sk.theme.defaultTextColor
         textInput "player-name", state.playerName
+        sk.theme.textColor = foreground
+        sk.theme.defaultTextColor = foreground
         checkBox "Show interaction hints", state.showHints
+        sk.theme.defaultTextColor = controlText
         text "Volume"
         scrubber "volume", state.volume, 0'f32, 1'f32, "Volume"
         text "Difficulty"
@@ -101,7 +106,9 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
           characters "Follow the river.\nFind the old watchtower.\nSpeak to its keeper.\nReturn with news."
           fillWidth()
         text "Objectives"
+        sk.theme.defaultTextColor = foreground
         checkBox "Find the river crossing", state.crossingFound
+        sk.theme.defaultTextColor = controlText
         text "Reward / 25 gold + travel ration"
         button "Claim reward", state.crossingFound and not state.claimed:
           state.claimed = true

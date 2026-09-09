@@ -102,8 +102,10 @@ try:
     browser("screenshot", "tmp/ui-gallery/narrow.png")
     browser("mouse", "move", "200", "540")
     browser("mouse", "wheel", "320")
-    wait("Math.abs(state.scrollY) > 0")
+    wait("state.scrollY > 0")
     browser("screenshot", "tmp/ui-gallery/narrow-scrolled.png")
+    browser("mouse", "wheel", "-320")
+    wait("state.scrollY === 0")
     print(snapshot())
     print("Live gallery input, disabled actions, theme, resize and scroll proof passed")
 finally:
