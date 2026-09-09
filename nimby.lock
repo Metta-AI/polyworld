@@ -8,7 +8,7 @@ nimsimd 1.3.2 https://github.com/guzba/nimsimd ba71ac4e2927ba61e6d1bf75d0d124eac
 bumpy 1.1.3 https://github.com/treeform/bumpy 93583f6f8056a6259aaa96c89f4c143ba55bc6f0
 crunchy 0.1.11 https://github.com/guzba/crunchy 98eb6526982bb8aae8eec6e8781f4539fa19e049
 shady 0.1.5 https://github.com/treeform/shady 58ddf950fafa15d7cbd7f8d7e0b9fe3d95fc3993
-windy 0.5.0 https://github.com/treeform/windy 3ecdb7abcd6dfec2fd4f798f5178abca5ceec7d6
+windy 0.5.0 https://github.com/relh/windy f59a1bb31051e1c8b82643bc1de486daea794f31
 opengl 1.2.9 https://github.com/nim-lang/opengl 8e2e098f82dc5eefd874488c37b5830233cd18f4
 urlly 1.1.1 https://github.com/treeform/urlly 99784779f05649df25fd9c33003d8ef6de027345
 ws 0.6.0 https://github.com/treeform/ws c9c0c7b51e2e83cc9305a895a0b144a297b4bea8
