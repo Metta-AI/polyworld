@@ -58,9 +58,9 @@ proc current*(player: ClipPlayer): int = player.current
 proc currentTime*(player: ClipPlayer): float32 = player.currentTime
 proc fading*(player: ClipPlayer): bool = player.fadeTime < player.fadeDuration
 
-proc capture(player: ClipPlayer, pose: var Pose) =
+proc captureOutgoing(player: ClipPlayer) =
   for i, node in player.nodes:
-    pose[i] = (node.pos, node.rot, node.scale)
+    player.outgoing[i] = (node.pos, node.rot, node.scale)
 
 proc timeScale*(player: ClipPlayer): float32 = player.rate
 
@@ -82,7 +82,7 @@ proc play*(player: ClipPlayer, clip: int, fade = 0.2'f32) =
   if fade > 0 and (player.current >= 0 or player.fading):
     player.outgoingFrozen = player.fading
     if player.outgoingFrozen:
-      player.capture(player.outgoing)
+      player.captureOutgoing()
     player.previous = player.current
     player.previousTime = player.currentTime
     player.fadeTime = 0
@@ -111,25 +111,19 @@ proc clipTime(player: ClipPlayer, clip: int, time: float32): float32 =
 proc applyPose(player: ClipPlayer) =
   let root = player.root
   root.resetToBase()
-  if not player.fading:
-    if player.current >= 0:
-      applyClipAt(
-        root.animations[player.current],
-        player.clipTime(player.current, player.currentTime))
-    return
-
-  # Fade: sample both clips against the base pose, then blend per node.
-  if not player.outgoingFrozen:
+  if player.fading and not player.outgoingFrozen:
     if player.previous >= 0:
       applyClipAt(
         root.animations[player.previous],
         player.clipTime(player.previous, player.previousTime))
-    player.capture(player.outgoing)
-  root.resetToBase()
+    player.captureOutgoing()
+    root.resetToBase()
   if player.current >= 0:
     applyClipAt(
       root.animations[player.current],
       player.clipTime(player.current, player.currentTime))
+  if not player.fading:
+    return
   let w = clamp(player.fadeTime / player.fadeDuration, 0, 1)
   for i, node in player.nodes:
     let a = player.outgoing[i]
