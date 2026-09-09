@@ -32,7 +32,7 @@ type
     previousTime: float32
     fadeTime, fadeDuration: float32
     lastLoop: int               ## the looping clip one-shots return to
-    outgoing, incoming: Pose
+    outgoing: Pose
 
 proc newClipPlayer*(root: Node): ClipPlayer =
   ## Every clip loops until `setRule` says otherwise.
@@ -42,7 +42,6 @@ proc newClipPlayer*(root: Node): ClipPlayer =
   for rule in result.rules.mitems:
     rule.loop = true
   result.outgoing.setLen(result.nodes.len)
-  result.incoming.setLen(result.nodes.len)
 
 proc clipIndex*(player: ClipPlayer, name: string): int =
   for i, clip in player.root.animations:
@@ -109,39 +108,8 @@ proc clipTime(player: ClipPlayer, clip: int, time: float32): float32 =
   else:
     min(time, player.root.animations[clip].duration)
 
-proc seek*(player: ClipPlayer, time: float32) =
-  ## Samples the selected clip immediately, ending any transition. One-shot
-  ## seeks clamp at the final pose without chaining; looping seeks wrap.
-  if not (time >= 0 and time < Inf):
-    raise newException(ValueError, "animation seek time must be finite and nonnegative")
-  player.currentTime = if player.current >= 0:
-    player.clipTime(player.current, time)
-  else: 0
-  player.fadeTime = 0
-  player.fadeDuration = 0
-  player.root.resetToBase()
-  if player.current >= 0:
-    applyClipAt(player.root.animations[player.current], player.currentTime)
-
-proc update*(player: ClipPlayer, dt: float32) =
-  ## Advances time, chains finished one-shots, and poses the tree.
-  if not (dt >= 0 and dt < Inf):
-    raise newException(ValueError, "animation delta must be finite and nonnegative")
+proc applyPose(player: ClipPlayer) =
   let root = player.root
-  let elapsed = if player.paused: 0'f32 else: dt * player.rate
-  player.currentTime += elapsed
-  if player.fading:
-    player.previousTime += elapsed
-    player.fadeTime += elapsed
-
-  if elapsed > 0 and player.current >= 0 and not player.rules[player.current].loop and
-      player.currentTime >= root.animations[player.current].duration:
-    let rule = player.rules[player.current]
-    if rule.next.len > 0:
-      player.play(rule.next)
-    elif player.lastLoop >= 0 and player.lastLoop != player.current:
-      player.play(player.lastLoop)
-
   root.resetToBase()
   if not player.fading:
     if player.current >= 0:
@@ -162,12 +130,43 @@ proc update*(player: ClipPlayer, dt: float32) =
     applyClipAt(
       root.animations[player.current],
       player.clipTime(player.current, player.currentTime))
-  player.capture(player.incoming)
   let w = clamp(player.fadeTime / player.fadeDuration, 0, 1)
   for i, node in player.nodes:
-    let
-      a = player.outgoing[i]
-      b = player.incoming[i]
-    node.pos = mix(a.pos, b.pos, w)
-    node.rot = slerp(a.rot, b.rot, w)
-    node.scale = mix(a.scale, b.scale, w)
+    let a = player.outgoing[i]
+    node.pos = mix(a.pos, node.pos, w)
+    node.rot = slerp(a.rot, node.rot, w)
+    node.scale = mix(a.scale, node.scale, w)
+
+proc seek*(player: ClipPlayer, time: float32) =
+  ## Samples the selected clip immediately, ending any transition. One-shot
+  ## seeks clamp at the final pose without chaining; looping seeks wrap.
+  if not (time >= 0 and time < Inf):
+    raise newException(ValueError, "animation seek time must be finite and nonnegative")
+  player.currentTime = if player.current >= 0:
+    player.clipTime(player.current, time)
+  else: 0
+  player.fadeTime = 0
+  player.fadeDuration = 0
+  player.applyPose()
+
+proc update*(player: ClipPlayer, dt: float32) =
+  ## Advances time, chains finished one-shots, and poses the tree.
+  if not (dt >= 0 and dt < Inf):
+    raise newException(ValueError, "animation delta must be finite and nonnegative")
+  let root = player.root
+  let elapsed = if player.paused: 0'f32 else: dt * player.rate
+  player.currentTime += elapsed
+  if player.fading:
+    player.previousTime += elapsed
+    player.fadeTime += elapsed
+
+  player.applyPose()
+  if elapsed > 0 and player.current >= 0 and not player.rules[player.current].loop and
+      player.currentTime >= root.animations[player.current].duration:
+    let rule = player.rules[player.current]
+    if rule.next.len > 0:
+      player.play(rule.next)
+      player.applyPose()
+    elif player.lastLoop >= 0 and player.lastLoop != player.current:
+      player.play(player.lastLoop)
+      player.applyPose()
