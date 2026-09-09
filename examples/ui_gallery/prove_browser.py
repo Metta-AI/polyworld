@@ -34,6 +34,17 @@ def click(x, y):
     frames()
 
 
+def drag(x0, y0, x1, y1):
+    browser("mouse", "move", str(x0), str(y0))
+    frames()
+    browser("mouse", "down")
+    frames()
+    browser("mouse", "move", str(x1), str(y1))
+    frames()
+    browser("mouse", "up")
+    frames()
+
+
 subprocess.run(["agent-browser", "session", "list"], check=True)
 server = subprocess.Popen([
     "python3", "-m", "http.server", "8898", "--bind", "127.0.0.1",
@@ -54,23 +65,18 @@ try:
     for _ in range(4):
         browser("press", "Backspace")
         frames()
-    browser("eval", "(() => { for (const type of ['keydown', 'keypress', 'keyup']) "
-            + "document.addEventListener(type, event => console.log(type, event.key, event.charCode, event.defaultPrevented)); })()")
     for letter in "Nora":
         browser("press", letter)
         frames()
     wait("state.playerName === 'Nora'")
     click(54, 340)
     wait("!state.hints")
-    browser("mouse", "move", "620", "412")
-    frames()
-    browser("mouse", "down")
-    frames()
-    browser("mouse", "move", "240", "412")
-    frames()
-    browser("mouse", "up")
-    frames()
+    drag(620, 412, 240, 412)
     assert 0.1 < snapshot()["volume"] < 0.4
+    drag(240, 412, 0, 412)
+    assert snapshot()["volume"] == 0
+    drag(84, 412, 959, 412)
+    assert snapshot()["volume"] == 1
     click(150, 490)
     browser("screenshot", "tmp/ui-gallery/dropdown.png")
     click(150, 600)
