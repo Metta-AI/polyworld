@@ -76,6 +76,7 @@ proc pickMesh*(ray: PickRay; root: Node; doubleSided = false): Option[MeshHit] =
       return
     if node.mesh != nil:
       let joints = root.skinMatrices(node)
+      let mirrored = node.mat.determinant < 0
       for primitive in node.mesh.primitives:
         if primitive.mode != TrianglesMode:
           continue
@@ -98,8 +99,10 @@ proc pickMesh*(ray: PickRay; root: Node; doubleSided = false): Option[MeshHit] =
           else: i)
         for triangle in 0 ..< count div 3:
           let a = index(triangle * 3)
-          let b = index(triangle * 3 + 1)
-          let c = index(triangle * 3 + 2)
+          var b = index(triangle * 3 + 1)
+          var c = index(triangle * 3 + 2)
+          if mirrored:
+            swap(b, c)
           let hit = query.intersectTriangle(points[a], points[b], points[c],
             doubleSided or (primitive.material != nil and primitive.material.doubleSided))
           if hit.isSome and (nearest.isNone or hit.get.distance < query.far):
@@ -111,6 +114,8 @@ proc pickMesh*(ray: PickRay; root: Node; doubleSided = false): Option[MeshHit] =
               let weights = value.barycentric
               value.uv = some(primitive.uvs[a] * weights.x +
                 primitive.uvs[b] * weights.y + primitive.uvs[c] * weights.z)
+            if mirrored:
+              swap(value.barycentric.y, value.barycentric.z)
             query.far = value.distance
             nearest = some(value)
     for child in node.nodes:

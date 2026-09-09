@@ -133,4 +133,34 @@ block:
       rejected = true
     doAssert rejected
 
+echo "Reflected meshes preserve rendered faces, vertex weights and UVs"
+block:
+  let root = triangle()
+  root.scale = vec3(-1, 1, 1)
+  root.updateTransforms()
+  let front = pickRay(vec3(0.25, 0, 5), vec3(0, 0, -1)).pickMesh(root).get
+  doAssert length(front.barycentric - vec3(0.375, 0.125, 0.5)) < 1e-6
+  doAssert length(front.uv.get - vec2(0.375, 0.5)) < 1e-6
+  let back = pickRay(vec3(0.25, 0, -5), vec3(0, 0, 1))
+  doAssert back.pickMesh(root).isNone
+  doAssert back.pickMesh(root, doubleSided = true).isSome
+
+echo "Character rays skip origin hits before choosing the nearest distance"
+block:
+  let root = triangle()
+  root.baseVisible = true
+  root.baseScale = vec3(1)
+  root.baseRot = quat()
+  let primitive = root.mesh.primitives[0]
+  primitive.points.add triangle(-2).mesh.primitives[0].points
+  let model = CharacterModel(file: GltfFile(root: root), baseTransform: mat4())
+  doAssert model.pickCharacter(vec3(0), vec3(0, 0, -1), vec3(0), 0, -1, 0) == 2
+  for i in 3 .. 5:
+    primitive.points[i].z = -1e-9'f32
+  doAssert abs(model.pickCharacter(vec3(0), vec3(0, 0, -1), vec3(0), 0, -1, 0) - 1e-9'f32) < 1e-15
+  primitive.points.setLen(3)
+  doAssert model.pickCharacter(vec3(0), vec3(0, 0, -1), vec3(0), 0, -1, 0) == -1
+  root.updateTransforms()
+  doAssert pickRay(vec3(0), vec3(0, 0, -1)).pickMesh(root).get.distance == 0
+
 echo "Picking tests passed"
