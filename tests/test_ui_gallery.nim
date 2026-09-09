@@ -20,6 +20,17 @@ window.pumpFrame(sk)
 doAssert sk.semantic.root.findByText("Appearance") != nil
 window.clickText(sk, "Show interaction hints", "CheckBox")
 doAssert not state.showHints
+window.moveMouse(240, 412)
+window.pumpFrame(sk)
+window.pumpFrame(sk)
+window.pressButton(MouseLeft)
+window.releaseButton(MouseLeft)
+window.pumpFrame(sk)
+doAssert state.volume > 0.1 and state.volume < 0.4
+let stopped = state.volume
+window.moveMouse(800, 412)
+window.pumpFrame(sk)
+doAssert state.volume == stopped
 window.clickButton(sk, "Quest")
 doAssert state.tab == 2
 window.clickButton(sk, "Claim reward")

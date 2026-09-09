@@ -34,6 +34,17 @@ def click(x, y):
     frames()
 
 
+def completed_click(x, y):
+    browser("mouse", "move", str(x), str(y))
+    frames()
+    # One JS task guarantees both DOM events arrive before the next game frame.
+    browser("eval", "(() => { const canvas = document.querySelector('canvas'); "
+            + f"const point = {{clientX: {x}, clientY: {y}, button: 0, bubbles: true}}; "
+            + "canvas.dispatchEvent(new MouseEvent('mousedown', {...point, buttons: 1})); "
+            + "canvas.dispatchEvent(new MouseEvent('mouseup', {...point, buttons: 0})); })()")
+    frames()
+
+
 def drag(x0, y0, x1, y1):
     browser("mouse", "move", str(x0), str(y0))
     frames()
@@ -71,6 +82,12 @@ try:
     wait("state.playerName === 'Nora'")
     click(54, 340)
     wait("!state.hints")
+    completed_click(240, 412)
+    assert 0.1 < snapshot()["volume"] < 0.4
+    stopped = snapshot()["volume"]
+    browser("mouse", "move", "800", "412")
+    frames()
+    assert snapshot()["volume"] == stopped
     drag(620, 412, 240, 412)
     assert 0.1 < snapshot()["volume"] < 0.4
     drag(240, 412, 0, 412)
