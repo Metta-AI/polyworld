@@ -102,8 +102,9 @@ proc transportPanel*(layout: GameUiLayout): GameUiPanel =
 
 proc fitPanel*(area: GameUiPanel, origin, size: Vec2): GameUiPanel =
   ## Fits a desired panel to a usable area. Oversized content needs scrolling.
-  result.size = min(max(size, vec2(0)), max(area.size, vec2(0)))
-  result.origin = clamp(origin, area.origin, area.origin + area.size - result.size)
+  let usableSize = max(area.size, vec2(0))
+  result.size = min(max(size, vec2(0)), usableSize)
+  result.origin = clamp(origin, area.origin, area.origin + usableSize - result.size)
 
 proc popupPanel*(area, anchor: GameUiPanel, size: Vec2, gap = 8'f32): GameUiPanel =
   ## Places a popup below its anchor, preferring above when below cannot fit.
