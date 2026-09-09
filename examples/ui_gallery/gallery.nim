@@ -126,7 +126,9 @@ when isMainModule:
   var state = newGalleryState()
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) = sk.inputRunes.add(rune)
+  var frame = 0
   window.onFrame = proc() =
+    inc frame
     if window.buttonPressed[MouseLeft] or window.buttonReleased[MouseLeft]:
       echo "Pointer ", window.mousePos, " pressed=", window.buttonPressed[MouseLeft], " released=", window.buttonReleased[MouseLeft]
     sk.beginUI(window, window.size)
@@ -135,7 +137,9 @@ when isMainModule:
     window.swapBuffers()
     when defined(emscripten):
       proc runScript(script: cstring) {.importc: "emscripten_run_script", header: "<emscripten.h>".}
-      runScript(("window.__polyworldUiGalleryState = " & $state.gallerySnapshot(window.size.vec2) &
+      var snapshot = state.gallerySnapshot(window.size.vec2)
+      snapshot["frame"] = %frame
+      runScript(("window.__polyworldUiGalleryState = " & $snapshot &
         "; window.__polyworldUiGallery = {snapshot: () => window.__polyworldUiGalleryState};").cstring)
   while not window.closeRequested:
     pollEvents()
