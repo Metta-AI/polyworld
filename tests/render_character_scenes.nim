@@ -30,7 +30,7 @@ proc beginImage(shading: CharacterShading) =
   scene.beginCharacters(window, view, projection, vec3(0, 0, 20))
   renderer.clearScreen(color(0, 0, 0, 1))
 
-proc capture(label: string): Vec2 =
+proc capture(label: string, visible = true): Vec2 =
   glFinish()
   doAssert glGetError() == GL_NO_ERROR, label & " GL error"
   let image = renderer.captureScreenshot()
@@ -42,9 +42,16 @@ proc capture(label: string): Vec2 =
         inc count
         result += vec2(x.float32, y.float32)
   image.writeFile("tmp/model-render-proof/" & label & ".png")
-  doAssert count > 20, label & " must render visible geometry"
-  result /= count.float32
+  if visible:
+    doAssert count > 20, label & " must render visible geometry"
+    result /= count.float32
+  else:
+    doAssert count == 0, label & " must not render hidden gear"
   echo label, ": ", count, " visible pixels, center ", result
+
+let root = character.file.root
+let arm = root.nodes[0]
+let socket = arm.nodes[0]
 
 sunShadowsEnabled = false
 for shading in CharacterShading:
@@ -64,64 +71,75 @@ for shading in CharacterShading:
   doAssert abs((finish.x - start.x) - Size.float32 * 3 / 9) < 2
   doAssert abs((finish.y - start.y) + Size.float32 * 4 / 10) < 2
 
-# Exercise the other audited PRs through the rendered scene on this temporary
-# integration branch. The engine PRs keep their independent focused fixtures.
-let root = staticModel.file.root
-let target = root.nodes[0]
-root.animations = @[AnimationClip(name: "slide", duration: 1,
-  channels: @[AnimationChannel(target: target, path: AnimTranslation,
-    interpolation: aiLinear, times: @[0'f32, 1'f32],
-    valuesVec3: @[target.pos, target.pos + vec3(2, 0, 0)])])]
-let player = newClipPlayer(root)
-player.play(0, fade = 0)
-player.timeScale = 0.5
-player.update(0.5)
-beginImage(ToonCharacters)
-scene.drawStaticSceneModel(staticModel, vec3(0))
-let beforePause = capture("animation-quarter")
-player.paused = true
-target.pos = vec3(100)
-player.update(10)
-beginImage(ToonCharacters)
-scene.drawStaticSceneModel(staticModel, vec3(0))
-let paused = capture("animation-paused")
-doAssert length(beforePause - paused) < 0.01
-player.paused = false
-player.update(0.5)
-beginImage(ToonCharacters)
-scene.drawStaticSceneModel(staticModel, vec3(0))
-let resumed = capture("animation-resumed")
-doAssert abs(resumed.x - paused.x - Size.float32 * 0.5 / 9) < 2
-player.paused = true
-player.seek(0.25)
-beginImage(ToonCharacters)
-scene.drawStaticSceneModel(staticModel, vec3(0))
-let seeked = capture("animation-seeked")
-doAssert length(seeked - beforePause) < 0.01
-player.paused = false
-player.play(-1, fade = 1)
-player.update(0.25)
-beginImage(ToonCharacters)
-scene.drawStaticSceneModel(staticModel, vec3(0))
-let fading = capture("animation-fading-to-bind")
-player.play(0, fade = 1)
-player.update(0)
-beginImage(ToonCharacters)
-scene.drawStaticSceneModel(staticModel, vec3(0))
-let interrupted = capture("animation-interrupted")
-doAssert length(interrupted - fading) < 0.01
-player.update(2)
-doAssert not player.fading
-let bounds = root.getAABounds()
-doAssert boundsVisible(bounds.min, bounds.max, projection * view)
-doAssert not boundsVisible(bounds.min, bounds.max,
-  projection * view * translate(vec3(100, 0, 0)))
-for node in root.walkNodes:
-  if node.mesh != nil:
-    let points = node.mesh.primitives[0].points
-    let center = node.mat * ((points[0] + points[1] + points[2]) / 3)
-    doAssert pickRay(center + vec3(0, 0, 10), vec3(0, 0, -1)).pickMesh(root, true).isSome
-    break
+  for hidden in [root, arm, socket]:
+    hidden.baseVisible = false
+    beginImage(shading)
+    scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
+    discard capture($shading & "-hidden-" & hidden.name, visible = false)
+    hidden.baseVisible = true
+  beginImage(shading)
+  scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
+  discard capture($shading & "-gear-restored")
+
+block:
+  # Exercise the other audited PRs through the rendered scene on this temporary
+  # integration branch. The engine PRs keep their independent focused fixtures.
+  let root = staticModel.file.root
+  let target = root.nodes[0]
+  root.animations = @[AnimationClip(name: "slide", duration: 1,
+    channels: @[AnimationChannel(target: target, path: AnimTranslation,
+      interpolation: aiLinear, times: @[0'f32, 1'f32],
+      valuesVec3: @[target.pos, target.pos + vec3(2, 0, 0)])])]
+  let player = newClipPlayer(root)
+  player.play(0, fade = 0)
+  player.timeScale = 0.5
+  player.update(0.5)
+  beginImage(ToonCharacters)
+  scene.drawStaticSceneModel(staticModel, vec3(0))
+  let beforePause = capture("animation-quarter")
+  player.paused = true
+  target.pos = vec3(100)
+  player.update(10)
+  beginImage(ToonCharacters)
+  scene.drawStaticSceneModel(staticModel, vec3(0))
+  let paused = capture("animation-paused")
+  doAssert length(beforePause - paused) < 0.01
+  player.paused = false
+  player.update(0.5)
+  beginImage(ToonCharacters)
+  scene.drawStaticSceneModel(staticModel, vec3(0))
+  let resumed = capture("animation-resumed")
+  doAssert abs(resumed.x - paused.x - Size.float32 * 0.5 / 9) < 2
+  player.paused = true
+  player.seek(0.25)
+  beginImage(ToonCharacters)
+  scene.drawStaticSceneModel(staticModel, vec3(0))
+  let seeked = capture("animation-seeked")
+  doAssert length(seeked - beforePause) < 0.01
+  player.paused = false
+  player.play(-1, fade = 1)
+  player.update(0.25)
+  beginImage(ToonCharacters)
+  scene.drawStaticSceneModel(staticModel, vec3(0))
+  let fading = capture("animation-fading-to-bind")
+  player.play(0, fade = 1)
+  player.update(0)
+  beginImage(ToonCharacters)
+  scene.drawStaticSceneModel(staticModel, vec3(0))
+  let interrupted = capture("animation-interrupted")
+  doAssert length(interrupted - fading) < 0.01
+  player.update(2)
+  doAssert not player.fading
+  let bounds = root.getAABounds()
+  doAssert boundsVisible(bounds.min, bounds.max, projection * view)
+  doAssert not boundsVisible(bounds.min, bounds.max,
+    projection * view * translate(vec3(100, 0, 0)))
+  for node in root.walkNodes:
+    if node.mesh != nil:
+      let points = node.mesh.primitives[0].points
+      let center = node.mat * ((points[0] + points[1] + points[2]) / 3)
+      doAssert pickRay(center + vec3(0, 0, 10), vec3(0, 0, -1)).pickMesh(root, true).isSome
+      break
 
 sunShadowsEnabled = true
 initSunShadows(10, 20)
@@ -145,6 +163,20 @@ for attached in [false, true]:
     echo "Shadow attached=", attached, ": ", covered, " covered pixels"
   else:
     doAssert glGetError() == GL_NO_ERROR
+for hidden in [root, arm, socket]:
+  hidden.baseVisible = false
+  beginSunDepthPass(0)
+  glViewport(0, 0, Size, Size)
+  scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
+  when not defined(emscripten):
+    var depth = newSeq[float32](Size * Size)
+    glReadPixels(0, 0, Size, Size, GL_DEPTH_COMPONENT, cGL_FLOAT, depth[0].addr)
+    doAssert glGetError() == GL_NO_ERROR
+    for value in depth:
+      doAssert value == 1, "hidden gear must not write shadow depth"
+  else:
+    doAssert glGetError() == GL_NO_ERROR
+  hidden.baseVisible = true
 endSunDepthPass(window.size)
 echo "Model GPU proof passed"
 
@@ -155,7 +187,8 @@ when defined(emscripten):
       'PbrCharacters-gear-finish', 'ToonCharacters-static',
       'ToonCharacters-gear-start', 'ToonCharacters-gear-finish',
       'animation-quarter', 'animation-paused', 'animation-resumed',
-      'animation-seeked', 'animation-fading-to-bind', 'animation-interrupted'];
+      'animation-seeked', 'animation-fading-to-bind', 'animation-interrupted',
+      'PbrCharacters-gear-restored', 'ToonCharacters-gear-restored'];
     const gallery = document.createElement('div');
     gallery.style = 'display:grid;grid-template-columns:repeat(3,256px);gap:12px;background:white;color:black;padding:12px';
     for (const name of names) {
