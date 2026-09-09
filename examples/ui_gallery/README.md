@@ -29,3 +29,8 @@ and replay controls. Insets use left/top/right/bottom order in UI units.
 `fitPanel` contains oversized popup rectangles (their content should scroll),
 and `popupPanel` flips below/above an anchor before clamping to the usable area.
 Zero insets preserve existing placements.
+
+The lockfile temporarily pins the interaction fix from
+[Silky #67](https://github.com/treeform/silky/pull/67). It preserves a complete
+click whose press and release arrive between two rendered frames. Replace that
+pin with the upstream commit when the dependency PR merges.
