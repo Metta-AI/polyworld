@@ -92,6 +92,26 @@ beginImage(ToonCharacters)
 scene.drawStaticSceneModel(staticModel, vec3(0))
 let resumed = capture("animation-resumed")
 doAssert abs(resumed.x - paused.x - Size.float32 * 0.5 / 9) < 2
+player.paused = true
+player.seek(0.25)
+beginImage(ToonCharacters)
+scene.drawStaticSceneModel(staticModel, vec3(0))
+let seeked = capture("animation-seeked")
+doAssert length(seeked - beforePause) < 0.01
+player.paused = false
+player.play(-1, fade = 1)
+player.update(0.25)
+beginImage(ToonCharacters)
+scene.drawStaticSceneModel(staticModel, vec3(0))
+let fading = capture("animation-fading-to-bind")
+player.play(0, fade = 1)
+player.update(0)
+beginImage(ToonCharacters)
+scene.drawStaticSceneModel(staticModel, vec3(0))
+let interrupted = capture("animation-interrupted")
+doAssert length(interrupted - fading) < 0.01
+player.update(2)
+doAssert not player.fading
 let bounds = root.getAABounds()
 doAssert boundsVisible(bounds.min, bounds.max, projection * view)
 doAssert not boundsVisible(bounds.min, bounds.max,
@@ -134,7 +154,8 @@ when defined(emscripten):
     const names = ['PbrCharacters-static', 'PbrCharacters-gear-start',
       'PbrCharacters-gear-finish', 'ToonCharacters-static',
       'ToonCharacters-gear-start', 'ToonCharacters-gear-finish',
-      'animation-quarter', 'animation-paused', 'animation-resumed'];
+      'animation-quarter', 'animation-paused', 'animation-resumed',
+      'animation-seeked', 'animation-fading-to-bind', 'animation-interrupted'];
     const gallery = document.createElement('div');
     gallery.style = 'display:grid;grid-template-columns:repeat(3,256px);gap:12px;background:white;color:black;padding:12px';
     for (const name of names) {
