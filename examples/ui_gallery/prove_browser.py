@@ -7,7 +7,7 @@ SESSION = "polyworld-ui-gallery"
 def browser(*args):
     return subprocess.run(
         ["agent-browser", "--session", SESSION, *args], check=True,
-        text=True, capture_output=True).stdout
+        text=True, stdout=subprocess.PIPE).stdout
 
 
 def wait(expression):
@@ -31,6 +31,8 @@ try:
     wait("window.__polyworldUiGallery && window.__polyworldUiGallery.snapshot().tab === 0")
     browser("screenshot", "tmp/ui-gallery/character.png")
     click(180, 130)
+    print(browser("eval", "(() => ({canvas: document.querySelector('canvas').getBoundingClientRect().toJSON(), state: window.__polyworldUiGallery.snapshot()}))()"), flush=True)
+    browser("screenshot", "tmp/ui-gallery/after-settings-click.png")
     wait("window.__polyworldUiGallery.snapshot().tab === 1")
     browser("screenshot", "tmp/ui-gallery/settings.png")
     click(290, 130)

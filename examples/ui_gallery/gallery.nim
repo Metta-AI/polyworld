@@ -34,17 +34,17 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
     muted = if paper: rgbx(78, 87, 80, 255) else: rgbx(164, 185, 188, 255)
   sk.theme.textColor = foreground
   sk.theme.textH1Color = foreground
-  sk.theme.defaultTextColor = rgbx(32, 38, 43, 255)
+  sk.theme.defaultTextColor = rgbx(235, 239, 234, 255)
   sk.clearScreen(background)
   ui:
     group "heading":
       box panels.header.origin.x, panels.header.origin.y, panels.header.size.x, panels.header.size.y
       text "title":
         characters "The Wayfarer's Journal"
-        font "H1"
+        font (if panels.header.size.x < 400: "Default" else: "H1")
         tint foreground
       text "subtitle":
-        characters "A small game interface, ready to build on."
+        characters "A place for your next adventure."
         tint muted
     group "navigation":
       box panels.nav.origin.x, panels.nav.origin.y, panels.nav.size.x, panels.nav.size.y
@@ -62,7 +62,7 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
       case state.tab
       of 0:
         h1text "Mira / Pathfinder"
-        text "A patient explorer of the northern wilds."
+        text "Explorer of the northern wilds."
         group "health":
           box 260, 30
           layout LeftToRight
@@ -78,13 +78,13 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
           button "Upgrade (requires 50 gold)", false: discard
         if state.inspected:
           text "compass detail":
-            characters "A brass compass. Its needle always points home."
+            characters "A brass compass.\nIts needle always points home."
         text "Portrait alignment":
           fillWidth()
           characters "EXPLORER  /  LEVEL 12"
           textAlign RightAlign
       of 1:
-        h1text "Make yourself at home"
+        h1text "Your settings"
         text "Player name"
         textInput "player-name", state.playerName
         checkBox "Show interaction hints", state.showHints
@@ -97,15 +97,15 @@ proc drawGallery*(sk: Silky, window: Window, state: var GalleryState) =
       else:
         h1text "The old watchtower"
         text "quest description":
-          characters "Follow the river to the old watchtower. Speak to its keeper, then return with news of the northern road."
+          characters "Follow the river.\nFind the old watchtower.\nSpeak to its keeper.\nReturn with news."
           fillWidth()
         text "Objectives"
         checkBox "Find the river crossing", state.crossingFound
-        text "Reward / 25 gold and a travel ration"
+        text "Reward / 25 gold + travel ration"
         button "Claim reward", not state.claimed:
           state.claimed = true
         if state.claimed:
-          text "Reward claimed. Ready for the next adventure."
+          text "Reward claimed.\nReady for the next adventure."
         for name in ["River crossing", "The mossy stair", "Keeper's door", "North road", "Return to camp"]:
           text name
 
@@ -127,6 +127,8 @@ when isMainModule:
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) = sk.inputRunes.add(rune)
   window.onFrame = proc() =
+    if window.buttonPressed[MouseLeft] or window.buttonReleased[MouseLeft]:
+      echo "Pointer ", window.mousePos, " pressed=", window.buttonPressed[MouseLeft], " released=", window.buttonReleased[MouseLeft]
     sk.beginUI(window, window.size)
     sk.drawGallery(window, state)
     sk.endUi()
