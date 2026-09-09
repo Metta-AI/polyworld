@@ -29,7 +29,7 @@ proc beginImage(shading: CharacterShading) =
   scene.beginCharacters(window, view, projection, vec3(0, 0, 20))
   renderer.clearScreen(color(0, 0, 0, 1))
 
-proc capture(label: string): Vec2 =
+proc capture(label: string, visible = true): Vec2 =
   glFinish()
   doAssert glGetError() == GL_NO_ERROR, label & " GL error"
   let image = renderer.captureScreenshot()
@@ -41,9 +41,16 @@ proc capture(label: string): Vec2 =
         inc count
         result += vec2(x.float32, y.float32)
   image.writeFile("tmp/model-render-proof/" & label & ".png")
-  doAssert count > 20, label & " must render visible geometry"
-  result /= count.float32
+  if visible:
+    doAssert count > 20, label & " must render visible geometry"
+    result /= count.float32
+  else:
+    doAssert count == 0, label & " must not render hidden gear"
   echo label, ": ", count, " visible pixels, center ", result
+
+let root = character.file.root
+let arm = root.nodes[0]
+let socket = arm.nodes[0]
 
 sunShadowsEnabled = false
 for shading in CharacterShading:
@@ -62,6 +69,16 @@ for shading in CharacterShading:
   # The authored hand moves +3 X and +4 Y over one second.
   doAssert abs((finish.x - start.x) - Size.float32 * 3 / 9) < 2
   doAssert abs((finish.y - start.y) + Size.float32 * 4 / 10) < 2
+
+  for hidden in [root, arm, socket]:
+    hidden.baseVisible = false
+    beginImage(shading)
+    scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
+    discard capture($shading & "-hidden-" & hidden.name, visible = false)
+    hidden.baseVisible = true
+  beginImage(shading)
+  scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
+  discard capture($shading & "-gear-restored")
 
 sunShadowsEnabled = true
 initSunShadows(10, 20)
@@ -82,5 +99,16 @@ for attached in [false, true]:
     if value < 1: inc covered
   doAssert covered > 20, "model must write shadow depth"
   echo "Shadow attached=", attached, ": ", covered, " covered pixels"
+for hidden in [root, arm, socket]:
+  hidden.baseVisible = false
+  beginSunDepthPass(0)
+  glViewport(0, 0, Size, Size)
+  scene.drawCharacter(character, vec3(0), 0, 0, 1, [gear])
+  var depth = newSeq[float32](Size * Size)
+  glReadPixels(0, 0, Size, Size, GL_DEPTH_COMPONENT, cGL_FLOAT, depth[0].addr)
+  doAssert glGetError() == GL_NO_ERROR
+  for value in depth:
+    doAssert value == 1, "hidden gear must not write shadow depth"
+  hidden.baseVisible = true
 endSunDepthPass(window.size)
 echo "Model GPU proof passed"
