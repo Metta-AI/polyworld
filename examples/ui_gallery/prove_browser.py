@@ -54,7 +54,11 @@ try:
     for _ in range(4):
         browser("press", "Backspace")
         frames()
-    browser("keyboard", "type", "Nora")
+    browser("eval", "(() => { for (const type of ['keydown', 'keypress', 'keyup']) "
+            + "document.addEventListener(type, event => console.log(type, event.key, event.charCode, event.defaultPrevented)); })()")
+    for letter in "Nora":
+        browser("press", letter)
+        frames()
     wait("state.playerName === 'Nora'")
     click(54, 340)
     wait("!state.hints")
@@ -97,6 +101,8 @@ try:
     print(snapshot())
     print("Live gallery input, disabled actions, theme, resize and scroll proof passed")
 finally:
+    subprocess.run(["agent-browser", "--session", SESSION, "eval",
+                    "(() => window.__polyworldUiGallery?.snapshot())()"], check=False)
     subprocess.run(["agent-browser", "--session", SESSION, "screenshot", "tmp/ui-gallery/final.png"], check=False)
     for command in ["console", "errors", "close"]:
         subprocess.run(["agent-browser", "--session", SESSION, command], check=False)
