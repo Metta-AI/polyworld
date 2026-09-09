@@ -82,7 +82,6 @@ doAssert transport.tick == 50
 transport.rewind()
 doAssert transport.tick == 0
 
-echo "Game UI tests passed"
 
 block:
   echo "Safe insets and transport share one usable rectangle"
@@ -112,3 +111,10 @@ block:
       let placed = area.fitPanel(vec2(x, y), vec2(80, 60))
       doAssert GameUiPanel(origin: placed.origin - area.origin, size: placed.size).inside(area.size)
       doAssert placed.contains(placed.origin + placed.size * 0.5)
+
+block:
+  let empty = GameUiPanel(origin: vec2(20), size: vec2(-10))
+  let fitted = empty.fitPanel(vec2(-100), vec2(50))
+  doAssert fitted.origin == empty.origin and fitted.size == vec2(0)
+
+echo "Game UI tests passed"

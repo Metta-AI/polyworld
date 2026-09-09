@@ -9,9 +9,9 @@ nim r examples/ui_gallery/gallery.nim
 nim r -d:silkyTesting tests/test_ui_gallery.nim
 ```
 
-The atlas builder accepts the path to Silky's `examples/basicwindow/data` as
-its first argument. It uses those existing assets and font without copying them
-into Polyworld. The generated atlas belongs in `tmp/ui-gallery`.
+The atlas builder accepts the Silky repository root as its first argument. It
+uses the existing basicwindow assets and font plus the7gui's disabled-button
+patch without copying them into Polyworld. The generated atlas belongs in `tmp/ui-gallery`.
 
 The example reuses Silky's content sizing, stack spacing, text alignment,
 scrolling frame, dropdowns, checkbox, disabled button, scrubber, text input,
