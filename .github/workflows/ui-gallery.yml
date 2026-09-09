@@ -1,0 +1,48 @@
+name: UI gallery
+on:
+  pull_request:
+    paths:
+      - 'src/polyworld/gameuis.nim'
+      - 'examples/ui_gallery/**'
+      - 'tests/test_ui_gallery.nim'
+      - '.github/workflows/ui-gallery.yml'
+  workflow_dispatch:
+jobs:
+  gallery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: treeform/setup-nim-action@v6
+      - name: Install pinned dependencies
+        run: |
+          cd ..
+          nimby create
+          nimby install polyworld/polyworld.nimble
+          nimby sync polyworld/nimby.lock
+      - name: Build atlas and test actual widgets
+        run: |
+          nim r --parallelBuild:1 examples/ui_gallery/build_atlas.nim
+          nim r --parallelBuild:1 -d:silkyTesting tests/test_ui_gallery.nim
+          nim c --parallelBuild:1 examples/ui_gallery/gallery.nim
+      - name: Build WebGL gallery
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /tmp/polyworld-ui-emsdk
+          /tmp/polyworld-ui-emsdk/emsdk install 5.0.7
+          /tmp/polyworld-ui-emsdk/emsdk activate 5.0.7
+          source /tmp/polyworld-ui-emsdk/emsdk_env.sh
+          nim c --parallelBuild:1 --os:linux --cpu:wasm32 --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --threads:off --mm:arc --exceptions:goto -d:emscripten -d:noSignalHandler --out:tmp/ui-gallery/index.html --passL:"--preload-file tmp/ui-gallery/atlas.png@/tmp/ui-gallery/atlas.png --shell-file src/polyworld/emscripten.html --pre-js src/polyworld/webinputs.js -s ASYNCIFY -s USE_WEBGL2=1 -s MAX_WEBGL_VERSION=2 -s MIN_WEBGL_VERSION=1 -s FULL_ES3=1 -s GL_ENABLE_GET_PROC_ADDRESS=1 -s ALLOW_MEMORY_GROWTH --profiling" examples/ui_gallery/gallery.nim
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Exercise the live WebGL UI
+        env:
+          AGENT_BROWSER_ARGS: --no-sandbox,--use-gl=angle,--use-angle=swiftshader,--enable-unsafe-swiftshader
+          AGENT_BROWSER_EXECUTABLE_PATH: /usr/bin/google-chrome
+        run: |
+          npm install -g agent-browser@0.33.2
+          python3 examples/ui_gallery/prove_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-gallery-proof
+          path: tmp/ui-gallery/*.png
