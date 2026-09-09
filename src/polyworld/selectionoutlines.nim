@@ -245,6 +245,23 @@ proc initSelectionOutline*(
   glGenTextures(1, result.colorTexture.addr)
   glGenTextures(1, result.depthTexture.addr)
 
+proc closeSelectionOutline*(outline: var SelectionOutline) =
+  ## Releases this outline's GPU resources while its context is current.
+  ## Safe to repeat. Initialize a new outline before drawing again.
+  if outline.program != 0:
+    glDeleteProgram(outline.program)
+  if outline.vertexArray != 0:
+    glDeleteVertexArrays(1, outline.vertexArray.addr)
+  if outline.vertexBuffer != 0:
+    glDeleteBuffers(1, outline.vertexBuffer.addr)
+  if outline.framebuffer != 0:
+    glDeleteFramebuffers(1, outline.framebuffer.addr)
+  if outline.colorTexture != 0:
+    glDeleteTextures(1, outline.colorTexture.addr)
+  if outline.depthBuffer != 0:
+    glDeleteRenderbuffers(1, outline.depthBuffer.addr)
+  outline = SelectionOutline()
+
 proc ensureSize(outline: var SelectionOutline, size: IVec2) =
   ## Resizes the silhouette framebuffer to match the current window.
   let safeSize = ivec2(max(size.x, 1), max(size.y, 1))
