@@ -1,6 +1,5 @@
 """Exercise real canvas input with agent-browser and retain actual screenshots."""
 import subprocess
-import time
 
 SESSION = "polyworld-ui-gallery"
 
