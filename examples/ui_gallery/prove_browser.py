@@ -12,7 +12,8 @@ def browser(*args):
 
 
 def wait(expression):
-    browser("wait", "--fn", expression)
+    browser("wait", "--fn", "(() => { const state = window.__polyworldUiGallery?.snapshot(); "
+            + "return state && (" + expression + "); })()")
 
 
 def snapshot():
@@ -21,7 +22,7 @@ def snapshot():
 
 def frames():
     frame = snapshot()["frame"]
-    wait(f"window.__polyworldUiGallery.snapshot().frame >= {frame + 2}")
+    wait(f"state.frame >= {frame + 2}")
 
 
 def click(x, y):
@@ -41,12 +42,12 @@ try:
     browser("open", "about:blank")
     browser("set", "viewport", "960", "720")
     browser("open", "http://127.0.0.1:8898/index.html")
-    wait("window.__polyworldUiGallery && window.__polyworldUiGallery.snapshot().tab === 0")
+    wait("state.tab === 0")
     click(170, 398)
-    wait("window.__polyworldUiGallery.snapshot().inspected")
+    wait("state.inspected")
     browser("screenshot", "tmp/ui-gallery/character.png")
     click(180, 130)
-    wait("window.__polyworldUiGallery.snapshot().tab === 1")
+    wait("state.tab === 1")
     click(150, 300)
     browser("press", "End")
     frames()
@@ -54,9 +55,9 @@ try:
         browser("press", "Backspace")
         frames()
     browser("keyboard", "type", "Nora")
-    wait("window.__polyworldUiGallery.snapshot().playerName === 'Nora'")
+    wait("state.playerName === 'Nora'")
     click(54, 340)
-    wait("!window.__polyworldUiGallery.snapshot().hints")
+    wait("!state.hints")
     browser("mouse", "move", "620", "412")
     frames()
     browser("mouse", "down")
@@ -69,29 +70,29 @@ try:
     click(150, 490)
     browser("screenshot", "tmp/ui-gallery/dropdown.png")
     click(150, 600)
-    wait("window.__polyworldUiGallery.snapshot().difficulty === 'Hard'")
+    wait("state.difficulty === 'Hard'")
     browser("screenshot", "tmp/ui-gallery/settings.png")
     click(150, 575)
     click(150, 650)
-    wait("window.__polyworldUiGallery.snapshot().theme === 'Parchment'")
+    wait("state.theme === 'Parchment'")
     browser("screenshot", "tmp/ui-gallery/parchment.png")
     click(290, 130)
-    wait("window.__polyworldUiGallery.snapshot().tab === 2")
+    wait("state.tab === 2")
     click(110, 474)
     assert snapshot()["gold"] == 0
     click(100, 397)
-    wait("window.__polyworldUiGallery.snapshot().crossingFound")
+    wait("state.crossingFound")
     click(110, 474)
-    wait("window.__polyworldUiGallery.snapshot().claimed")
+    wait("state.claimed")
     click(110, 474)
     assert snapshot()["gold"] == 25
     browser("screenshot", "tmp/ui-gallery/quest.png")
     browser("set", "viewport", "360", "640")
-    wait("window.__polyworldUiGallery.snapshot().width === 360")
+    wait("state.width === 360")
     browser("screenshot", "tmp/ui-gallery/narrow.png")
     browser("mouse", "move", "200", "540")
     browser("mouse", "wheel", "320")
-    wait("Math.abs(window.__polyworldUiGallery.snapshot().scrollY) > 0")
+    wait("Math.abs(state.scrollY) > 0")
     browser("screenshot", "tmp/ui-gallery/narrow-scrolled.png")
     print(snapshot())
     print("Live gallery input, disabled actions, theme, resize and scroll proof passed")
