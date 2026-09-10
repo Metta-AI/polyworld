@@ -11,13 +11,13 @@ import
   std/[math, os, strformat, strutils, tables, times, unicode],
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
-    actioncam, characters, chrome, clickmarks, common, fixed, inputs, particles,
-    particleshaders,
+    actioncam, assets, characters, chrome, clickmarks, common, fixed, inputs,
+    particles, particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shapes,
     shadows, tapes, toon, viewers, visions, worldbars, worldtexts
   ],
-  content,
+  assets, content,
   sim,
   game,
   replays,
@@ -27,7 +27,6 @@ import
 const
   WindowTitle = "Light vs Dark"
   AtlasPath = TmpRoot & "/lvd.atlas.png"
-  LogoPath = DataRoot & "/themes/lvd/lvd_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most
     ## that much.
@@ -36,83 +35,6 @@ const
     ## letting a busy lumber camp stutter the frame rate.
   SelectionDragPixels = 6.0'f32
     ## Pointer travel that turns a click into a box select.
-  UnitModels = [
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/human/worker.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/human/footman.glb",
-      ArcherUnit: DataRoot & "/characters/mini_legion/human/archer.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/human/mage.glb",
-      KnightUnit: DataRoot & "/characters/mini_legion/human/horseman.glb",
-      CatapultUnit: DataRoot &
-        "/characters/mini_legion/human/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/sentinel/druid.glb",
-      SummonUnit: DataRoot &
-        "/characters/mini_legion/sentinel/rock_golem.glb"
-    ],
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/warband/minion.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/warband/grunt.glb",
-      ArcherUnit: DataRoot &
-        "/characters/mini_legion/warband/head_hunter.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/warband/warlock.glb",
-      KnightUnit: DataRoot &
-        "/characters/mini_legion/warband/hog_rider.glb",
-      CatapultUnit: DataRoot &
-        "/characters/mini_legion/undead/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/undead/lich.glb",
-      SummonUnit: DataRoot & "/characters/rpg_monsters/demon_king.glb"
-    ]
-  ]
-  UnitHeights = [
-    PeonUnit: 1.05'f32,
-    SoldierUnit: 1.15'f32,
-    ArcherUnit: 1.20'f32,
-    MageUnit: 1.25'f32,
-    KnightUnit: 1.55'f32,
-    CatapultUnit: 1.40'f32,
-    ClericUnit: 1.22'f32,
-    SummonUnit: 1.90'f32
-  ]
-  LightPropPack = DataRoot & "/terrain/low_poly_village.glb"
-  DarkPropPack = DataRoot & "/terrain/tower_defense_kit.glb"
-  BuildingProps = [
-    [
-      TownHallBuilding: "house_lvl7",
-      FarmBuilding: "farm_lvl4",
-      BarracksBuilding: "farm_house_lvl5",
-      LumberMillBuilding: "farm_house_lvl3",
-      TowerBuilding: "tower_lvl5",
-      StablesBuilding: "farm_house_lvl6",
-      ChurchBuilding: "house_lvl4",
-      BlacksmithBuilding: "farm_house_lvl2",
-      GoldMineBuilding: ""
-    ],
-    [
-      TownHallBuilding: "building1",
-      FarmBuilding: "farm_lvl2",
-      BarracksBuilding: "building3",
-      LumberMillBuilding: "building2",
-      TowerBuilding: "tower_square_tall1",
-      StablesBuilding: "tower_tall1",
-      ChurchBuilding: "tower_square_tall2",
-      BlacksmithBuilding: "tower_square_small1",
-      GoldMineBuilding: ""
-    ]
-  ]
-  BuildingPropHeights = [
-    TownHallBuilding: 3.0'f32,
-    FarmBuilding: 1.6'f32,
-    BarracksBuilding: 2.6'f32,
-    LumberMillBuilding: 2.4'f32,
-    TowerBuilding: 3.2'f32,
-    StablesBuilding: 2.5'f32,
-    ChurchBuilding: 2.8'f32,
-    BlacksmithBuilding: 2.2'f32,
-    GoldMineBuilding: 1.8'f32
-  ]
-  MineProps = ["mineral1", "mineral3", "rock2"]
-  ConstructionProps = ["box1", "barel1", "wall1"]
-  RubbleProps = ["rock1", "stump1"]
 
 type
   GraphicsError = object of CatchableError
@@ -161,28 +83,6 @@ var
   terrainVisionMode = int32.low
 
 ## Presentation helpers
-
-proc unitPortraitPath(player: int32, kind: UnitKind): string =
-  ## Returns the on-disk profile next to one unit model.
-  UnitModels[player][kind].changeFileExt("profile.png")
-
-proc buildingPack(player: int32, kind: BuildingKind): string =
-  ## Returns the GLB pack that holds this building's prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack
-  elif player == LightPlayer or kind == FarmBuilding:
-    LightPropPack
-  else:
-    DarkPropPack
-
-proc buildingPortraitPath(player: int32, kind: BuildingKind): string =
-  ## Returns the on-disk profile for one building prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack.changeFileExt("mineral1.profile.png")
-  else:
-    buildingPack(player, kind).changeFileExt(
-      BuildingProps[player][kind] & ".profile.png"
-    )
 
 proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
   ## Returns a clip for one pose. Locomotion prefers Run, Move, then Walk.
@@ -337,7 +237,9 @@ proc runGraphics*() =
     seed = run.mapSeed
     treeHeight = 6.0'f
     treeWidth = 0.0'f
-    initTerrain(DenseTrees, GeneratedTerrain, PaintedRocks)
+    initTerrain(
+      DenseTrees, GeneratedTerrain, PaintedRocks, settings = LvdTerrainAssets
+    )
     scatterGrass(800, run.mapSeed)
     scatterRocks(80, run.mapSeed)
 
@@ -379,8 +281,8 @@ proc runGraphics*() =
     villagePack: PropPack
     towerPack: PropPack
   profileBlock "props":
-    villagePack = loadPropPack(LightPropPack)
-    towerPack = loadPropPack(DarkPropPack)
+    villagePack = loadPropPack(propPaths(LightPropPack, lightProps()))
+    towerPack = loadPropPack(propPaths(DarkPropPack, darkProps()))
 
   proc packFor(player: int32, name: string): PropPack =
     ## Chooses the pack that actually carries a prop, so Dark can borrow the

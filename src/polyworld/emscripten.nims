@@ -3,7 +3,7 @@
 import
   std/[os, strformat, strutils]
 
-proc setupEmscripten*(exampleDir: string) =
+proc setupEmscripten*(exampleDir: string, game = "") =
   ## Configures the wasm backend and writes the bundle next to the game.
   when defined(emscripten):
     let
@@ -17,18 +17,22 @@ proc setupEmscripten*(exampleDir: string) =
         ""
       else:
         "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
-    var preload = "--preload-file " & dataDir & "@/polyworld_data"
-    let selection = exampleDir / "webdata.txt"
-    if fileExists(selection):
-      preload = ""
-      for line in readFile(selection).splitLines():
-        let name = line.strip()
-        if name.len == 0 or name.startsWith("#"):
-          continue
-        if not fileExists(dataDir / name) and not dirExists(dataDir / name):
-          raise newException(ValueError, "Missing replay asset: " & name)
-        preload.add " --preload-file " & dataDir / name &
-          "@/polyworld_data/" & name
+    var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_data")
+    if game.len > 0:
+      let
+        variant = if defined(webPng): "png" else: "ktx2"
+        cache = repoDir / "tmp" / "webassets" / (game & "-" & variant)
+        packer = cache / ("pack_assets" & ExeExt)
+        options = if defined(webPng): " -d:webPng" else: ""
+      if not dirExists(cache):
+        mkDir(cache)
+      exec quoteShell(getCurrentCompilerExe()) & " c --hints:off" & options &
+        " --nimcache:" & quoteShell(cache / "nimcache") &
+        " -o:" & quoteShell(packer) & " " &
+        quoteShell(exampleDir / "pack_assets.nim")
+      exec quoteShell(packer) & " " & quoteShell(dataDir) &
+        " " & quoteShell(cache)
+      preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_data")
     if not dirExists(outputDir):
       mkDir(outputDir)
     switch("nimcache", outputDir / "tmp")

@@ -3,19 +3,13 @@
 import
   std/[math, os, strutils, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  common, player
+  assets, player
 
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
 
 const
   DefaultWindowSize* = ivec2(1280, 800)
-  DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
-  BoldFontPath* = DataRoot & "/fonts/Rubik-Bold.ttf"
-  MonoFontPath* = DataRoot & "/fonts/OverpassMono-Regular.ttf"
-  MainThemeDir* = DataRoot & "/themes/main/"
-  UiDir* = DataRoot & "/ui/"
-  IconDir* = DataRoot & "/icons/"
   HudIconSize = 64
   SplashName* = "logo"
   SplashSeconds* = 3.0
