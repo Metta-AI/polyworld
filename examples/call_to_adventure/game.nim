@@ -6,7 +6,7 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps,
   sim,
@@ -117,11 +117,19 @@ proc advanceGame*() =
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+  run.sampleMetrics(
+    run.world.outcome != RunningOutcome or
+      (run.replayMode and run.world.tick >= run.replayData.hashes.len)
+  )
+  run.metrics.finishTick(run.world.tick)
 
 proc saveRecording*(path = options.recordPath) =
   ## Finalizes and writes a requested action replay.
   if run.recorder == nil or path.len == 0:
     return
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  run.recorder.data.metrics = run.history.replayMetrics()
   saveReplay(path, run.recorder.data)
   echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
@@ -230,6 +238,7 @@ if options.replayPath.len > 0:
   run.replayData = replayData
   run.replayPlayer = initReplayPlayer(replayData)
   run.historyPlayback = true
+  run.legacyStats = replayData.header.gameVersion == LegacyGameVersion
   if replayData.header.setup != run.world.setup:
     raise newException(
       ReplayError,

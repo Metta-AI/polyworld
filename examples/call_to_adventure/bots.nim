@@ -5,7 +5,7 @@
 ## cannot write world fields directly.
 
 import
-  polyworld/[basic, cli, controllers, pathing, profiles],
+  polyworld/[metrics, basic, cli, controllers, pathing, profiles],
   content,
   sim,
   replays
@@ -318,6 +318,10 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   game.heroVms[slot].lastWork = game.heroVms[slot].runtime.workUsed
   game.heroVms[slot].lastInstructions =
     game.heroVms[slot].runtime.instructionsUsed
+  game.metrics.decision(
+    int(slot), game.world.tick, game.heroVms[slot].lastInstructions,
+    heroLimits().maxInstructions
+  )
   activeGame = nil
   activeHeroSlot = -1
 

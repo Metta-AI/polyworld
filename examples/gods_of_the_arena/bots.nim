@@ -2,7 +2,7 @@
 ## on the simulation.
 
 import
-  polyworld/[basic, cli, controllers, profiles, tapes],
+  polyworld/[metrics, basic, cli, controllers, profiles, tapes],
   content,
   sim,
   replays
@@ -163,7 +163,14 @@ proc initHeroHost(heroId: int32): Host =
         BasicError,
         "replay recording failed: " & error.msg
       )
-    int32(applyWalkTo(activeGame.world, heroId, arguments[0], arguments[1]))
+    let accepted = applyWalkTo(
+      activeGame.world, heroId, arguments[0], arguments[1]
+    )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
   let attackTargetProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -180,7 +187,14 @@ proc initHeroHost(heroId: int32): Host =
         BasicError,
         "replay recording failed: " & error.msg
       )
-    int32(applyAttackTarget(activeGame.world, heroId, arguments[0]))
+    let accepted = applyAttackTarget(
+      activeGame.world, heroId, arguments[0]
+    )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
   let itemIdProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -213,7 +227,14 @@ proc initHeroHost(heroId: int32): Host =
         BasicError,
         "replay recording failed: " & error.msg
       )
-    int32(applyBuyItem(activeGame.world, heroId, arguments[0]))
+    let accepted = applyBuyItem(
+      activeGame.world, heroId, arguments[0]
+    )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
   let useItemProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -230,7 +251,14 @@ proc initHeroHost(heroId: int32): Host =
         BasicError,
         "replay recording failed: " & error.msg
       )
-    int32(applyUseItem(activeGame.world, heroId, arguments[0]))
+    let accepted = applyUseItem(
+      activeGame.world, heroId, arguments[0]
+    )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
 
   discard result.addFunction("objectCount", 0, objectCountProc, 2)
   discard result.addFunction("objectId", 1, objectIdProc, 4)
@@ -325,6 +353,10 @@ proc runHeroScript(game: Game, index: int) =
       echo "hero ", hero.id, " BASIC error: ", error.msg
   vm.lastWork = vm.runtime.workUsed
   vm.lastInstructions = vm.runtime.instructionsUsed
+  game.metrics.decision(
+    index, game.world.tick, vm.lastInstructions,
+    heroVmLimits().maxInstructions
+  )
 
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every VM in seeded cyclic order and advances the first slot.

@@ -4,6 +4,7 @@
 ## `apply*` procs the BASIC bots use.
 
 import
+  polyworld/metrics,
   sim,
   replays
 
@@ -66,7 +67,7 @@ proc queueUseItem*(heroId, slot: int32) =
   )
 
 proc recordCommand(game: Game, command: PlayerCommand) =
-  ## Writes one accepted human command onto the live tape.
+  ## Writes one human command attempt onto the live tape.
   if game.recorder == nil:
     return
   let tick = uint32(game.world.tick)
@@ -112,4 +113,7 @@ proc flushPlayerCommands*(game: Game) =
   pending.setLen(0)
   for command in commands:
     game.recordCommand(command)
-    discard game.applyCommand(command)
+    if game.applyCommand(command):
+      game.metrics.command(
+        heroIndex(game.world, command.heroId), game.world.tick
+      )

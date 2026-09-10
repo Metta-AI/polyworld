@@ -36,7 +36,7 @@ type
     controls*: array[5, GameUiPanel]
     loop*: GameUiPanel
     speeds*: array[4, GameUiPanel]
-    scrub*, recorded*, scrubHit*, camera*, tick*: GameUiPanel
+    scrub*, recorded*, scrubHit*, camera*, stats*, tick*: GameUiPanel
 
   Player* = object
     playing*: bool
@@ -217,11 +217,13 @@ proc shouldTick*(
     return true
   false
 
-proc transportPanels*(panel: GameUiPanel): TransportPanels =
+proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
   ## Reserves fixed controls at both ends, then fills the timeline between.
   var trailing = panel.stack(RightToLeft, vec2(0, IconY))
   let tick = trailing.takeColumn(TickLabelW, 16)
   result.camera = trailing.take(vec2(IconSize), GroupGap)
+  if showStats:
+    result.stats = trailing.take(vec2(IconSize), IconGap)
   var leading = trailing.takeRest().stack(LeftToRight)
   leading.gap(12)
   for control in result.controls.mitems:
@@ -294,13 +296,14 @@ proc drawTransport*(
     window: Window,
     panel: GameUiPanel,
     actionCam: var ActionCam,
-    followSelection: var bool
+    followSelection: var bool,
+    statsToggle: ptr bool = nil
 ) =
   ## Draws the shared play/replay bar and applies clicks.
   sk.drawRibbon(panel)
   let playing = player.playing or player.targetTick >= 0
   let
-    slots = panel.transportPanels()
+    slots = panel.transportPanels(statsToggle != nil)
     skipStart = slots.controls[0]
     stepBackBtn = slots.controls[1]
     playBtn = slots.controls[2]
@@ -357,6 +360,10 @@ proc drawTransport*(
         1.0'f32
       )
       player.seekTo(int32(ratio * player.timelineEnd.float32))
+  if statsToggle != nil:
+    sk.drawIcon(slots.stats, "stats", statsToggle[])
+    if window.clicked(sk, slots.stats):
+      statsToggle[] = not statsToggle[]
   let actionBtn = slots.camera
   sk.drawIcon(actionBtn, "action_cam", actionCam.enabled)
   if window.clicked(sk, actionBtn):
