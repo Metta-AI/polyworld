@@ -11,14 +11,8 @@ const
 
 type
   CoworldError* = object of CatchableError
-  CoworldPlayer* = object
-    name*: string
-  CoworldConfig* = object
-    tokens*: seq[string]
-    players*: seq[CoworldPlayer]
-    seed*: int32 = 2026
-    maxTicks*: int32 = DefaultDurationTicks
-    spawnIntervalTicks*: int32 = 240
+  CoworldTokens = object
+    tokens: seq[string]
   CoworldSeat* = object
     slot*: int
     fileUri*, contentHash*: string
@@ -58,14 +52,14 @@ type
 
 var
   seats*: CoworldSeats
-  config*: CoworldConfig
+  config*: GameConfig
   logs: seq[PlayerLog]
   server: Server
   serverThread: Thread[ServerAddress]
   resultsPath, replayPath, failurePath: string
 
 proc renameHook*(
-    value: var (CoworldConfig | CoworldSeat | CoworldSeats),
+    value: var (CoworldSeat | CoworldSeats),
     fieldName: var string
 ) =
   ## Maps the platform's snake case wire fields to Nim field names.
@@ -266,14 +260,17 @@ proc serve(address: ServerAddress) {.thread.} =
 
 proc coworldOptions*(slotCount: int): GameOptions =
   ## Loads the file handoff, opens logs, and starts the optional host wrapper.
+  var tokens: CoworldTokens
   try:
-    config = readLocal(getEnv("COGAME_CONFIG_URI")).fromJson(CoworldConfig)
+    let bytes = readLocal(getEnv("COGAME_CONFIG_URI"))
+    config = bytes.fromJson(GameConfig)
+    tokens = bytes.fromJson(CoworldTokens)
     seats = readLocal(getEnv("COGAME_PLAYER_SEATS_URI")).fromJson(CoworldSeats)
   except JsonError as error:
     raise newException(CoworldError,
       "Invalid Coworld configuration: " & error.msg)
   if seats.schema != "coworld-player-seats/1" or
-    seats.seats.len != slotCount or config.tokens.len != slotCount or
+    seats.seats.len != slotCount or tokens.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
   if config.maxTicks <= 0 or config.maxTicks > DefaultDurationTicks or

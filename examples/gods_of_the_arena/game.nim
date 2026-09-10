@@ -6,7 +6,7 @@
 
 import
   std/[math, os, strformat, strutils, times],
-  polyworld/[cli, profiles, tapes],
+  polyworld/[cli, controllers, profiles, tapes],
   content,
   maps,
   sim,
@@ -103,14 +103,14 @@ block:
   if replayMode:
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
-    mapSeed = replayData.header.setup.mapSeed
+    mapSeed = replayData.config.seed
   var gameMap: MapData
   profileBlock "map":
     gameMap = generateMap(mapSeed)
   run = newGame(
     gameMap,
     if replayMode:
-      int32(replayData.header.setup.spawnIntervalTicks)
+      replayData.config.spawnIntervalTicks
     else:
       options.spawnIntervalTicks,
     if replayMode: 0 else: HeroClassCount,
@@ -122,6 +122,15 @@ block:
     run.historyPlayback = true
   else:
     loadBots(run, options.botGroups, options.playerSlot)
+    run.recorder = initReplayRecorder(
+      currentSetup(run, uint32(options.maximumTicks))
+    )
+    run.recorder.data.config =
+      when defined(coworld):
+        coworld.config
+      else:
+        localGameConfig(options, HeroClassCount)
+    run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
@@ -173,9 +182,10 @@ proc heroVmStatus*(): tuple[active, decisions: int] =
 
 proc startReplayRecording*(maximumTicks: uint32) =
   ## Starts the in-memory action tape for a live match.
-  run.recorder = initReplayRecorder(
-    currentSetup(run, maximumTicks)
-  )
+  var config = run.config
+  config.maxTicks = int32(maximumTicks)
+  run.recorder = initReplayRecorder(currentSetup(run, maximumTicks))
+  run.recorder.data.config = config
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc saveRecording*(path = options.recordPath) =

@@ -231,6 +231,13 @@ const
   TowerAttackTicks* = TickRate
   TowerSiegeRange* = 105_000'i32
 
+proc config*(game: Game): GameConfig =
+  ## Reads the match configuration owned by the live or loaded replay.
+  if game.recorder != nil:
+    game.recorder.data.config
+  else:
+    game.replayData.config
+
 proc worldPoint(point: PathPoint): WorldPoint =
   ## Converts one exact 1/32-tile path point into integer world units.
   const PathUnit = WorldScale div PathUnitsPerTile

@@ -13,7 +13,7 @@ import
   polyworld/shadows,
   polyworld/terrainsurfaces,
   polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
-    visions, worldbars]
+    visions, worldbars, worldtexts]
 
 when defined(takeScreenshot):
   import std/os
@@ -195,6 +195,7 @@ proc runGraphics*() =
     addAbilityIcons(builder)
     addItemIcons(builder)
     builder.addDefaultFonts()
+    builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
   profileBlock "window":
     (window, sk) = initGameWindow(
@@ -265,6 +266,11 @@ proc runGraphics*() =
     worldShapes = initShapeRenderer()
     selectionOutline = initSelectionOutline()
     worldBarRenderer = initWorldBarRenderer()
+    playerLabels = layoutNames(
+      sk.atlas.fonts["WorldName"],
+      sk.atlas.size,
+      run.config.players
+    )
     damageTrails: DamageTrailTracker
 
   const
@@ -530,6 +536,18 @@ proc runGraphics*() =
       (0.5'f32 - normalized.y * 0.5'f32) * window.size.y.float32
     )
 
+  proc addPlayerNames() =
+    ## Labels living visible heroes using their bot execution slot.
+    for slot, hero in run.world.heroes:
+      if slot >= run.config.players.len or hero.state == Dying or hero.hp <= 0 or
+        not visibleInView(hero.team, hero.position):
+          continue
+      let anchor = unitRenderPoint(hero.id, hero.position) + vec3(0, 2.4'f, 0)
+      worldBarRenderer.addText(
+        playerLabels[slot],
+        anchor
+      )
+
   proc drawWorldUnitBars(
       renderer: var WorldBarRenderer,
       viewProjection: Mat4,
@@ -623,7 +641,13 @@ proc runGraphics*() =
           )]
         renderer.addResourceBars(anchor, FootmanWorldBarWidth, bars)
     damageTrails.finishFrame()
-    renderer.draw(viewProjection, cameraRight, cameraUp)
+    addPlayerNames()
+    renderer.draw(
+      viewProjection,
+      cameraRight,
+      cameraUp,
+      sk.atlasTextureId()
+    )
 
   proc pickEntity(viewProjection: Mat4): int32 =
     ## Finds the closest visible mesh under the pointer by triangle hit.

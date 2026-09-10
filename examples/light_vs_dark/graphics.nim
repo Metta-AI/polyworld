@@ -15,7 +15,7 @@ import
     particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shapes,
-    shadows, tapes, toon, viewers, visions, worldbars
+    shadows, tapes, toon, viewers, visions, worldbars, worldtexts
   ],
   content,
   sim,
@@ -314,6 +314,7 @@ proc runGraphics*() =
     let builder = newHudAtlas(4096)
     addHudIcons(builder)
     builder.addDefaultFonts()
+    builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
   profileBlock "window":
     (window, sk) = initGameWindow(
@@ -365,6 +366,11 @@ proc runGraphics*() =
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
     worldBarRenderer = initWorldBarRenderer()
+    playerLabels = layoutNames(
+      sk.atlas.fonts["WorldName"],
+      sk.atlas.size,
+      run.config.players
+    )
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
 
@@ -631,6 +637,20 @@ proc runGraphics*() =
       (normalized.x * 0.5'f32 + 0.5'f32) * window.size.x.float32,
       (0.5'f32 - normalized.y * 0.5'f32) * window.size.y.float32
     )
+
+  proc addPlayerNames() =
+    ## Labels each visible living town hall with its owner's name.
+    for structure in run.world.buildings:
+      if structure.kind != TownHallBuilding or structure.hp <= 0 or
+        structure.owner < 0 or structure.owner >= run.config.players.len or
+        not shownBuilding(structure):
+          continue
+      let anchor = buildingCentre(structure) +
+        vec3(0, BuildingPropHeights[TownHallBuilding] + 0.4'f, 0)
+      worldBarRenderer.addText(
+        playerLabels[structure.owner],
+        anchor
+      )
 
   proc pickEntity(viewProjection: Mat4): int32 =
     ## Finds the nearest visible unit or structure under the pointer.
@@ -1265,7 +1285,13 @@ proc runGraphics*() =
           )]
         worldBarRenderer.addResourceBars(anchor, width, bars)
     damageTrails.finishFrame()
-    worldBarRenderer.draw(viewProjection, cameraRight, cameraUp)
+    addPlayerNames()
+    worldBarRenderer.draw(
+      viewProjection,
+      cameraRight,
+      cameraUp,
+      sk.atlasTextureId()
+    )
 
   proc particleTargetPosition(id: int32): tuple[
       found: bool,

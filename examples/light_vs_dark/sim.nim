@@ -155,6 +155,13 @@ type
 ## Identifier ranges make the kind checkable before any array is touched, and
 ## the slot tables turn a valid identifier into an index in constant time.
 
+proc config*(game: Game): GameConfig =
+  ## Reads the match configuration owned by the live or loaded replay.
+  if game.recorder != nil:
+    game.recorder.data.config
+  else:
+    game.replayData.config
+
 proc unitIndex*(w: World, id: int32): int32 =
   ## Returns the index of a living unit, or -1.
   if not id.isUnitId:

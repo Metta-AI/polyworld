@@ -45,6 +45,7 @@ import
   test_aigen_splats,
   test_tile_paths,
   test_viewers,
-  test_visions
+  test_visions,
+  test_worldtexts
 
 echo "All tests passed"

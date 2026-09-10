@@ -7,7 +7,10 @@
 ## `takeCommonFlag`, and handles the rest itself.
 
 import
-  std/strutils
+  std/strutils,
+  configs
+
+export configs
 
 type
   BotGroup* = object
@@ -127,14 +130,6 @@ proc parseWindowSize*(text, name: string): (int32, int32) =
     parsePositiveInt32(text[0 ..< separator], name),
     parsePositiveInt32(text[separator + 1 .. ^1], name)
   )
-
-const
-  SharedTickRate* = 24'i32
-    ## Simulation ticks per second used by every Polyworld game.
-  DefaultMinutes* = 20'i32
-    ## Default match length in minutes.
-  DefaultDurationTicks* = DefaultMinutes * 60 * SharedTickRate
-    ## Twenty minutes at `SharedTickRate`, 28800 ticks.
 
 proc ticksFromCount(count, scale: int32, name: string): int32 =
   ## Converts a positive count into ticks without overflowing int32.
