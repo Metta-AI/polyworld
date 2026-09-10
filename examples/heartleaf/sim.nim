@@ -69,6 +69,15 @@ type
       ## Items on the table before anyone ate.
     hostPoints*: int32
 
+  DinnerBite* = object
+    veggie*, points*: int32
+
+  DailyReport* = object
+    startingScore*, dinnerHost*, hostingPoints*, penalty*: int32
+    hostHome*: bool
+    bites*: array[int(BiteRounds), DinnerBite]
+    biteCount*: int
+
   PathRequest* = object
     slot*: int32
     goal*: Tile2
@@ -87,6 +96,7 @@ type
     villagers*: array[VillagerCount, Villager]  # HASH: include; refs
     gardens*: array[GardenCount, int8]  # HASH: include, veggie kind or -1
     pathQueue*: seq[PathRequest]      # HASH: include
+    dailyReports*: array[VillagerCount, DailyReport] # HASH: excluded, derived presentation data.
     lastTally*: array[VillagerCount, DinnerReport]  # HASH: include
     map*: MapData                     # HASH: derived, fixed at generation
 
@@ -460,8 +470,11 @@ proc chooseBite*(pantry: array[VeggieKinds, int16],
 
 proc runDinnerTally*(w: World) {.measure.} =
   ## Scores every house at 18:00.
-  for v in w.villagers:
+  for slot, v in w.villagers:
     v.lastGained = 0
+    w.dailyReports[slot] = DailyReport(
+      startingScore: v.score, dinnerHost: NoHouse,
+      hostHome: v.inHouse == int32(slot))
   for house in 0 ..< VillagerCount:
     var report = DinnerReport()
     let host = w.villagers[house]
@@ -475,6 +488,9 @@ proc runDinnerTally*(w: World) {.measure.} =
       report.visitors = int32(diners.len - 1)
       report.pantry = host.carriedTotal()
       report.hostPoints = report.pantry * report.visitors
+      w.dailyReports[house].hostingPoints = report.hostPoints
+      for diner in diners:
+        w.dailyReports[diner].dinnerHost = int32(house)
       host.score += report.hostPoints
       host.lastGained += report.hostPoints
 
@@ -493,6 +509,10 @@ proc runDinnerTally*(w: World) {.measure.} =
             let points =
               if eater.eaten[veggie]: RepeatVeggiePoints
               else: NewVeggiePoints
+            let daily = addr w.dailyReports[diner]
+            daily.bites[daily.biteCount] = DinnerBite(
+              veggie: veggie, points: points)
+            inc daily.biteCount
             eater.eaten[veggie] = true
             eater.score += points
             eater.lastGained += points
@@ -517,6 +537,8 @@ proc startDay(w: World) =
     let v = w.villagers[slot]
     v.inHouse = NoHouse
     v.curfewMissed = false
+    w.dailyReports[slot] = DailyReport(
+      startingScore: v.score, dinnerHost: NoHouse)
     v.hostingTonight = false
     v.acceptedHost = NoVillager
     for other in 0 ..< VillagerCount:
@@ -535,6 +557,7 @@ proc startScoreScreen(w: World) =
     v.curfewMissed = v.inHouse != int32(slot)
     if v.curfewMissed:
       v.score -= CurfewPenalty
+      w.dailyReports[slot].penalty = CurfewPenalty
     w.stepInside(int32(slot), int32(slot))
   w.pathQueue.setLen(0)
   w.phase = ScorePhase

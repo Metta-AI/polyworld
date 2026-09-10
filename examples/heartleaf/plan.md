@@ -302,3 +302,49 @@ nim r tests/test_hlf_replays.nim
 ```bash
 nim r tests/test_hlf_sim.nim
 ```
+
+## Spectator scorecards and startup seeking
+
+After curfew, the scorecard shows all nine gnomes: stocked vegetables times
+visitors, each dinner bite and its points, curfew penalties, daily gains,
+and cumulative totals. Hosting, eating, curfew, and totals reveal together
+by column over three seconds. A first taste is remembered across the match.
+Vegetable names identify each bite; the asset collection has no individual
+vegetable HUD sprites.
+
+Normal viewing spends ten real seconds on each scorecard regardless of the
+selected playback speed. Pause holds it for inspection; the reveal can finish
+while paused. Next morning skips the remaining countdown. The final night
+shows final results for the same ten seconds, then file replays loop by
+default. Disable the transport's loop control to retain the final standings.
+
+Startup seeking runs normal simulation as fast as possible, verifies replay
+hashes, and does not render intermediate world frames. Asset loading and
+simulation still take time. Specify one absolute tick (zero is initial state)
+or a day-qualified event. Morning lands after initialization, dinner after
+the tally, and scorecard after curfew penalties. `--play=false` pauses at the
+destination; otherwise playback continues there.
+
+```sh
+# Open the third nightly scorecard, paused.
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:3:scorecard --play=false
+
+# Open final results for the bundled seven-day replay.
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:7:scorecard --play=false
+
+# Inspect an exact tick, or another event.
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-tick 4320 --play=false
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:2:dinner --play=false
+
+# Run current scripted bots directly to a scorecard.
+nim r examples/heartleaf/heartleaf.nim --seed 1988 --bot examples/heartleaf/players/base.bas:9 --seek-event day:1:scorecard --play=false
+
+# Inspect the same destination without opening a window; print scores and exit.
+nim r -d:headless examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:3:scorecard
+```
+
+Seeking requires a replay or all scripted villagers; it rejects human-player
+runs and unavailable destinations. Headless seeking stops at the destination,
+prints all nine breakdowns, and writes the partial recording if requested.
+New report fields are derived during simulation and checkpointed without
+changing replay hashes or format.
