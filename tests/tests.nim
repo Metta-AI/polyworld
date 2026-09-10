@@ -24,6 +24,7 @@ import
   test_hlf_maps,
   test_hlf_replays,
   test_hlf_sim,
+  test_hlf_scorecard,
   test_hudlayouts,
   test_inputs,
   test_lvd_content,

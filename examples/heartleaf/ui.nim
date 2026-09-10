@@ -8,7 +8,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, quadterrain,
     rtscameras],
-  content, sim, game, controls
+  content, sim, game, controls, scorecard
 
 const
   PanelRoster = vec2(292, 392)
@@ -28,6 +28,8 @@ const
     rgbx(92, 148, 214, 255),   # Dima
     rgbx(196, 132, 190, 255)   # Egor
   ]
+
+var scorePresentation*: ScorePresentation
 
 var villagerPortraitKeys: array[VillagerCount, string]
 for slot in 0 ..< VillagerCount:
@@ -64,7 +66,10 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
 
 proc hudUiScale*(windowSize: Vec2): float32 =
   ## Returns the stepped Silky scale that keeps HUD panels from overlapping.
-  fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
+  if run.world.phase in {ScorePhase, GameOverPhase}:
+    fitUiScale(windowSize, scoreLayoutFits, ScoreUiScales)
+  else:
+    fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
 
 proc hudUiScale*(window: Window): float32 =
   ## Returns the stepped Silky scale that fits the HUD on this window.
@@ -84,6 +89,8 @@ proc currentChrome(window: Window): HudChrome =
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether the pointer is over an anchored game UI panel.
+  if run.world.phase in {ScorePhase, GameOverPhase}:
+    return true
   if mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
@@ -149,6 +156,9 @@ proc updateMinimapCamera*(
     minimapPanning: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
+  if run.world.phase in {ScorePhase, GameOverPhase}:
+    minimapPanning = false
+    return
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
@@ -179,76 +189,54 @@ proc standingsOrder(): array[VillagerCount, int32] =
     if delta != 0: int(delta) else: int(a - b))
   slots
 
+proc describeResultForStandings(world: World): string =
+  let slots = standingsOrder()
+  let best = world.villagers[slots[0]].score
+  for slot in slots:
+    if world.villagers[slot].score != best:
+      break
+    if result.len > 0:
+      result.add " & "
+    result.add VillagerNames[slot]
+  result.add " - " & $best & " points"
+
 proc drawStandings(sk: Silky, layout: GameUiLayout, title: string) =
-  ## Draws the centered between-days standings card.
   let
-    size = vec2(430, 120 + RosterRowHeight * float32(VillagerCount))
-    panel = layout.panel(GameUiRegion.Center, size)
+    panel = layout.panel(GameUiRegion.Center,
+      vec2(ScorecardWidth, ScorecardHeight))
     inner = sk.beginPanel(panel)
-  sk.drawLabel(
-    title,
-    inner.origin,
-    vec2(inner.size.x, 34),
-    rgbx(240, 226, 180, 255),
-    "H1",
-    CenterAlign
-  )
-  var y = 52.0'f32
+    ink = rgbx(240, 226, 180, 255)
+  sk.drawLabel(title, inner.origin, vec2(inner.size.x, 34), ink,
+    "H1", CenterAlign)
+  const headings = ["GNOME", "HOSTING", "EATING", "CURFEW", "TODAY", "TOTAL"]
+  for column, heading in headings:
+    sk.drawLabel(heading, inner.origin + vec2(ScoreColumns[column], 62),
+      vec2(ScoreColumnWidths[column], 24), ink, "Small")
   for rank, slot in standingsOrder():
-    let v = run.world.villagers[slot]
-    sk.drawSprite(
-      villagerPortraitKey(slot),
-      inner.origin + vec2(24, y),
-      vec2(28)
-    )
-    sk.drawLabel(
-      VillagerNames[slot],
-      inner.origin + vec2(62, y + 4),
-      vec2(120, 22),
-      VillagerColors[slot]
-    )
-    writeInt(hudScratch, v.score.int)
-    sk.drawLabel(
-      hudScratch,
-      inner.origin + vec2(190, y + 4),
-      vec2(60, 22),
-      rgbx(240, 226, 180, 255)
-    )
-    if v.lastGained > 0 or v.curfewMissed:
-      hudScratch.setLen(0)
-      if v.curfewMissed:
-        hudScratch.add '-'
-        hudScratch.addHudInt(CurfewPenalty.int)
-        hudScratch.add " curfew"
-      else:
-        hudScratch.add '+'
-        hudScratch.addHudInt(v.lastGained.int)
-        hudScratch.add " tonight"
-      sk.drawLabel(
-        hudScratch,
-        inner.origin + vec2(256, y + 4),
-        vec2(120, 22),
-        if v.curfewMissed: rgbx(230, 120, 100, 255)
-        else: rgbx(120, 196, 90, 255),
-        "Small"
-      )
-    if run.world.lastTally[slot].valid:
-      hudScratch.setLen(0)
-      hudScratch.add "fed "
-      hudScratch.addHudInt(run.world.lastTally[slot].visitors.int)
-      sk.drawSprite(
-        "food",
-        inner.origin + vec2(376, y + 6),
-        vec2(16)
-      )
-      sk.drawLabel(
-        hudScratch,
-        inner.origin + vec2(330, y + 4),
-        vec2(44, 22),
-        rgbx(226, 180, 120, 255),
-        "Small"
-      )
-    y += RosterRowHeight
+    let
+      v = run.world.villagers[slot]
+      report = run.world.dailyReports[slot]
+      y = ScoreRowsTop + float32(rank) * ScoreRowHeight
+      color = VillagerColors[slot]
+    sk.drawSprite(villagerPortraitKey(slot), inner.origin + vec2(0, y), vec2(32))
+    sk.drawLabel(VillagerNames[slot], inner.origin + vec2(40, y + 4),
+      vec2(120, 24), color)
+    let values = ["", hostingText(run.world, slot), eatingText(report),
+      (if report.penalty > 0: signedPoints(-report.penalty) else: "Home"),
+      signedPoints(dailyGain(run.world, slot)), $v.score]
+    for column in 1 .. 5:
+      if scorePresentation.shown(column):
+        sk.drawLabel(values[column],
+          inner.origin + vec2(ScoreColumns[column], y + 4),
+          vec2(ScoreColumnWidths[column], 24),
+          (if column == 3 and report.penalty > 0: rgbx(230, 120, 100, 255)
+           else: ink), "Hud")
+    if scorePresentation.shown(2) and report.dinnerHost >= 0:
+      sk.drawLabel("At " & VillagerNames[report.dinnerHost] & "'s table",
+        inner.origin + vec2(ScoreColumns[2], y + 25), vec2(400, 18),
+        rgbx(180, 190, 200, 255), "Small")
+  sk.drawLabel("Hosting = stocked vegetables x guests    First taste this match = 3    Repeat = 1    Missed curfew = -3",
+    inner.origin + vec2(0, 540), vec2(inner.size.x, 24), ink, "Small")
 
 proc drawUi*(
     sk: Silky,
@@ -264,207 +252,222 @@ proc drawUi*(
   ## Draws the HUD and reports clicks on any playback-speed button.
   let
     chrome = currentChrome(window)
-    roster = sk.beginPanel(chrome.roster)
-    clock = sk.beginPanel(chrome.clock)
-    minimapPanel = sk.beginPanel(chrome.minimap)
     world = run.world
-
-  ## Roster: one row per villager. Clicking a row follows that villager.
-  sk.drawLabel(
-    "THE VILLAGE",
-    roster.origin,
-    vec2(roster.size.x, 22),
-    rgbx(200, 205, 216, 255),
-    "Small"
-  )
-  for slot in 0 ..< VillagerCount:
+  if world.phase notin {ScorePhase, GameOverPhase}:
     let
-      v = world.villagers[slot]
-      y = 26.0'f32 + float32(slot) * RosterRowHeight
-      row = GameUiPanel(
-        origin: roster.origin + vec2(0, y),
-        size: vec2(roster.size.x, RosterRowHeight - 4)
-      )
-    if int32(slot) == followSlot:
-      sk.drawSlot(
-        GameUiPanel(
-          origin: row.origin - vec2(4, 2),
-          size: row.size + vec2(8, 0)
-        ),
-        selected = true
-      )
-    sk.drawSprite(
-      villagerPortraitKey(int32(slot)),
-      row.origin,
-      vec2(30)
-    )
-    sk.drawRect(
-      row.origin + vec2(0, 30),
-      vec2(30, 3),
-      VillagerColors[slot]
-    )
+      roster = sk.beginPanel(chrome.roster)
+      clock = sk.beginPanel(chrome.clock)
+      minimapPanel = sk.beginPanel(chrome.minimap)
+    ## Roster: one row per villager. Clicking a row follows that villager.
     sk.drawLabel(
-      VillagerNames[slot],
-      row.origin + vec2(38, 5),
-      vec2(92, 22),
-      rgbx(226, 230, 239, 255)
-    )
-    writeInt(hudScratch, v.score.int)
-    sk.drawLabel(
-      hudScratch,
-      row.origin + vec2(134, 5),
-      vec2(48, 22),
-      rgbx(240, 226, 180, 255)
-    )
-    sk.drawSprite("gather", row.origin + vec2(188, 7), vec2(16))
-    writeInt(hudScratch, v.carriedTotal().int)
-    sk.drawLabel(
-      hudScratch,
-      row.origin + vec2(208, 5),
-      vec2(34, 22),
-      rgbx(166, 200, 150, 255),
+      "THE VILLAGE",
+      roster.origin,
+      vec2(roster.size.x, 22),
+      rgbx(200, 205, 216, 255),
       "Small"
     )
-    if v.inHouse == v.slot:
-      sk.drawSprite("home", row.origin + vec2(246, 7), vec2(16))
-    elif v.inHouse >= 0:
-      sk.drawSprite("housing", row.origin + vec2(246, 7), vec2(16))
-    elif v.hostingTonight:
-      sk.drawSprite("wave", row.origin + vec2(246, 7), vec2(16))
-    if window.clicked(sk, row):
-      followSlot =
-        if followSlot == int32(slot): -1'i32
-        else: int32(slot)
-      actionCam.takeManual()
-
-  ## Clock strip.
-  let minuteNow = int(simClockMinute(0))
-  sk.drawSprite(
-    if world.phase in {ScorePhase, GameOverPhase}: "night"
-    elif minuteNow >= 18 * 60: "night"
-    else: "day",
-    clock.origin + vec2(8, 10),
-    vec2(20)
-  )
-  hudScratch.setLen(0)
-  hudScratch.add "DAY "
-  hudScratch.addHudInt(min(world.day, world.dayCount).int)
-  hudScratch.add " / "
-  hudScratch.addHudInt(world.dayCount.int)
-  sk.drawLabel(
-    hudScratch,
-    clock.origin + vec2(36, 8),
-    vec2(110, 24),
-    rgbx(226, 230, 239, 255)
-  )
-  hudScratch.setLen(0)
-  hudScratch.addHudClock(minuteNow)
-  sk.drawLabel(
-    hudScratch,
-    clock.origin + vec2(152, 8),
-    vec2(96, 24),
-    rgbx(247, 221, 143, 255)
-  )
-  if world.phase == DaytimePhase:
-    hudScratch.setLen(0)
-    let left = DinnerMinute - minuteNow
-    if left <= 60:
-      hudScratch.add "DINNER IN "
-      hudScratch.addHudInt(left)
-      hudScratch.add 'M'
-    else:
-      hudScratch.add "DINNER AT 6 PM"
-    sk.drawLabel(
-      hudScratch,
-      clock.origin + vec2(252, 8),
-      vec2(150, 24),
-      if left <= 60: rgbx(226, 120, 92, 255)
-      else: rgbx(166, 174, 190, 255),
-      "Small"
-    )
-  elif world.phase == EveningPhase:
-    sk.drawLabel(
-      "AFTER DINNER",
-      clock.origin + vec2(252, 8),
-      vec2(150, 24),
-      rgbx(166, 174, 190, 255),
-      "Small"
-    )
-
-  ## Minimap.
-  let area = minimapPanel.minimapMap()
-  sk.drawFrame(area)
-  const MapSampleStride = 2'i32
-  let cell = area.size.x / float32(GridSide)
-  for y in countup(0'i32, GridSide - 1, MapSampleStride):
-    for x in countup(0'i32, GridSide - 1, MapSampleStride):
+    for slot in 0 ..< VillagerCount:
       let
-        index = tileIndex(x, y)
-        shade =
-          case world.map.kinds[index]
-          of 1'u8: rgbx(150, 132, 92, 255)                 # road
-          of 4'u8: rgbx(128, 128, 132, 255)                # plaza stone
-          of 5'u8: rgbx(30, 52, 32, 255)                   # forest
-          of uint8(GardenTileKind): rgbx(112, 88, 52, 255)
-          of uint8(HouseTileKind): rgbx(96, 74, 58, 255)
-          else: rgbx(62, 96, 56, 255)                      # meadow
-        origin = minimapPoint(tile2(x, y), area)
-        far = minimapPoint(
-          tile2(min(x + MapSampleStride, GridSide),
-                min(y + MapSampleStride, GridSide)),
-          area
+        v = world.villagers[slot]
+        y = 26.0'f32 + float32(slot) * RosterRowHeight
+        row = GameUiPanel(
+          origin: roster.origin + vec2(0, y),
+          size: vec2(roster.size.x, RosterRowHeight - 4)
         )
-      sk.drawRect(origin, far - origin, shade)
-  for garden in 0 ..< GardenCount:
-    if world.gardens[garden] < 0:
-      continue
-    sk.drawRect(
-      minimapPoint(world.map.gardenTiles[garden], area) - vec2(1),
-      vec2(cell * 1.5'f32 + 2),
-      rgbx(140, 220, 110, 255)
-    )
-  for slot in 0 ..< VillagerCount:
-    let house = world.map.houses[slot]
-    sk.drawRect(
-      minimapPoint(house.center, area) - vec2(cell),
-      vec2(cell * 3),
-      VillagerColors[slot]
-    )
-  for slot in 0 ..< VillagerCount:
-    let v = world.villagers[slot]
-    if v.inHouse >= 0:
-      continue
-    sk.drawRect(
-      minimapPoint(v.tile, area) - vec2(2),
-      vec2(cell * 1.5'f32 + 3),
-      rgbx(20, 22, 26, 255)
-    )
-    sk.drawRect(
-      minimapPoint(v.tile, area) - vec2(1),
-      vec2(cell * 1.5'f32 + 1),
-      VillagerColors[slot]
-    )
-  let aspect = window.size.x.float32 / max(window.size.y.float32, 1)
-  sk.drawCameraFrame(
-    minimapViewport(
-      cameraTarget,
-      cameraDistance,
-      aspect,
-      area.origin,
-      area.size,
-      HalfGrid
-    )
-  )
+      if int32(slot) == followSlot:
+        sk.drawSlot(
+          GameUiPanel(
+            origin: row.origin - vec2(4, 2),
+            size: row.size + vec2(8, 0)
+          ),
+          selected = true
+        )
+      sk.drawSprite(
+        villagerPortraitKey(int32(slot)),
+        row.origin,
+        vec2(30)
+      )
+      sk.drawRect(
+        row.origin + vec2(0, 30),
+        vec2(30, 3),
+        VillagerColors[slot]
+      )
+      sk.drawLabel(
+        VillagerNames[slot],
+        row.origin + vec2(38, 5),
+        vec2(92, 22),
+        rgbx(226, 230, 239, 255)
+      )
+      writeInt(hudScratch, v.score.int)
+      sk.drawLabel(
+        hudScratch,
+        row.origin + vec2(134, 5),
+        vec2(48, 22),
+        rgbx(240, 226, 180, 255)
+      )
+      sk.drawSprite("gather", row.origin + vec2(188, 7), vec2(16))
+      writeInt(hudScratch, v.carriedTotal().int)
+      sk.drawLabel(
+        hudScratch,
+        row.origin + vec2(208, 5),
+        vec2(34, 22),
+        rgbx(166, 200, 150, 255),
+        "Small"
+      )
+      if v.inHouse == v.slot:
+        sk.drawSprite("home", row.origin + vec2(246, 7), vec2(16))
+      elif v.inHouse >= 0:
+        sk.drawSprite("housing", row.origin + vec2(246, 7), vec2(16))
+      elif v.hostingTonight:
+        sk.drawSprite("wave", row.origin + vec2(246, 7), vec2(16))
+      if window.clicked(sk, row):
+        followSlot =
+          if followSlot == int32(slot): -1'i32
+          else: int32(slot)
+        actionCam.takeManual()
 
-  ## Standings between days and at the end.
-  if world.phase == ScorePhase:
+    ## Clock strip.
+    let minuteNow = int(simClockMinute(0))
+    sk.drawSprite(
+      if world.phase in {ScorePhase, GameOverPhase}: "night"
+      elif minuteNow >= 18 * 60: "night"
+      else: "day",
+      clock.origin + vec2(8, 10),
+      vec2(20)
+    )
     hudScratch.setLen(0)
     hudScratch.add "DAY "
-    hudScratch.addHudInt(world.day.int)
-    hudScratch.add " STANDINGS"
-    sk.drawStandings(chrome.layout, hudScratch)
-  elif world.over:
-    sk.drawStandings(chrome.layout, describeResult())
+    hudScratch.addHudInt(min(world.day, world.dayCount).int)
+    hudScratch.add " / "
+    hudScratch.addHudInt(world.dayCount.int)
+    sk.drawLabel(
+      hudScratch,
+      clock.origin + vec2(36, 8),
+      vec2(110, 24),
+      rgbx(226, 230, 239, 255)
+    )
+    hudScratch.setLen(0)
+    hudScratch.addHudClock(minuteNow)
+    sk.drawLabel(
+      hudScratch,
+      clock.origin + vec2(152, 8),
+      vec2(96, 24),
+      rgbx(247, 221, 143, 255)
+    )
+    if world.phase == DaytimePhase:
+      hudScratch.setLen(0)
+      let left = DinnerMinute - minuteNow
+      if left <= 60:
+        hudScratch.add "DINNER IN "
+        hudScratch.addHudInt(left)
+        hudScratch.add 'M'
+      else:
+        hudScratch.add "DINNER AT 6 PM"
+      sk.drawLabel(
+        hudScratch,
+        clock.origin + vec2(252, 8),
+        vec2(150, 24),
+        if left <= 60: rgbx(226, 120, 92, 255)
+        else: rgbx(166, 174, 190, 255),
+        "Small"
+      )
+    elif world.phase == EveningPhase:
+      sk.drawLabel(
+        "AFTER DINNER",
+        clock.origin + vec2(252, 8),
+        vec2(150, 24),
+        rgbx(166, 174, 190, 255),
+        "Small"
+      )
+
+    ## Minimap.
+    let area = minimapPanel.minimapMap()
+    sk.drawFrame(area)
+    const MapSampleStride = 2'i32
+    let cell = area.size.x / float32(GridSide)
+    for y in countup(0'i32, GridSide - 1, MapSampleStride):
+      for x in countup(0'i32, GridSide - 1, MapSampleStride):
+        let
+          index = tileIndex(x, y)
+          shade =
+            case world.map.kinds[index]
+            of 1'u8: rgbx(150, 132, 92, 255)                 # road
+            of 4'u8: rgbx(128, 128, 132, 255)                # plaza stone
+            of 5'u8: rgbx(30, 52, 32, 255)                   # forest
+            of uint8(GardenTileKind): rgbx(112, 88, 52, 255)
+            of uint8(HouseTileKind): rgbx(96, 74, 58, 255)
+            else: rgbx(62, 96, 56, 255)                      # meadow
+          origin = minimapPoint(tile2(x, y), area)
+          far = minimapPoint(
+            tile2(min(x + MapSampleStride, GridSide),
+                  min(y + MapSampleStride, GridSide)),
+            area
+          )
+        sk.drawRect(origin, far - origin, shade)
+    for garden in 0 ..< GardenCount:
+      if world.gardens[garden] < 0:
+        continue
+      sk.drawRect(
+        minimapPoint(world.map.gardenTiles[garden], area) - vec2(1),
+        vec2(cell * 1.5'f32 + 2),
+        rgbx(140, 220, 110, 255)
+      )
+    for slot in 0 ..< VillagerCount:
+      let house = world.map.houses[slot]
+      sk.drawRect(
+        minimapPoint(house.center, area) - vec2(cell),
+        vec2(cell * 3),
+        VillagerColors[slot]
+      )
+    for slot in 0 ..< VillagerCount:
+      let v = world.villagers[slot]
+      if v.inHouse >= 0:
+        continue
+      sk.drawRect(
+        minimapPoint(v.tile, area) - vec2(2),
+        vec2(cell * 1.5'f32 + 3),
+        rgbx(20, 22, 26, 255)
+      )
+      sk.drawRect(
+        minimapPoint(v.tile, area) - vec2(1),
+        vec2(cell * 1.5'f32 + 1),
+        VillagerColors[slot]
+      )
+    let aspect = window.size.x.float32 / max(window.size.y.float32, 1)
+    sk.drawCameraFrame(
+      minimapViewport(
+        cameraTarget,
+        cameraDistance,
+        aspect,
+        area.origin,
+        area.size,
+        HalfGrid
+      )
+    )
+
+  else:
+    let finalNight = world.over or world.day == world.dayCount
+    let title =
+      if finalNight: "FINAL RESULTS"
+      else: "DAY " & $world.day & " - TONIGHT'S SCORES"
+    sk.drawStandings(chrome.layout, title)
+    if finalNight:
+      let panel = chrome.layout.panel(GameUiRegion.Center,
+        vec2(ScorecardWidth, ScorecardHeight))
+      sk.drawLabel(describeResultForStandings(world),
+        panel.origin + vec2(20, 43), vec2(ScorecardWidth - 40, 24),
+        rgbx(240, 226, 180, 255), "Hud", CenterAlign)
+    if world.phase == ScorePhase:
+      let
+        panel = chrome.layout.panel(GameUiRegion.Center,
+          vec2(ScorecardWidth, ScorecardHeight))
+        button = GameUiPanel(origin: panel.origin + vec2(440, 580),
+          size: vec2(340, 28))
+      sk.drawRect(button.origin, button.size, rgbx(55, 66, 55, 255))
+      sk.drawLabel((if finalNight: "Finish match" else: "Next morning"),
+        button.origin, button.size, rgbx(240, 226, 180, 255), "Small", CenterAlign)
+      if window.clicked(sk, button):
+        transport.seekTo(world.tick + world.phaseTicks, play = false)
 
   var following = followSlot >= 0
   transport.drawTransport(

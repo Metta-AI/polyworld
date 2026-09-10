@@ -22,6 +22,7 @@ import
   ground,
   decor,
   democamera,
+  scorecard,
   houses,
   houseview
 
@@ -103,7 +104,8 @@ var
     live = not run.replayMode,
     durationTicks = run.maximumTicks,
     playing = not options.pauseOnStart,
-    speed = options.speed
+    speed = options.speed,
+    repeating = run.replayMode
   )
   frameAlpha = 0.0'f32
   previousPositions: array[VillagerCount, Vec3]
@@ -397,6 +399,11 @@ proc runGraphics*() =
       advanceGame()
       captureCheckpoint()
 
+  seekStartup(captureCheckpoint)
+  transport.sync(run.world.tick,
+    (if run.recorder != nil: int32(run.recorder.data.hashes.len)
+     else: int32(run.replayPlayer.data.hashes.len)), run.world.over)
+
   ## Camera and input
 
   proc playerMode(): bool =
@@ -659,8 +666,6 @@ proc runGraphics*() =
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
-      sk.uiScale = hudUiScale(window)
-      sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
@@ -669,19 +674,25 @@ proc runGraphics*() =
       if restoreTick >= 0:
         restoreTo(restoreTick)
         transport.sync(run.world.tick, recorded, run.world.over)
-      transport.startFrame(dt, TickRate)
+      transport.startScoreFrame(run.world, dt)
       let frameStart = epochTime()
       run.historyPlayback = transport.inHistory
       profileBlock "simulate":
-        while transport.shouldTick(frameStart):
+        while transport.shouldScoreTick(frameStart):
           if atLiveTickCap(run.world.tick, run.maximumTicks, transport.live):
             break
           run.historyPlayback = transport.inHistory
+          let previousPhase = run.world.phase
           advanceRenderedGame()
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
             else: int32(run.replayPlayer.data.hashes.len)
           transport.sync(run.world.tick, recordedNow, run.world.over)
+          if transport.stopAtScoreBoundary(previousPhase, run.world):
+            break
+      scorePresentation.update(run.world, dt)
+      sk.uiScale = hudUiScale(window)
+      sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let active = simulationActive(transport)
       frameAlpha =
         if active:
