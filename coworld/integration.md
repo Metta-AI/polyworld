@@ -57,7 +57,8 @@ return HTTP 501. No player artifact ZIP is produced.
 `tools/verify_native.sh` checks all desktop, headless and Coworld entrypoints,
 recording regression tests, and full replay verification. First record full matches
 into `tmp/coworld/{gota,lvd,cta}.replay` with the ordinary headless binaries and
-`--record PATH`. `tools/test_runtime.py` uses the binaries in `tmp/coworld` to check
+`--record PATH`. Run `nim r coworld/tools/test_runtime.nim` from the repository root.
+It uses the binaries in `tmp/coworld` to check
 extensionless and empty sources, slot-specific print output, compilation failure,
 disabled VMs, health/Ping/Pong, completion ordering and the 10 MiB log bound.
 

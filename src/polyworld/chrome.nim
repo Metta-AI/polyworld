@@ -1,7 +1,7 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, strutils, times],
+  std/[math, strutils, times, unicode],
   chroma, pixie, silky, vmath, windy,
   gameuis, inputs, profiles, quadterrain, rtscameras
 
@@ -329,6 +329,21 @@ proc drawLabel*(
     hAlign = align,
     vAlign = MiddleAlign
   )
+
+proc fittedLabel*(
+    sk: Silky,
+    value: string,
+    width: float32,
+    font = "Hud"
+): string =
+  ## Ellipsizes text to one line without splitting a UTF-8 character.
+  if sk.getTextSize(font, value).x <= width:
+    return value
+  for rune in value.runes:
+    let candidate = result & $rune
+    if sk.getTextSize(font, candidate & "...").x > width:
+      return result & "..."
+    result = candidate
 
 proc barPatch(size: Vec2, wanted: int): int =
   ## Returns a 9-patch border that still fits inside size.

@@ -65,6 +65,13 @@ var
   ctaWalkLayer: int
   ctaWalkDestLayer: int
 
+proc config*(game: Game): GameConfig =
+  ## Reads the match configuration owned by the live or loaded replay.
+  if game.recorder != nil:
+    game.recorder.data.config
+  else:
+    game.replayData.config
+
 proc lightRadius*(world: World, slot: int32): int32
 proc bindActorBody(actor: Actor)
 proc applyActorBody(world: World, slot: int32)

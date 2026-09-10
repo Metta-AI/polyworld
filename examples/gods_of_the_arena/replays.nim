@@ -1,13 +1,14 @@
 ## Gods of the Arena action-only replay format and playback cursor.
 
 import
+  std/os,
   polyworld/tapes,
   content
 
 const
   ReplayGame* = "gods_of_the_arena"
-  ReplayFormatVersion* = 3'u16
-  ReplayGameVersion* = 14'u16
+  ReplayFormatVersion* = 5'u16
+  ReplayGameVersion* = 16'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
@@ -53,20 +54,22 @@ proc fail(message: string) {.noreturn.} =
   raise newException(ReplayError, message)
 
 proc initReplayData*(setup: Setup): ReplayData =
-  ## Creates an empty replay with a versioned deterministic setup.
-  initActionTape[Setup, ReplayAction](
+  ## Creates a replay containing the match setup, config, and action tape.
+  result = initActionTape[Setup, ReplayAction](
     setup,
     ReplayFormatVersion,
     ReplayGameVersion
+  )
+  result.config = GameConfig(
+    seed: setup.mapSeed,
+    maxTicks: int32(setup.maximumTicks),
+    players: unnamedPlayers(HeroClassCount),
+    spawnIntervalTicks: int32(setup.spawnIntervalTicks)
   )
 
 proc initReplayRecorder*(setup: Setup): ReplayRecorder =
-  ## Creates an in-memory Gods of the Arena action recorder.
-  initTapeRecorder[Setup, ReplayAction](
-    setup,
-    ReplayFormatVersion,
-    ReplayGameVersion
-  )
+  ## Creates an in-memory recorder owning the complete replay data.
+  ReplayRecorder(data: initReplayData(setup))
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one bot action in deterministic tick order.
@@ -160,6 +163,13 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
 
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, actor IDs, and action ordering.
+  data.config.validateConfig(HeroClassCount)
+  if data.config.seed != data.header.setup.mapSeed or
+    data.config.maxTicks != int32(data.header.setup.maximumTicks):
+      fail("replay configuration does not match its simulation setup")
+  if data.config.spawnIntervalTicks !=
+    int32(data.header.setup.spawnIntervalTicks):
+      fail("replay configuration has a different spawn interval")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion
@@ -216,17 +226,12 @@ proc validate*(data: ReplayData) =
     lastTick = action.tick
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes a validated arena replay using the shared Flatty envelope.
+  ## Encodes the complete replay, including its match configuration.
   data.validate()
-  encodeReplayFile(
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Decodes and validates one arena replay buffer.
+  ## Decodes and validates the complete replay configuration and action tape.
   result = decodeReplayFile(
     ReplayGame,
     ReplayGameVersion,
@@ -237,26 +242,24 @@ proc decodeReplay*(bytes: string): ReplayData =
   result.validate()
 
 proc saveReplay*(path: string, data: ReplayData) =
-  ## Writes one complete arena replay file.
-  data.validate()
-  saveReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  ## Creates the parent directory and saves the complete recording.
+  if path.len == 0:
+    fail("replay output path is empty")
+  let bytes = encodeReplay(data)
+  try:
+    let directory = path.parentDir
+    if directory.len > 0:
+      createDir(directory)
+    writeFile(path, bytes)
+  except IOError, OSError:
+    fail("cannot save replay: " & getCurrentExceptionMsg())
 
 proc loadReplay*(path: string): ReplayData =
-  ## Loads one complete arena replay file.
-  result = loadReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    ReplayData,
-    MaxReplayBytes
-  )
-  result.validate()
+  ## Loads one recording with its complete match configuration.
+  try:
+    result = decodeReplay(readFile(path))
+  except IOError, OSError:
+    fail("cannot load replay: " & getCurrentExceptionMsg())
 
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Creates a playback cursor over validated action data.

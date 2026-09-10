@@ -3,7 +3,7 @@
 import
   std/strformat,
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+  polyworld/[actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
   content, sim, game, controls, layouts
 
@@ -175,40 +175,40 @@ proc towerCount(player: int32): int =
 proc buildingName(kind: BuildingKind, owner = -1'i32): string =
   ## Returns a spectator-facing name for one structure.
   case kind
-  of TownHallBuilding: "TOWN HALL"
-  of FarmBuilding: "FARM"
-  of BarracksBuilding: "BARRACKS"
-  of LumberMillBuilding: "LUMBER MILL"
-  of TowerBuilding: "TOWER"
+  of TownHallBuilding: "Town Hall"
+  of FarmBuilding: "Farm"
+  of BarracksBuilding: "Barracks"
+  of LumberMillBuilding: "Lumber Mill"
+  of TowerBuilding: "Tower"
   of StablesBuilding:
-    if owner == DarkPlayer: "KENNELS" else: "STABLES"
+    if owner == DarkPlayer: "Kennels" else: "Stables"
   of ChurchBuilding:
-    if owner == DarkPlayer: "TEMPLE" else: "CHURCH"
-  of BlacksmithBuilding: "BLACKSMITH"
-  of GoldMineBuilding: "GOLD MINE"
+    if owner == DarkPlayer: "Temple" else: "Church"
+  of BlacksmithBuilding: "Blacksmith"
+  of GoldMineBuilding: "Gold Mine"
 
 proc unitName(kind: UnitKind, owner: int32): string =
   ## Returns a spectator-facing name for one unit.
   if owner == DarkPlayer:
     case kind
-    of PeonUnit: "PEON"
-    of SoldierUnit: "GRUNT"
-    of ArcherUnit: "SPEARMAN"
-    of MageUnit: "WARLOCK"
-    of KnightUnit: "RAIDER"
-    of CatapultUnit: "CATAPULT"
-    of ClericUnit: "NECROLYTE"
-    of SummonUnit: "DAEMON"
+    of PeonUnit: "Peon"
+    of SoldierUnit: "Grunt"
+    of ArcherUnit: "Spearman"
+    of MageUnit: "Warlock"
+    of KnightUnit: "Raider"
+    of CatapultUnit: "Catapult"
+    of ClericUnit: "Necrolyte"
+    of SummonUnit: "Daemon"
   else:
     case kind
-    of PeonUnit: "PEASANT"
-    of SoldierUnit: "FOOTMAN"
-    of ArcherUnit: "ARCHER"
-    of MageUnit: "CONJURER"
-    of KnightUnit: "KNIGHT"
-    of CatapultUnit: "CATAPULT"
-    of ClericUnit: "CLERIC"
-    of SummonUnit: "ELEMENTAL"
+    of PeonUnit: "Peasant"
+    of SoldierUnit: "Footman"
+    of ArcherUnit: "Archer"
+    of MageUnit: "Conjurer"
+    of KnightUnit: "Knight"
+    of CatapultUnit: "Catapult"
+    of ClericUnit: "Cleric"
+    of SummonUnit: "Elemental"
 
 proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
   ## Returns whether one entity belongs to the HUD selection set.
@@ -462,6 +462,14 @@ proc drawUi*(
     )
   sk.drawScoreRow(scoreSlots, LightPlayer, 0)
   sk.drawScoreRow(scoreSlots, DarkPlayer, 1)
+  for owner in 0 ..< min(PlayerCount, run.config.players.len):
+    let side = if owner == LightPlayer: "LIGHT: " else: "DARK: "
+    sk.drawLabel(
+      sk.fittedLabel(side & run.config.players[owner].displayName(owner), 262),
+      scorePanel.origin + vec2(18, 100 + owner.float32 * 22),
+      vec2(262, 22),
+      playerColor(int32(owner))
+    )
 
   let resourceRows = [
     ("GOLD", light.gold),
@@ -589,6 +597,7 @@ proc drawUi*(
     portraitMax = 1'i32
     portraitId = primaryId
     portraitName = "NO SELECTION"
+    portraitOwner = -1'i32
   if portraitId == NoEntity:
     for id in selectedIds:
       if (id.isUnitId and run.world.hasUnit(id)) or
@@ -601,6 +610,7 @@ proc drawUi*(
     portraitHp = unit.hp
     portraitMax = UnitTable[unit.owner][unit.kind].hp
     portraitName = unit.kind.unitName(unit.owner)
+    portraitOwner = unit.owner
   elif portraitId != NoEntity and run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
       run.world.buildingIndex(portraitId)
@@ -612,6 +622,11 @@ proc drawUi*(
     portraitHp = structure.hp
     portraitMax = max(structure.maxHp, 1)
     portraitName = structure.kind.buildingName(structure.owner)
+    portraitOwner = structure.owner
+  let players = run.config.players
+  if portraitOwner >= 0 and portraitOwner < players.len:
+    portraitName = players[portraitOwner].displayName(portraitOwner) &
+      "'s " & portraitName
   let
     selectPortrait = selection.portrait
     selectBar = selection.hp
@@ -627,7 +642,7 @@ proc drawUi*(
     hudScratch
   )
   sk.drawLabel(
-    portraitName,
+    sk.fittedLabel(portraitName, selectName.size.x, "Small"),
     selectName.origin,
     selectName.size,
     rgbx(226, 230, 239, 255),

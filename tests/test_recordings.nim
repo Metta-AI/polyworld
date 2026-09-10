@@ -3,7 +3,8 @@
 ## -d:recordGota, -d:recordHlf, or -d:recordLvd selects another game.
 
 import
-  std/[os, osproc, strutils]
+  std/[os, osproc, strutils],
+  polyworld/tapes
 
 when defined(recordGota):
   import ../examples/gods_of_the_arena/[game, replays, sim]
@@ -19,7 +20,10 @@ when not defined(headless):
 
 proc playFile(path: string): tuple[output: string, exitCode: int] =
   ## Verifies a replay in a fresh process using the same game runner.
-  execCmdEx(quoteShell(getAppFilename()) & " --replay " & quoteShell(path))
+  execCmdEx(
+    quoteShell(getAppFilename()) & " --replay " & quoteShell(path) &
+    " --seed -123 --ticks 1"
+  )
 
 proc testRecording() =
   ## Covers empty tapes, partial recordings, rewinds, and failed verification.
@@ -34,12 +38,38 @@ proc testRecording() =
     removeDir(directory)
 
   echo "Testing saving before the first tick"
+  let originalHash = run.stateHash()
+  doAssert run.recorder.data.config.players.len > 0
+  doAssert run.recorder.data.config.players[0].name == "base"
+  run.recorder.data.config.players[0].name = "Dragon.BAS"
+  doAssert run.stateHash() == originalHash
+  let config = run.recorder.data.config
   saveRecording(path)
   let empty = loadReplay(path)
+  doAssert empty.config == config
+  doAssert empty.config.players[0].name == "Dragon.BAS"
   doAssert empty.header.setup == setup
   doAssert empty.hashes.len == 0
   let emptyPlayback = playFile(path)
   doAssert emptyPlayback.exitCode == 0, emptyPlayback.output
+
+  echo "Testing replay config agrees with the recorded match"
+  for check in 0 ..< 4:
+    var invalid = empty
+    case check
+    of 0:
+      inc invalid.config.seed
+    of 1:
+      inc invalid.config.maxTicks
+    of 2:
+      invalid.config.players.setLen(0)
+    else:
+      invalid.config.players[0].name = repeat('x', 4097)
+    try:
+      discard encodeReplay(invalid)
+      doAssert false, "inconsistent replay configuration must fail"
+    except ReplayError:
+      discard
 
   echo "Testing partial recordings preserve the simulation setup"
   for i in 0 ..< 24:
@@ -49,6 +79,7 @@ proc testRecording() =
     advanceGame()
   saveRecording(path)
   let partial = loadReplay(path)
+  doAssert partial.config == config
   doAssert partial.header.setup == setup
   doAssert partial.hashes.len == 48
   doAssert partial.actions.len > 0
@@ -60,6 +91,7 @@ proc testRecording() =
   run.world.restore(snapshot)
   saveRecording(path)
   let rewound = loadReplay(path)
+  doAssert rewound.config == config
   doAssert rewound == partial
   doAssert run.recorder.data == partial
   let rewoundPlayback = playFile(path)
@@ -76,6 +108,7 @@ proc testRecording() =
   echo "Recording tests passed"
 
 if run.replayMode:
+  doAssert run.replayData.config.players[0].name == "Dragon.BAS"
   runHeadless()
 else:
   testRecording()
