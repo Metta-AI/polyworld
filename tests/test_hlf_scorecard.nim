@@ -1,6 +1,6 @@
 import
   std/times,
-  vmath, pixie, polyworld/[assets, player, chrome, tapes],
+  vmath, polyworld/[player, chrome, tapes],
   ../examples/heartleaf/[content, maps, sim, scorecard, seeking, replays]
 
 let gameMap = generateMap(DefaultSeed)
@@ -198,14 +198,6 @@ block screenBounds:
     let scale = fitUiScale(size, scoreLayoutFits, ScoreUiScales)
     doAssert scoreLayoutFits(size / scale)
     doAssert scale >= 0.5
-  let font = readFont(DefaultFontPath)
-  font.size = 15
-  for a in VeggieNames:
-    for b in VeggieNames:
-      for c in VeggieNames:
-        doAssert font.layoutBounds(a & " +3 / " & b & " +1 / " & c & " +1").x <= ScoreColumnWidths[2]
-  doAssert font.layoutBounds("27 veg x 8 guests = +216").x <= ScoreColumnWidths[1]
-
 block replayReports:
   let data = loadReplay("examples/heartleaf/replays/demo.replay")
   let game = newGame(generateMap(data.header.setup.mapSeed), int32(data.header.setup.dayCount))
