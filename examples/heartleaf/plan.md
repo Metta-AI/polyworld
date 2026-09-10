@@ -305,8 +305,10 @@ nim r tests/test_hlf_sim.nim
 
 ## Spectator scorecards and startup seeking
 
-After curfew, the scorecard shows all nine gnomes: stocked vegetables times
-visitors, each dinner bite and its points, curfew penalties, daily gains,
+After curfew, the scorecard shows all nine gnomes. Dinner identifies each
+host (with bonus points and the stocked-vegetables-times-visitors calculation)
+or guest (with their host's name); no dinner role is shown as `-`.
+Curfew shows only `-` or `-3`. The other columns show each dinner bite and its points, curfew penalties, daily gains,
 and cumulative totals. Hosting, eating, curfew, and totals reveal together
 by column over three seconds. A first taste is remembered across the match.
 Vegetable names identify each bite; the asset collection has no individual

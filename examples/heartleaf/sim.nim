@@ -74,7 +74,6 @@ type
 
   DailyReport* = object
     startingScore*, dinnerHost*, hostingPoints*, penalty*: int32
-    hostHome*: bool
     bites*: array[int(BiteRounds), DinnerBite]
     biteCount*: int
 
@@ -473,8 +472,7 @@ proc runDinnerTally*(w: World) {.measure.} =
   for slot, v in w.villagers:
     v.lastGained = 0
     w.dailyReports[slot] = DailyReport(
-      startingScore: v.score, dinnerHost: NoHouse,
-      hostHome: v.inHouse == int32(slot))
+      startingScore: v.score, dinnerHost: NoHouse)
   for house in 0 ..< VillagerCount:
     var report = DinnerReport()
     let host = w.villagers[house]
