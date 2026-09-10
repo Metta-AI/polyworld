@@ -3,7 +3,7 @@
 import
   std/strformat,
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
+  polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
   content, sim, game, controls, layouts
 
@@ -127,13 +127,54 @@ proc currentLayout*(window: Window): GameUiLayout =
     TransportHeight
   )
 
+var statsState: StatsState
+
+proc currentMetrics(slot: int, complete: bool): MetricRow =
+  ## Combines authoritative totals with live or original replay telemetry.
+  result = run.metrics.read(slot, run.world.tick, complete)
+  if run.historyPlayback:
+    result = result.withTelemetry(
+      run.history, slot, run.world.tick, complete
+    )
+  if run.replayMode:
+    result = result.withTelemetry(
+      run.replayData.metrics, slot, run.world.tick, complete
+    )
+
+proc currentStats(): StatsTable =
+  ## Adapts the actual roster and outcome to the shared table.
+  run.sampleMetrics()
+  result = StatsTable(kind: RtsStats, tick: run.world.tick,
+    complete: run.world.over, winner: int(run.world.winner))
+  for slot in 0 ..< PlayerCount:
+    result.rows.add StatsRow(
+      slot: slot,
+      name: run.config.players[slot].displayName(slot),
+      subtitle: if slot == 0: "LIGHT COMMANDER" else: "DARK COMMANDER",
+      portrait: unitPortraitKey(int32(slot), PeonUnit),
+      team: slot,
+      selected: not run.replayMode and options.playerSlot == slot + 1,
+      metrics: currentMetrics(slot, result.complete)
+    )
+
+proc statsContains(window: Window, mouse: Vec2): bool =
+  ## Tests the overlay before allowing input through to the existing HUD.
+  if not statsState.visible(window.tabHeld):
+    return false
+  statsState.mouseOverStats(window, currentLayout(window),
+    currentStats(), mouse)
+
+proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
+  ## Keeps covered HUD controls from receiving an overlay click.
+  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
+
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether the pointer is over an anchored game UI panel.
-  if mouseOverDebugMenu(mouse):
+  if window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   mouseOverPanels(
@@ -319,6 +360,9 @@ proc updateMinimapCamera*(
     followSelection: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
+  if window.statsContains(mouse):
+    minimapPanning = false
+    return
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
@@ -434,6 +478,8 @@ proc drawUi*(
     actionCam: var ActionCam
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  let table = currentStats()
+  statsState.sync(table.complete)
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
@@ -582,7 +628,7 @@ proc drawUi*(
       "Small",
       CenterAlign
     )
-    if window.clicked(sk, button):
+    if window.hudClicked(sk, button):
       if options.playerSlot == 0:
         viewMode = int32(index)
 
@@ -671,7 +717,7 @@ proc drawUi*(
       UnitTable[unit.owner][unit.kind].hp.float32,
       HealthColor
     )
-    if window.clicked(sk, slot):
+    if window.hudClicked(sk, slot):
       clickedId = id
     inc shown
   if clickedId != NoEntity:
@@ -734,7 +780,7 @@ proc drawUi*(
       "Hud",
       CenterAlign
     )
-    if window.clicked(sk, tab):
+    if window.hudClicked(sk, tab):
       commandTab = i
   if commandTab == 0:
     for index in 0 ..< build.slots.len:
@@ -753,7 +799,7 @@ proc drawUi*(
         sk.drawSlotCosts(slot, stats.gold, stats.wood)
         if options.playerSlot > 0 and
             not run.replayMode and
-            window.clicked(sk, slot):
+            window.hudClicked(sk, slot):
           pendingBuild = int32(kind.ord)
   elif commandTab == 1:
     for kind in UnitKind:
@@ -772,7 +818,7 @@ proc drawUi*(
       sk.drawSlotCosts(slot, stats.gold, stats.wood)
       if options.playerSlot > 0 and
           not run.replayMode and
-          window.clicked(sk, slot):
+          window.hudClicked(sk, slot):
         let player = options.playerSlot - 1
         if primaryId.isBuildingId and
             run.world.buildingOwner(primaryId) == player:
@@ -792,7 +838,8 @@ proc drawUi*(
     window,
     chrome.layout.transportPanel,
     actionCam,
-    followSelection
+    followSelection,
+    addr statsState.toggled
   )
 
   if run.world.over:
@@ -812,3 +859,7 @@ proc drawUi*(
         &"first at tick {run.hashCheck.firstTick}"
     )
   sk.drawDebugMenu(window)
+  sk.drawStats(
+    window, chrome.layout, statsState, table,
+    run.history
+  )

@@ -7,7 +7,7 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps as mapgen,
   sim,
@@ -114,6 +114,7 @@ block:
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
+    run.legacyStats = replayData.header.gameVersion == LegacyGameVersion
   else:
     var gameMap: MapData
     profileBlock "map":
@@ -162,7 +163,8 @@ proc decide(w: World) =
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      w.applyReplayAction(action)
+      if w.applyReplayAction(action):
+        run.metrics.command(int(action.playerId), w.tick)
   else:
     flushPlayerCommands(run)
     runBotDecisions(run)
@@ -185,6 +187,8 @@ proc advanceGame*() =
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+  run.sampleMetrics(run.world.over or run.world.tick >= run.maximumTicks)
+  run.metrics.finishTick(run.world.tick)
 
 proc saveRecording*(path = options.recordPath) =
   ## Saves every recorded tick, keeping the original match setup.
@@ -194,6 +198,9 @@ proc saveRecording*(path = options.recordPath) =
   let directory = path.parentDir
   if directory.len > 0:
     createDir(directory)
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  run.recorder.data.metrics = run.history.replayMetrics()
   saveReplay(path, run.recorder.data)
 
 proc describeResult*(): string =

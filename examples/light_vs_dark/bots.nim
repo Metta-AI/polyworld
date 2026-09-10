@@ -11,7 +11,7 @@
 ## kill things, and it is where fog of war is applied.
 
 import
-  polyworld/[basic, profiles],
+  polyworld/[metrics, basic, profiles],
   content,
   sim
 
@@ -600,6 +600,10 @@ proc runDecision(game: Game, player: int32) =
   game.brains[player].lastWork = game.brains[player].runtime.workUsed
   game.brains[player].lastInstructions =
     game.brains[player].runtime.instructionsUsed
+  game.metrics.decision(
+    int(player), game.world.tick, game.brains[player].lastInstructions,
+    overlordLimits().maxInstructions
+  )
 
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every player's script for this decision tick.

@@ -6,8 +6,9 @@
 ##     --bot:examples/gods_of_the_arena/players/base.bas:10
 
 import
+  polyworld/metrics,
   polyworld/tapes,
-  ../examples/gods_of_the_arena/[content, maps, game, sim, replays]
+  ../examples/gods_of_the_arena/[content, controls, maps, game, sim, replays]
 
 template hashNow(): uint64 =
   run.stateHash()
@@ -141,6 +142,24 @@ block:
   doAssert run.world.heroes[targetHero].hp ==
     run.world.heroes[targetHero].maxHp -
       TowerDamages[run.world.towers[0].tier]
+
+echo "Testing tower deaths update hero statistics"
+block:
+  let snapshot = run.world.clone()
+  let victim = heroIndex(run.world, run.world.towers[0].targetId)
+  doAssert victim >= 0
+  run.world.heroes[victim].hp = 1
+  let deaths = run.world.stats.values[victim][LossesMetric]
+  for _ in 0 ..< TowerAttackTicks:
+    updateTower(run.world, run.world.towers[0])
+  doAssert run.world.stats.values[victim][LossesMetric] == deaths + 1
+  doAssert snapshot.stats.values[victim][LossesMetric] == deaths
+  run.world.restore(snapshot)
+  let original = hashNow()
+  run.world.stats.add(victim, GoldMetric, 10)
+  doAssert hashNow() != original
+  run.world.restore(snapshot)
+  doAssert hashNow() == original
 
 echo "Testing tower combat state reaches the simulation hash"
 block:
@@ -376,3 +395,27 @@ block:
   doAssert world.scores() == @[1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
   world.winner = BlueTeam
   doAssert world.scores() == @[0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
+
+echo "Testing rejected hero commands do not contribute to APM"
+block:
+  let
+    savedRecorder = run.recorder
+    savedMetrics = run.metrics
+    savedWorld = run.world.clone()
+    heroId = run.world.heroes[0].id
+  run.recorder = nil
+  run.metrics = newMetrics(run.world.heroes.len, TickRate)
+  run.world.heroes[0].state = Marching
+  run.world.heroes[0].hp = run.world.heroes[0].maxHp
+  queueUseItem(heroId, -1)
+  queueAttackTarget(heroId, -1)
+  flushPlayerCommands(run)
+  doAssert run.metrics.read(0, run.world.tick).commands == 0
+  run.world.heroes[0].gold = 10000
+  run.world.heroes[0].inventory = default(typeof(run.world.heroes[0].inventory))
+  queueBuyItem(heroId, int32(ManaPotion.ord))
+  flushPlayerCommands(run)
+  doAssert run.metrics.read(0, run.world.tick).commands == 1
+  run.world.restore(savedWorld)
+  run.metrics = savedMetrics
+  run.recorder = savedRecorder

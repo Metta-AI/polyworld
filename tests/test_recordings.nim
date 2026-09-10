@@ -6,6 +6,9 @@ import
   std/[os, osproc, strutils],
   polyworld/tapes
 
+when not defined(recordHlf):
+  import polyworld/metrics
+
 when defined(recordGota):
   import ../examples/gods_of_the_arena/[game, replays, sim]
 elif defined(recordHlf):
@@ -13,7 +16,7 @@ elif defined(recordHlf):
 elif defined(recordLvd):
   import ../examples/light_vs_dark/[game, replays, sim]
 else:
-  import ../examples/call_to_adventure/[game, replays, sim]
+  import ../examples/call_to_adventure/[content, game, replays, sim]
 
 when not defined(headless):
   {.error: "Recording tests require -d:headless.".}
@@ -24,6 +27,18 @@ proc playFile(path: string): tuple[output: string, exitCode: int] =
     quoteShell(getAppFilename()) & " --replay " & quoteShell(path) &
     " --seed -123 --ticks 1"
   )
+
+when not defined(recordHlf):
+  proc apmSummary(): string =
+    ## Compares each reconstructed command count and APM sample across runs.
+    result = "APM"
+    for frame in run.history.frames:
+      result.add " " & $frame.tick & ":"
+      for row in frame.rows:
+        result.add $row.commands & "/" & $row.values[ApmMetric] & ","
+    for slot in 0 ..< run.metrics.len:
+      let row = run.metrics.read(slot, run.world.tick, true)
+      result.add " " & $row.commands & "/" & $row.values[ApmMetric]
 
 proc testRecording() =
   ## Covers empty tapes, partial recordings, rewinds, and failed verification.
@@ -84,8 +99,32 @@ proc testRecording() =
   doAssert partial.hashes.len == 48
   doAssert partial.actions.len > 0
   doAssert run.recorder.data.header.setup == setup
+  when not defined(recordHlf):
+    doAssert partial.metrics == run.history.replayMetrics()
+    doAssert partial.metrics.frames[^1].tick == 48
+    doAssert partial.metrics.frames[^1].rows[0].cpu >= 0
+    doAssert readFile(path) == encodeReplay(partial)
+    for invalid in 0 ..< 3:
+      var corrupt = partial
+      case invalid
+      of 0:
+        corrupt.metrics.frames[^1].tick = 49
+      of 1:
+        corrupt.metrics.final.setLen(0)
+      else:
+        corrupt.metrics.frames[0].rows.setLen(0)
+      try:
+        discard encodeReplay(corrupt)
+        doAssert false, "invalid embedded telemetry must fail"
+      except ReplayError:
+        discard
+  when not defined(recordHlf):
+    let liveApm = apmSummary()
+    doAssert run.metrics.read(0, run.world.tick).commands > 0, liveApm
   let partialPlayback = playFile(path)
   doAssert partialPlayback.exitCode == 0, partialPlayback.output
+  when not defined(recordHlf):
+    doAssert partialPlayback.output.contains(liveApm), partialPlayback.output
 
   echo "Testing a rewind does not shorten the saved recording"
   run.world.restore(snapshot)
@@ -96,6 +135,45 @@ proc testRecording() =
   doAssert run.recorder.data == partial
   let rewoundPlayback = playFile(path)
   doAssert rewoundPlayback.exitCode == 0, rewoundPlayback.output
+
+  when not defined(recordHlf):
+    echo "Testing APM survives rewinding and continuing live play"
+    run.replayPlayer.data = run.recorder.data
+    run.replayPlayer.syncCursor(uint32(run.world.tick))
+    run.historyPlayback = true
+    while run.world.tick < 48:
+      advanceGame()
+    doAssert apmSummary() == liveApm
+    run.historyPlayback = false
+    for i in 0 ..< 31:
+      advanceGame()
+    saveRecording(path)
+    let continuedPlayback = playFile(path)
+    doAssert continuedPlayback.exitCode == 0, continuedPlayback.output
+    doAssert continuedPlayback.output.contains(apmSummary()),
+      continuedPlayback.output
+
+    echo "Testing older embedded CPU/APM recordings retain only CPU"
+    var previous: ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
+    previous.header = partial.header
+    previous.header.gameVersion = MetricsGameVersion
+    previous.config = partial.config
+    previous.actions = partial.actions
+    previous.hashes = partial.hashes
+    previous.metrics.tickRate = partial.metrics.tickRate
+    previous.metrics.interval = partial.metrics.interval
+    for frame in partial.metrics.frames:
+      var sample = LegacyTelemetryFrame(tick: frame.tick)
+      for row in frame.rows:
+        sample.rows.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
+      previous.metrics.frames.add sample
+    for row in partial.metrics.final:
+      previous.metrics.final.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
+    let converted = decodeReplay(encodeReplayFile(
+      ReplayGame, MetricsGameVersion, previous, MaxReplayBytes
+    ))
+    doAssert converted.metrics == partial.metrics
+    doAssert decodeReplay(encodeReplay(converted)) == partial
 
   echo "Testing divergent replays exit with failure"
   var corrupt = partial
@@ -110,5 +188,7 @@ proc testRecording() =
 if run.replayMode:
   doAssert run.replayData.config.players[0].name == "Dragon.BAS"
   runHeadless()
+  when not defined(recordHlf):
+    echo apmSummary()
 else:
   testRecording()

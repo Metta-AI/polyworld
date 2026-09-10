@@ -32,6 +32,8 @@ import
   test_lvd_maps,
   test_lvd_replays,
   test_lvd_sim,
+  test_metrics,
+  test_stats,
   test_nav,
   test_noises,
   test_pathing,

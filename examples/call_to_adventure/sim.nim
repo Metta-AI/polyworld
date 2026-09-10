@@ -9,7 +9,7 @@
 ## VM type on `Game` but never runs a program.
 
 import
-  polyworld/[basic, bodies, fixed, hashes, pathing, profiles, rngs, tapes,
+  polyworld/[basic, bodies, fixed, hashes, metrics, pathing, profiles, rngs, tapes,
     visions],
   content,
   maps,
@@ -29,6 +29,9 @@ type
     ## One expedition session. World is the hashable sim; everything else
     ## is tape, map, and agents.
     world*: World
+    metrics*: MatchMetrics
+    history*: MetricHistory
+    legacyStats*: bool
     dungeon*: Dungeon
     log*: seq[string]
     recorder*: ReplayRecorder
@@ -82,6 +85,7 @@ proc newWorld*(setup: Setup): World =
   ## Creates the tick-zero world. Pure: no file access, no assets, no command
   ## line. Reads the generated terrain through `maps` but never mutates it.
   result = World()
+  result.stats = newCombatStats(PartySize)
   result.setup = setup
   result.outcome = RunningOutcome
   result.phase = DescendingPhase
@@ -106,11 +110,13 @@ proc clone*(world: World): World =
   ## Deep copy. Actors are refs and must be cloned one by one.
   result = World()
   result[] = world[]
+  result.stats = world.stats.clone()
   result.actors = cloneActors(world.actors)
 
 proc restore*(world: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
   world[] = snapshot[]
+  world.stats = snapshot.stats.clone()
   world.actors = cloneActors(snapshot.actors)
 
 ## Bit maps
@@ -814,9 +820,15 @@ proc inMelee*(a, b: TileRef): bool =
     dz = abs(int32(a.z) - int32(b.z))
   dx <= 1 and dz <= 1 and dx + dz > 0
 
-proc hashWorld*(world: World): uint64 =
-  ## The digest recorded in replays. One walk of the payload.
-  uint64(hashy(world[]))
+proc hashWorld*(world: World, includeStats = true): uint64 =
+  ## Hashes authoritative fields, with the previous format for old tapes.
+  var hash = HashySeed
+  for name, value in fieldPairs(world[]):
+    when name != "stats":
+      hash.addHashy(value)
+  if includeStats:
+    hash.addHashy(world.stats)
+  uint64(hash)
 
 ## Spawning
 
@@ -922,12 +934,25 @@ proc spawnParty*(game: Game) =
   doAssert placed == PartySize, "the entrance has no room for the party"
   game.world.nextActorId = int32(100 + PartySize)
 
+proc sampleMetrics*(game: Game, force = false) =
+  ## Samples deterministic world counters and independent VM telemetry.
+  if game.metrics == nil or game.world.stats == nil:
+    return
+  for slot, values in game.world.stats.values:
+    for kind in MetricKind:
+      game.metrics.set(slot, kind, values[kind])
+    let hero = game.world.actors[slot]
+    game.metrics.set(slot, GoldMetric,
+      if hero.alive: hero.carriedValue else: 0)
+    game.metrics.set(slot, BankedMetric, game.world.bankedGold[slot])
+  game.history.capture(game.metrics, game.world.tick, force)
+
 proc newGame*(
     seed: int32,
     maximumTicks = DefaultMaximumTicks
 ): Game =
   ## Generates a dungeon, verifies it can be completed, and fills it.
-  result = Game()
+  result = Game(metrics: newMetrics(PartySize, TickRate))
   result.dungeon = generateMap(seed)
   result.dungeon.verifyDungeon()
   doAssert result.dungeon.descentPath(),
@@ -951,6 +976,7 @@ proc newGame*(
   result.populateDungeon()
   result.world.rebuildVision()
 
+  result.sampleMetrics(true)
 
 ## Queries
 
@@ -1158,6 +1184,8 @@ proc applyAbility(game: Game, slot: int32) =
           game.world.actors[slot].refreshSpeed()
     return
   if ability == HealingPotion:
+    game.world.stats.add(int(slot), HealingMetric,
+      min(80, int(actor.maxHp - actor.hp)))
     game.world.actors[slot].hp = min(
       actor.hp + 80,
       actor.maxHp
@@ -1183,6 +1211,8 @@ proc applyAbility(game: Game, slot: int32) =
     game.world.actors[slot].guardTicks = 64
     return
   if ability == NatureTalisman:
+    game.world.stats.add(int(slot), HealingMetric,
+      min(40, int(actor.maxHp - actor.hp)))
     game.world.actors[slot].hp = min(actor.hp + 40, actor.maxHp)
     game.world.actors[slot].mana = min(actor.mana + 30, actor.maxMana)
     return
@@ -1207,6 +1237,11 @@ proc applyAbility(game: Game, slot: int32) =
   game.world.rng = rng
 
   if damage < 0:
+    if actor.kind == HeroActor and
+      game.world.actors[targetSlot].kind == HeroActor:
+        game.world.stats.add(int(slot), HealingMetric,
+          min(-damage, int32(game.world.actors[targetSlot].maxHp -
+            game.world.actors[targetSlot].hp)))
     # Healing is negative damage, so one path covers both and the cleric
     # needs no special case beyond choosing an ally to aim at.
     game.world.actors[targetSlot].hp = min(
@@ -1214,6 +1249,12 @@ proc applyAbility(game: Game, slot: int32) =
       game.world.actors[targetSlot].maxHp)
     return
 
+  if actor.kind == HeroActor and
+    game.world.actors[targetSlot].kind == MonsterActor:
+      game.world.stats.add(int(slot), DamageMetric,
+        min(max(damage, 1), int32(game.world.actors[targetSlot].hp)))
+      if max(damage, 1) >= game.world.actors[targetSlot].hp:
+        game.world.stats.add(int(slot), KillsMetric)
   game.world.actors[targetSlot].hp -= int16(max(damage, 1))
   game.world.actors[targetSlot].sinceHitTicks = 0
   if game.world.actors[targetSlot].hp <= 0:
@@ -1381,6 +1422,9 @@ proc applyHeroAction*(
   if not actor.alive or actor.kind != HeroActor or actor.busy or
       actor.id != action.heroId:
     return false
+  defer:
+    if result:
+      game.metrics.command(int(slot), game.world.tick)
   case action.kind
   of ActionWalkTo:
     if action.first < 0 or action.first >= LevelCount or
@@ -1712,7 +1756,7 @@ proc partyGold*(game: Game): int32 =
 
 proc stateHash*(game: Game): uint64 =
   ## The replay digest. `World` has nothing to skip.
-  hashWorld(game.world)
+  hashWorld(game.world, not game.legacyStats)
 
 proc scores*(world: World): seq[int] =
   ## Awards shared wins to surviving returners with the most banked gold.

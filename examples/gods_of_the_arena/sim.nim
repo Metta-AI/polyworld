@@ -10,7 +10,7 @@
 
 import
   std/[strformat],
-  polyworld/[basic, bodies, fixed, hashes, noises, pathing, profiles, rngs,
+  polyworld/[basic, bodies, fixed, hashes, metrics, noises, pathing, profiles, rngs,
     tapes, visions],
   content,
   maps,
@@ -181,6 +181,7 @@ type
     z*: int
 
   World* = ref object
+    stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
     footmen*: seq[Footman]
     heroes*: seq[Hero]
@@ -208,6 +209,9 @@ type
     ## One match session. World is the hashable sim; everything else is
     ## tape, map, and agents.
     world*: World
+    metrics*: MatchMetrics
+    history*: MetricHistory
+    legacyStats*: bool
     map*: MapData
     recorder*: ReplayRecorder
     replayData*: ReplayData
@@ -453,11 +457,13 @@ proc clone*(w: World): World =
   ## Deep copy. Heroes are refs and must be cloned one by one.
   result = World()
   result[] = w[]
+  result.stats = w.stats.clone()
   result.heroes = cloneHeroes(w.heroes)
 
 proc restore*(w: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
   w[] = snapshot[]
+  w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
 
 proc buildSightTerrain(): tuple[
@@ -1636,6 +1642,7 @@ proc updateTower*(world: World, tower: var Tower) =
     world.heroes[targetHero].hp -= damage
     if wasAlive and world.heroes[targetHero].hp <= 0:
       recordHeroKill(world, tower.team, world.heroes[targetHero].team)
+      world.stats.hitHero(-1, targetHero, world.tick, TickRate, true)
 
 proc updateFootman(world: World, footman: var Footman) =
   ## Advances one footman's movement, target selection, combat, and animation.
@@ -1769,6 +1776,7 @@ proc updateFootman(world: World, footman: var Footman) =
           world.heroes[targetHero].hp -= FootmanDamage
           if wasAlive and world.heroes[targetHero].hp <= 0:
             recordHeroKill(world, footman.team, world.heroes[targetHero].team)
+            world.stats.hitHero(-1, targetHero, world.tick, TickRate, true)
         elif targetTower >= 0:
           world.towers[targetTower].hp -= FootmanDamage
         else:
@@ -1846,17 +1854,25 @@ proc applyHeroHit(
     world.footmen[targetFootman].hp -= damage
     if wasAlive and world.footmen[targetFootman].hp <= 0:
       hero.gainRewards(FootmanXpReward, FootmanGoldReward)
+      world.stats.add(heroIndex(world, hero.id), GoldMetric, FootmanGoldReward)
   elif targetHero >= 0:
     let wasAlive = world.heroes[targetHero].hp > 0
     world.heroes[targetHero].hp -= damage
+    if wasAlive:
+      world.stats.hitHero(
+        heroIndex(world, hero.id), targetHero, world.tick, TickRate,
+        world.heroes[targetHero].hp <= 0
+      )
     if wasAlive and world.heroes[targetHero].hp <= 0:
       hero.gainRewards(HeroXpReward, HeroGoldReward)
+      world.stats.add(heroIndex(world, hero.id), GoldMetric, HeroGoldReward)
       recordHeroKill(world, hero.team, world.heroes[targetHero].team)
   elif targetTower >= 0:
     let wasStanding = world.towers[targetTower].hp > 0
     world.towers[targetTower].hp -= damage
     if wasStanding and world.towers[targetTower].hp <= 0:
       hero.gainRewards(TowerXpReward, TowerGoldReward)
+      world.stats.add(heroIndex(world, hero.id), GoldMetric, TowerGoldReward)
   elif fortIndex >= 0:
     world.forts[fortIndex].hp -= damage
 
@@ -1927,21 +1943,21 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
   world.heroes[index].consumeItem(slot)
   true
 
-proc applyReplayAction(world: World, action: ReplayAction) =
+proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
   case action.kind
   of ActionWalkTo:
-    discard applyWalkTo(world, action.heroId, action.first, action.second)
+    applyWalkTo(world, action.heroId, action.first, action.second)
   of ActionAttackMove:
-    discard applyAttackMove(
+    applyAttackMove(
       world, action.heroId, action.first, action.second
     )
   of ActionAttackTarget:
-    discard applyAttackTarget(world, action.heroId, action.first)
+    applyAttackTarget(world, action.heroId, action.first)
   of ActionBuyItem:
-    discard applyBuyItem(world, action.heroId, action.first)
+    applyBuyItem(world, action.heroId, action.first)
   of ActionUseItem:
-    discard applyUseItem(world, action.heroId, action.first)
+    applyUseItem(world, action.heroId, action.first)
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
@@ -2411,6 +2427,8 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.deathTicks)
     hash.addHashy(footman.surfaceHint)
     hash.addHashy(footman.navLayer)
+  if not game.legacyStats:
+    hash.addHashy(world.stats)
   uint64(hash)
 
 proc settleSurface(position: var WorldPoint, surfaceHint: int32) =
@@ -2449,7 +2467,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       game.replayPlayer.data = game.recorder.data
     var action: ReplayAction
     while game.replayPlayer.takeActionAt(uint32(world.tick), action):
-      applyReplayAction(world, action)
+      if applyReplayAction(world, action):
+        game.metrics.command(heroIndex(world, action.heroId), world.tick)
   dec world.heroTurnTicks
   if world.heroTurnTicks <= 0:
     world.heroTurnTicks += DecisionTicks
@@ -2631,6 +2650,16 @@ proc initLanePaths(seed: int32) =
   doAssert redFountainPath.len > 0, "red fountain dais is unreachable"
   doAssert blueFountainPath.len > 0, "blue fountain dais is unreachable"
 
+proc sampleMetrics*(game: Game, force = false) =
+  ## Samples deterministic world counters and independent VM telemetry.
+  if game.metrics == nil or game.world.stats == nil:
+    return
+  for slot, values in game.world.stats.values:
+    for kind in MetricKind:
+      game.metrics.set(slot, kind, values[kind])
+    game.metrics.set(slot, LevelMetric, game.world.heroes[slot].level)
+  game.history.capture(game.metrics, game.world.tick, force)
+
 proc newGame*(
     map: MapData,
     spawnInterval: int32,
@@ -2649,6 +2678,8 @@ proc newGame*(
     ),
     map: map,
     replayMode: replayMode,
+    legacyStats: replayMode and
+      replayData.header.gameVersion == LegacyGameVersion,
     replayData: replayData
   )
   let world = result.world
@@ -2682,11 +2713,16 @@ proc newGame*(
     else:
       liveHeroSetup(botCount)
   spawnHeroes(world, heroSetup)
+  world.stats = newCombatStats(world.heroes.len)
+  result.metrics = newMetrics(world.heroes.len, TickRate)
+  for slot, hero in world.heroes:
+    world.stats.teams[slot] = hero.team.ord
   doAssert world.heroes.len == heroSetup.len, "every configured hero must spawn"
   rebuildVision(world)
   world.heroTurnStart = seededHeroTurnStart(world)
   if replayMode:
     validateReplayWorld(result)
+  result.sampleMetrics(true)
 
 proc scores*(world: World): seq[int] =
   ## Awards every hero on the victorious team one win.

@@ -42,6 +42,13 @@ const
   FpsAvgSize = vec2(168, 22)
   FpsStdSize = vec2(148, 22)
 
+type
+  SparkStyle* = enum
+    Linear, Stepped
+  SparkSample* = object
+    tick*: int32
+    value*: int64
+
 var
   hudScratch*: string
   debugMenuOpen* = false
@@ -57,6 +64,143 @@ var
   fpsNowText = "  0.00"
   fpsAvgText = "frame   0.00 ms"
   fpsStdText = "  0.00 ms std"
+
+proc sparkPoints*(
+    panel: GameUiPanel,
+    samples: openArray[SparkSample],
+    firstTick, lastTick: int32,
+    minimum, maximum: int64,
+    points: var seq[Vec2]
+) =
+  ## Maps samples into pixel buckets, retaining their ordered extrema.
+  points.setLen(0)
+  if panel.size.x <= 0 or panel.size.y <= 0:
+    return
+  let
+    duration = max(lastTick - firstTick, 1)
+    spread = max(maximum - minimum, 1)
+  var
+    bucket = -1
+    first, low, high, last: Vec2
+    lowIndex, highIndex, index: int
+  template flush() =
+    ## Emits the first point, ordered extrema, and final point per pixel.
+    if bucket >= 0:
+      points.add first
+      if lowIndex < highIndex:
+        if low != first:
+          points.add low
+        if high != low and high != first:
+          points.add high
+      else:
+        if high != first:
+          points.add high
+        if low != high and low != first:
+          points.add low
+      if points[^1] != last:
+        points.add last
+  for sample in samples:
+    if sample.tick < firstTick or sample.tick > lastTick:
+      continue
+    let
+      x = float32(sample.tick - firstTick) / float32(duration)
+      y = float32(clamp(sample.value, minimum, maximum) - minimum) /
+        float32(spread)
+      point = panel.origin + vec2(
+        x * panel.size.x,
+        (1 - y) * panel.size.y
+      )
+      next = int(x * panel.size.x)
+    if next != bucket:
+      flush()
+      bucket = next
+      first = point
+      low = point
+      high = point
+      lowIndex = index
+      highIndex = index
+    if point.y < low.y:
+      low = point
+      lowIndex = index
+    if point.y > high.y:
+      high = point
+      highIndex = index
+    last = point
+    inc index
+  flush()
+
+proc drawSparkline*(
+    sk: Silky,
+    panel: GameUiPanel,
+    samples: openArray[SparkSample],
+    firstTick, lastTick: int32,
+    minimum, maximum: int64,
+    color: ColorRGBX,
+    scratch: var seq[Vec2],
+    style = Linear,
+    thickness = 2.0'f,
+    lastRadius = 3.0'f
+) =
+  ## Draws a clipped sparkline with a circular marker on its final sample.
+  let
+    halfSize = max(min(panel.size.x, panel.size.y), 0) / 2
+    radius = min(max(lastRadius, 0), halfSize)
+    plot = GameUiPanel(
+      origin: panel.origin + vec2(radius),
+      size: max(panel.size - vec2(radius * 2), vec2(0))
+    )
+  sparkPoints(plot, samples, firstTick, lastTick, minimum, maximum, scratch)
+  if scratch.len == 0 or thickness <= 0:
+    return
+  let
+    white = sk.atlas.entries[WhiteTileKey]
+    uv = vec2(white.x.float32 + white.width.float32 / 2,
+      white.y.float32 + white.height.float32 / 2)
+    clipOrigin = max(panel.origin, sk.clipRect.xy)
+    clipEnd = min(panel.origin + panel.size, sk.clipRect.xy + sk.clipRect.wh)
+    clipSize = max(clipEnd - clipOrigin, vec2(0))
+  proc segment(first, last: Vec2) =
+    ## Expands one thick segment into two atlas-colored triangles.
+    let
+      delta = last - first
+      distance = length(delta)
+    if distance <= 0:
+      return
+    let
+      offset = vec2(-delta.y, delta.x) * (thickness / (2 * distance))
+      a = first - offset
+      b = first + offset
+      c = last + offset
+      d = last - offset
+    sk.drawTriangle(
+      [a, b, c], [uv, uv, uv], [color, color, color], clipOrigin, clipSize
+    )
+    sk.drawTriangle(
+      [a, c, d], [uv, uv, uv], [color, color, color], clipOrigin, clipSize
+    )
+  if scratch.len == 1:
+    segment(
+      scratch[0] - vec2(thickness / 2, 0),
+      scratch[0] + vec2(thickness / 2, 0)
+    )
+  for i in 1 ..< scratch.len:
+    case style
+    of Linear:
+      segment(scratch[i - 1], scratch[i])
+    of Stepped:
+      let corner = vec2(scratch[i].x, scratch[i - 1].y)
+      segment(scratch[i - 1], corner)
+      segment(corner, scratch[i])
+  if radius > 0:
+    sk.pushClipRect(rect(panel.origin, panel.size))
+    sk.drawRoundedImage(
+      WhiteTileKey,
+      scratch[^1] - vec2(radius),
+      vec2(radius * 2),
+      radius,
+      color
+    )
+    sk.popClipRect()
 
 proc addDigits(s: var string, value: int) =
   ## Appends an unsigned decimal value.

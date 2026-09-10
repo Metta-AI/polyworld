@@ -4,7 +4,7 @@
 
 import
   std/strformat,
-  polyworld/[bodies, tapes],
+  polyworld/[bodies, metrics, tapes],
   ../examples/light_vs_dark/bots,
   ../examples/light_vs_dark/content,
   ../examples/light_vs_dark/maps,
@@ -205,6 +205,20 @@ block ownershipIsEnforced:
     "Light cancelled a Dark unit's order"
   doAssert w.applyMove(DarkPlayer, darkPeon, 100, 100),
     "Dark could not command its own unit"
+
+echo "Testing only accepted RTS commands contribute to APM"
+block:
+  let game = newGame(map, MatchTicks)
+  var darkPeon = NoEntity
+  for unit in game.world.units:
+    if unit.owner == DarkPlayer:
+      darkPeon = unit.id
+      break
+  doAssert not game.applyMove(LightPlayer, darkPeon, 100, 100)
+  doAssert not game.applyCancel(LightPlayer, darkPeon)
+  doAssert game.metrics.read(LightPlayer, 0).commands == 0
+  doAssert game.applyMove(DarkPlayer, darkPeon, 100, 100)
+  doAssert game.metrics.read(DarkPlayer, 0).commands == 1
 
 echo "Testing live history seek does not skip recorded actions"
 block liveHistorySeek:
@@ -859,3 +873,30 @@ block:
   doAssert world.scores() == @[1, 0]
   world.winner = DarkPlayer
   doAssert world.scores() == @[0, 1]
+
+echo "Testing credited kills and deterministic statistics checkpoints"
+block:
+  let game = newGame(map, MatchTicks)
+  let initial = game.stateHash()
+  game.world.stats.add(0, KillsMetric)
+  doAssert game.stateHash() != initial
+  let snapshot = game.world.clone()
+  var victim = NoEntity
+  for unit in game.world.units:
+    if unit.owner == DarkPlayer:
+      victim = unit.id
+      break
+  game.world.damageEntity(victim, 100_000, LightPlayer)
+  game.world.damageEntity(victim, 100_000, LightPlayer)
+  game.sampleMetrics()
+  doAssert game.metrics.read(0, 0).values[KillsMetric] == 2
+  doAssert game.metrics.read(1, 0).values[LossesMetric] == 1
+  doAssert snapshot.stats.values[0][KillsMetric] == 1
+  game.world.restore(snapshot)
+  game.sampleMetrics()
+  doAssert game.metrics.read(0, 0).values[KillsMetric] == 1
+  for building in game.world.buildings:
+    if building.owner == DarkPlayer:
+      game.world.damageEntity(building.id, 100_000, LightPlayer)
+      break
+  doAssert game.world.stats.values[0][StructuresMetric] == 1

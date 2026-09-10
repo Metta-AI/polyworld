@@ -6,7 +6,7 @@
 
 import
   std/[math, os, strformat, strutils, times],
-  polyworld/[cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps,
   sim,
@@ -104,6 +104,7 @@ block:
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
     mapSeed = replayData.config.seed
+    options.maximumTicks = int32(replayData.hashes.len)
   var gameMap: MapData
   profileBlock "map":
     gameMap = generateMap(mapSeed)
@@ -120,6 +121,7 @@ block:
   if replayMode:
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
+    run.legacyStats = replayData.header.gameVersion == LegacyGameVersion
   else:
     loadBots(run, options.botGroups, options.playerSlot)
     run.recorder = initReplayRecorder(
@@ -138,6 +140,11 @@ proc advanceGame*() =
     flushPlayerCommands(run)
     runBotDecisions(run)
   )
+
+  run.sampleMetrics(
+    run.world.gameOver or run.world.tick >= options.maximumTicks
+  )
+  run.metrics.finishTick(run.world.tick)
 
 ## Headless reporting and replay recording.
 
@@ -192,6 +199,9 @@ proc saveRecording*(path = options.recordPath) =
   ## Finalizes and saves a requested action replay.
   if run.recorder == nil or path.len == 0:
     return
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  run.recorder.data.metrics = run.history.replayMetrics()
   saveReplay(path, run.recorder.data)
   echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"

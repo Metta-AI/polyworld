@@ -3,7 +3,7 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+  polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
   content, sim, game, controls, layouts
 
@@ -98,6 +98,53 @@ proc currentLayout*(window: Window): GameUiLayout =
     TransportHeight
   )
 
+var statsState: StatsState
+
+proc currentMetrics(slot: int, complete: bool): MetricRow =
+  ## Combines authoritative totals with live or original replay telemetry.
+  result = run.metrics.read(slot, run.world.tick, complete)
+  if run.historyPlayback:
+    result = result.withTelemetry(
+      run.history, slot, run.world.tick, complete
+    )
+  if run.replayMode:
+    result = result.withTelemetry(
+      run.replayData.metrics, slot, run.world.tick, complete
+    )
+
+proc currentStats(): StatsTable =
+  ## Adapts the actual roster and outcome to the shared table.
+  run.sampleMetrics()
+  result = StatsTable(kind: GotaStats, tick: run.world.tick,
+    complete: run.world.gameOver or run.world.tick >= run.config.maxTicks,
+    winner: if run.world.gameOver: run.world.winner.ord else: -1,
+    kills: run.world.teamHeroKills)
+  for team in [BlueTeam, RedTeam]:
+    for slot, hero in run.world.heroes:
+      if hero.team != team:
+        continue
+      result.rows.add StatsRow(
+        slot: slot,
+        name: run.config.players[slot].displayName(slot),
+        subtitle: HeroSpecs[hero.class].name,
+        portrait: HeroPortraitKeys[hero.class],
+        team: team.ord,
+        fallen: hero.state == Dying,
+        selected: not run.replayMode and options.playerSlot == slot + 1,
+        metrics: currentMetrics(slot, result.complete)
+      )
+
+proc statsContains(window: Window, mouse: Vec2): bool =
+  ## Tests the overlay before allowing input through to the existing HUD.
+  if not statsState.visible(window.tabHeld):
+    return false
+  statsState.mouseOverStats(window, currentLayout(window),
+    currentStats(), mouse)
+
+proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
+  ## Keeps covered HUD controls from receiving an overlay click.
+  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
+
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
@@ -108,7 +155,7 @@ proc mouseOverUi*(
     primaryId = 0'i32
 ): bool =
   ## Returns whether the pointer is over a visible game UI panel.
-  if mouseOverDebugMenu(mouse):
+  if window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   if primaryId == 0:
@@ -360,6 +407,9 @@ proc updateMinimapCamera*(
     followSelection: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
+  if window.statsContains(mouse):
+    minimapPanning = false
+    return
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
@@ -478,7 +528,7 @@ proc drawHeroPortrait(
     selected = picked,
     iconSize = IconSmall
   )
-  if window.clicked(sk, portrait):
+  if window.hudClicked(sk, portrait):
     actionCam.takeManual()
     selectHeroCard(
       primaryId,
@@ -590,6 +640,8 @@ proc drawUi*(
     focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  let table = currentStats()
+  statsState.sync(table.complete)
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
@@ -747,7 +799,7 @@ proc drawUi*(
         of SelectedHero:
           "champion"
       sk.drawWellImage(portrait, glyph, teamColor, iconSize = IconLarge)
-    if window.clicked(sk, portrait) and
+    if window.hudClicked(sk, portrait) and
         selection.kind == SelectedHero and
         options.playerSlot > 0 and
         not run.replayMode and
@@ -787,7 +839,7 @@ proc drawUi*(
       0'i32
   if playerHero:
     let title = inventory.title
-    if window.clicked(sk, title):
+    if window.hudClicked(sk, title):
       shopOpen = not shopOpen
   if playerHero and shopOpen:
     var
@@ -803,7 +855,7 @@ proc drawUi*(
       let
         slotPanel = shopSlots[index]
       sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = ShopIcon)
-      if window.clicked(sk, slotPanel):
+      if window.hudClicked(sk, slotPanel):
         queueBuyItem(playerHeroId, int32(item.ord))
       inc index
   else:
@@ -816,7 +868,7 @@ proc drawUi*(
         sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
       else:
         sk.drawSlot(slotPanel)
-      if playerHero and window.clicked(sk, slotPanel):
+      if playerHero and window.hudClicked(sk, slotPanel):
         queueUseItem(playerHeroId, int32(slot))
 
   if selection != nil:
@@ -969,6 +1021,11 @@ proc drawUi*(
     window,
     chrome.layout.transportPanel,
     actionCam,
-    followSelection
+    followSelection,
+    addr statsState.toggled
   )
   sk.drawDebugMenu(window)
+  sk.drawStats(
+    window, chrome.layout, statsState, table,
+    run.history
+  )
