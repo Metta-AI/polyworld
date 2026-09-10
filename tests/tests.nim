@@ -2,6 +2,7 @@
 
 {.warning[UnusedImport]: off.}
 import
+  test_assetpacks,
   test_actioncam,
   test_basic,
   test_bodies,

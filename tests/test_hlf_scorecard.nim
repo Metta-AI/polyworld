@@ -1,6 +1,6 @@
 import
   std/times,
-  vmath, pixie, polyworld/[player, chrome, viewers, tapes],
+  vmath, pixie, polyworld/[assets, player, chrome, tapes],
   ../examples/heartleaf/[content, maps, sim, scorecard, seeking, replays]
 
 let gameMap = generateMap(DefaultSeed)

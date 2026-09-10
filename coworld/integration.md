@@ -29,10 +29,11 @@ revisions plus optional Mummy. Run
 `nim r coworld/tools/sync_dependencies.nim --latest` to resolve upstream HEADs and
 update both locks. Ordinary builds never update revisions implicitly.
 The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_DATA`
-can point at a checkout of that revision. Per-game `webdata.txt` files include only
-selected models, their referenced textures, and the assets loaded by each renderer.
-Run `nim r coworld/tools/select_assets.nim` after changing those dependencies or
-asset references.
+can point at a checkout of that revision. Each game's `assets.nim` declarations
+select its browser models, textures, and UI files. Emscripten builds automatically
+run that game's native packer and preload its clean staging directory. Generated
+manifests and byte reports live in `tmp/webassets/<game>-ktx2/`. See
+[browser assets](../docs/browser_assets.md) for the formats and validation commands.
 
 ## Runtime
 

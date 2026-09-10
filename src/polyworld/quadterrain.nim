@@ -9,7 +9,8 @@
 import
   std/[random, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, pixie/internal, shady, vmath,
-  common, pathing, shadows, terrainblends, terrainmaps, terrainsurfaces, toon
+  assets, common, pathing, shadows, terrainblends, terrainmaps,
+  terrainsurfaces, textures, toon
 
 ## Shaders
 ##
@@ -973,13 +974,6 @@ type
     summerLayers: seq[int]  # tree texture array layers this mesh can wear:
     autumnLayers: seq[int]  # greens only, or greens plus reds and yellows
 
-  TreeStyle* = enum
-    MixedTrees, EvergreenTrees, DenseTrees
-  TerrainStyle* = enum
-    CartoonTerrain, GeneratedTerrain
-  RockStyle* = enum
-    LowPolyRocks, PaintedRocks
-
 var
   treeModels: seq[TreeModel]   # trees; occupy a tile and block it
   grassModels: seq[PropModel]  # grass puffs; walkable decoration
@@ -1182,15 +1176,6 @@ proc brighten(models: var seq[PropModel], factor: float32) =
 ## all the paintings and each planted tree picks a layer.
 
 const
-  TreeTextures = [
-    "fir",                                                       # 0
-    "birch_simple_01", "birch_simple_02", "birch_simple_03",     # 1..4
-    "birch_simple_04", "oak_simple_01", "oak_simple_02",         # ..6
-    "birch_double_01", "birch_double_02", "birch_double_03",     # 7..10
-    "birch_double_04", "oak_double_01", "oak_double_02",         # ..12
-  ]
-    ## Leafy paintings: 01 light green, 02 dark green, 03 red, 04 yellow
-    ## (birch); 01 light green, 02 dark green (oak).
   TreeAlphaCutoff = 0.5'f32
 
 proc collectTreeMesh(
@@ -1293,13 +1278,13 @@ proc coverage(image: Image): float32 =
       inc passing
   passing.float32 / image.data.len.float32
 
-proc loadTreeTextures(): seq[seq[Image]] =
+proc loadTreeTextures(style: TreeStyle): seq[seq[Image]] =
   ## Coverage-preserving mip chains. Box filtering thin leaf shapes into
   ## their transparent surroundings drags alpha under the cutoff, so plain
   ## mips shed leaves level by level and distant trees go bald. Each level
   ## instead gets its alpha rescaled until the same fraction of texels
   ## passes the cutout as at full resolution.
-  for name in TreeTextures:
+  for name in treeTextures(style):
     let chain = mipChain(readImage(&"{DataRoot}/terrain/handpainted_trees/{name}.png"))
     let target = coverage(chain[0])
     for level, mip in chain:
@@ -1361,7 +1346,7 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
 
 proc loadPropPack*(
-    path: string, unitHeight = true, brightness = 1.0'f32,
+    paths: openArray[string], unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false
 ): PropPack =
   ## Loads named glTF props, scaled to unit height unless disabled.
@@ -1370,9 +1355,10 @@ proc loadPropPack*(
   ## Textured packs require a current GL context.
   result = PropPack()
   var images: seq[Image]
-  collectPropModels(
-    readGltfFile(path).root, mat4(), result.models, only = only,
-    images = if textured: images.addr else: nil)
+  for path in paths:
+    collectPropModels(
+      readGltfFile(path).root, mat4(), result.models, only = only,
+      images = if textured: images.addr else: nil)
   if textured and images.len > 0:
     var size = 1
     for image in images:
@@ -1397,6 +1383,13 @@ proc loadPropPack*(
     result.models.brighten(brightness)
   for i, model in result.models:
     result.names[model.name] = i
+
+proc loadPropPack*(
+    path: string, unitHeight = true, brightness = 1.0'f,
+    only: seq[string] = @[], textured = false, repeatTexture = false
+): PropPack =
+  ## Loads an original single-file prop pack through the shared collector.
+  loadPropPack(@[path], unitHeight, brightness, only, textured, repeatTexture)
 
 proc hasProp*(pack: PropPack, name: string): bool =
   ## Returns whether a pack contains a model with the requested node name.
@@ -1700,17 +1693,6 @@ const
   TerrainTextureSize = 1024
   GeneratedTextureSize = 256
   TerrainVertexSize = 21
-  WaterNormalTextures = ["water_1_normal", "water_2_normal"]
-  TerrainMaterials = [
-    "grass",
-    "sand",
-    "cliff",
-    "marsh",
-    "stone",
-    "dirt",
-    "volcanic",
-    "underwater"
-  ]
   GrassMaterial* = 0.0'f32
   SandMaterial* = 1.0'f32
   CliffMaterial* = 2.0'f32
@@ -1751,6 +1733,11 @@ type TileMaterial* = object
   blendPriority*: int32
 
 # Tile material index: texture layers, tints, and blending priority by kind.
+var
+  terrainMaterialSize = TerrainTextureSize
+  terrainMaterialPaths: seq[string]
+  terrainMaterialCompressed = false
+
 var tileMaterialTable* = @[
   TileMaterial(
     top: vec3(1),
@@ -1836,19 +1823,19 @@ proc averageColor(image: Image): Vec3 =
   vec3(sums[0].float32, sums[1].float32, sums[2].float32) /
     sums[3].float32
 
-proc loadTerrainMaterials(): seq[seq[Image]] =
+proc loadTerrainMaterials(settings: TerrainAssets): seq[seq[Image]] =
   ## Each material's basecolor with its height map packed into alpha. The
   ## alpha isn't coverage here, so mips must not premultiply by it: build
   ## the chain from the opaque color and re-pack height per level.
   terrainAverageColors.setLen(0)
-  for name in TerrainMaterials:
+  for name in settings.materials:
     let
       colors = mipChain(readImage(
         &"{DataRoot}/terrain/cartoon_textures/{name}_color.png"))
       heights = mipChain(readImage(
         &"{DataRoot}/terrain/cartoon_textures/{name}_height.png"))
-    if colors[0].width != TerrainTextureSize or
-        colors[0].height != TerrainTextureSize or
+    if colors[0].width != settings.size or
+        colors[0].height != settings.size or
         heights.len != colors.len:
       raise newException(
         QuadTerrainError,
@@ -2000,7 +1987,7 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
       if generatedTerrain:
         GeneratedTextureSize
       else:
-        TerrainTextureSize
+        terrainMaterialSize
   if index < 0 or index >= materialCount:
     raise newException(
       QuadTerrainError,
@@ -2013,6 +2000,11 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
       QuadTerrainError,
       "terrain material replacement has the wrong dimensions"
     )
+  if terrainMaterialCompressed:
+    let replacement = loadTerrainTextures(terrainMaterialPaths, forceRgba = true)
+    glDeleteTextures(1, terrainTextureArray.addr)
+    terrainTextureArray = replacement.texture
+    terrainMaterialCompressed = false
   let
     colors = mipChain(color)
     heights = mipChain(height)
@@ -2020,6 +2012,8 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
   for level in 0 ..< colors.len:
     let mip = colors[level]
+    if terrainMaterialPaths.len > 0 and mip.width < 4:
+      break
     for i in 0 ..< mip.data.len:
       mip.data[i].a = heights[level].data[i].r
     glTexSubImage3D(
@@ -3101,13 +3095,17 @@ proc initTerrain*(
   treeStyle: TreeStyle = MixedTrees,
   terrainStyle: TerrainStyle = CartoonTerrain,
   rockStyle: RockStyle = LowPolyRocks,
-  extraTiles: openArray[string] = []
+  extraTiles: openArray[string] = [],
+  settings = DefaultTerrainAssets
 ) =
   ## Initializes rendering with a current GL context, once before bakeTerrain.
   ## Extra generated tile names append after SurfaceNames without splat stamps.
   ## Assets load from ../polyworld_data/terrain/ relative to the repo root.
   if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
     raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
+  terrainMaterialSize = settings.size
+  terrainMaterialPaths.setLen(0)
+  terrainMaterialCompressed = false
   initSunShadows()
   generatedTerrain = terrainStyle == GeneratedTerrain
   if generatedTerrain:
@@ -3185,17 +3183,31 @@ proc initTerrain*(
     splatColorArray = buildTextureArray(stamps.colors, GL_CLAMP_TO_EDGE.GLint)
     splatHeightArray = buildTextureArray(stamps.heights, GL_CLAMP_TO_EDGE.GLint)
   else:
-    terrainTextureArray = buildTextureArray(
-      loadTerrainMaterials(), GL_REPEAT.GLint
-    )
+    if settings.compressed:
+      for name in settings.materials:
+        terrainMaterialPaths.add DataRoot & "/terrain/cartoon_textures/" &
+          name & ".ktx2"
+      let loaded = loadTerrainTextures(terrainMaterialPaths)
+      terrainTextureArray = loaded.texture
+      terrainMaterialCompressed = loaded.compressed
+      # Cartoon terrain does not use the generated-terrain color classifier.
+      terrainAverageColors = newSeq[Vec3](settings.materials.len)
+    else:
+      terrainTextureArray = buildTextureArray(
+        loadTerrainMaterials(settings), GL_REPEAT.GLint
+      )
     let placeholder = @[@[newImage(1, 1)]]
     splatColorArray = buildTextureArray(placeholder, GL_CLAMP_TO_EDGE.GLint)
     splatHeightArray = buildTextureArray(placeholder, GL_CLAMP_TO_EDGE.GLint)
   let empty = @[0.0'f, 0.0'f, 0.0'f, 0.0'f]
   splatDimensions = uploadTerrainData(splatDataTexture, empty)
   blendDimensions = uploadTerrainData(blendDataTexture, empty)
-  treeTextureArray = buildTextureArray(loadTreeTextures(), GL_CLAMP_TO_EDGE.GLint)
-  waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
+  if treeStyle != NoTrees:
+    treeTextureArray = buildTextureArray(
+      loadTreeTextures(treeStyle), GL_CLAMP_TO_EDGE.GLint
+    )
+  if settings.water:
+    waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
   glGenTextures(1, visibilityTexture.addr)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glTexImage2D(
@@ -3536,6 +3548,8 @@ proc initTerrain*(
   # tall old-growth fir with a small crown, planted sparingly; the pack's
   # fir 04 is a bare snag and is left out of the forest entirely.
   case treeStyle
+  of NoTrees:
+    discard
   of MixedTrees:
     treeModels.add loadTreeModel("tree_fir_01", 25, @[0], @[0])
     treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
@@ -3554,10 +3568,12 @@ proc initTerrain*(
     treeModels.add loadTreeModel("tree_fir_01", 25, @[0], @[0])
     treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
   treeModels.scaleTrees(8.4)
-  collectPropModels(
-    readGltfFile(DataRoot & "/terrain/low_poly_grass.glb").root, mat4(), grassModels)
-  grassModels.scalePack(0.7)
+  if settings.grass:
+    collectPropModels(readGltfFile(GrassPath).root, mat4(), grassModels)
+    grassModels.scalePack(0.7)
   case rockStyle
+  of NoRocks:
+    discard
   of LowPolyRocks:
     collectPropModels(
       readGltfFile(DataRoot & "/terrain/low_poly_rocks.glb").root,
@@ -3567,12 +3583,16 @@ proc initTerrain*(
     rockModels.normalizeModels()
     rockModels.brighten(2.4)
   of PaintedRocks:
-    let pack = loadPropPack(
-      DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
-      only = @["rock_large_02a", "rock_medium_01a"],
-      textured = true,
-      repeatTexture = true
-    )
+    let
+      paths =
+        if settings.splitProps: propPaths(PaintedRockPath, PaintedRockNames)
+        else: @[PaintedRockPath]
+      pack = loadPropPack(
+        paths,
+        only = @PaintedRockNames,
+        textured = true,
+        repeatTexture = true
+      )
     rockModels = pack.models
     rockScaleRange = vec2(1.1, 1.1) * 0.75'f
     rockBurial = 0.43'f

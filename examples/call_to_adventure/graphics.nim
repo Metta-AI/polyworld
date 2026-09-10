@@ -10,18 +10,17 @@
 import
   std/[math, tables, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, characters, clickmarks, common, fixed, inputs, particles,
-    particleshaders,
+  polyworld/[actioncam, assets, characters, clickmarks, common, fixed, inputs,
+    particles, particleshaders,
     chrome, pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, shapes, tapes, viewers, visions, worldbars, worldtexts],
-  content, maps, sim, game, replays, ui, controls
+  assets, content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
   import std/[os, strutils]
 
 const
   AtlasPath = TmpRoot & "/cta.atlas.png"
-  LogoPath = DataRoot & "/themes/cta/cta_logo.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10
   PathLift = 0.2'f32
@@ -30,13 +29,6 @@ const
   FacingOffset = 0.4'f32
   FacingLength = 0.45'f32
   FacingHalfWidth = 0.18'f32
-  # Rendered by tools/profile_glb.nim from the same presets the heroes wear.
-  HeroPortraitPaths: array[HeroClass, string] = [
-    DataRoot & "/characters/modular_chars/character.preset_5.profile.png",
-    DataRoot & "/characters/modular_chars/character.preset_18.profile.png",
-    DataRoot & "/characters/modular_chars/character.preset_11.profile.png",
-    DataRoot & "/characters/modular_chars/character.preset_9.profile.png"
-  ]
 
 type
   HeroVisual = object
@@ -249,7 +241,10 @@ proc runGraphics*() =
   # readable instead of clipping the deep ones to black.
   profileBlock "terrain":
     amplitude = 48.0
-    initTerrain()
+    when defined(emscripten):
+      initTerrain(NoTrees, rockStyle = NoRocks, settings = CtaWebTerrainAssets)
+    else:
+      initTerrain()
     bakeTerrain(rebuildWalkability = false)
 
   let scene = newCharacterScene(window)
@@ -276,29 +271,21 @@ proc runGraphics*() =
       monsterModels[species] = loadCharacterModel(SpeciesModels[species], 1.6)
   drawSplash(sk, window, splash.name)
 
-  proc clipFor(model: CharacterModel, names: varargs[string]): int =
-    ## Clip names differ across the model packs, so ask for the first one
-    ## this model actually has and fall back to whatever exists.
-    for name in names:
-      if model.clips.hasKey(name):
-        return model.clipIndex(name)
-    0
-
   var
     heroIdle, heroRun, heroAttack: array[HeroClass, int]
     monsterIdle, monsterRun, monsterAttack: array[Species, int]
   for class in HeroClass:
     let model = heroModels[class]
-    heroIdle[class] = clipFor(model, "Idle", "Idle_Battle", "Idle01")
-    heroRun[class] = clipFor(
-      model, "Run", "RunForwardBattle", "BattleRunForward",
-      "MoveFWD_Battle", "Walk")
-    heroAttack[class] = clipFor(model, "Attack01", "NormalAttack01")
+    heroIdle[class] = model.clipIndex(HeroClips[0])
+    heroRun[class] = model.clipIndex(HeroClips[1])
+    heroAttack[class] = model.clipIndex(HeroClips[2])
   for species in Species:
-    let model = monsterModels[species]
-    monsterIdle[species] = clipFor(model, "Idle", "Idle_Battle")
-    monsterRun[species] = clipFor(model, "Run", "Walk")
-    monsterAttack[species] = clipFor(model, "Attack01")
+    let
+      model = monsterModels[species]
+      clips = speciesClips(species)
+    monsterIdle[species] = model.clipIndex(clips[0])
+    monsterRun[species] = model.clipIndex(clips[1])
+    monsterAttack[species] = model.clipIndex(clips[2])
 
   var
     visuals: seq[HeroVisual]
