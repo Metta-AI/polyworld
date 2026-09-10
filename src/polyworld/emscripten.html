@@ -33,6 +33,14 @@
       #loading[hidden] { display: none; }
       #loading.error { color: #ffb4a9; }
       #loading p { margin: 0 0 12px; }
+      #loading-logo {
+        width: min(320px, 70vw);
+        height: auto;
+        max-height: 40vh;
+        object-fit: contain;
+        justify-self: center;
+        margin: 0 auto 24px;
+      }
       #loading-detail {
         max-width: 320px;
         color: #aaa;
@@ -50,6 +58,7 @@
   <body>
     <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
     <div id="loading" role="status" aria-live="polite">
+      <!-- GAME_LOGO -->
       <p id="loading-title">Loading game…</p>
       <progress id="loading-progress" aria-label="Game asset download"></progress>
       <p id="loading-detail">Connecting…</p>

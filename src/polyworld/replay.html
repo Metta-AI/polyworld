@@ -7,15 +7,21 @@
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10131a;color:#eef;font:16px system-ui}
 canvas{display:block;width:100%;height:100%;outline:none}
-#status{position:absolute;inset:0;display:grid;place-content:center;padding:32px;background:#10131a;white-space:pre-wrap}
+#status{position:absolute;inset:0;display:grid;place-content:center;padding:32px;background:#10131a;text-align:center}
 #status[hidden]{display:none} #status.error{background:#351d25}
+#loading-logo{width:min(320px,70vw);height:auto;max-height:40vh;object-fit:contain;justify-self:center;margin:0 auto 24px}
+#status-detail{margin:0;max-width:480px;white-space:pre-wrap;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
 <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
-<div id="status" role="status">Loading replay viewer…</div>
+<div id="status" role="status">
+<!-- GAME_LOGO -->
+<p id="status-detail">Loading replay viewer…</p>
+</div>
 <script>
 const statusElement = document.getElementById('status');
+const statusDetail = document.getElementById('status-detail');
 let failed = false, ready = false;
 function message(type, extra = {}) {
   if (window.parent !== window) window.parent.postMessage({src:'coworld-replay', type, ...extra}, '*');
@@ -26,7 +32,7 @@ function fail(reason) {
   const detail = String(reason?.message || reason);
   statusElement.hidden = false;
   statusElement.className = 'error';
-  statusElement.textContent = 'Unable to play this replay.\n' + detail;
+  statusDetail.textContent = 'Unable to play this replay.\n' + detail;
   message('error', {message: detail});
 }
 message('loading');
