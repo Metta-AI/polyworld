@@ -1,3 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$(dirname "${BASH_SOURCE[0]}")/../../tools/build_replay_viewer.sh" light_vs_dark lvd "$1"
+tool_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../tools" && pwd)"
+exec nim r --hints:off --out:"$tool_dir/build_replay_viewer_lvd" \
+  --nimcache:"$tool_dir/../../tmp/coworld/tool-cache/lvd" \
+  "$tool_dir/build_replay_viewer.nim" lvd "$1"

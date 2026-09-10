@@ -17,7 +17,7 @@ revision includes James Boggs's merged game-hosted file-player workflow. Use a
 separate Metta checkout so an existing development checkout stays intact.
 
 ```sh
-python3 coworld/tools/sync_dependencies.py
+nim r coworld/tools/sync_dependencies.nim
 export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
 coworld build --project coworld/gota --version 2026.9.9.3
 coworld build --project coworld/lvd --version 2026.9.9.3
@@ -25,12 +25,14 @@ coworld build --project coworld/cta --version 2026.9.9.3
 ```
 
 `nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
-revisions plus optional Mummy. `sync_dependencies.py --latest` resolves upstream
-HEADs and updates both locks; ordinary builds never update revisions implicitly.
+revisions plus optional Mummy. Run
+`nim r coworld/tools/sync_dependencies.nim --latest` to resolve upstream HEADs and
+update both locks. Ordinary builds never update revisions implicitly.
 The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_DATA`
 can point at a checkout of that revision. Per-game `webdata.txt` files include only
 selected models, their referenced textures, and the assets loaded by each renderer.
-Run `select_assets.py` after changing those dependencies or asset references.
+Run `nim r coworld/tools/select_assets.nim` after changing those dependencies or
+asset references.
 
 ## Runtime
 
@@ -54,16 +56,20 @@ return HTTP 501. No player artifact ZIP is produced.
 
 ## Verification
 
-`tools/verify_native.sh` checks all desktop, headless and Coworld entrypoints,
-recording regression tests, and full replay verification. First record full matches
-into `tmp/coworld/{gota,lvd,cta}.replay` with the ordinary headless binaries and
+`nim r coworld/tools/verify_native.nim` checks all desktop, headless and Coworld
+entrypoints, recording regression tests, and full replay verification. First record
+full matches into `tmp/coworld/{gota,lvd,cta}.replay` with the headless binaries and
 `--record PATH`. Run `nim r coworld/tools/test_runtime.nim` from the repository root.
 It uses the binaries in `tmp/coworld` to check
 extensionless and empty sources, slot-specific print output, compilation failure,
 disabled VMs, health/Ping/Pong, completion ordering and the 10 MiB log bound.
 
-Serve the repository over HTTP to run `tools/test_browser.py`. It checks actual
-WASM rendering and full replay hashes, seeking, speed, iframe resizing, readiness,
+`nim r coworld/tools/test_tools.nim` checks concurrent build subprocesses,
+working-directory restoration, and failure logs.
+
+Serve the repository over HTTP to run
+`python3 coworld/tools/test_browser_with_playwright.py`. It checks actual WASM
+rendering and full replay hashes, seeking, speed, iframe resizing, readiness,
 and visible errors. It supports a host Chrome executable or container Chromium for
 ARM and x86 coverage. `tools/replay_probe.html` captures the Softmax iframe protocol.
 

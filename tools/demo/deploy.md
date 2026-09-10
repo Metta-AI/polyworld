@@ -11,7 +11,7 @@ export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
 nim c -d:emscripten examples/gods_of_the_arena/gota.nim
 nim c -d:emscripten examples/light_vs_dark/lvd.nim
 nim c -d:emscripten examples/call_to_adventure/cta.nim
-python3 tools/demo/package.py tmp/polyworld-site --release UNIQUE_RELEASE
+nim r tools/demo/package.nim tmp/polyworld-site --release UNIQUE_RELEASE
 ```
 
 The output contains `demo/index.html` and a versioned `releases/UNIQUE_RELEASE`
