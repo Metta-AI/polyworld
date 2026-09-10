@@ -34,6 +34,7 @@ proc package(destination, release: string) =
       let filename = game.name & "." & extension
       copyFile(bundle / filename, target / filename)
     writeFile(target / (game.name & ".js"), javascript)
+    copyFile(bundle / "loading-logo.png", target / "loading-logo.png")
     copyFile(source / "players/base.bas", target / "base.bas")
     let
       oldUrl = "../../examples/" & game.directory & "/emscripten/" &

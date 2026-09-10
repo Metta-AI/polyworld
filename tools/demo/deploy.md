@@ -15,10 +15,10 @@ nim r tools/demo/package.nim tmp/polyworld-site --release UNIQUE_RELEASE
 ```
 
 The output contains `demo/index.html` and a versioned `releases/UNIQUE_RELEASE`
-directory. Each game has its HTML, JavaScript, WASM, asset bundle, and unchanged
-`base.bas`. The page uses relative URLs and seats 10 GotA bots, 2 LvD bots, and
-4 CtA bots. Each iframe can also run as a standalone page. No game server or
-connection to the developer's machine is needed.
+directory. Each game has its HTML, JavaScript, WASM, asset bundle, loading logo
+PNG, and unchanged `base.bas`. The page uses relative URLs and seats 10 GotA bots,
+2 LvD bots, and 4 CtA bots. Each iframe can also run as a standalone page. No game
+server or connection to the developer's machine is needed.
 
 Looping starts enabled. Each game runs its live bots for the first match, then
 replays that recorded match continuously. The transport's loop button can turn
@@ -36,7 +36,7 @@ release directories so already-open pages can finish loading their assets.
 Generated bundles and upload staging belong in the ignored `tmp/` directory.
 
 The existing `/etc/nginx/conf.d/softmaxdash.conf` serves `/polyworld/` directly
-from `/var/www`, with gzip sidecars, WASM MIME types, and cache revalidation.
+from `/var/www`, with gzip sidecars, WASM and PNG MIME types, and cache revalidation.
 `/polyworld/demo` redirects to `/polyworld/demo/`. Tailscale provides HTTPS to
 nginx on `127.0.0.1:8080`; the other dashboard routes retain their proxy to
 `127.0.0.1:8930`. Validate changes with `sudo nginx -t` before reloading nginx.

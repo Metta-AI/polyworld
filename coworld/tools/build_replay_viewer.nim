@@ -53,5 +53,6 @@ proc main() =
   for suffix in ["js", "wasm", "data"]:
     copyFile(source / (game & "." & suffix), output / (game & "." & suffix))
   copyFile(source / (game & ".html"), output / "index.html")
+  copyFile(source / "loading-logo.png", output / "loading-logo.png")
 
 runTool(main)
