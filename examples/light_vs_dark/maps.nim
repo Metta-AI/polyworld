@@ -147,9 +147,11 @@ proc canonicalCorner(cx, cz: int): (int, int) =
 
 ## Generation
 
-proc generateMap*(seed: int32): MapData {.measure.} =
+proc generateOnce(seed: int32): MapData {.measure.} =
   ## Builds the terrain layers for one seed and returns the derived map data.
   ## Writes the shared `pathing.layers` and refreshes walkability once.
+  ## Noise decides the terrain, so the result is not always playable: callers
+  ## go through `generateMap`, which is the one that guarantees a sound map.
 
   proc ground(cx, cz: int): int32 =
     ## Layered value noise, evaluated at the canonical corner.
@@ -697,8 +699,11 @@ proc fordWidth(map: MapData, cornerX, cornerZ: int): int =
     if not map.blockedForSetup(x, y):
       inc result
 
-proc validateMap*(map: MapData) =
-  ## Asserts that a generated map is symmetric, connected, and playable.
+proc mapProblem*(map: MapData): string =
+  ## The first reason this map cannot be played, or an empty string when it is
+  ## symmetric, connected and playable. Checked in order and returning at the
+  ## first fault, because the later checks read tiles the earlier ones prove
+  ## are on the grid.
   let seed = map.seed
 
   for y in 0 ..< GridSide:
@@ -707,56 +712,59 @@ proc validateMap*(map: MapData) =
         (mirrorX, mirrorY) = mirrorTile(x, y)
         index = tileIndex(x, y)
         mirrorIndex = tileIndex(mirrorX, mirrorY)
-      doAssert map.passable[index] == map.passable[mirrorIndex],
-        &"seed {seed}: walkability is asymmetric at ({x},{y})"
-      doAssert map.kinds[index] == map.kinds[mirrorIndex],
-        &"seed {seed}: tile kind is asymmetric at ({x},{y})"
-      doAssert map.heights[index] == map.heights[mirrorIndex],
-        &"seed {seed}: mean height is asymmetric at ({x},{y})"
-      doAssert map.treeWood[index] == map.treeWood[mirrorIndex],
-        &"seed {seed}: wood is asymmetric at ({x},{y})"
+      if map.passable[index] != map.passable[mirrorIndex]:
+        return &"seed {seed}: walkability is asymmetric at ({x},{y})"
+      if map.kinds[index] != map.kinds[mirrorIndex]:
+        return &"seed {seed}: tile kind is asymmetric at ({x},{y})"
+      if map.heights[index] != map.heights[mirrorIndex]:
+        return &"seed {seed}: mean height is asymmetric at ({x},{y})"
+      if map.treeWood[index] != map.treeWood[mirrorIndex]:
+        return &"seed {seed}: wood is asymmetric at ({x},{y})"
       ## A 180 degree rotation swaps corner 0 with 3 and 1 with 2.
       let
         tops = layers[0].tiles[index].tops
         mirrorTops = layers[0].tiles[mirrorIndex].tops
       for i in 0 .. 3:
-        doAssert tops[i] == mirrorTops[3 - i],
-          &"seed {seed}: terrain height is asymmetric at ({x},{y})"
+        if tops[i] != mirrorTops[3 - i]:
+          return &"seed {seed}: terrain height is asymmetric at ({x},{y})"
 
-  doAssert map.mines.len == PlayerCount * 3,
-    &"seed {seed}: expected three mines per player"
+  if map.mines.len != PlayerCount * 3:
+    return &"seed {seed}: expected three mines per player"
 
   var seenIds: seq[int32]
   for mine in map.mines:
-    doAssert mine.id.isMineId, &"seed {seed}: mine {mine.id} is out of range"
-    doAssert mine.id notin seenIds, &"seed {seed}: duplicate mine {mine.id}"
+    if not mine.id.isMineId:
+      return &"seed {seed}: mine {mine.id} is out of range"
+    if mine.id in seenIds:
+      return &"seed {seed}: duplicate mine {mine.id}"
     seenIds.add mine.id
-    doAssert mine.gold > 0, &"seed {seed}: mine {mine.id} holds no gold"
+    if mine.gold <= 0:
+      return &"seed {seed}: mine {mine.id} holds no gold"
 
   for player in 0 ..< PlayerCount:
     let
       hall = map.hallOrigin[player]
       spawnTiles = map.freeTilesAround(hall, HallFootprint, 2)
-    doAssert spawnTiles >= MinimumSpawnTiles,
-      &"seed {seed}: player {player} has only {spawnTiles} tiles to spawn " &
-      &"peons around its hall"
+    if spawnTiles < MinimumSpawnTiles:
+      return &"seed {seed}: player {player} has only {spawnTiles} tiles to " &
+        &"spawn peons around its hall"
 
   let
     lightStart = map.anyOpenNeighbour(map.hallOrigin[LightPlayer],
       HallFootprint)
     darkStart = map.anyOpenNeighbour(map.hallOrigin[DarkPlayer], HallFootprint)
-  doAssert inGrid(lightStart) and inGrid(darkStart),
-    &"seed {seed}: a town hall is completely walled in"
+  if not (inGrid(lightStart) and inGrid(darkStart)):
+    return &"seed {seed}: a town hall is completely walled in"
 
   let reached = map.floodFrom(lightStart)
-  doAssert reached[tileIndex(darkStart)] == 1,
-    &"seed {seed}: the two bases cannot reach each other"
+  if reached[tileIndex(darkStart)] != 1:
+    return &"seed {seed}: the two bases cannot reach each other"
   for mine in map.mines:
     let approach = map.anyOpenNeighbour(mine.origin, MineFootprint)
-    doAssert inGrid(approach),
-      &"seed {seed}: mine {mine.id} is completely walled in"
-    doAssert reached[tileIndex(approach)] == 1,
-      &"seed {seed}: mine {mine.id} is unreachable"
+    if not inGrid(approach):
+      return &"seed {seed}: mine {mine.id} is completely walled in"
+    if reached[tileIndex(approach)] != 1:
+      return &"seed {seed}: mine {mine.id} is unreachable"
 
   for player in 0 ..< PlayerCount:
     var grove = 0
@@ -766,10 +774,51 @@ proc validateMap*(map: MapData) =
         if map.treeWood[tileIndex(x, y)] > 0 and
             chebyshev(tile2(x, y), centre) <= GroveOuterRing + 4:
           inc grove
-    doAssert grove >= MinimumGroveTiles,
-      &"seed {seed}: player {player} has only {grove} nearby tree tiles"
+    if grove < MinimumGroveTiles:
+      return &"seed {seed}: player {player} has only {grove} nearby tree tiles"
 
   for index, (fordX, fordZ) in FordCorners:
     let width = map.fordWidth(fordX, fordZ)
-    doAssert width >= MinimumFordWidth,
-      &"seed {seed}: ford {index} at ({fordX},{fordZ}) closed up to {width}"
+    if width < MinimumFordWidth:
+      return &"seed {seed}: ford {index} at ({fordX},{fordZ}) closed up to " &
+        &"{width}"
+
+proc validateMap*(map: MapData) =
+  ## Asserts that a generated map is symmetric, connected, and playable.
+  ## `generateMap` never returns a map that fails this, so a failure here
+  ## means something rewrote the map after it was generated.
+  let problem = map.mapProblem()
+  doAssert problem.len == 0, problem
+
+## Rejection and retry
+
+const MapAttempts = 32
+  ## How many seeds one request may burn before the generator gives up.
+  ## About one map in three hundred comes out unplayable, so two rejections in
+  ## a row is already a freak event: this bound exists to make the loop
+  ## terminate, not because the generator is expected to approach it.
+
+proc nextMapSeed(seed: int32): int32 =
+  ## The seed a rejected map hands to its replacement. A full period generator,
+  ## so a request cannot cycle back onto a seed it already rejected, and the
+  ## substitution is a pure function of the seed: the server, a replay and a
+  ## local run all land on the same map.
+  int32((uint32(seed) * 1664525'u32 + 1013904223'u32) and 0x7FFF_FFFF'u32)
+
+proc generateMap*(seed: int32): MapData =
+  ## Builds a playable map for one seed.
+  ##
+  ## Terrain is noise, and noise occasionally walls an expansion mine in or
+  ## closes every ford across the river. Such a map used to reach the game and
+  ## abort it on the assertion in `validateMap`, which on the ladder means a
+  ## dead episode and a failed round. A rejected map is regenerated from a
+  ## derived seed instead, until one is playable. `result.seed` is the seed
+  ## that actually drew the terrain, so a replay records the map it was
+  ## played on.
+  var attemptSeed = seed
+  for attempt in 1 .. MapAttempts:
+    result = generateOnce(attemptSeed)
+    if result.mapProblem().len == 0:
+      return
+    attemptSeed = nextMapSeed(attemptSeed)
+  doAssert false, &"seed {seed}: no playable map in {MapAttempts} attempts"
