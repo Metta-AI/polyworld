@@ -126,6 +126,8 @@ block:
       mapHash: gameMap.hash,
       contentHash: contentHash()
     ))
+    run.recorder.data.config = localGameConfig(options, VillagerCount)
+    run.recorder.data.config.dayCount = dayCount
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc decide(w: World) =

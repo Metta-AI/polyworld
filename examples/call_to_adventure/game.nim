@@ -213,12 +213,13 @@ when defined(coworld):
   options = coworldOptions(4)
 else:
   options = parseGameOptions()
+
 startGameProfile()
 if options.replayPath.len > 0:
   var replayData: ReplayData
   profileBlock "replay":
     replayData = loadReplay(options.replayPath)
-  options.seed = replayData.header.setup.seed
+  options.seed = replayData.config.seed
   options.maximumTicks = int32(replayData.hashes.len)
   profileBlock "map":
     run = newGame(
@@ -239,4 +240,9 @@ else:
     run = newGame(options.seed, options.maximumTicks)
   loadBots(run, options.botGroups, options.playerSlot)
   run.recorder = initReplayRecorder(run.world.setup)
+  run.recorder.data.config =
+    when defined(coworld):
+      coworld.config
+    else:
+      localGameConfig(options, PartySize)
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)

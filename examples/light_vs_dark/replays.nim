@@ -1,18 +1,17 @@
 ## Light vs Dark action-only replay format and playback cursor.
 ##
-## A replay stores accepted overlord commands and one canonical simulation
-## hash per tick. It never stores bot source, bot identity, or simulation
-## snapshots, so replaying a match reveals what was done and never how the
-## deciding program was written.
+## A replay contains the match config, accepted commands, and one canonical
+## simulation hash per tick. It never stores bot source or private logs.
 
 import
+  std/os,
   polyworld/tapes,
   content
 
 const
   ReplayGame* = "light_vs_dark"
-  ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 10'u16
+  ReplayFormatVersion* = 3'u16
+  ReplayGameVersion* = 12'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -76,20 +75,21 @@ proc fail(message: string) {.noreturn.} =
   raise newException(ReplayError, message)
 
 proc initReplayData*(setup: Setup): ReplayData =
-  ## Creates an empty replay with a versioned deterministic setup.
-  initActionTape[Setup, ReplayAction](
+  ## Creates a replay containing the match setup, config, and action tape.
+  result = initActionTape[Setup, ReplayAction](
     setup,
     ReplayFormatVersion,
     ReplayGameVersion
+  )
+  result.config = GameConfig(
+    seed: setup.mapSeed,
+    maxTicks: int32(setup.maximumTicks),
+    players: unnamedPlayers(PlayerCount)
   )
 
 proc initReplayRecorder*(setup: Setup): ReplayRecorder =
-  ## Creates an in-memory recorder for one match.
-  initTapeRecorder[Setup, ReplayAction](
-    setup,
-    ReplayFormatVersion,
-    ReplayGameVersion
-  )
+  ## Creates an in-memory recorder owning the complete replay data.
+  ReplayRecorder(data: initReplayData(setup))
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
@@ -212,6 +212,10 @@ proc validateAction(action: ReplayAction, setup: Setup) =
 
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, command payloads, and hash coverage.
+  data.config.validateConfig(PlayerCount)
+  if data.config.seed != data.header.setup.mapSeed or
+    data.config.maxTicks != int32(data.header.setup.maximumTicks):
+      fail("replay configuration does not match its simulation setup")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion
@@ -234,17 +238,12 @@ proc validate*(data: ReplayData) =
     lastTick = action.tick
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes a validated replay using the shared Flatty envelope.
+  ## Encodes the complete replay, including its match configuration.
   data.validate()
-  encodeReplayFile(
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Decodes and validates one replay buffer.
+  ## Decodes and validates the complete replay configuration and action tape.
   result = decodeReplayFile(
     ReplayGame,
     ReplayGameVersion,
@@ -255,26 +254,24 @@ proc decodeReplay*(bytes: string): ReplayData =
   result.validate()
 
 proc saveReplay*(path: string, data: ReplayData) =
-  ## Writes one complete replay file.
-  data.validate()
-  saveReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  ## Creates the parent directory and saves the complete recording.
+  if path.len == 0:
+    fail("replay output path is empty")
+  let bytes = encodeReplay(data)
+  try:
+    let directory = path.parentDir
+    if directory.len > 0:
+      createDir(directory)
+    writeFile(path, bytes)
+  except IOError, OSError:
+    fail("cannot save replay: " & getCurrentExceptionMsg())
 
 proc loadReplay*(path: string): ReplayData =
-  ## Loads one complete replay file.
-  result = loadReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    ReplayData,
-    MaxReplayBytes
-  )
-  result.validate()
+  ## Loads one recording with its complete match configuration.
+  try:
+    result = decodeReplay(readFile(path))
+  except IOError, OSError:
+    fail("cannot load replay: " & getCurrentExceptionMsg())
 
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Creates a playback cursor over validated command data.

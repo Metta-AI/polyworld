@@ -2,7 +2,10 @@
 
 import
   std/[os, strutils, times],
-  flatty
+  flatty,
+  configs
+
+export configs
 
 const
   ReplayMagic* = "POLYWORLDREPLAY"
@@ -22,6 +25,17 @@ type
 proc fail(message: string) {.noreturn.} =
   ## Raises one replay-specific error.
   raise newException(ReplayError, message)
+
+proc validateConfig*(config: GameConfig, count: int) =
+  ## Checks the recorded match config and its ordered public player records.
+  if config.players.len != count:
+    fail("replay configuration players do not match its seats")
+  if config.maxTicks <= 0 or config.spawnIntervalTicks < 0 or
+    config.playerSlot < 0 or config.playerSlot > count or config.dayCount < 0:
+      fail("replay configuration has invalid match settings")
+  for player in config.players:
+    if player.name.len > 4096:
+      fail("replay player name has an invalid length")
 
 proc addUint16(bytes: var string, value: uint16) =
   ## Appends one portable little-endian header value.
@@ -177,6 +191,7 @@ type
     ## Hash count is the recorded duration, up to `setup.maximumTicks`.
     ## Setup stays unchanged when a match ends early or playback rewinds.
     header*: TapeHeader[Setup]
+    config*: GameConfig
     actions*: seq[Action]
     hashes*: seq[uint64]
 
@@ -397,4 +412,3 @@ proc actionsAt*[Setup, Action](
   var action: Action
   while player.takeActionAt(tick, action):
     result.add action
-

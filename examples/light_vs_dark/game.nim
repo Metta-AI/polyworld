@@ -96,8 +96,8 @@ block:
     var replayData: ReplayData
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
-    mapSeed = replayData.header.setup.mapSeed
-    maximumTicks = int32(replayData.header.setup.maximumTicks)
+    mapSeed = replayData.config.seed
+    maximumTicks = replayData.config.maxTicks
     var gameMap: MapData
     profileBlock "map":
       gameMap = generateMap(mapSeed)
@@ -148,6 +148,11 @@ block:
         )
       ]
     ))
+    run.recorder.data.config =
+      when defined(coworld):
+        coworld.config
+      else:
+        localGameConfig(options, PlayerCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc decide(w: World) =
