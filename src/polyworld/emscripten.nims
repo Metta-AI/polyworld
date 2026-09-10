@@ -1,7 +1,7 @@
 ## Shared Emscripten compile recipe for Polyworld games.
 
 import
-  std/[os, strformat, strutils]
+  std/[base64, os, strformat, strutils]
 
 proc setupEmscripten*(exampleDir: string, game = "") =
   ## Configures the wasm backend and writes the bundle next to the game.
@@ -10,14 +10,16 @@ proc setupEmscripten*(exampleDir: string, game = "") =
       repoDir = exampleDir / ".." / ".."
       dataDir = getEnv("POLYWORLD_DATA", repoDir / ".." / "polyworld_data")
       outputDir = exampleDir / "emscripten"
-      shellFile = repoDir / "src" / "polyworld" /
+      shellTemplate = repoDir / "src" / "polyworld" /
         (if defined(replayViewer): "replay.html" else: "emscripten.html")
+      shellFile = outputDir / "shell.html"
     let preJs =
       if defined(replayViewer):
         ""
       else:
         "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
     var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_data")
+    var logo = ""
     if game.len > 0:
       let
         variant = if defined(webPng): "png" else: "ktx2"
@@ -32,9 +34,15 @@ proc setupEmscripten*(exampleDir: string, game = "") =
         quoteShell(exampleDir / "pack_assets.nim")
       exec quoteShell(packer) & " " & quoteShell(dataDir) &
         " " & quoteShell(cache)
+      logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
+        "width=\"320\" height=\"240\" src=\"data:image/png;base64," &
+        encode(readFile(cache / "loading-logo.png")) & "\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_data")
     if not dirExists(outputDir):
       mkDir(outputDir)
+    let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
+    if not fileExists(shellFile) or readFile(shellFile) != shell:
+      writeFile(shellFile, shell)
     switch("nimcache", outputDir / "tmp")
     switch("threads", "off")
     --os:linux

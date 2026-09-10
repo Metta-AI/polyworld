@@ -529,7 +529,7 @@ proc imageFiles(source, name: string): seq[string] =
   result.sort()
 
 proc outputFiles(output: string): seq[string] =
-  ## Lists every staged file and the two generated packaging reports.
+  ## Lists staged files, packaging reports, and the optional HTML logo.
   let stage = output / "stage"
   if dirExists(stage):
     for path in walkDirRec(stage, yieldFilter = {
@@ -538,6 +538,8 @@ proc outputFiles(output: string): seq[string] =
       result.add relativePath(path, output).replace('\\', '/')
   result.add "manifest.txt"
   result.add "report.json"
+  if fileExists(output / "loading-logo.png"):
+    result.add "loading-logo.png"
   result.sort()
 
 proc matchingFiles(root: string, files: seq[HashedFile]): bool =
@@ -572,7 +574,7 @@ proc cachedAssets(
   matchingFiles(source, cache.inputs) and matchingFiles(output, cache.outputs)
 
 proc packAssets*(
-  declarations: seq[Asset], source, output: string, revision = ""
+  declarations: seq[Asset], source, output: string, revision = "", logo = ""
 ): seq[PackedFile] =
   ## Reuses verified assets or rebuilds the stage, using an executable revision.
   let
@@ -596,6 +598,7 @@ proc packAssets*(
         "revision": revision,
         "source": source,
         "assets": declarations,
+        "logo": logo,
         "directories": directoryFiles
       }))
       cachePath = output / "cache.json"
@@ -609,6 +612,18 @@ proc packAssets*(
       removeDir(stage)
     createDir(stage)
     var packer = AssetPacker(source: source, stage: stage)
+    let logoPath = output / "loading-logo.png"
+    if fileExists(logoPath):
+      removeFile(logoPath)
+    if logo.len > 0:
+      let
+        image = decodeImage(packer.sourceFile(logo.assetName))
+        scale = min(1.0, min(320 / image.width, 240 / image.height))
+        preview = image.resize(
+          max(1, int(image.width.float * scale)),
+          max(1, int(image.height.float * scale))
+        )
+      writeFile(logoPath, compressPng(preview.encodePng()))
     for asset in declarations:
       case asset.kind
       of FileAsset:

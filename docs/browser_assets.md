@@ -34,6 +34,11 @@ bake, and a failed rebuild cannot leave a reusable partial stage. Delete
 variant uses the same mechanism in its separate `-png` cache. Nim still checks the
 native packer's compilation dependencies before running the hash check.
 
+Each game's packer also creates a cached 320 by 240 maximum logo preview outside
+the preload stage. Normal and replay HTML pages embed this preview above the
+loading status, so it appears before the asset download finishes. The original
+in-game logo keeps its full resolution.
+
 Static props become individual GLBs under the original pack's basename. The
 multi-file `loadPropPack` overload collects these files into the same runtime
 structure. Native builds retain the original single-file path. Character packs
