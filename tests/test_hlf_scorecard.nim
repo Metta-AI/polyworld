@@ -23,8 +23,11 @@ block dailyReports:
     doAssert report.bites[1].points == 1
     doAssert report.bites[2].points == 1
     doAssert report.eatingText == "Carrot +3 / Carrot +1 / Carrot +1"
-  doAssert hostingText(w, 0) == "8 veg x 1 guests = +8"
-  doAssert hostingText(w, 1) == "Host absent"
+  doAssert dinnerRoleText(w, 0) == "Host +8"
+  doAssert hostingCalculation(w, 0) == "8 veg x 1 guests = +8"
+  doAssert dinnerRoleText(w, 1) == "Guest at Ivan's"
+  doAssert hostingCalculation(w, 1) == ""
+  doAssert dinnerRoleText(w, 2) == "-"
   doAssert w.dailyReports[2].eatingText == "No dinner"
   doAssert w.dailyGain(0) == 13
   let dinner = w.clone()
@@ -76,7 +79,7 @@ block noGuests:
   w.villagers[0].inventory[0] = 10
   w.runDinnerTally()
   doAssert w.dailyGain(0) == 0
-  doAssert hostingText(w, 0) == "No guests"
+  doAssert dinnerRoleText(w, 0) == "-"
 
 block reveal:
   let w = newWorld(gameMap, 1)

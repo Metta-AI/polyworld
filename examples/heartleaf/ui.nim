@@ -208,7 +208,7 @@ proc drawStandings(sk: Silky, layout: GameUiLayout, title: string) =
     ink = rgbx(240, 226, 180, 255)
   sk.drawLabel(title, inner.origin, vec2(inner.size.x, 34), ink,
     "H1", CenterAlign)
-  const headings = ["GNOME", "HOSTING", "EATING", "CURFEW", "TODAY", "TOTAL"]
+  const headings = ["GNOME", "DINNER", "EATING", "CURFEW", "TODAY", "TOTAL"]
   for column, heading in headings:
     sk.drawLabel(heading, inner.origin + vec2(ScoreColumns[column], 62),
       vec2(ScoreColumnWidths[column], 24), ink, "Small")
@@ -221,8 +221,8 @@ proc drawStandings(sk: Silky, layout: GameUiLayout, title: string) =
     sk.drawSprite(villagerPortraitKey(slot), inner.origin + vec2(0, y), vec2(32))
     sk.drawLabel(VillagerNames[slot], inner.origin + vec2(40, y + 4),
       vec2(120, 24), color)
-    let values = ["", hostingText(run.world, slot), eatingText(report),
-      (if report.penalty > 0: signedPoints(-report.penalty) else: "Home"),
+    let values = ["", dinnerRoleText(run.world, slot), eatingText(report),
+      (if report.penalty > 0: signedPoints(-report.penalty) else: "-"),
       signedPoints(dailyGain(run.world, slot)), $v.score]
     for column in 1 .. 5:
       if scorePresentation.shown(column):
@@ -231,9 +231,10 @@ proc drawStandings(sk: Silky, layout: GameUiLayout, title: string) =
           vec2(ScoreColumnWidths[column], 24),
           (if column == 3 and report.penalty > 0: rgbx(230, 120, 100, 255)
            else: ink), "Hud")
-    if scorePresentation.shown(2) and report.dinnerHost >= 0:
-      sk.drawLabel("At " & VillagerNames[report.dinnerHost] & "'s table",
-        inner.origin + vec2(ScoreColumns[2], y + 25), vec2(400, 18),
+    if scorePresentation.shown(1) and report.dinnerHost == slot:
+      sk.drawLabel(hostingCalculation(run.world, slot),
+        inner.origin + vec2(ScoreColumns[1], y + 25),
+        vec2(ScoreColumnWidths[1], 18),
         rgbx(180, 190, 200, 255), "Small")
   sk.drawLabel("Hosting = stocked vegetables x guests    First taste this match = 3    Repeat = 1    Missed curfew = -3",
     inner.origin + vec2(0, 540), vec2(inner.size.x, 24), ink, "Small")

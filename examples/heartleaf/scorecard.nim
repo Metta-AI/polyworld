@@ -33,14 +33,21 @@ proc update*(presentation: var ScorePresentation, world: World, dt: float32) =
 proc shown*(presentation: ScorePresentation, column: int): bool =
   presentation.elapsed >= float32(min(max(column - 1, 0), 3))
 
-proc hostingText*(world: World, slot: int): string =
-  let tally = world.lastTally[slot]
-  if tally.valid:
-    &"{tally.pantry} veg x {tally.visitors} guests = +{tally.hostPoints}"
-  elif not world.dailyReports[slot].hostHome:
-    "Host absent"
+proc dinnerRoleText*(world: World, slot: int): string =
+  let report = world.dailyReports[slot]
+  if report.dinnerHost == int32(slot):
+    &"Host +{report.hostingPoints}"
+  elif report.dinnerHost >= 0:
+    "Guest at " & VillagerNames[report.dinnerHost] & "'s"
   else:
-    "No guests"
+    "-"
+
+proc hostingCalculation*(world: World, slot: int): string =
+  let tally = world.lastTally[slot]
+  if world.dailyReports[slot].dinnerHost == int32(slot):
+    &"{tally.pantry} veg x {tally.visitors} guests = +{tally.hostPoints}"
+  else:
+    ""
 
 proc eatingText*(report: DailyReport): string =
   if report.biteCount == 0:
