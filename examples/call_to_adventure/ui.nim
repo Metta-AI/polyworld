@@ -3,8 +3,8 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels],
+  polyworld/[actioncam, chrome, configs, gameuis, inputs, pathing, player,
+    rtscameras, stackpanels],
   content, maps, sim, game, controls, layouts
 
 const
@@ -15,12 +15,6 @@ const
   DividerColor = rgbx(94, 80, 56, 255)
   ActionKeys = [
     "Q", "W", "E", "R", "F", "G"
-  ]
-  HeroNames: array[HeroClass, string] = [
-    "Brom", "Nyra", "Fenn", "Zyra"
-  ]
-  HeroTitles: array[HeroClass, string] = [
-    "Fighter", "Wizard", "Rogue", "Cleric"
   ]
   HeroPortraitKeys*: array[HeroClass, string] = [
     "hero_fighter", "hero_wizard", "hero_rogue", "hero_cleric"
@@ -372,7 +366,11 @@ proc drawUi*(
       iconSize = IconSmall
     )
     sk.drawLabel(
-      HeroNames[class],
+      sk.fittedLabel(
+        run.config.players[slot].displayName(slot),
+        nameBox.size.x,
+        "Bold"
+      ),
       nameBox.origin,
       nameBox.size,
       rgbx(255, 255, 255, 255),

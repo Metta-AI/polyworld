@@ -13,7 +13,7 @@ import
   polyworld/[actioncam, characters, clickmarks, common, fixed, inputs, particles,
     particleshaders,
     chrome, pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
-    shadows, shapes, tapes, viewers, visions, worldbars],
+    shadows, shapes, tapes, viewers, visions, worldbars, worldtexts],
   content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
@@ -232,6 +232,7 @@ proc runGraphics*() =
     addHudIcons(builder)
     addAbilityIcons(builder)
     builder.addDefaultFonts()
+    builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
   var window: Window
   profileBlock "window":
@@ -257,6 +258,11 @@ proc runGraphics*() =
     particles = initParticleSystem()
     clickMarks = initClickMarks()
     worldBarRenderer = initWorldBarRenderer()
+    playerLabels = layoutNames(
+      sk.atlas.fonts["WorldName"],
+      sk.atlas.size,
+      run.config.players
+    )
     worldShapes = initShapeRenderer()
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
@@ -860,6 +866,19 @@ proc runGraphics*() =
       (0.5'f32 - normalized.y * 0.5'f32) * window.size.y.float32
     )
 
+  proc addPlayerNames(visibleFrom: int) =
+    ## Labels party slots on the visible dungeon floors.
+    for slot in 0 ..< min(PartySize, run.world.actors.len):
+      let actor = run.world.actors[slot]
+      if slot >= run.config.players.len or not actor.alive or
+        int(actor.home.level) < visibleFrom:
+          continue
+      let anchor = actorRenderPosition(actor) + vec3(0, 2.22'f, 0)
+      worldBarRenderer.addText(
+        playerLabels[slot],
+        anchor
+      )
+
   proc pickLoot(viewProjection: Mat4): int32 =
     ## Finds loose treasure under the pointer on the visible floor.
     result = 0
@@ -1076,7 +1095,13 @@ proc runGraphics*() =
           )]
         worldBarRenderer.addResourceBars(anchor, 1.0'f32, bars)
     damageTrails.finishFrame()
-    worldBarRenderer.draw(viewProjection, cameraRight, cameraUp)
+    addPlayerNames(visibleFrom)
+    worldBarRenderer.draw(
+      viewProjection,
+      cameraRight,
+      cameraUp,
+      sk.atlasTextureId()
+    )
 
   proc attackTargetSlot(visibleFrom: int): int32 =
     ## Returns the living attack-target slot, or minus one.
