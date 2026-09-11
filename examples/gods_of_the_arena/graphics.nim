@@ -185,9 +185,9 @@ proc runGraphics*() =
       QuarryRimKind.int,
       DirtSurface.float32,
       GravelSurface.float32,
-      vec3(0.80'f32, 0.72'f32, 0.58'f32),
+      vec3(0.92'f32, 0.88'f32, 0.76'f32),
       vec3(0.62'f32, 0.56'f32, 0.48'f32),
-      4
+      2
     )
     setTileMaterial(
       HillRockKind.int,
