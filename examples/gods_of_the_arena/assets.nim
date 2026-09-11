@@ -37,33 +37,6 @@ const
       "rock_large_02a", "rock_large_03a", "rock_large_04a",
       "rock_platform_01a", "rock_platform_02a"]
   ]
-  ## Curated one-mesh KayKit models. The pinned gltf reader decodes their
-  ## EXT_meshopt_compression and KHR_mesh_quantization streams directly.
-  KayKitDecorPaths* = [
-    DataRoot & "/cogcraft/nature/kaykit_bloom_tree_5_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_tree_3_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_tree_6_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_bare_tree_1_b.glb",
-    DataRoot & "/cogcraft/nature/kaykit_bare_tree_2_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_bush_1_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_bush_3_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_bush_4_b.glb",
-    DataRoot & "/cogcraft/nature/kaykit_bloom_bush_2_a.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_grass_1_c.glb",
-    DataRoot & "/cogcraft/nature/kaykit_plains_grass_2_b.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_rock_2_e.glb",
-    DataRoot & "/cogcraft/nature/kaykit_forest_rock_5_b.glb",
-    DataRoot & "/cogcraft/nature/kaykit_mesa_rock_3_a.glb",
-    DataRoot & "/cogcraft/town/resource_crate_medium_wood.glb",
-    DataRoot & "/cogcraft/town/tool_rope_bundle.glb",
-    DataRoot & "/cogcraft/town/resource_berry_basket.glb",
-    DataRoot & "/cogcraft/town/holiday_lantern.glb",
-    DataRoot & "/cogcraft/town/tool_pickaxe.glb",
-    DataRoot & "/cogcraft/town/tool_shovel.glb",
-    DataRoot & "/cogcraft/town/resource_stone_chunks.glb",
-    DataRoot & "/cogcraft/dungeon/kaykit_dungeon_bucket_pickaxes.glb",
-    DataRoot & "/cogcraft/dungeon/scaffold_frame_large.glb"
-  ]
   GotaTerrainAssets* =
     when defined(emscripten): WebTerrainAssets
     else: DefaultTerrainAssets
@@ -164,8 +137,6 @@ proc browserAssets*(): seq[Asset] =
   result.add propAssets(TowerPack, TowerProps)
   for i, pack in ArenaDecorPacks:
     result.add propAssets(pack, ArenaDecorNodes[i])
-  for path in KayKitDecorPaths:
-    result.add modelAsset(path)
   var parts: seq[string]
   for look in HeroLooks:
     for part in look:

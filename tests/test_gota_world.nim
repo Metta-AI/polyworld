@@ -273,7 +273,7 @@ block:
   doAssert outcropTiles > 50,
     "the landmark hills need substantial exposed rock bands"
 
-echo "Testing the middle lane crosses the authored stone causeway"
+echo "Testing every lane wades through a continuous shallow river"
 block:
   discard generateMap(2026)
   var tiles: seq[PathTile]
@@ -290,16 +290,18 @@ block:
   for tile in tiles:
     doAssert tile.layer == GroundLayer,
       "the middle lane should stay on the ground"
-  let
-    centerX = MidCausewayCenter[0]
-    centerZ = MidCausewayCenter[1]
-    centre = layers[GroundLayer].tiles[centerZ * GridTiles + centerX]
-  doAssert isWalkable(GroundLayer, centerX, centerZ),
-    "the middle causeway should be walkable ground"
-  doAssert not layers[WaterLayer].tiles[centerZ * GridTiles + centerX].exists,
-    "the middle causeway should rise above the shallow river"
-  doAssert centre.kind == StoneTile,
-    "the middle crossing should read as an authored stone causeway"
+  for (centerX, centerZ) in [(107, 21), MidFordCenter, (21, 107)]:
+    let
+      centre = layers[GroundLayer].tiles[centerZ * GridTiles + centerX]
+      water = layers[WaterLayer].tiles[centerZ * GridTiles + centerX]
+    doAssert isWalkable(GroundLayer, centerX, centerZ),
+      "a shallow crossing should be walkable ground"
+    doAssert centre.kind == MarshTile and water.exists,
+      "the river surface should continue across every lane"
+    for corner, height in centre.tops:
+      let depth = water.tops[corner].int32 - height.int32
+      doAssert depth > 0 and depth <= WaterDepthSteps,
+        "a lane crossing should remain a visibly shallow wade"
   let pulled = smoothPathTiles(tiles)
   doAssert pulled.len >= 2, "the middle lane needs a complete route"
   for tile in pulled:
