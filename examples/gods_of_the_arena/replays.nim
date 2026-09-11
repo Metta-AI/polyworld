@@ -11,7 +11,8 @@ const
   LegacyGameVersion* = 16'u16
   ActionGameVersion* = 17'u16
   MetricsGameVersion* = 18'u16
-  ReplayGameVersion* = 19'u16
+  TelemetryGameVersion* = 19'u16
+  ReplayGameVersion* = 20'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
@@ -180,7 +181,8 @@ proc validate*(data: ReplayData) =
     data.header.gameVersion
   )
   if data.header.gameVersion notin {
-    LegacyGameVersion, ActionGameVersion, MetricsGameVersion, ReplayGameVersion
+    LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
+    TelemetryGameVersion, ReplayGameVersion
   }:
     fail("unsupported replay game version")
   let setup = data.header.setup
@@ -261,8 +263,14 @@ proc encodeReplay*(data: ReplayData): string =
       MaxReplayBytes
     )
   var current = data
-  current.header.gameVersion = ReplayGameVersion
-  encodeReplayFile(ReplayGame, ReplayGameVersion, current, MaxReplayBytes)
+  if current.header.gameVersion == MetricsGameVersion:
+    current.header.gameVersion = TelemetryGameVersion
+  encodeReplayFile(
+    ReplayGame,
+    current.header.gameVersion,
+    current,
+    MaxReplayBytes
+  )
 
 proc decodeReplay*(bytes: string): ReplayData =
   ## Returns the complete replay, including its original CPU telemetry.
@@ -270,10 +278,11 @@ proc decodeReplay*(bytes: string): ReplayData =
     fail("replay exceeds the file size limit")
   let version = bytes.replayFileHeader().gameVersion
   if version notin {
-    LegacyGameVersion, ActionGameVersion, MetricsGameVersion, ReplayGameVersion
+    LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
+    TelemetryGameVersion, ReplayGameVersion
   }:
     fail("unsupported replay game version")
-  if version == ReplayGameVersion:
+  if version in {TelemetryGameVersion, ReplayGameVersion}:
     result = decodeReplayFile(
       ReplayGame,
       version,

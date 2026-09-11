@@ -18,6 +18,7 @@ import
   test_fixed,
   test_fxmeshes,
   test_gameuis,
+  test_gota_abilities,
   test_gota_content,
   test_gota_replays,
   test_gota_world,

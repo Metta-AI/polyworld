@@ -174,7 +174,10 @@ proc testRecording() =
         ReplayGame, MetricsGameVersion, previous, MaxReplayBytes
       ))
       doAssert converted.metrics == partial.metrics
-      doAssert decodeReplay(encodeReplay(converted)) == partial
+      var expected = partial
+      when defined(recordGota):
+        expected.header.gameVersion = TelemetryGameVersion
+      doAssert decodeReplay(encodeReplay(converted)) == expected
 
   echo "Testing divergent replays exit with failure"
   var corrupt = partial
