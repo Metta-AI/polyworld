@@ -479,6 +479,9 @@ proc terrainFrag(
 var
   cameraPos: Uniform[Vec3]
   waterNormals: Uniform[Sampler2dArray]
+  waterOffset: Uniform[Vec2]
+  waterOpacity: Uniform[float32]
+  waterHighlightOpacity: Uniform[float32]
 
 proc waterVert(
     gl_Position: var Vec4,
@@ -497,12 +500,13 @@ proc waterFrag(
     worldPos: Vec3,
     waterNormal: Vec3
 ) =
-  ## Shades transparent water with a view-dependent highlight.
+  ## Shades drifting transparent water with a view-dependent highlight.
   let
+    samplePos: Vec2 = vec2(worldPos.x, worldPos.z) - waterOffset
     normalA: Vec3 = texture(waterNormals, vec3(
-      worldPos.x * 0.08, worldPos.z * 0.08, 0.0)).xyz * 2.0 - vec3(1.0)
+      samplePos.x * 0.08, samplePos.y * 0.08, 0.0)).xyz * 2.0 - vec3(1.0)
     normalB: Vec3 = texture(waterNormals, vec3(
-      worldPos.z * -0.13, worldPos.x * 0.13, 1.0)).xyz * 2.0 - vec3(1.0)
+      samplePos.y * -0.13, samplePos.x * 0.13, 1.0)).xyz * 2.0 - vec3(1.0)
     detailNormal: Vec3 = normalize(vec3(
       normalA.x + normalB.x,
       normalA.z + normalB.z,
@@ -534,7 +538,8 @@ proc waterFrag(
     (0.16 + 0.42 * visibility) + specular * visibility * envLightLevel
   ) * envHighlight
   fragColor = vec4(water.x, water.y, water.z,
-    clamp(0.55 + specular * envLightLevel * 0.45, 0.0, 1.0))
+    clamp(waterOpacity + specular * envLightLevel * waterHighlightOpacity,
+      0.0, 1.0))
 
 ## Prop shader: baked vertex colors with half-lambert lighting.
 
@@ -885,6 +890,8 @@ var
   groundRingShapeValues = vec3(0)
   waterProgram: GLuint
   waterMvpLocation, waterCameraLocation, waterNormalsLocation: GLint
+  waterOffsetLocation, waterOpacityLocation: GLint
+  waterHighlightOpacityLocation: GLint
   waterVisibilityTexLocation: GLint
   waterVisibilityOffsetLocation, waterVisibilityScaleLocation: GLint
   waterNormalTextureArray: GLuint
@@ -3252,6 +3259,12 @@ proc initTerrain*(
   waterEnv = envLocations(waterProgram)
   waterCameraLocation = glGetUniformLocation(waterProgram, "cameraPos")
   waterNormalsLocation = glGetUniformLocation(waterProgram, "waterNormals")
+  waterOffsetLocation = glGetUniformLocation(waterProgram, "waterOffset")
+  waterOpacityLocation = glGetUniformLocation(waterProgram, "waterOpacity")
+  waterHighlightOpacityLocation = glGetUniformLocation(
+    waterProgram,
+    "waterHighlightOpacity"
+  )
   waterVisibilityTexLocation = glGetUniformLocation(
     waterProgram,
     "visibilityTex"
@@ -3797,8 +3810,15 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
       drawTexturedBatch(batch, mvp)
   glUseProgram(0)
 
-proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
-  ## Transparent water pass; call after all opaque drawing.
+proc drawWater*(
+    viewProjection: Mat4,
+    cameraEye: Vec3,
+    offset = vec2(0),
+    opacity = 0.55'f,
+    highlightOpacity = 0.45'f
+) =
+  ## Draws water with a world-space offset and base plus highlight opacity.
+  ## Call after all opaque drawing.
   if waterMesh.len == 0:
     return
   glDisable(GL_CULL_FACE)
@@ -3807,6 +3827,9 @@ proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
   mvp = viewProjection
   glUniformMatrix4fv(waterMvpLocation, 1, GL_FALSE, cast[ptr float32](mvp.addr))
   glUniform3f(waterCameraLocation, cameraEye.x, cameraEye.y, cameraEye.z)
+  glUniform2f(waterOffsetLocation, offset.x, offset.y)
+  glUniform1f(waterOpacityLocation, opacity)
+  glUniform1f(waterHighlightOpacityLocation, highlightOpacity)
   glUniform1f(waterVisibilityOffsetLocation, HalfGrid)
   glUniform1f(
     waterVisibilityScaleLocation,
