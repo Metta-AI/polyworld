@@ -21,6 +21,7 @@ import
   test_gota_abilities,
   test_gota_content,
   test_gota_replays,
+  test_gota_spells,
   test_gota_world,
   test_hashes,
   test_hlf_content,

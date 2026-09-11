@@ -333,6 +333,7 @@ proc gameParticleVertex*(
   if fragmentAlive < 0.5'f:
     gl_Position = vec4(2.0'f, 2.0'f, 2.0'f, 1.0'f)
     return
+  size *= 2.0'f
   let corner: Vec2 = fragmentUv * 2.0'f - 1.0'f
   var
     right: Vec3 = uParticleCameraRight

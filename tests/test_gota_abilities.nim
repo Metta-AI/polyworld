@@ -37,6 +37,7 @@ proc combatGame(class: HeroClass): Game =
   ## Isolates one attacker and a nearby enemy from bots, creeps and towers.
   result = newGame(generateMap(2026), 240, 10, false, ReplayData())
   let world = result.world
+  world.legacyAbilities = true
   world.spawnTimerTicks = 1000
   world.heroTurnTicks = 1000
   for hero in world.heroes:
@@ -165,7 +166,7 @@ block:
     game = combatGame(Crossbowman)
     hero = game.world.heroes[0]
     target = game.world.heroes[5]
-  target.hp = FinalMeasure.abilitySpec.damage
+  target.hp = FinalMeasure.legacyAbilitySpec.damage
   for slot in HeroAbilitySlot:
     hero.cooldowns[slot] = 0
   game.tickWorld(nil)
@@ -177,14 +178,14 @@ block:
   doAssert hero.attackObjectId == 0 and hero.targetHeroId == 0
   doAssert game.world.stats.values[0][KillsMetric] == 1
 
-echo "Testing all forty abilities apply their effect, mana and cooldown"
+echo "Testing all forty historical ability effects, mana and cooldowns"
 for class in HeroClass:
   for slot in HeroAbilitySlot:
     let
       game = combatGame(class)
       hero = game.world.heroes[0]
       target = game.world.heroes[5]
-      spec = heroAbility(class, slot).abilitySpec
+      spec = heroAbility(class, slot).legacyAbilitySpec
     hero.cooldowns[slot] = 0
     if spec.kind == Heal:
       hero.hp -= spec.heal
@@ -212,7 +213,7 @@ block:
     game = combatGame(Arcanist)
     hero = game.world.heroes[0]
     target = game.world.heroes[5]
-    spec = FrostLance.abilitySpec
+    spec = FrostLance.legacyAbilitySpec
     targetHp = target.hp
   hero.cooldowns[PrimaryAbility] = 0
   hero.mana = spec.manaCost - 1
@@ -225,7 +226,7 @@ block:
     game = combatGame(Ranger)
     hero = game.world.heroes[0]
     target = game.world.heroes[5]
-    spec = StormEagle.abilitySpec
+    spec = StormEagle.legacyAbilitySpec
     mana = hero.mana
     targetHp = target.hp
   hero.cooldowns[UltimateAbility] = 0
