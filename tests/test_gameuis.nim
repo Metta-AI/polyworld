@@ -82,4 +82,44 @@ doAssert transport.tick == 50
 transport.rewind()
 doAssert transport.tick == 0
 
+block:
+  echo "Safe insets and transport share one usable rectangle"
+  let layout = initGameUiLayout(vec2(800, 600), 40, 10, vec4(30, 20, 50, 60))
+  doAssert layout.gameArea.origin == vec2(30, 20)
+  doAssert layout.gameArea.size == vec2(720, 480)
+  doAssert layout.panel(GameUiRegion.TopLeft, vec2(100)).origin == vec2(40, 30)
+  doAssert layout.panel(GameUiRegion.BottomRight, vec2(100)).origin == vec2(640, 390)
+  doAssert layout.transportPanel.origin == vec2(30, 500)
+  doAssert layout.transportPanel.size == vec2(720, 40)
+  doAssert layout.layoutFits([layout.gameArea])
+  doAssert not layout.layoutFits([layout.transportPanel])
+  doAssert not layout.layoutFits([
+    GameUiPanel(origin: vec2(30, 499), size: vec2(100, 2))])
+  doAssert not layout.layoutFits([GameUiPanel(origin: vec2(0), size: vec2(10))])
+  let collapsed = initGameUiLayout(vec2(40, 30), 100, safeInsets = vec4(60, 40, 60, 40))
+  doAssert collapsed.gameArea.size == vec2(0)
+  doAssert collapsed.transportPanel.size == vec2(0)
+
+block:
+  echo "Panels stay within usable bounds"
+  let area = GameUiPanel(origin: vec2(20, 30), size: vec2(300, 200))
+  let huge = area.fitPanel(vec2(-100), vec2(600, 400))
+  doAssert huge.origin == area.origin and huge.size == area.size
+  for x in [-100'f32, 0, 200, 500]:
+    for y in [-100'f32, 0, 200, 500]:
+      let placed = area.fitPanel(vec2(x, y), vec2(80, 60))
+      doAssert GameUiPanel(origin: placed.origin - area.origin, size: placed.size).inside(area.size)
+      doAssert placed.contains(placed.origin + placed.size * 0.5)
+
+block:
+  let empty = GameUiPanel(origin: vec2(20), size: vec2(-10))
+  let fitted = empty.fitPanel(vec2(-100), vec2(50))
+  doAssert fitted.origin == empty.origin and fitted.size == vec2(0)
+
+block:
+  let layout = initGameUiLayout(vec2(160, 120), 30, 10, vec4(10))
+  for region in GameUiRegion:
+    doAssert layout.layoutFits([layout.panel(region, vec2(200))]),
+      "an oversized panel must stay clear of screen edges and replay controls"
+
 echo "Game UI tests passed"
