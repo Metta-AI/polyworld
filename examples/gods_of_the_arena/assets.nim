@@ -22,14 +22,12 @@ const
       "boat_01a", "boat_wreck_01a", "rope_01a", "wood_cart_01a",
       "wood_fence_01a", "wood_wheel_01a"],
     @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
-      "flower_bush_01a", "flower_bush_02a", "bush_01a", "bush_02a",
+      "flower_bush_01a", "flower_bush_02a",
       "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
       "grass_patch_04a", "grass_patch_05a", "lily_flower_01a",
       "lily_flower_02a", "lily_flower_03a", "plant_01a", "plant_02a",
       "plant_03a", "plant_04a", "plant_05a", "plant_06a", "plant_07a",
-      "mushroom_01a", "mushroom_03a", "mushroom_06a",
-      "tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a",
-      "tree_06a"],
+      "mushroom_01a", "mushroom_03a", "mushroom_06a"],
     @["rock_small_01a", "rock_small_02a", "rock_small_03a",
       "rock_small_04a", "rock_medium_01a", "rock_medium_02a",
       "rock_medium_03a"],
@@ -40,6 +38,12 @@ const
   GotaTerrainAssets* =
     when defined(emscripten): WebTerrainAssets
     else: DefaultTerrainAssets
+  GotaTreeStyle* =
+    when defined(emscripten): DenseTrees
+    else: MixedTrees
+  GotaDecorTextureSize* =
+    when defined(emscripten): 256
+    else: 512
   FootmanModels*: array[2, string] = [
     DataRoot & "/characters/mini_legion/human/footman.glb",
     DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb"
@@ -132,19 +136,19 @@ proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
   result.add terrainAssets(
-    MixedTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
+    DenseTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
   )
-  result.add propAssets(TowerPack, TowerProps)
+  result.add propAssets(TowerPack, TowerProps, textureSize = 256)
   for i, pack in ArenaDecorPacks:
-    result.add propAssets(pack, ArenaDecorNodes[i])
+    result.add propAssets(pack, ArenaDecorNodes[i], textureSize = 256)
   var parts: seq[string]
   for look in HeroLooks:
     for part in look:
       if part notin parts:
         parts.add part
-  result.add modelAsset(HeroModelPath, parts)
+  result.add modelAsset(HeroModelPath, parts, textureSize = 512)
   for path in FootmanModels:
-    result.add modelAsset(path)
+    result.add modelAsset(path, textureSize = 512)
   for path in HeroPortraitPaths:
     result.add fileAsset(path)
   for hero in HeroClass:

@@ -121,7 +121,7 @@ proc runGraphics*() =
     treeHeight = 5.8'f
     treeWidth = 0.0'f
     initTerrain(
-      MixedTrees, GeneratedTerrain, PaintedRocks, FortTextures,
+      GotaTreeStyle, GeneratedTerrain, PaintedRocks, FortTextures,
       settings = GotaTerrainAssets
     )
     for i, kind in [RedFortKind, BlueFortKind]:
@@ -177,9 +177,9 @@ proc runGraphics*() =
       QuarryFloorKind.int,
       GravelSurface.float32,
       DirtSurface.float32,
-      vec3(0.84'f32, 0.80'f32, 0.70'f32),
+      vec3(0.90'f32, 0.86'f32, 0.76'f32),
       vec3(0.58'f32, 0.54'f32, 0.48'f32),
-      5
+      2
     )
     setTileMaterial(
       QuarryRimKind.int,
@@ -191,11 +191,19 @@ proc runGraphics*() =
     )
     setTileMaterial(
       HillRockKind.int,
-      GravelSurface.float32,
+      ForestSurface.float32,
       DirtSurface.float32,
-      vec3(0.82'f32, 0.82'f32, 0.76'f32),
-      vec3(0.52'f32, 0.48'f32, 0.42'f32),
-      5
+      vec3(0.92'f32, 1.04'f32, 0.84'f32),
+      vec3(0.70'f32, 0.62'f32, 0.48'f32),
+      3
+    )
+    setTileMaterial(
+      QuarryShoulderKind.int,
+      DirtSurface.float32,
+      DirtSurface.float32,
+      vec3(0.88'f32, 0.92'f32, 0.76'f32),
+      vec3(0.66'f32, 0.62'f32, 0.52'f32),
+      1
     )
     scatterGrass(1_500, run.map.seed, matchTerrain = true)
     scatterRocks(180, run.map.seed, scale = 0.25'f)
@@ -319,7 +327,8 @@ proc runGraphics*() =
       scale = FountainScale,
       tint = structureTint(RedTeam)
     )
-    decorPack = loadPropPack(arenaDecorPaths())
+    decorPack = loadPropPack(
+      arenaDecorPaths(), textured = true, textureSize = GotaDecorTextureSize)
     for nodes in ArenaDecorNodes:
       for name in nodes:
         doAssert decorPack.hasProp(name), "missing arena decoration: " & name
