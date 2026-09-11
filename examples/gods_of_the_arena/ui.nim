@@ -261,7 +261,7 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
           TickRate.float32 / WorldScale.float32
         attackRange = heroAttackRange(hero.class).float32 /
           WorldScale.float32
-        attackTicks = heroAttackTicks(hero.class).float32
+        attackTicks = run.world.heroAttackTicks(hero).float32
       return SelectedUnit(
         id: hero.id,
         kind: SelectedHero,

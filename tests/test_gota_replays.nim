@@ -62,6 +62,17 @@ doAssert decoded.actions[2].first == 70
 doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
+echo "Testing old combat replays keep their version when saved again"
+block:
+  var historical = recorder.data
+  historical.header.gameVersion = TelemetryGameVersion
+  let saved = historical.encodeReplay()
+  doAssert saved.replayFileHeader().gameVersion == TelemetryGameVersion
+  let restored = decodeReplay(saved)
+  doAssert restored.header.gameVersion == TelemetryGameVersion
+  doAssert restored.actions == historical.actions
+  doAssert restored.hashes == historical.hashes
+
 echo "Testing exact-tick action playback"
 let player = initReplayPlayer(decoded)
 doAssert player.actionsAt(0).len == 0
