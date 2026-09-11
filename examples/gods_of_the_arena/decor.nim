@@ -14,7 +14,8 @@ const
   DecorStream = 0xA24BAED4963EE407'u64
   RiverDecorStream = 0x3C6EF372FE94F82B'u64
   LandmarkDecorStream = 0xBB67AE8584CAA73B'u64
-  VergeDecorBudget = 260
+  DecorRichness = 3
+  VergeDecorBudget = 260 * DecorRichness
   VergePlants = [
     "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
     "flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a"
@@ -28,6 +29,13 @@ const
   ]
   Reeds = ["plant_01a", "plant_02a", "plant_03a", "plant_07a"]
   WaterLilies = ["lily_flower_01a", "lily_flower_02a", "lily_flower_03a"]
+  OpenGroundDecor = [
+    "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
+    "grass_patch_04a", "grass_patch_05a", "flowers_patch_01a",
+    "flowers_patch_02a", "flowers_patch_03a", "plant_07a",
+    "mushroom_01a", "mushroom_03a", "rock_small_01a",
+    "rock_small_02a", "rock_small_03a", "rock_small_04a"
+  ]
 
 type LaneDoodad = tuple[
   name: string,
@@ -188,10 +196,11 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
           nearWater(x, z, 3) and nearWater(mirrorX, mirrorZ, 3) and
           besideLane(x.float32, z.float32, 5.5'f32) and
           besideLane(mirrorX.float32, mirrorZ.float32, 5.5'f32) and
-          riverTreesPlaced < 30 and rng.chance(13):
+          riverTreesPlaced < 30 * DecorRichness and
+          rng.chance(13 * DecorRichness):
         var spaced = true
         for site in treeSites:
-          if abs(site.x - x) <= 4 and abs(site.z - z) <= 4:
+          if abs(site.x - x) <= 3 and abs(site.z - z) <= 3:
             spaced = false
             break
         if spaced:
@@ -210,7 +219,8 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
       if kind == WetBankKind and
           ground.tiles[mirrorIndex].kind == WetBankKind and
           nearWater(x, z, 1) and nearWater(mirrorX, mirrorZ, 1) and
-          reedsPlaced < 96 and rng.chance(24):
+          reedsPlaced < 96 * DecorRichness and
+          rng.chance(24 * DecorRichness):
         pack.placePair(
           Reeds[int(rng.below(Reeds.len.int32))], x, z,
           (rng.unit() - 0.5'f32) * 0.6'f32,
@@ -222,7 +232,8 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
         reedsPlaced += 2
 
       if water.tiles[index].exists and water.tiles[mirrorIndex].exists and
-          liliesPlaced < 48 and rng.chance(7):
+          liliesPlaced < 48 * DecorRichness and
+          rng.chance(7 * DecorRichness):
         pack.placeWaterPair(
           WaterLilies[int(rng.below(WaterLilies.len.int32))], x, z,
           (rng.unit() - 0.5'f32) * 0.5'f32,
@@ -324,16 +335,16 @@ proc placeArenaDecor*(pack: PropPack, seed: int32) =
       var
         name = ""
         scale = 0.45'f32
-      if kind == LaneShoulderKind and rng.chance(17):
+      if kind == LaneShoulderKind and rng.chance(17 * DecorRichness):
         name = VergePlants[int(rng.below(VergePlants.len.int32))]
         scale = 0.32'f32 + rng.unit() * 0.30'f32
-      elif kind == WetBankKind and rng.chance(20):
+      elif kind == WetBankKind and rng.chance(20 * DecorRichness):
         name = BankDecor[int(rng.below(BankDecor.len.int32))]
         scale = 0.30'f32 + rng.unit() * 0.35'f32
-      elif kind == LandmarkHillKind and rng.chance(24):
+      elif kind == LandmarkHillKind and rng.chance(24 * DecorRichness):
         name = VergePlants[int(rng.below(VergePlants.len.int32))]
         scale = 0.34'f32 + rng.unit() * 0.38'f32
-      elif kind == QuarryRimKind and rng.chance(16):
+      elif kind == QuarryRimKind and rng.chance(16 * DecorRichness):
         name = BankDecor[int(rng.below(BankDecor.len.int32))]
         scale = 0.28'f32 + rng.unit() * 0.34'f32
       if name.len == 0:
@@ -352,6 +363,32 @@ proc placeArenaDecor*(pack: PropPack, seed: int32) =
         vec3(0.92'f32, 0.96'f32, 0.90'f32)
       )
       placed += 2
+
+  # A light third layer carries small groundcover into otherwise empty grass
+  # between the authored landmarks. At three percent it adds texture across
+  # the whole arena without becoming a new wall of silhouettes.
+  for z in 2 ..< GridTiles - 2:
+    for x in 2 ..< GridTiles - 2:
+      let
+        mirrorX = GridTiles - 1 - x
+        mirrorZ = GridTiles - 1 - z
+        index = z * GridTiles + x
+        mirrorIndex = mirrorZ * GridTiles + mirrorX
+      if index >= mirrorIndex or
+          ground.tiles[index].kind != GrassTile or
+          ground.tiles[mirrorIndex].kind != GrassTile or
+          not besideLane(x.float32, z.float32, 5.0'f32) or
+          not besideLane(mirrorX.float32, mirrorZ.float32, 5.0'f32) or
+          not rng.chance(3):
+        continue
+      pack.placePair(
+        OpenGroundDecor[int(rng.below(OpenGroundDecor.len.int32))], x, z,
+        (rng.unit() - 0.5'f32) * 0.65'f32,
+        (rng.unit() - 0.5'f32) * 0.65'f32,
+        rng.unit() * 2.0'f32 * PI.float32,
+        0.28'f32 + rng.unit() * 0.38'f32,
+        vec3(0.90'f32, 0.95'f32, 0.84'f32)
+      )
 
   # Four substantial lamps announce the central ford from its dry outer edges
   # while keeping the full diagonal wading route visually open.
