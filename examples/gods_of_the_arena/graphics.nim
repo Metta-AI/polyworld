@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, content, decor, sim, game, maps, replays, ui,
+  assets, content, decor, sim, game, maps, quarrymask, replays, ui,
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
@@ -175,7 +175,7 @@ proc runGraphics*() =
     )
     setTileMaterial(
       QuarryFloorKind.int,
-      GravelSurface.float32,
+      GrassSurface.float32,
       DirtSurface.float32,
       vec3(0.90'f32, 0.86'f32, 0.76'f32),
       vec3(0.58'f32, 0.54'f32, 0.48'f32),
@@ -183,7 +183,7 @@ proc runGraphics*() =
     )
     setTileMaterial(
       QuarryRimKind.int,
-      DirtSurface.float32,
+      GrassSurface.float32,
       GravelSurface.float32,
       vec3(0.92'f32, 0.88'f32, 0.76'f32),
       vec3(0.62'f32, 0.56'f32, 0.48'f32),
@@ -199,11 +199,20 @@ proc runGraphics*() =
     )
     setTileMaterial(
       QuarryShoulderKind.int,
-      DirtSurface.float32,
+      GrassSurface.float32,
       DirtSurface.float32,
       vec3(0.88'f32, 0.92'f32, 0.76'f32),
       vec3(0.66'f32, 0.62'f32, 0.52'f32),
       3
+    )
+    # Paint quarry tops independently of their gameplay tile kinds. The
+    # sub-tile mask feathers exposed earth through the approved height blend,
+    # and lets gravel details break up the working-floor boundary.
+    uploadGroundMask(buildQuarryGroundMask(), QuarryMaskSize)
+    setGroundLayers(
+      GravelSurface.float32,
+      DirtSurface.float32,
+      GrassSurface.float32
     )
     scatterGrass(1_500, run.map.seed, matchTerrain = true)
     scatterRocks(180, run.map.seed, scale = 0.25'f)
