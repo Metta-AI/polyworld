@@ -490,13 +490,13 @@ proc placeArenaDecor*(pack: PropPack, seed: int32) =
   # Quarry dressing clusters on the working floor's rear edge and around the
   # rim. The centre and lane-facing cut remain visually uncluttered.
   for (name, x, z, rotation, scale) in [
-    ("rock_medium_02a", 34, 56, 0.3'f32, 1.20'f32),
-    ("rock_medium_03a", 43, 60, -0.8'f32, 1.08'f32),
-    ("rock_small_04a", 42, 68, 0.5'f32, 0.88'f32),
-    ("wood_barrel_01a", 39, 61, 0.2'f32, 0.76'f32),
-    ("wood_crate_01a", 40, 62, -0.3'f32, 0.72'f32),
-    ("pier_bollard_02a", 39, 66, 0.4'f32, 0.92'f32),
-    ("wood_fence_pole_01a", 37, 71, PI.float32 / 2.0'f32, 1.12'f32)
+    ("rock_medium_02a", 28, 58, 0.3'f32, 1.20'f32),
+    ("rock_medium_03a", 37, 62, -0.8'f32, 1.08'f32),
+    ("rock_small_04a", 36, 70, 0.5'f32, 0.88'f32),
+    ("wood_barrel_01a", 33, 63, 0.2'f32, 0.76'f32),
+    ("wood_crate_01a", 34, 64, -0.3'f32, 0.72'f32),
+    ("pier_bollard_02a", 33, 68, 0.4'f32, 0.92'f32),
+    ("wood_fence_pole_01a", 31, 73, PI.float32 / 2.0'f32, 1.12'f32)
   ]:
     pack.placeLaneEdgePair(
       name, x, z, 0, 0, rotation, scale,
