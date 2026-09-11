@@ -509,15 +509,14 @@ proc buildOverlordHost*(playerId: int32): Host =
   discard result.addFunction("cancel", 1, cancelProc, 40)
 
   let orderFailedProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Reads and clears the flag, so one failure is reported exactly once.
+    ## Reads the failure flag without changing the recorded world state.
     let index = game.unitIndex(arguments[0])
     if index < 0:
       return 0
     let unit = game.units[index]
     if unit.owner != playerId:
       return 0
-    result = int32(unit.orderFailed)
-    unit.orderFailed = false
+    int32(unit.orderFailed)
   discard result.addFunction("orderFailed", 1, orderFailedProc, 4)
 
 ## Lifecycle

@@ -153,27 +153,28 @@ proc testRecording() =
     doAssert continuedPlayback.output.contains(apmSummary()),
       continuedPlayback.output
 
-    echo "Testing older embedded CPU/APM recordings retain only CPU"
-    var previous: ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
-    previous.header = partial.header
-    previous.header.gameVersion = MetricsGameVersion
-    previous.config = partial.config
-    previous.actions = partial.actions
-    previous.hashes = partial.hashes
-    previous.metrics.tickRate = partial.metrics.tickRate
-    previous.metrics.interval = partial.metrics.interval
-    for frame in partial.metrics.frames:
-      var sample = LegacyTelemetryFrame(tick: frame.tick)
-      for row in frame.rows:
-        sample.rows.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
-      previous.metrics.frames.add sample
-    for row in partial.metrics.final:
-      previous.metrics.final.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
-    let converted = decodeReplay(encodeReplayFile(
-      ReplayGame, MetricsGameVersion, previous, MaxReplayBytes
-    ))
-    doAssert converted.metrics == partial.metrics
-    doAssert decodeReplay(encodeReplay(converted)) == partial
+    when not defined(recordLvd):
+      echo "Testing older embedded CPU/APM recordings retain only CPU"
+      var previous: ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
+      previous.header = partial.header
+      previous.header.gameVersion = MetricsGameVersion
+      previous.config = partial.config
+      previous.actions = partial.actions
+      previous.hashes = partial.hashes
+      previous.metrics.tickRate = partial.metrics.tickRate
+      previous.metrics.interval = partial.metrics.interval
+      for frame in partial.metrics.frames:
+        var sample = LegacyTelemetryFrame(tick: frame.tick)
+        for row in frame.rows:
+          sample.rows.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
+        previous.metrics.frames.add sample
+      for row in partial.metrics.final:
+        previous.metrics.final.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
+      let converted = decodeReplay(encodeReplayFile(
+        ReplayGame, MetricsGameVersion, previous, MaxReplayBytes
+      ))
+      doAssert converted.metrics == partial.metrics
+      doAssert decodeReplay(encodeReplay(converted)) == partial
 
   echo "Testing divergent replays exit with failure"
   var corrupt = partial
