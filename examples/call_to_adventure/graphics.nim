@@ -20,6 +20,7 @@ when defined(takeScreenshot):
   import std/[os, strutils]
 
 const
+  DefaultCameraDistance = 13.0'f
   AtlasPath = TmpRoot & "/cta.atlas.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10
@@ -464,7 +465,7 @@ proc runGraphics*() =
       emitActorAttack(old)
 
   var
-    cameraDistance = 26.0'f32
+    cameraDistance = DefaultCameraDistance
     cameraTarget = vec3(0, 0, 0)
     panning = false
     minimapPanning = false
@@ -473,7 +474,11 @@ proc runGraphics*() =
     followSelection = false
     cameraEase: CameraEase
     focusPlayerHero = false
+    viewingDt = 0.0'f
+    viewingSeeking = false
     actionCam = initActionCam(
+      subjectMode = true,
+      defaultDistance = DefaultCameraDistance,
       minDistance = 12,
       maxDistance = 36,
       tight = 0.35,
@@ -604,6 +609,8 @@ proc runGraphics*() =
         playerSlot >= 0 and
         playerSlot < run.world.actors.len:
       return int(run.world.actors[playerSlot].home.level)
+    if actionCam.enabled and actionCam.locked:
+      return int(actionCam.director.subject.floor)
     int(run.viewLevel(selectedIds))
 
   proc updateSelectionCamera() =
@@ -691,132 +698,35 @@ proc runGraphics*() =
         dz = position.z - center.z
       result = max(result, sqrt(dx * dx + dz * dz))
 
-  proc partyActionLevel(): int8 =
-    ## Returns the floor most living heroes currently stand on.
-    var counts: array[LevelCount, int]
-    for slot in 0 ..< min(PartySize, run.world.actors.len):
-      if run.world.actors[slot].alive:
-        inc counts[int(run.world.actors[slot].home.level)]
-    result = 0
-    for level, count in counts:
-      if count > counts[int(result)]:
-        result = int8(level)
-
-  proc feedCtaActions() =
-    ## Notes the living party first, then nearby fights on that floor.
-    const
-      LookAheadTicks = 48'i32
-      PartyShotId = 90_000_000'i32
-    let
-      tick = run.world.tick
-      level = partyActionLevel()
-    actionCam.beginFrame(tick)
-    proc leadPosition(actor: Actor): Vec3 =
-      ## Nudges one step along the current path, not a room ahead.
-      result = actorRenderPosition(actor)
-      if actor.path.len == 0:
-        return
-      let i = min(int(actor.pathIndex), actor.path.len - 1)
-      if i < 0:
-        return
-      let tile = actor.path[i].tile
-      if tile.level != actor.home.level:
-        return
-      result = mix(
-        result,
-        tileCenter(int(tile.level), int(tile.x), int(tile.z)),
-        0.25'f32
-      )
-    var
-      partyTotal = vec3(0, 0, 0)
-      partyCount = 0
-      partyRadius = 2.4'f32
-      partyFighting = false
-    for actor in run.world.actors:
-      if actor.kind != HeroActor or
-          not actor.alive or
-          actor.home.level != level:
+  proc feedCtaActions(observeTick = false) =
+    ## Refreshes real subjects and observes every simulated tick.
+    if not actionCam.enabled:
+      return
+    var subjects: seq[Subject]
+    for slot, actor in run.world.actors:
+      if actor.id == 0:
         continue
-      partyTotal = partyTotal + leadPosition(actor)
-      inc partyCount
-      if actor.state == FightingState or actor.busy:
-        partyFighting = true
-    if partyCount > 0:
-      let center = partyTotal / partyCount.float32
-      for actor in run.world.actors:
-        if actor.kind != HeroActor or
-            not actor.alive or
-            actor.home.level != level:
-          continue
-        let
-          pos = actorRenderPosition(actor)
-          dx = pos.x - center.x
-          dz = pos.z - center.z
-        partyRadius = max(
-          partyRadius,
-          sqrt(dx * dx + dz * dz) + 1.6'f32
-        )
-      actionCam.noteInterest(
-        PartyShotId,
-        center + vec3(0, 0.45'f32, 0),
-        if partyFighting: 120.0'f32 else: 100.0'f32,
-        partyRadius,
-        tick,
-        12
+      let hero = actor.kind == HeroActor
+      subjects.add Subject(
+        id: actor.id, owner: (if hero: int32(slot) else: -1),
+        floor: int32(actor.home.level), position: actorRenderPosition(actor),
+        height: 0.85, radius: 0.8,
+        visible: hero or selectedVisible(actor.home), alive: actor.alive,
+        hp: int32(actor.hp), maxHp: int32(actor.maxHp), complete: true,
+        participant: actor.target,
+        fighting: actor.action != NoAbility and Abilities[actor.action].damage > 0,
+        activity: int32(actor.actionTicks), gold: actor.carriedValue,
+        returned: hero and run.world.returned[slot],
+        idleScore: (if hero and actor.path.len > 0: 24.0'f else: 12.0'f),
+        combatScore: (if hero: 125.0'f else: 85.0'f)
       )
-    proc noteUpcoming(actions: openArray[ReplayAction]) =
-      ## Widens the party shot toward a recorded swing still in the room.
-      var i = actions.actionIndexAfter(uint32(tick))
-      let limit = uint32(tick + LookAheadTicks)
-      while i < actions.len and actions[i].tick <= limit:
-        let action = actions[i]
-        if action.kind == ActionAttackTarget or
-            action.kind == ActionHealTarget:
-          let heroSlot = run.world.actorSlot(action.heroId)
-          if heroSlot >= 0:
-            let hero = run.world.actors[heroSlot]
-            if hero.home.level == level:
-              var pos = actorRenderPosition(hero)
-              let targetSlot = run.world.actorSlot(action.first)
-              if targetSlot >= 0:
-                let target = run.world.actors[targetSlot]
-                if target.home.level == level:
-                  pos = mix(
-                    pos,
-                    actorRenderPosition(target),
-                    0.4'f32
-                  )
-              actionCam.noteInterest(
-                action.heroId,
-                pos,
-                70,
-                2.2,
-                tick,
-                int32(action.tick) - tick + 12
-              )
-        inc i
-    if run.replayPlayer != nil:
-      noteUpcoming(run.replayPlayer.data.actions)
-    elif run.recorder != nil:
-      noteUpcoming(run.recorder.data.actions)
-    for actor in run.world.actors:
-      if actor.id == 0 or actor.home.level != level:
-        continue
-      if actor.kind == HeroActor and actor.alive:
-        if actor.state == FightingState or actor.busy:
-          var pos = actorRenderPosition(actor)
-          let targetSlot = run.world.actorSlot(actor.target)
-          if targetSlot >= 0:
-            let target = run.world.actors[targetSlot]
-            if target.home.level == level:
-              pos = mix(pos, actorRenderPosition(target), 0.35'f32)
-          actionCam.noteInterest(actor.id, pos, 80, 2.2, tick, 16)
-      elif actor.kind == MonsterActor and actor.alive:
-        let pos = actorRenderPosition(actor)
-        if actor.state == FightingState:
-          actionCam.noteInterest(actor.id, pos, 68, 1.8, tick, 16)
-        elif actor.maxHp > 0 and actor.hp * 3 <= actor.maxHp:
-          actionCam.noteInterest(actor.id, pos, 55, 2.0, tick, 12)
+    if observeTick and not viewingSeeking:
+      actionCam.director.observe(subjects)
+    var heroes: seq[Subject]
+    for subject in subjects:
+      if subject.owner >= 0:
+        heroes.add subject
+    actionCam.director.refresh(heroes)
 
   proc updateTerrainVision(level: int32) =
     ## Uploads softened party vision and explored memory for one floor.
@@ -1265,10 +1175,21 @@ proc runGraphics*() =
     if existsEnv("SELECT_ALL"):
       selectAllHeroes()
 
+  var
+    viewingClock: ViewingClock
+    cameraSeekSerial = -1
+
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)
+      viewingDt = viewingClock.viewingDelta(window)
+      viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
+      if not transport.playing or viewingSeeking:
+        viewingDt = 0
+      if cameraSeekSerial != transport.seekSerial:
+        actionCam.resetDirector(transport.automaticSeek)
+        cameraSeekSerial = transport.seekSerial
       sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let recorded =
@@ -1288,6 +1209,7 @@ proc runGraphics*() =
           recorded,
           run.world.phase in {EscapedPhase, WipedPhase}
         )
+      feedCtaActions(observeTick = true)
       transport.startFrame(dt, TickRate)
       let
         frameStart = epochTime()
@@ -1301,6 +1223,7 @@ proc runGraphics*() =
           let oldActors = captureParticleActors()
           run.historyPlayback = transport.inHistory
           advanceGame()
+          feedCtaActions(observeTick = true)
           emitTickParticles(oldActors)
           cacheSeekCheckpoint()
           let recordedNow =
@@ -1399,12 +1322,12 @@ proc runGraphics*() =
             actionCam.takeManual()
           if actionCam.enabled:
             feedCtaActions()
-            actionCam.chooseShot(dt, transport.speed)
-            actionCam.follow(
-              cameraTarget,
-              cameraDistance,
-              dt,
-              transport.speed
+            actionCam.direct(
+              cameraTarget, cameraDistance, viewingDt,
+              run.world.phase in {EscapedPhase, WipedPhase} or
+                transport.tick >= transport.timelineEnd,
+              transport.repeating,
+              window.size.x.float32 / max(window.size.y.float32, 1)
             )
           else:
             let livingSelection = selectedLivingCount()
@@ -1644,6 +1567,7 @@ proc runGraphics*() =
           focusPlayerHero
         )
         sk.endUi()
+        drawStatsOverlay(sk, window)
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -1653,6 +1577,9 @@ proc runGraphics*() =
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
+        reportDirectorFrame(
+          actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
+        )
         reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):

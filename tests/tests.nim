@@ -4,6 +4,7 @@
 import
   test_assetpacks,
   test_actioncam,
+  test_directors,
   test_basic,
   test_bodies,
   test_body_layers,

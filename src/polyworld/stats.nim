@@ -1,7 +1,7 @@
 import
   std/algorithm,
   chroma, pixie, silky, vmath, windy,
-  chrome, gameuis, inputs, metrics
+  actioncam, chrome, gameuis, inputs, metrics
 
 when defined(takeScreenshot):
   import std/os
@@ -40,6 +40,7 @@ type
     scroll*: float32
     completed: bool
     showingResults*: bool
+    automatic*, automaticFinal*: bool
     finalTable: StatsTable
   StatsLayout* = object
     panel*, header*, body*: GameUiPanel
@@ -56,7 +57,7 @@ var
 
 proc visible*(state: StatsState, tabHeld: bool): bool =
   ## Combines held-key visibility with the independent button toggle.
-  tabHeld or state.toggled
+  tabHeld or state.toggled or state.automatic
 
 proc toggle*(state: var StatsState) =
   ## Toggles persistent visibility without modifying held-key visibility.
@@ -69,6 +70,17 @@ proc sync*(state: var StatsState, complete: bool) =
     state.toggled = true
     state.showingResults = true
   state.completed = complete
+
+proc syncDirector*(state: var StatsState, cam: ActionCam,
+    current: StatsTable, tabHeld: bool) =
+  ## Keeps automatic coverage separate from held Tab and manual toggles.
+  if current.complete:
+    state.finalTable = current
+  cam.manualPanel = state.toggled or tabHeld
+  state.automatic = cam.enabled and
+    (cam.director.overview or cam.director.finalResults)
+  state.automaticFinal = cam.enabled and cam.director.finalResults
+  state.showingResults = false
 
 proc displayedValue*(row: MetricRow, kind: StatsKind,
     metric: MetricKind): int64 =
@@ -99,7 +111,8 @@ proc displayedTable*(state: var StatsState, current: StatsTable,
     state.finalTable = current
   if not state.toggled or transportInput:
     state.showingResults = false
-  if state.showingResults and state.finalTable.complete:
+  if (state.showingResults or state.automaticFinal) and
+      state.finalTable.complete:
     result = state.finalTable
   else:
     result = current
@@ -109,8 +122,14 @@ proc tabHeld*(window: Window): bool =
   ## Reads temporary visibility directly from current focused input.
   window.focused and window.buttonDown[KeyTab]
 
-proc columns(kind: StatsKind): seq[StatsColumn] =
+proc columns(kind: StatsKind, compact = false): seq[StatsColumn] =
   ## Selects explicit per-game columns for the shared renderer.
+  if compact:
+    return @[
+      StatsColumn(label: "GOLD", metric: GoldMetric, width: 22),
+      StatsColumn(label: "DAMAGE", metric: DamageMetric, width: 22),
+      StatsColumn(label: "KILLS", metric: KillsMetric, width: 12)
+    ]
   case kind
   of GotaStats:
     result = @[
@@ -177,11 +196,24 @@ proc statsLayout*(layout: GameUiLayout, table: StatsTable): StatsLayout =
   result.contentHeight = content
   result.maxScroll = max(content - result.body.size.y, 0)
 
+proc statsScale*(hudScale: float32): float32 =
+  ## Keeps overview type readable independently of narrow-window HUD chrome.
+  max(hudScale, 0.75'f)
+
+proc statsViewport*(layout: GameUiLayout, hudScale: float32): GameUiLayout =
+  ## Preserves physical panel placement at the readable statistics scale.
+  let ratio = hudScale / statsScale(hudScale)
+  initGameUiLayout(layout.size * ratio, layout.transportHeight * ratio,
+    layout.margin * ratio)
+
 proc mouseOverStats*(state: StatsState, window: Window,
     layout: GameUiLayout, table: StatsTable, mouse: Vec2): bool =
   ## Blocks underlying input only within the visible statistics window.
+  let
+    scale = window.size.x.float32 / max(layout.size.x, 1)
+    viewport = statsViewport(layout, scale)
   state.visible(window.tabHeld) and
-    statsLayout(layout, table).panel.contains(mouse)
+    statsLayout(viewport, table).panel.contains(mouse * scale / statsScale(scale))
 
 proc statsColor(kind: StatsKind, team: int): ColorRGBX =
   ## Selects familiar faction accents for bands and trends.
@@ -215,7 +247,7 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
     return
   let
     slots = statsLayout(layout, table)
-    specs = columns(table.kind)
+    specs = columns(table.kind, layout.size.x < 1000)
     innerWidth = slots.header.size.x
   state.scroll = clamp(state.scroll, 0, slots.maxScroll)
   if slots.panel.contains(sk.mousePos):
@@ -280,8 +312,8 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
           if table.winner < 0: "DRAW"
           elif table.winner == row.team: "VICTORY"
           else: "DEFEAT"
-        sk.drawLabel(outcome, vec2(slots.body.origin.x + 330, y),
-          vec2(300, StatsBandHeight), color)
+        sk.drawLabel(outcome, vec2(slots.body.origin.x + innerWidth / 2, y),
+          vec2(innerWidth / 2 - 8, StatsBandHeight), color)
       y += StatsBandHeight
       previousTeam = row.team
     let rowPanel = GameUiPanel(origin: vec2(slots.body.origin.x, y),
@@ -371,3 +403,21 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
       offset = state.scroll / slots.maxScroll * (slots.body.size.y - height)
     sk.drawRect(slots.body.origin + vec2(innerWidth - 4, offset),
       vec2(3, height), MutedColor)
+
+proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
+    state: var StatsState, current: StatsTable, history: MetricHistory) =
+  ## Draws the readable overlay in its own pass after the ordinary HUD.
+  when defined(takeScreenshot):
+    if existsEnv("SHOW_STATS"):
+      state.toggled = true
+  if not state.visible(window.tabHeld):
+    return
+  let
+    scale = sk.uiScale
+    mouse = sk.mousePos
+  sk.uiScale = statsScale(scale)
+  sk.beginUi(window, window.size)
+  sk.drawStats(window, statsViewport(layout, scale), state, current, history)
+  sk.endUi()
+  sk.uiScale = scale
+  sk.mousePos = mouse

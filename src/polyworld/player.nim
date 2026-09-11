@@ -54,6 +54,8 @@ type
     targetTick*: int32
       ## Catch up to this tick at max speed. -1 means none.
     accumulator*: float32
+    seekSerial*: int
+    automaticSeek*: bool
     tickRate: int32
 
 proc speed*(player: Player): int32 =
@@ -111,10 +113,13 @@ proc sync*(
   if player.targetTick >= 0 and player.tick >= player.targetTick:
     player.targetTick = -1
 
-proc seekTo*(player: var Player, tick: int32, play = true) =
+proc seekTo*(player: var Player, tick: int32, play = true,
+    automatic = false) =
   ## Jumps toward one timeline tick at max speed, restoring if going back.
   ## Backward seeks reload the last checkpoint at or before the target,
   ## then resimulate up to it.
+  inc player.seekSerial
+  player.automaticSeek = automatic
   let wanted = clamp(tick, 0'i32, player.timelineEnd)
   if wanted < player.tick:
     player.restoreTick = wanted
@@ -199,7 +204,7 @@ proc shouldTick*(
   ## Paused seeks run until they land so single-tick steps stay exact.
   if player.reachedEnd:
     if player.repeating:
-      player.seekTo(0)
+      player.seekTo(0, automatic = true)
       return false
     player.playing = false
     player.targetTick = -1
@@ -361,9 +366,14 @@ proc drawTransport*(
       )
       player.seekTo(int32(ratio * player.timelineEnd.float32))
   if statsToggle != nil:
-    sk.drawIcon(slots.stats, "stats", statsToggle[])
+    let automatic = actionCam.subjectMode and actionCam.enabled and
+      (actionCam.director.overview or actionCam.director.finalResults)
+    sk.drawIcon(slots.stats, "stats", statsToggle[] or automatic)
     if window.clicked(sk, slots.stats):
-      statsToggle[] = not statsToggle[]
+      if automatic and not statsToggle[]:
+        actionCam.director.dismissOverview()
+      else:
+        statsToggle[] = not statsToggle[]
   let actionBtn = slots.camera
   sk.drawIcon(actionBtn, "action_cam", actionCam.enabled)
   if window.clicked(sk, actionBtn):

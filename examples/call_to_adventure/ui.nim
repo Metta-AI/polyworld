@@ -387,16 +387,26 @@ proc drawUi*(
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let table = currentStats()
-  statsState.sync(table.complete)
+  statsState.syncDirector(actionCam, table, window.tabHeld)
   let
     chrome = currentChrome(window)
     chatPanel = sk.beginFrame(chrome.chat)
     questPanel = sk.beginFrame(chrome.quest)
     detailsPanel = sk.beginFrame(chrome.abilities)
     inventoryPanel = sk.beginFrame(chrome.inventory)
-    selectedActor = run.world.actors[primaryId]
+    detailSlot =
+      if actionCam.enabled and actionCam.locked and
+          actionCam.director.subject.owner in 0 ..< PartySize:
+        int(actionCam.director.subject.owner)
+      else:
+        primaryId
+    selectedActor = run.world.actors[detailSlot]
     selectedClass = selectedActor.heroClass
-    shownLevel = run.viewLevel(selectedIds)
+    shownLevel =
+      if actionCam.enabled and actionCam.locked:
+        actionCam.director.subject.floor
+      else:
+        run.viewLevel(selectedIds)
     experience = run.progressExperience
     experienceInLevel = experience mod 250
     nextExperience = 250
@@ -422,7 +432,8 @@ proc drawUi*(
         rgbx(255, 255, 255, 255)
       else:
         rgbx(140, 140, 148, 255),
-      selected = selectedIds[slot],
+      selected = (if actionCam.enabled and actionCam.locked:
+        slot == detailSlot else: selectedIds[slot]),
       iconSize = IconSmall
     )
     sk.drawLabel(
@@ -797,7 +808,10 @@ proc drawUi*(
         &"first at tick {run.hashCheck.firstTick}"
     )
   sk.drawDebugMenu(window)
-  sk.drawStats(
-    window, chrome.layout, statsState, table,
-    run.history
+  statsState.syncDirector(actionCam, table, window.tabHeld)
+
+proc drawStatsOverlay*(sk: Silky, window: Window) =
+  ## Presents readable statistics above the HUD at every window width.
+  sk.drawStatsOverlay(
+    window, currentLayout(window), statsState, currentStats(), run.history
   )
