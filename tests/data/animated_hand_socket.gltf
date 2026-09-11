@@ -1,0 +1,28 @@
+{
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0]}],
+  "nodes": [
+    {"name": "arm", "translation": [10, 20, 30], "children": [1, 2]},
+    {"name": "handslot.r", "translation": [1, 2, 3]},
+    {"name": "handslot.l", "translation": [-1, 2, 3]}
+  ],
+  "meshes": [],
+  "animations": [{
+    "name": "move_hand",
+    "samplers": [{"input": 0, "output": 1, "interpolation": "LINEAR"}],
+    "channels": [{"sampler": 0, "target": {"node": 1, "path": "translation"}}]
+  }],
+  "buffers": [{
+    "byteLength": 32,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAgD8AAIA/AAAAQAAAQEAAAIBAAADAQAAAAEE="
+  }],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 8},
+    {"buffer": 0, "byteOffset": 8, "byteLength": 24}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0], "max": [1]},
+    {"bufferView": 1, "componentType": 5126, "count": 2, "type": "VEC3"}
+  ]
+}
