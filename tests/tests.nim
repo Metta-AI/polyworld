@@ -4,6 +4,7 @@
 import
   test_assetpacks,
   test_actioncam,
+  test_animblend_controls,
   test_directors,
   test_basic,
   test_bodies,
