@@ -111,6 +111,7 @@ proc runGraphics*() =
     addAbilityIcons(builder)
     addItemIcons(builder)
     builder.addDefaultFonts()
+    builder.addFont(DefaultFontPath, "HeroVersus", 24.0)
     builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
   profileBlock "window":
@@ -142,7 +143,7 @@ proc runGraphics*() =
         6
       )
     scatterGrass(800, run.map.seed, matchTerrain = true)
-    scatterRocks(80, run.map.seed)
+    scatterRocks(80, run.map.seed, scale = 0.25'f)
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -1040,7 +1041,8 @@ proc runGraphics*() =
         hp: footman.hp, maxHp: FootmanHp, complete: true,
         participant: max(footman.targetHeroId, footman.targetTowerId),
         fighting: footman.state == Fighting, activity: footman.swingTicks,
-        idleScore: 8, combatScore: 70
+        idleScore: (if footman.state == Marching: 22.0'f else: 8.0'f),
+        combatScore: 70
       )
     for tower in run.world.towers:
       subjects.add Subject(
@@ -1056,7 +1058,7 @@ proc runGraphics*() =
         id: fort.id, owner: int32(fort.team), position: gods[i].position,
         height: 2.5, radius: 4, visible: visibleInView(fort.team, fort.center),
         alive: fort.hp > 0, hp: fort.hp, maxHp: FortHp, complete: true,
-        idleScore: 3, combatScore: 165
+        damageOnly: true, combatScore: 165
       )
     # Approaching opponents deserve a shot anchored on an advancing hero.
     for subject in subjects.mitems:
