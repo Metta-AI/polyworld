@@ -15,7 +15,7 @@ const
   IconLarge = 128.0'f32
   ShopIcon = 32.0'f32
   ShopWell = ShopIcon + 4
-  BadgeSmall = 18.0'f32
+  BadgeSmall = 16.0'f
   BadgeLarge = 64.0'f32
   AbilityKeys = ["Q", "W", "E", "R", "F", "G"]
   ScoreIcons = ["tower", "kills", "deaths"]
@@ -568,7 +568,7 @@ proc drawHeroMeters(
     rgbx(65, 126, 224, 255)
   )
   sk.drawBadge(
-    portrait.origin + vec2(-2, portrait.size.y - BadgeSmall),
+    portrait.origin + vec2(-4, portrait.size.y - BadgeSmall + 3),
     vec2(BadgeSmall),
     $hero.level
   )
@@ -688,8 +688,28 @@ proc drawUi*(
       actionCam,
       focusPlayerHero
     )
-  for hero in run.world.heroes:
-    sk.drawHeroMeters(heroes[hero.heroCardIndex], hero)
+  for slot, hero in run.world.heroes:
+    let panel = heroes[hero.heroCardIndex]
+    sk.drawLabel(
+      sk.fittedLabel(
+        run.config.players[slot].displayName(slot),
+        panel.name.size.x,
+        "Small"
+      ),
+      panel.name.origin,
+      panel.name.size,
+      rgbx(166, 174, 190, 255),
+      "Small",
+      CenterAlign
+    )
+    sk.drawHeroMeters(panel, hero)
+  sk.drawLabel(
+    "vs",
+    heroesPanel.origin + vec2(532, 57),
+    vec2(26, 28),
+    rgbx(166, 174, 190, 255),
+    "HeroVersus"
+  )
 
   sk.drawSprite(
     if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",

@@ -86,7 +86,7 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
       panel = GameUiPanel(origin: origin, size: gota.PanelHeroes)
       cards = panel.heroPanels()
     for card in cards:
-      checkPanels(panel, [card.portrait, card.hp, card.mana])
+      checkPanels(panel, [card.portrait, card.name, card.hp, card.mana])
       doAssert card.hp.origin.x == card.mana.origin.x
       doAssert card.hp.size == card.mana.size
     for team in 0 ..< 2:
@@ -94,7 +94,7 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
         let
           previous = cards[team * 5 + i - 1].portrait
           current = cards[team * 5 + i].portrait
-        doAssert current.origin.x - previous.origin.x == 95
+        doAssert current.origin.x - previous.origin.x == 104
   block:
     let
       panel = GameUiPanel(origin: origin, size: gota.PanelDetails)
