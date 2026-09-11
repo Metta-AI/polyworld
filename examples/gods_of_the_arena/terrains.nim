@@ -59,7 +59,7 @@ proc kindAt(layerIndex, mapX, mapY: int32, tile: Tile): TerrainKind =
     TerrainGrass
   of RoadTile, StoneTile, LaneShoulderKind, TowerCourtKind:
     TerrainRoad
-  of RockTile, QuarryFloorKind, QuarryRimKind, HillRockKind:
+  of RockTile, QuarryFloorKind, QuarryRimKind, QuarryShoulderKind, HillRockKind:
     TerrainRock
   of MarshTile, WetBankKind:
     TerrainMarsh
