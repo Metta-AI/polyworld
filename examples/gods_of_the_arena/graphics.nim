@@ -3,7 +3,8 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, content, sim, game, maps, replays, ui, controls, spelleffects,
+  assets, content, decor, kaykit_decor, sim, game, maps, replays, ui,
+  controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
   polyworld/common, polyworld/pathing,
@@ -76,15 +77,6 @@ proc addHudIcons(builder: AtlasBuilder) =
   ## Packs the theme logo into the atlas.
   builder.addThemeLogo(LogoPath)
 
-proc laneRenderPath(lane: int): seq[Vec3] =
-  ## Converts one integer lane polyline into render-space points.
-  for point in lanePathPoints[lane]:
-    result.add vec3(
-      point.x.float32 / PathUnitsPerTile.float32,
-      point.y.float32 / PathUnitsPerTile.float32,
-      point.z.float32 / PathUnitsPerTile.float32
-    )
-
 # Lane footmen and the gods per team: humans for red, undead for blue, so
 # the teams read from their models with no tinting. Heroes are outfits of
 # the same modular pack Call to Adventure uses. Blue wears the upper tank,
@@ -126,24 +118,87 @@ proc runGraphics*() =
   profileBlock "terrain":
     amplitude = 1.4'f32
     seed = run.map.seed
-    treeHeight = 6.0'f
+    treeHeight = 5.8'f
     treeWidth = 0.0'f
     initTerrain(
-      DenseTrees, GeneratedTerrain, PaintedRocks, FortTextures,
+      MixedTrees, GeneratedTerrain, PaintedRocks, FortTextures,
       settings = GotaTerrainAssets
     )
     for i, kind in [RedFortKind, BlueFortKind]:
       let material = (SurfaceNames.len + i).float32
+      let
+        topTint =
+          if i == 0: vec3(1.08'f32, 0.76'f32, 0.68'f32)
+          else: vec3(0.72'f32, 0.84'f32, 1.08'f32)
+        sideTint =
+          if i == 0: vec3(0.82'f32, 0.56'f32, 0.50'f32)
+          else: vec3(0.54'f32, 0.66'f32, 0.88'f32)
       setTileMaterial(
         kind.int,
         material,
         material,
-        vec3(1),
-        vec3(0.9),
+        topTint,
+        sideTint,
         6
       )
-    scatterGrass(800, run.map.seed, matchTerrain = true)
-    scatterRocks(80, run.map.seed, scale = 0.25'f)
+    setTileMaterial(
+      LaneShoulderKind.int,
+      GravelSurface.float32,
+      DirtSurface.float32,
+      vec3(0.94'f32, 0.92'f32, 0.84'f32),
+      vec3(0.78'f32, 0.74'f32, 0.62'f32),
+      4
+    )
+    setTileMaterial(
+      WetBankKind.int,
+      MarshSurface.float32,
+      DirtSurface.float32,
+      vec3(0.82'f32, 0.92'f32, 0.78'f32),
+      vec3(0.66'f32, 0.72'f32, 0.56'f32),
+      3
+    )
+    setTileMaterial(
+      TowerCourtKind.int,
+      CobbleSurface.float32,
+      GravelSurface.float32,
+      vec3(0.92'f32, 0.90'f32, 0.82'f32),
+      vec3(0.66'f32, 0.62'f32, 0.54'f32),
+      5
+    )
+    setTileMaterial(
+      LandmarkHillKind.int,
+      ForestSurface.float32,
+      DirtSurface.float32,
+      vec3(0.92'f32, 1.04'f32, 0.84'f32),
+      vec3(0.70'f32, 0.62'f32, 0.48'f32),
+      3
+    )
+    setTileMaterial(
+      QuarryFloorKind.int,
+      GravelSurface.float32,
+      DirtSurface.float32,
+      vec3(0.84'f32, 0.80'f32, 0.70'f32),
+      vec3(0.58'f32, 0.54'f32, 0.48'f32),
+      5
+    )
+    setTileMaterial(
+      QuarryRimKind.int,
+      DirtSurface.float32,
+      GravelSurface.float32,
+      vec3(0.80'f32, 0.72'f32, 0.58'f32),
+      vec3(0.62'f32, 0.56'f32, 0.48'f32),
+      4
+    )
+    setTileMaterial(
+      HillRockKind.int,
+      GravelSurface.float32,
+      DirtSurface.float32,
+      vec3(0.82'f32, 0.82'f32, 0.76'f32),
+      vec3(0.52'f32, 0.48'f32, 0.42'f32),
+      5
+    )
+    scatterGrass(1_500, run.map.seed, matchTerrain = true)
+    scatterRocks(180, run.map.seed, scale = 0.25'f)
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -200,10 +255,8 @@ proc runGraphics*() =
     SmallTowerScale = 3.5'f32
     TallTowerScale = 4.5'f32
     GateTowerScale = 6.0'f32
-    BarracksScale = 2.25'f32
-    FountainScale = BarracksScale * 1.5'f32
-    RedBarracksOffsets = [4.0'f32, -4.0'f32, 4.0'f32]
-    BlueBarracksOffsets = [-4.0'f32, 4.0'f32, -4.0'f32]
+    BarracksScale = 1.65'f32
+    FountainScale = 3.4'f32
 
   proc towerPropName(tier: TowerTier): string =
     ## Returns the terrain-kit model name for one tower tier.
@@ -225,55 +278,37 @@ proc runGraphics*() =
     of GateTower:
       GateTowerScale
 
-  proc lanePlacement(
-      path: seq[Vec3],
-      ratio,
-      offset: float32
-  ): tuple[position: Vec3, facing: float32] =
-    ## Finds a presentation prop position beside a sampled lane point.
-    let
-      index = clamp(
-        int(round((path.len - 1).float32 * ratio)),
-        0,
-        path.len - 1
-      )
-      nextIndex = min(index + 1, path.len - 1)
-      previousIndex = max(index - 1, 0)
-      direction = normalize(vec3(
-        path[nextIndex].x - path[previousIndex].x,
-        0,
-        path[nextIndex].z - path[previousIndex].z
-      ))
-      side = vec3(-direction.z, 0, direction.x)
-      facing = arctan2(direction.x, direction.z)
-    for amount in [offset, -offset, offset * 0.5, offset * -0.5]:
-      var position = path[index] + side * amount
-      let (tileX, tileZ) = worldToTile(position.x, position.z)
-      if isWalkable(0, tileX, tileZ):
-        position.y = groundHeight(position.x, position.z)
-        return (position, facing)
-    (path[index], facing)
+  proc structureTint(team: Team): Vec3 =
+    ## Warms red masonry and cools blue masonry for instant side readability.
+    if team == RedTeam:
+      vec3(1.16'f32, 0.58'f32, 0.52'f32)
+    else:
+      vec3(0.68'f32, 0.82'f32, 1.14'f32)
+
+  proc structureTint4(team: Team): Vec4 =
+    let tint = structureTint(team)
+    vec4(tint.x, tint.y, tint.z, 1)
 
   proc placeStaticStructures(pack: PropPack) =
-    ## Places one permanent barracks at each end of every lane.
-    for lane in 0 .. 2:
-      let path = laneRenderPath(lane)
-      let
-        redBarracks = lanePlacement(path, 0.0, RedBarracksOffsets[lane])
-        blueBarracks = lanePlacement(path, 1.0, BlueBarracksOffsets[lane])
-      pack.placeProp(
-        "building2",
-        redBarracks.position,
-        redBarracks.facing,
-        BarracksScale
-      )
-      pack.placeProp(
-        "building2",
-        blueBarracks.position,
-        blueBarracks.facing + PI.float32,
-        BarracksScale
-      )
-  var towerPack: PropPack
+    ## Three deliberately spaced barracks form a river-facing arc beyond the
+    ## nexus, while leaving straight visual corridors to all three entrances.
+    for team in Team:
+      for site in BarracksSites[team.ord]:
+        let facing = arctan2(
+          (site.faceX - site.x).float32,
+          (site.faceZ - site.z).float32
+        )
+        pack.placeProp(
+          "building2",
+          tileCenter(GroundLayer, site.x, site.z),
+          facing,
+          BarracksScale,
+          structureTint(team)
+        )
+  var
+    towerPack: PropPack
+    decorPack: PropPack
+    kaykitPack: PropPack
   profileBlock "props":
     towerPack = loadPropPack(propPaths(TowerPack, TowerProps))
     for name in TowerProps:
@@ -282,13 +317,23 @@ proc runGraphics*() =
     towerPack.placeProp(
       "magiccrystal1",
       tileCenter(RedFortLayer, FortOuterRadius, FortOuterRadius),
-      scale = FountainScale
+      scale = FountainScale,
+      tint = structureTint(RedTeam)
     )
+    decorPack = loadPropPack(arenaDecorPaths())
+    for nodes in ArenaDecorNodes:
+      for name in nodes:
+        doAssert decorPack.hasProp(name), "missing arena decoration: " & name
+    decorPack.placeArenaDecor(run.map.seed)
+    kaykitPack = loadPropPack(KayKitDecorPaths, brightness = 1.08'f32)
+    kaykitPack.placeKayKitDecor(
+      run.map.seed, LandmarkHillSites[0], QuarrySites[0])
     towerPack.placeProp(
       "magiccrystal1",
       tileCenter(BlueFortLayer, FortOuterRadius, FortOuterRadius),
       rotation = PI.float32,
-      scale = FountainScale
+      scale = FountainScale,
+      tint = structureTint(BlueTeam)
     )
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
@@ -1593,8 +1638,16 @@ proc runGraphics*() =
     startReplayRecording(uint32(transport.durationTicks))
   replayCheckpoints = @[captureCheckpoint()]
 
+  let cleanScreenshot =
+    when defined(takeScreenshot): existsEnv("CLEAN_SCREENSHOT")
+    else: false
   when defined(takeScreenshot):
     var screenshotFrame = 0
+    let screenshotPath =
+      if existsEnv("SCREENSHOT_PATH"):
+        getEnv("SCREENSHOT_PATH")
+      else:
+        "examples/gods_of_the_arena/gota_shot.png"
     applyScreenshotCamera(cameraDistance)
     if existsEnv("CAM_X"): cameraTarget.x = getEnv("CAM_X").parseFloat.float32
     if existsEnv("CAM_Z"): cameraTarget.z = getEnv("CAM_Z").parseFloat.float32
@@ -1645,6 +1698,11 @@ proc runGraphics*() =
       selectEntity(getEnv("SELECT_ID").parseInt.int32)
     if existsEnv("SELECT_ALL"):
       selectAllHeroes()
+    if cleanScreenshot:
+      primaryId = 0
+      selectedIds.setLen(0)
+      followSelection = false
+      viewMode = 0
     if existsEnv("CAM_X") or existsEnv("CAM_Z"):
       followSelection = false
       actionCam.takeManual()
@@ -1837,7 +1895,8 @@ proc runGraphics*() =
             renderPoint(tower.position),
             renderFacing(tower.facing),
             towerScale(tower.tier),
-            viewProjection
+            viewProjection,
+            structureTint4(tower.team)
           )
 
         if showOccludedCharacters:
@@ -1892,45 +1951,47 @@ proc runGraphics*() =
             if points.len >= 2:
               worldShapes.addPolyline(points, color)
           worldShapes.draw(viewProjection)
-        drawWorldUnitBars(
-          worldBarRenderer,
-          viewProjection,
-          barCameraRight,
-          barCameraUp,
-          dt
-        )
-        drawSelectedOutline(view, projection, viewProjection)
+        if not cleanScreenshot:
+          drawWorldUnitBars(
+            worldBarRenderer,
+            viewProjection,
+            barCameraRight,
+            barCameraUp,
+            dt
+          )
+          drawSelectedOutline(view, projection, viewProjection)
 
       profileBlock "ui":
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_CULL_FACE)
-        glDisable(GL_BLEND)
-        when not defined(emscripten):
-          glDisable(GL_MULTISAMPLE)
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-        sk.beginUi(window, window.size)
-        drawUi(
-          sk,
-          window,
-          transport,
-          cameraTarget,
-          cameraDistance,
-          viewMode,
-          primaryId,
-          selectedIds,
-          followSelection,
-          actionCam,
-          focusPlayerHero
-        )
-        sk.endUi()
-        drawStatsOverlay(sk, window)
+        if not cleanScreenshot:
+          glDisable(GL_DEPTH_TEST)
+          glDisable(GL_CULL_FACE)
+          glDisable(GL_BLEND)
+          when not defined(emscripten):
+            glDisable(GL_MULTISAMPLE)
+          glActiveTexture(GL_TEXTURE0)
+          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          sk.beginUi(window, window.size)
+          drawUi(
+            sk,
+            window,
+            transport,
+            cameraTarget,
+            cameraDistance,
+            viewMode,
+            primaryId,
+            selectedIds,
+            followSelection,
+            actionCam,
+            focusPlayerHero
+          )
+          sk.endUi()
+          drawStatsOverlay(sk, window)
       when defined(takeScreenshot):
         captureScreenshot(
           window,
           screenshotFrame,
           30,
-          "examples/gods_of_the_arena/gota_shot.png"
+          screenshotPath
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
