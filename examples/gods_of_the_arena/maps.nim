@@ -31,6 +31,7 @@ const
   QuarryFloorKind* = 12'u32
   QuarryRimKind* = 13'u32
   HillRockKind* = 14'u32
+  QuarryShoulderKind* = 15'u32
   PerimeterForestMin* = 4
   PerimeterForestMax* = 6
   TerrainAmplitudeSteps = 11'i32
@@ -48,6 +49,7 @@ const
   HillDetailStream = 0x6A09E667F3BCC909'u64
   HillContourStream = 0x510E527FADE682D1'u64
   QuarryContourStream = 0x9B05688C2B3E6C1F'u64
+  TowerContourStream = 0x1F83D9ABFB41BD6B'u64
   ForestRollStream = 0x2545F4914F6CDD1D'u64
   ForestDensityPercent = 90'i64
     ## Chance of a candidate at the forest map's peak.
@@ -120,9 +122,10 @@ const
   LandmarkHillAccessMouths* = [(63, 24), (64, 103)]
   LandmarkHillRadius* = 14
   LandmarkHillTopSteps* = 28'i32
-  QuarrySites* = [(37, 63), (90, 64)]
-  QuarryAccessMouths* = [(24, 63), (103, 64)]
-  QuarryRadius* = 9
+  QuarrySites* = [(31, 65), (96, 62)]
+  QuarryAccessMouths* = [(24, 65), (103, 62)]
+  QuarryShoulderRadius* = 11
+  QuarryRadius* = 8
   QuarryFloorRadius* = 3
   QuarryFloorSteps* = -20'i32
   HillRockOutcrops* = [
@@ -197,8 +200,8 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     landmarkHillCore: array[GridTiles * GridTiles, bool]
     hillRock: array[GridTiles * GridTiles, bool]
     quarryTerrain: array[GridTiles * GridTiles, bool]
-    quarryCore: array[GridTiles * GridTiles, bool]
     quarryFloor: array[GridTiles * GridTiles, bool]
+    quarryShoulder: array[GridTiles * GridTiles, bool]
     landmarkAccess: array[GridTiles * GridTiles, bool]
     barracksPads: array[GridTiles * GridTiles, bool]
 
@@ -264,6 +267,20 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       detail * int64(roughness), int64(MapBlendScale) * 2
     ))
 
+  proc smoothNaturalDisc(
+      x, z, cx, cz, radius: int,
+      stream: uint64,
+      period, roughness: int
+  ): bool =
+    ## Quarter-tile distance and broad contour noise avoid the chunky,
+    ## dithered edge produced by whole-tile distance bands.
+    let
+      dx4 = int64((x - cx) * 4)
+      dz4 = int64((z - cz) * 4)
+      distance4 = int(integerSqrt(dx4 * dx4 + dz4 * dz4))
+      edge4 = naturalOffset(x, z, stream, period, roughness) * 4
+    distance4 <= radius * 4 + edge4
+
   for route in LaneRoutes:
     for i in 0 ..< route.len - 1:
       let
@@ -280,9 +297,15 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     for team in 0 .. 1:
       for tier in 0 .. 2:
         let site = TowerSites[lane][team][tier]
-        stamp(towerCourts, site.x, site.z, 5)
-        stamp(towerCourtCenters, site.x, site.z, 3)
         stamp(laneClear, site.x, site.z, 8)
+        for z in max(0, site.z - 7) .. min(GridTiles - 1, site.z + 7):
+          for x in max(0, site.x - 7) .. min(GridTiles - 1, site.x + 7):
+            if smoothNaturalDisc(
+                x, z, site.x, site.z, 3, TowerContourStream, 12, 1):
+              towerCourts[z * GridTiles + x] = true
+            if smoothNaturalDisc(
+                x, z, site.x, site.z, 1, TowerContourStream, 12, 0):
+              towerCourtCenters[z * GridTiles + x] = true
   for (x, z, radius, _) in ForestHillocks:
     stamp(hillockTerrain, x, z, radius)
   for z in 0 ..< GridTiles:
@@ -328,17 +351,17 @@ proc generateMap*(seed: int32): MapData {.measure.} =
   for z in 0 ..< GridTiles:
     for x in 0 ..< GridTiles:
       for (quarryX, quarryZ) in QuarrySites:
-        if naturalDisc(
+        if smoothNaturalDisc(
+            x, z, quarryX, quarryZ, QuarryShoulderRadius,
+            QuarryContourStream, 12, 1):
+          quarryShoulder[z * GridTiles + x] = true
+        if smoothNaturalDisc(
             x, z, quarryX, quarryZ, QuarryRadius,
-            QuarryContourStream, 5, 2):
+            QuarryContourStream, 10, 1):
           quarryTerrain[z * GridTiles + x] = true
-        if naturalDisc(
-            x, z, quarryX, quarryZ, QuarryRadius - 2,
-            QuarryContourStream, 5, 1):
-          quarryCore[z * GridTiles + x] = true
-        if naturalDisc(
+        if smoothNaturalDisc(
             x, z, quarryX, quarryZ, QuarryFloorRadius,
-            QuarryContourStream, 4, 1):
+            QuarryContourStream, 8, 1):
           quarryFloor[z * GridTiles + x] = true
   for i, site in QuarrySites:
     let mouth = QuarryAccessMouths[i]
@@ -515,28 +538,33 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           dz2 = int64(cz * 2 - (quarryZ * 2 + 1))
           distance2 = int32(integerSqrt(dx2 * dx2 + dz2 * dz2))
           contour = naturalCornerOffset(
-            cx, cz, QuarryContourStream, 5, 2) * 2
+            cx, cz, QuarryContourStream, 10, 1) * 2
           shapedDistance2 = max(distance2 - contour, 0'i32)
           floorHeight = QuarryFloorSteps + naturalCornerOffset(
             cx, cz, QuarryContourStream xor HillDetailStream, 6, 1)
-        if shapedDistance2 < QuarryRadius * 2:
+        if shapedDistance2 < QuarryShoulderRadius * 2:
           let amount = smoothstep(
-            (QuarryRadius.int32 * 2 - shapedDistance2) * MapBlendScale div
-              (QuarryRadius.int32 * 2)
+            (QuarryShoulderRadius.int32 * 2 - shapedDistance2) *
+              MapBlendScale div (QuarryShoulderRadius.int32 * 2)
           )
           result = blendHeight(result, floorHeight, amount)
 
-    # Tower courts are deliberately flat combat rooms. Their shoulders fade
-    # into the surrounding terrain over two tiles.
+    # Tower courts keep a compact level fighting centre, then use a round,
+    # low-frequency falloff instead of a square Chebyshev terrace.
     for lane in 0 .. 2:
       for team in 0 .. 1:
         for tier in 0 .. 2:
           let
             site = TowerSites[lane][team][tier]
-            distance = max(abs(cx - site.x), abs(cz - site.z))
-          if distance <= 7:
+            dx2 = int64(cx * 2 - (site.x * 2 + 1))
+            dz2 = int64(cz * 2 - (site.z * 2 + 1))
+            distance2 = int32(integerSqrt(dx2 * dx2 + dz2 * dz2))
+            contour = naturalCornerOffset(
+              cx, cz, TowerContourStream, 12, 1) * 2
+            shapedDistance2 = max(distance2 - contour, 0'i32)
+          if shapedDistance2 < 22:
             let amount = smoothstep(
-              int32(7 - distance) * MapBlendScale div 2
+              (22'i32 - shapedDistance2) * MapBlendScale div 12
             )
             result = blendHeight(
               result, laneElevation(site.x, site.z), amount
@@ -591,10 +619,10 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         kind =
           if quarryFloor[z * GridTiles + x]:
             QuarryFloorKind
-          elif quarryTerrain[z * GridTiles + x] and
-              (quarryCore[z * GridTiles + x] or naturalOffset(
-                x, z, QuarryContourStream xor ForestDetailStream, 4, 2) >= 0):
+          elif quarryTerrain[z * GridTiles + x]:
             QuarryRimKind
+          elif quarryShoulder[z * GridTiles + x]:
+            QuarryShoulderKind
           elif hillRock[z * GridTiles + x]:
             HillRockKind
           elif landmarkHill[z * GridTiles + x] and

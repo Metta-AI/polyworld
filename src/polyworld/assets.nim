@@ -68,12 +68,14 @@ proc modelAsset*(
   nodes: seq[string] = @[],
   clips: seq[string] = @[],
   manifest = "",
-  presets: seq[string] = @[]
+  presets: seq[string] = @[],
+  textureSize = 0
 ): Asset =
   ## Declares a model and the named content retained in its browser copy.
   Asset(
     kind: ModelAsset, source: path.assetName, output: path.assetName,
-    nodes: nodes, clips: clips, manifest: manifest.assetName, presets: presets
+    nodes: nodes, clips: clips, manifest: manifest.assetName, presets: presets,
+    size: textureSize
   )
 
 proc propPath*(pack, name: string): string =
@@ -88,10 +90,12 @@ proc propPaths*(pack: string, names: openArray[string]): seq[string] =
   else:
     result.add pack
 
-proc propAssets*(pack: string, names: openArray[string]): seq[Asset] =
+proc propAssets*(
+    pack: string, names: openArray[string], textureSize = 0
+): seq[Asset] =
   ## Declares independently reusable files for selected static props.
   for name in names:
-    var asset = modelAsset(pack, @[name])
+    var asset = modelAsset(pack, @[name], textureSize = textureSize)
     asset.output = propPath(pack.assetName, name)
     result.add asset
 
@@ -141,7 +145,8 @@ proc terrainAssets*(
   of LowPolyRocks:
     result.add modelAsset("terrain/low_poly_rocks.glb")
   of PaintedRocks:
-    result.add propAssets(PaintedRockPath, PaintedRockNames)
+    result.add propAssets(
+      PaintedRockPath, PaintedRockNames, textureSize = settings.size)
   case terrain
   of CartoonTerrain:
     for name in settings.materials:
