@@ -20,6 +20,7 @@ when defined(takeScreenshot):
   import std/os
 
 const
+  DefaultCameraDistance = 17.0'f
   AtlasPath = TmpRoot & "/gota.atlas.png"
 
 type
@@ -665,7 +666,7 @@ proc runGraphics*() =
     )
 
   var
-    cameraDistance = 170.0'f32
+    cameraDistance = DefaultCameraDistance
     cameraTarget = vec3(0, 0, 0)
     panning = false
     minimapPanning = false
@@ -681,7 +682,11 @@ proc runGraphics*() =
     cameraEase: CameraEase
     focusPlayerHero = false
     groupCameraScale = 1.0'f32
+    viewingDt = 0.0'f
+    viewingSeeking = false
     actionCam = initActionCam(
+      subjectMode = true,
+      defaultDistance = DefaultCameraDistance,
       minDistance = 22,
       maxDistance = 150,
       tight = 0.72,
@@ -690,9 +695,6 @@ proc runGraphics*() =
       holdSeconds = 2.8,
       mapSpan = HalfGrid * 2
     )
-    prevTowerHp: seq[int32]
-    prevFortHp: array[2, int32]
-    sawTowerHp = false
     transport = initPlayer(
       live = not run.replayMode,
       durationTicks =
@@ -747,6 +749,7 @@ proc runGraphics*() =
     run.world.heroes[options.playerSlot - 1].id
 
   if playerMode():
+    actionCam.takeManual()
     primaryId = playerHeroId()
     selectedIds.add primaryId
     followSelection = false
@@ -1011,222 +1014,64 @@ proc runGraphics*() =
           viewProjection
         )
 
-  proc feedGotaActions() =
-    ## Notes fights, tower shots, creeping, approaches, and upcoming tape.
-    const
-      LookAheadTicks = 48'i32
-      ApproachHero = 14.0'f32
-      ApproachTower = 10.0'f32
-      ApproachFort = 16.0'f32
-      CreepBase = 70_000_000'i32
-      PairBase = 80_000_000'i32
-    let tick = int32(run.world.tick)
-    actionCam.beginFrame(tick)
-    proc planarDist(a, b: Vec3): float32 =
-      ## Returns ground distance between two render points.
-      let
-        dx = a.x - b.x
-        dz = a.z - b.z
-      sqrt(dx * dx + dz * dz)
-    proc renderOf(id: int32, point: var Vec3): bool =
-      ## Finds a living object's current render position.
-      let hero = heroById(run.world, id)
-      if hero != nil and hero.id != 0:
-        point = renderPoint(hero.position)
-        return true
-      let tower = towerById(run.world, id)
-      if tower.id != 0:
-        point = renderPoint(tower.position)
-        return true
-      let footman = footmanById(run.world, id)
-      if footman.id != 0:
-        point = renderPoint(footman.position)
-        return true
-      for fort in run.world.forts:
-        if fort.id == id:
-          point = renderPoint(fort.center)
-          return true
-      false
-    proc noteUpcoming(actions: openArray[ReplayAction]) =
-      ## Zooms toward recorded attacks before they execute.
-      var i = actions.actionIndexAfter(uint32(tick))
-      let limit = uint32(tick + LookAheadTicks)
-      while i < actions.len and actions[i].tick <= limit:
-        let action = actions[i]
-        if action.kind == ActionAttackTarget or
-            action.kind == ActionUseItem:
-          var pos: Vec3
-          if renderOf(action.heroId, pos):
-            var score = 78.0'f32
-            if action.kind == ActionAttackTarget:
-              var target: Vec3
-              if renderOf(action.first, target):
-                pos = mix(pos, target, 0.5'f32)
-              score = 82
-            else:
-              score = 86
-            actionCam.noteInterest(
-              action.heroId,
-              pos,
-              score,
-              8,
-              tick,
-              int32(action.tick) - tick + 24
-            )
-        inc i
-    if run.replayPlayer != nil:
-      noteUpcoming(run.replayPlayer.data.actions)
-    elif run.recorder != nil:
-      noteUpcoming(run.recorder.data.actions)
-    if prevTowerHp.len != run.world.towers.len:
-      prevTowerHp.setLen(run.world.towers.len)
-    for i, tower in run.world.towers:
-      let pos = renderPoint(tower.position)
-      if tower.hp > 0:
-        if tower.attackTicks != 0:
-          actionCam.noteInterest(tower.id, pos, 58, 10, tick, 36)
-        elif tower.hp < tower.maxHp:
-          actionCam.noteInterest(tower.id, pos, 48, 10, tick, 36)
-      elif sawTowerHp and prevTowerHp[i] > 0:
-        actionCam.noteInterest(tower.id, pos, 96, 12, tick, 48)
-      prevTowerHp[i] = tower.hp
-    for i, fort in run.world.forts:
-      let
-        godPos = gods[i].position
-        wounded = fort.hp > 0 and fort.hp < FortHp
-        dying = sawTowerHp and prevFortHp[i] > 0 and fort.hp <= 0
-      if dying:
-        actionCam.noteInterest(fort.id, godPos, 150, 6, tick, 72)
-      elif fort.hp > 0:
-        var score = 0.0'f32
-        if wounded:
-          let hurt = 1.0'f32 - fort.hp.float32 / FortHp.float32
-          score = 90.0'f32 + 50.0'f32 * hurt
-        for hero in run.world.heroes:
-          if hero.team == fort.team or
-              hero.state == Dying or
-              hero.hp <= 0:
-            continue
-          let
-            pos = renderPoint(hero.position)
-            dist = planarDist(pos, godPos)
-          if hero.attackingFort or dist < ApproachFort:
-            let t = 1.0'f32 - clamp(dist / ApproachFort, 0, 1)
-            score = max(
-              score,
-              if hero.attackingFort: 130.0'f32 + 15.0'f32 * t
-              else: 100.0'f32 + 25.0'f32 * t
-            )
-        for footman in run.world.footmen:
-          if footman.team == fort.team or
-              footman.state == Dying or
-              footman.hp <= 0:
-            continue
-          let
-            pos = renderPoint(footman.position)
-            dist = planarDist(pos, godPos)
-          if footman.attackingFort or dist < ApproachFort * 0.7'f32:
-            score = max(score, 88.0'f32)
-        if score > 0:
-          actionCam.noteInterest(
-            fort.id,
-            godPos,
-            score,
-            6,
-            tick,
-            36
-          )
-      prevFortHp[i] = fort.hp
-    sawTowerHp = true
+  proc feedGotaActions(observeTick = false) =
+    ## Refreshes real subjects and observes every simulated tick.
+    if not actionCam.enabled:
+      return
+    var subjects: seq[Subject]
     for hero in run.world.heroes:
-      let pos = renderPoint(hero.position)
-      if hero.state == Fighting:
-        actionCam.noteInterest(hero.id, pos, 80, 6, tick, 36)
-      elif hero.state == Dying and
-          hero.deathTicks < TickRate:
-        actionCam.noteInterest(hero.id, pos, 92, 6, tick, 24)
-    for i, hero in run.world.heroes:
-      if hero.state == Dying or hero.hp <= 0:
-        continue
-      let fromPos = renderPoint(hero.position)
-      for other in run.world.heroes:
-        if other.team == hero.team or
-            other.state == Dying or
-            other.hp <= 0 or
-            other.id <= hero.id:
-          continue
-        let
-          toPos = renderPoint(other.position)
-          dist = planarDist(fromPos, toPos)
-        if dist < ApproachHero:
-          let
-            t = 1.0'f32 - dist / ApproachHero
-            pos = mix(fromPos, toPos, 0.5'f32)
-            id = PairBase + hero.id * 256 + other.id
-          actionCam.noteInterest(
-            id,
-            pos,
-            55 + 20 * t,
-            8,
-            tick,
-            24
-          )
-      for tower in run.world.towers:
-        if tower.team == hero.team or tower.hp <= 0:
-          continue
-        let
-          toPos = renderPoint(tower.position)
-          dist = planarDist(fromPos, toPos)
-        if dist < ApproachTower:
-          let t = 1.0'f32 - dist / ApproachTower
-          actionCam.noteInterest(
-            PairBase + hero.id * 1000 + tower.id,
-            mix(fromPos, toPos, 0.4'f32),
-            52 + 18 * t,
-            10,
-            tick,
-            24
-          )
-    var
-      laneScore: array[3, float32]
-      laneX: array[3, float32]
-      laneY: array[3, float32]
-      laneZ: array[3, float32]
-      laneN: array[3, int]
-    for footman in run.world.footmen:
-      if footman.lane < 0 or footman.lane > 2:
-        continue
-      let fighting = footman.state == Fighting
-      let dying =
-        footman.state == Dying and
-        footman.deathTicks < TickRate
-      if not fighting and not dying:
-        continue
-      let
-        pos = renderPoint(footman.position)
-        w = if fighting: 1.0'f32 else: 0.6'f32
-        lane = footman.lane
-      laneScore[lane] += w
-      laneX[lane] += pos.x * w
-      laneY[lane] += pos.y * w
-      laneZ[lane] += pos.z * w
-      inc laneN[lane]
-    for lane in 0 .. 2:
-      if laneN[lane] == 0:
-        continue
-      let total = laneScore[lane]
-      actionCam.noteInterest(
-        CreepBase + int32(lane),
-        vec3(
-          laneX[lane] / total,
-          laneY[lane] / total,
-          laneZ[lane] / total
-        ),
-        min(18.0'f32 + float32(laneN[lane]) * 2.0'f32, 32.0'f32),
-        10,
-        tick,
-        36
+      subjects.add Subject(
+        id: hero.id, owner: int32(hero.slot),
+        position: unitRenderPoint(hero.id, hero.position),
+        height: 0.9, radius: 1.2, visible: visibleInView(hero.team, hero.position),
+        alive: hero.hp > 0 and hero.state != Dying,
+        hp: hero.hp, maxHp: hero.maxHp, complete: true,
+        participant: max(hero.targetHeroId, hero.targetTowerId),
+        fighting: hero.state == Fighting, activity: hero.swingTicks,
+        idleScore: (if hero.hasMoveTarget: 22.0'f else: 12.0'f),
+        combatScore: 100
       )
+    for footman in run.world.footmen:
+      subjects.add Subject(
+        id: footman.id, owner: int32(footman.team),
+        position: unitRenderPoint(footman.id, footman.position),
+        height: 0.8, radius: 1, visible: visibleInView(footman.team, footman.position),
+        alive: footman.hp > 0 and footman.state != Dying,
+        hp: footman.hp, maxHp: FootmanHp, complete: true,
+        participant: max(footman.targetHeroId, footman.targetTowerId),
+        fighting: footman.state == Fighting, activity: footman.swingTicks,
+        idleScore: 8, combatScore: 70
+      )
+    for tower in run.world.towers:
+      subjects.add Subject(
+        id: tower.id, owner: int32(tower.team),
+        position: renderPoint(tower.position), height: 2.5, radius: 3,
+        visible: visibleInView(tower.team, tower.position), alive: tower.hp > 0,
+        hp: tower.hp, maxHp: tower.maxHp, complete: true,
+        participant: tower.targetId, fighting: tower.targetId != 0,
+        activity: tower.attackTicks, idleScore: 4, combatScore: 110
+      )
+    for i, fort in run.world.forts:
+      subjects.add Subject(
+        id: fort.id, owner: int32(fort.team), position: gods[i].position,
+        height: 2.5, radius: 4, visible: visibleInView(fort.team, fort.center),
+        alive: fort.hp > 0, hp: fort.hp, maxHp: FortHp, complete: true,
+        idleScore: 3, combatScore: 165
+      )
+    # Approaching opponents deserve a shot anchored on an advancing hero.
+    for subject in subjects.mitems:
+      let other = heroById(run.world, subject.id)
+      if other == nil or other.id == 0 or not subject.alive:
+        continue
+      for hero in run.world.heroes:
+        if hero.id == subject.id or hero.hp <= 0:
+          continue
+        if other.team != hero.team and
+            (renderPoint(hero.position) - subject.position).length < 14:
+          subject.idleScore = 28
+    if observeTick and not viewingSeeking:
+      actionCam.director.observe(subjects)
+    actionCam.director.refresh(subjects)
 
   proc playerHeroFrame(): Vec3 =
     ## Returns the look-at that frames the human hero over the HUD.
@@ -1359,14 +1204,6 @@ proc runGraphics*() =
         )
 
     if actionCam.enabled:
-      feedGotaActions()
-      actionCam.chooseShot(dt, transport.speed)
-      actionCam.follow(
-        cameraTarget,
-        cameraDistance,
-        dt,
-        transport.speed
-      )
       return
     let targetCount = selectedTargetCount()
     if followSelection and targetCount == 1:
@@ -1616,6 +1453,7 @@ proc runGraphics*() =
       oldTowerTicks[i] = tower.attackTicks
     captureUnitPositions()
     advanceGame()
+    feedGotaActions(observeTick = true)
     emitTickParticles(
       oldHeroLanded,
       oldFootmanLanded,
@@ -1719,10 +1557,21 @@ proc runGraphics*() =
       followSelection = false
       actionCam.takeManual()
 
+  var
+    viewingClock: ViewingClock
+    cameraSeekSerial = -1
+
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime)
+      viewingDt = viewingClock.viewingDelta(window)
+      viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
+      if not transport.playing or viewingSeeking:
+        viewingDt = 0
+      if cameraSeekSerial != transport.seekSerial:
+        actionCam.resetDirector(transport.automaticSeek)
+        cameraSeekSerial = transport.seekSerial
       sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       profileBlock "camera":
@@ -1735,6 +1584,7 @@ proc runGraphics*() =
       if restoreTick >= 0:
         restoreTo(restoreTick)
         transport.sync(int32(run.world.tick), recorded, run.world.gameOver)
+      feedGotaActions(observeTick = true)
       transport.startFrame(dt, TickRate)
       let frameStart = epochTime()
       run.historyPlayback = transport.inHistory
@@ -1775,6 +1625,14 @@ proc runGraphics*() =
                 footmanModels[god.team], footmanRenderClips[god.team][deathClip])
             )
 
+      feedGotaActions()
+      actionCam.direct(
+        cameraTarget, cameraDistance, viewingDt,
+        run.world.gameOver or transport.tick >= transport.timelineEnd,
+        transport.repeating,
+        window.size.x.float32 / max(window.size.y.float32, 1),
+        RtsGotaFollowLift
+      )
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()
@@ -1940,6 +1798,7 @@ proc runGraphics*() =
           focusPlayerHero
         )
         sk.endUi()
+        drawStatsOverlay(sk, window)
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -1949,6 +1808,9 @@ proc runGraphics*() =
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
+        reportDirectorFrame(
+          actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
+        )
         reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):

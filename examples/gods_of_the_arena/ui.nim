@@ -641,7 +641,7 @@ proc drawUi*(
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let table = currentStats()
-  statsState.sync(table.complete)
+  statsState.syncDirector(actionCam, table, window.tabHeld)
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
@@ -655,7 +655,10 @@ proc drawUi*(
     inventory = inventoryPanel.inventoryPanels()
     details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
-  var selection = selectedUnit(primaryId, viewMode)
+  let detailId =
+    if actionCam.enabled and actionCam.locked: actionCam.lockId
+    else: primaryId
+  var selection = selectedUnit(detailId, viewMode)
   if selection != nil:
     discard sk.beginFrame(chrome.details)
 
@@ -1025,7 +1028,10 @@ proc drawUi*(
     addr statsState.toggled
   )
   sk.drawDebugMenu(window)
-  sk.drawStats(
-    window, chrome.layout, statsState, table,
-    run.history
+  statsState.syncDirector(actionCam, table, window.tabHeld)
+
+proc drawStatsOverlay*(sk: Silky, window: Window) =
+  ## Presents readable statistics above the HUD at every window width.
+  sk.drawStatsOverlay(
+    window, currentLayout(window), statsState, currentStats(), run.history
   )

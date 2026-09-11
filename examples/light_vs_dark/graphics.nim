@@ -25,6 +25,7 @@ import
   controls
 
 const
+  DefaultCameraDistance = 17.0'f
   WindowTitle = "Light vs Dark"
   AtlasPath = TmpRoot & "/lvd.atlas.png"
   SeekCheckpointTicks = TickRate * 10
@@ -49,7 +50,7 @@ type
 var
   window*: Window
   sk*: Silky
-  cameraDistance* = 190.0'f32
+  cameraDistance* = DefaultCameraDistance
   cameraTarget* = vec3(0, 0, 0)
   cameraEye = vec3(0, 0, 0)
   panning = false
@@ -353,7 +354,11 @@ proc runGraphics*() =
     rebakeScene()
   cameraTarget = vec3(0, 0, 0)
   var
+    viewingDt = 0.0'f
+    viewingSeeking = false
     actionCam = initActionCam(
+      subjectMode = true,
+      defaultDistance = DefaultCameraDistance,
       minDistance = 40,
       maxDistance = 240,
       tight = 0.4,
@@ -363,8 +368,6 @@ proc runGraphics*() =
       mapSpan = HalfGrid * 2,
       closeScale = 0.5
     )
-    seenUnitId = 0'i32
-    sawUnits = false
 
   ## Replay scaffolding
 
@@ -431,6 +434,9 @@ proc runGraphics*() =
   proc playerMode(): bool =
     ## Returns whether this client issues orders for one side.
     options.playerSlot > 0 and not run.replayMode
+
+  if playerMode():
+    actionCam.takeManual()
 
   proc selectEntity(id: int32, additive = false) =
     ## Selects or toggles one entity. Spectator mode follows the selection.
@@ -652,95 +658,40 @@ proc runGraphics*() =
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
 
-  proc feedLvdActions() =
-    ## Notes builds, spawns, fights, wrecks, and upcoming tape commands.
-    const LookAheadTicks = 48'i32
-    let tick = run.world.tick
-    actionCam.beginFrame(tick)
-    proc renderOf(id: int32, point: var Vec3): bool =
-      ## Finds a living unit or standing building in render space.
-      if run.world.hasUnit(id):
-        point = renderPoint(
-          run.world.units[run.world.unitIndex(id)]
-        )
-        return true
-      if run.world.hasBuilding(id):
-        point = buildingCentre(
-          run.world.buildings[run.world.buildingIndex(id)]
-        )
-        return true
-      false
-    proc noteUpcoming(actions: openArray[ReplayAction]) =
-      ## Zooms toward recorded attacks and builds before they land.
-      var i = actions.actionIndexAfter(uint32(tick))
-      let limit = uint32(tick + LookAheadTicks)
-      while i < actions.len and actions[i].tick <= limit:
-        let action = actions[i]
-        var pos: Vec3
-        var score = 0.0'f32
-        var id = action.entityId
-        if action.kind == ActionAttack:
-          if renderOf(action.entityId, pos):
-            var target: Vec3
-            if renderOf(action.first, target):
-              pos = mix(pos, target, 0.5'f32)
-            score = 72
-        elif action.kind == ActionBuild:
-          let tile = tile2(action.second, action.third)
-          let xz = tileCentreXZ(tile)
-          pos = vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
-          score = 44
-          id = 90_000_000 + action.entityId
-        elif action.kind == ActionTrain:
-          if renderOf(action.entityId, pos):
-            score = 40
-        if score > 0:
-          actionCam.noteInterest(
-            id,
-            pos,
-            score,
-            6,
-            tick,
-            int32(action.tick) - tick + 24
-          )
-        inc i
-    if run.replayPlayer != nil:
-      noteUpcoming(run.replayPlayer.data.actions)
-    elif run.recorder != nil:
-      noteUpcoming(run.recorder.data.actions)
-    for structure in run.world.buildings:
-      let
-        pos = buildingCentre(structure)
-        radius = float32(structure.side) * 0.7'f32
-      if structure.state == BuildingUnderConstruction:
-        actionCam.noteInterest(
-          structure.id,
-          pos,
-          32,
-          radius,
-          tick,
-          48
-        )
-      elif structure.state == BuildingDying:
-        actionCam.noteInterest(
-          structure.id,
-          pos,
-          50.0'f32 + float32(structure.side) * 8.0'f32,
-          radius,
-          tick,
-          24
-        )
-    var maxId = seenUnitId
+  proc feedLvdActions(observeTick = false) =
+    ## Refreshes real subjects and observes every simulated tick.
+    if not actionCam.enabled:
+      return
+    var subjects: seq[Subject]
     for unit in run.world.units:
-      let pos = renderPoint(unit)
-      if unit.state == UnitAttacking:
-        actionCam.noteInterest(unit.id, pos, 55, 2.5, tick, 24)
-      if sawUnits and unit.id > seenUnitId:
-        actionCam.noteInterest(unit.id, pos, 38, 2, tick, 24)
-      if unit.id > maxId:
-        maxId = unit.id
-    seenUnitId = maxId
-    sawUnits = true
+      subjects.add Subject(
+        id: unit.id, owner: unit.owner, position: renderPoint(unit),
+        height: 0.9, radius: 1.5, visible: shownUnit(unit) and unit.state != UnitInMine,
+        alive: unit.hp > 0 and unit.state != UnitDying,
+        hp: unit.hp, maxHp: UnitTable[unit.owner][unit.kind].hp,
+        complete: true, participant: unit.targetId,
+        fighting: unit.state == UnitAttacking, activity: unit.cooldown,
+        progress: int32(unit.state), gold: unit.carryGold + unit.carryWood,
+        idleScore: (if unit.state == UnitIdle: 8.0'f else: 22.0'f),
+        combatScore: 90
+      )
+    for building in run.world.buildings:
+      subjects.add Subject(
+        id: building.id, owner: building.owner,
+        position: buildingCentre(building), height: 2,
+        radius: float32(building.side) * 0.7'f, visible: shownBuilding(building),
+        alive: building.hp > 0 and building.state != BuildingDying,
+        hp: building.hp, maxHp: building.maxHp,
+        complete: building.state == BuildingComplete,
+        progress: building.queueLength,
+        idleScore: (if building.state == BuildingUnderConstruction: 24.0'f
+          else: 4.0'f),
+        combatScore: (if building.kind == TownHallBuilding: 165.0'f
+          else: 105.0'f)
+      )
+    if observeTick and not viewingSeeking:
+      actionCam.director.observe(subjects)
+    actionCam.director.refresh(subjects)
 
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
@@ -811,44 +762,35 @@ proc runGraphics*() =
           400.0'f32
         )
     if actionCam.enabled:
-      feedLvdActions()
-      actionCam.chooseShot(dt, transport.speed)
-      actionCam.follow(
-        cameraTarget,
-        cameraDistance,
-        dt,
-        transport.speed
-      )
       return
-    if not playerMode() and not selectionStarted:
-      let count = selectedCount()
-      if followSelection and count == 1:
-        let focus = selectionTarget(selectedIds[0]).position
-        cameraTarget = mix(
-          cameraTarget,
-          focus,
-          damping(5.0'f32, dt)
-        )
-      elif followSelection and count > 1:
-        let
-          center = selectedCenter()
-          distance = clamp(
-            14.0'f32 + selectedRadius(center) * 2.8'f32,
-            24.0'f32,
-            400.0'f32
-          ) * groupCameraScale
-        cameraTarget = mix(
-          cameraTarget,
-          center,
-          damping(4.0'f32, dt)
-        )
-        cameraDistance = mix(
-          cameraDistance,
-          distance,
-          damping(2.0'f32, dt)
-        )
-      elif followSelection:
-        clearSelection()
+    let count = selectedCount()
+    if followSelection and count == 1:
+      let focus = selectionTarget(selectedIds[0]).position
+      cameraTarget = mix(
+        cameraTarget,
+        focus,
+        damping(5.0'f32, dt)
+      )
+    elif followSelection and count > 1:
+      let
+        center = selectedCenter()
+        distance = clamp(
+          14.0'f32 + selectedRadius(center) * 2.8'f32,
+          24.0'f32,
+          400.0'f32
+        ) * groupCameraScale
+      cameraTarget = mix(
+        cameraTarget,
+        center,
+        damping(4.0'f32, dt)
+      )
+      cameraDistance = mix(
+        cameraDistance,
+        distance,
+        damping(2.0'f32, dt)
+      )
+    elif followSelection:
+      clearSelection()
 
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Applies click, shift-click, or box selection on left release.
@@ -1345,6 +1287,7 @@ proc runGraphics*() =
     let towerTargets = expectedTowerTargets()
     captureUnitPoses()
     advanceGame()
+    feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
     captureCheckpoint()
 
@@ -1382,10 +1325,21 @@ proc runGraphics*() =
           selectedIds.add unit.id
     var screenshotFrame = 0
 
+  var
+    viewingClock: ViewingClock
+    cameraSeekSerial = -1
+
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
+      viewingDt = viewingClock.viewingDelta(window)
+      viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
+      if not transport.playing or viewingSeeking:
+        viewingDt = 0
+      if cameraSeekSerial != transport.seekSerial:
+        actionCam.resetDirector(transport.automaticSeek)
+        cameraSeekSerial = transport.seekSerial
       sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       profileBlock "camera":
@@ -1398,6 +1352,7 @@ proc runGraphics*() =
       if restoreTick >= 0:
         restoreTo(restoreTick)
         transport.sync(run.world.tick, recorded, run.world.over)
+      feedLvdActions(observeTick = true)
       transport.startFrame(dt, TickRate)
       let frameStart = epochTime()
       run.historyPlayback = transport.inHistory
@@ -1428,6 +1383,14 @@ proc runGraphics*() =
         (showTiles or framesSinceRebake >= RebakeFrameGap):
           profileBlock "rebake":
             rebakeScene()
+      feedLvdActions()
+      actionCam.direct(
+        cameraTarget, cameraDistance, viewingDt,
+        run.world.over or transport.tick >= transport.timelineEnd,
+        transport.repeating,
+        window.size.x.float32 / max(window.size.y.float32, 1),
+        RtsFollowLift
+      )
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()
@@ -1550,6 +1513,7 @@ proc runGraphics*() =
           selectionStarted
         )
         sk.endUi()
+        drawStatsOverlay(sk, window)
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -1559,6 +1523,9 @@ proc runGraphics*() =
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
+        reportDirectorFrame(
+          actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
+        )
         reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):
