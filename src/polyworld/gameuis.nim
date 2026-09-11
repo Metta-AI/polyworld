@@ -22,6 +22,7 @@ type
     size*: Vec2
     margin*: float32
     transportHeight*: float32
+    safeInsets*: Vec4  ## Left, top, right, bottom in UI layout units.
 
   ReplayTransport* = object
     playing*: bool
@@ -31,16 +32,34 @@ type
 proc initGameUiLayout*(
     size: Vec2,
     transportHeight = 0.0'f32,
-    margin = 10.0'f32
+    margin = 10.0'f32,
+    safeInsets = vec4(0)
 ): GameUiLayout =
   ## Creates a nine-region layout above an optional bottom transport ribbon.
   result.size = max(size, vec2(0))
   result.margin = max(margin, 0)
-  result.transportHeight = clamp(transportHeight, 0, result.size.y)
+  result.safeInsets.x = clamp(safeInsets.x, 0, result.size.x)
+  result.safeInsets.y = clamp(safeInsets.y, 0, result.size.y)
+  result.safeInsets.z = clamp(safeInsets.z, 0, result.size.x - result.safeInsets.x)
+  result.safeInsets.w = clamp(safeInsets.w, 0, result.size.y - result.safeInsets.y)
+  result.transportHeight = clamp(transportHeight, 0,
+    result.size.y - result.safeInsets.y - result.safeInsets.w)
+
+proc gameArea*(layout: GameUiLayout): GameUiPanel =
+  ## Usable game rectangle, excluding safe insets and replay transport.
+  GameUiPanel(origin: layout.safeInsets.xy, size: vec2(
+    layout.size.x - layout.safeInsets.x - layout.safeInsets.z,
+    layout.size.y - layout.safeInsets.y - layout.safeInsets.w - layout.transportHeight))
 
 proc gameAreaSize*(layout: GameUiLayout): Vec2 =
   ## Returns the area available to the nine anchored game UI regions.
-  vec2(layout.size.x, layout.size.y - layout.transportHeight)
+  layout.gameArea.size
+
+proc fitPanel*(area: GameUiPanel, origin, size: Vec2): GameUiPanel =
+  ## Fits a desired panel to a usable area. Oversized content needs scrolling.
+  let usableSize = max(area.size, vec2(0))
+  result.size = min(max(size, vec2(0)), usableSize)
+  result.origin = clamp(origin, area.origin, area.origin + usableSize - result.size)
 
 proc panel*(
     layout: GameUiLayout,
@@ -79,12 +98,14 @@ proc panel*(
       vec2(centerX, bottom)
     of GameUiRegion.BottomRight:
       vec2(right, bottom)
-  result.origin = max(result.origin, vec2(0))
+  result = layout.gameArea.fitPanel(
+    layout.gameArea.origin + result.origin, panelSize)
 
 proc transportPanel*(layout: GameUiLayout): GameUiPanel =
   ## Returns the full-width panel reserved below the nine game UI regions.
-  result.origin = vec2(0, layout.size.y - layout.transportHeight)
-  result.size = vec2(layout.size.x, layout.transportHeight)
+  let area = layout.gameArea
+  result.origin = area.origin + vec2(0, area.size.y)
+  result.size = vec2(area.size.x, layout.transportHeight)
 
 proc contains*(panel: GameUiPanel, point: Vec2): bool =
   ## Returns whether a point lies inside a panel.
@@ -126,9 +147,10 @@ proc layoutFits*(
   ## Returns whether plates stay inside the layout without overlapping.
   if panelsOverlap(plates, gap):
     return false
-  let transport = layout.transportPanel
+  let area = layout.gameArea
   for plate in plates:
-    if not plate.inside(layout.size) or overlaps(plate, transport):
+    let local = GameUiPanel(origin: plate.origin - area.origin, size: plate.size)
+    if not local.inside(area.size):
       return false
   true
 

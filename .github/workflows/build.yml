@@ -38,3 +38,8 @@ jobs:
       - run: nim c -d:headless examples/call_to_adventure/cta.nim
       - run: nim c -d:headless examples/light_vs_dark/lvd.nim
       - run: nim c -d:headless examples/heartleaf/heartleaf.nim
+      - name: Build the menu example
+        if: runner.os == 'Linux'
+        run: |
+          nim r --parallelBuild:1 examples/ui_gallery/build_atlas.nim
+          nim c --parallelBuild:1 examples/ui_gallery/gallery.nim
