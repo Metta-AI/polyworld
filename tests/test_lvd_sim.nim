@@ -4,7 +4,7 @@
 
 import
   std/strformat,
-  polyworld/[bodies, metrics, tapes],
+  polyworld/[basic, bodies, metrics, tapes],
   ../examples/light_vs_dark/bots,
   ../examples/light_vs_dark/content,
   ../examples/light_vs_dark/maps,
@@ -219,6 +219,108 @@ block:
   doAssert game.metrics.read(LightPlayer, 0).commands == 0
   doAssert game.applyMove(DarkPlayer, darkPeon, 100, 100)
   doAssert game.metrics.read(DarkPlayer, 0).commands == 1
+
+echo "Testing failure queries are read-only"
+block:
+  let
+    game = newGame(map, MatchTicks)
+    unit = game.world.units[0]
+    enemy = game.world.units[int(StartingPeons)]
+    source = "print orderFailed(" & $unit.id & ")\n" &
+      "print orderFailed(" & $unit.id & ")\n" &
+      "print orderFailed(" & $enemy.id & ")\n" &
+      "print orderFailed(-1)\n"
+  loadBots(game, [source, ""])
+  var values: seq[int32]
+  game.brains[LightPlayer].output = proc(event: PrintEvent) =
+    ## Captures the actual BASIC query results.
+    if event.kind == ValuePrint:
+      values.add event.value
+  unit.orderFailed = true
+  enemy.orderFailed = true
+  let before = game.stateHash()
+  runBotDecisions(game)
+  doAssert not game.brains[LightPlayer].failed
+  doAssert values == @[1'i32, 1, 0, 0]
+  doAssert game.stateHash() == before
+  doAssert game.world.applyCancel(LightPlayer, unit.id)
+  values.setLen(0)
+  runBotDecisions(game)
+  doAssert values == @[0'i32, 0, 0, 0]
+  doAssert enemy.orderFailed
+
+echo "Testing rejected orders preserve the complete world"
+block:
+  let
+    game = newGame(map, MatchTicks)
+    unit = game.world.units[0]
+  game.world.tick = DecisionTicks
+  game.recorder = initReplayRecorder(Setup())
+  unit.orderFailed = true
+  let before = game.stateHash()
+  doAssert not game.applyMove(LightPlayer, unit.id, -1, -1)
+  doAssert not game.applyAttackMove(LightPlayer, unit.id, -1, -1)
+  doAssert not game.applyAttack(LightPlayer, unit.id, unit.id)
+  doAssert not game.applyHarvest(LightPlayer, unit.id, -1, 1)
+  doAssert not game.applyBuild(
+    LightPlayer,
+    unit.id,
+    int32(FarmBuilding.ord),
+    -1,
+    -1
+  )
+  doAssert not game.applyTrain(LightPlayer, unit.id, int32(PeonUnit.ord))
+  doAssert not game.applySetRally(LightPlayer, unit.id, -1, -1)
+  doAssert not game.applyCancel(DarkPlayer, unit.id)
+  doAssert game.stateHash() == before
+  doAssert game.recorder.data.actions.len == 0
+  doAssert game.metrics.read(LightPlayer, DecisionTicks).commands == 0
+
+echo "Testing accepted unit orders clear previous failures"
+block:
+  let
+    w = newWorld(map, MatchTicks)
+    unit = w.units[0]
+    x = int32(unit.tile.x)
+    y = int32(unit.tile.y)
+    tree = w.nearestTree(unit.tile)
+    mine = map.mines[0].id
+  doAssert tree >= 0
+  unit.orderFailed = true
+  doAssert w.applyMove(LightPlayer, unit.id, x, y)
+  doAssert not unit.orderFailed
+  unit.orderFailed = true
+  doAssert w.applyAttackMove(LightPlayer, unit.id, x, y)
+  doAssert not unit.orderFailed
+  for resource in [0'i32, 1]:
+    for carrying in [false, true]:
+      unit.orderFailed = true
+      unit.carryGold = if carrying and resource == 0: GoldPerTrip else: 0
+      unit.carryWood = if carrying and resource == 1: WoodPerTrip else: 0
+      doAssert w.applyHarvest(
+        LightPlayer,
+        unit.id,
+        if resource == 0: mine else: tree,
+        resource
+      )
+      doAssert not unit.orderFailed
+  unit.orderFailed = true
+  doAssert w.applyCancel(LightPlayer, unit.id)
+  doAssert not unit.orderFailed
+
+echo "Testing accepted orders can report a new failure"
+block:
+  let
+    w = newWorld(map, MatchTicks)
+    unit = w.units[0]
+    tree = w.nearestTree(unit.tile)
+  unit.carryWood = WoodPerTrip
+  for building in w.buildings.mitems:
+    if building.owner == LightPlayer:
+      building.state = BuildingDying
+  doAssert w.applyHarvest(LightPlayer, unit.id, tree, 1)
+  doAssert unit.orderFailed, "missing drop-off must report a new failure"
+  doAssert unit.carryWood == WoodPerTrip
 
 echo "Testing live history seek does not skip recorded actions"
 block liveHistorySeek:
@@ -461,8 +563,10 @@ block basesGrow:
   let
     goldBefore = w.players[LightPlayer].gold
     stats = BuildingTable[FarmBuilding]
+  w.units[0].orderFailed = true
   doAssert w.applyBuild(LightPlayer, peon, int32(FarmBuilding.ord),
     int32(site.x), int32(site.y)), "a farm order was rejected"
+  doAssert not w.units[0].orderFailed
   doAssert w.players[LightPlayer].gold == goldBefore - stats.gold,
     "the farm was not paid for when the order was accepted"
   doAssert not w.canPlace(FarmBuilding, int32(site.x), int32(site.y)),
@@ -582,7 +686,9 @@ block unitsFightAndDie:
     let index = w.unitIndex(id)
     w.place(w.units[index], tile)
   w.rebuildVision()
+  w.units[w.unitIndex(attacker)].orderFailed = true
   doAssert w.applyAttack(LightPlayer, attacker, defender)
+  doAssert not w.units[w.unitIndex(attacker)].orderFailed
   doAssert not w.applyAttack(LightPlayer, attacker, w.units[1].id),
     "a unit was ordered to attack its own side"
 
@@ -789,10 +895,47 @@ block replayReproducesTheMatch:
   let recorder = initReplayRecorder(setup)
   var liveGame = newGame(map, Ticks)
   liveGame.recorder = recorder
+  const Queries = """
+i = 0
+while i < obsCount
+  if obsKind(i) = 2 and obsOwner(i) = selfPlayer then
+    id = obsId(i)
+    first = orderFailed(id)
+    second = orderFailed(id)
+  end if
+  i = i + 1
+wend
+"""
+  loadBots(liveGame, [Queries, Queries])
+  var
+    failureQueries = 0
+    blockedTree = -1'i32
+  for index in 0 ..< GridCells:
+    if liveGame.world.treeWood[index] == 0:
+      continue
+    var enclosed = true
+    for dy in -1'i32 .. 1'i32:
+      for dx in -1'i32 .. 1'i32:
+        if liveGame.world.tileOpen(
+          int32(index) mod GridSide + dx,
+          int32(index) div GridSide + dy
+        ):
+          enclosed = false
+    if enclosed:
+      blockedTree = int32(index)
+      break
+  doAssert blockedTree >= 0, "the map needs an unreachable tree"
 
   proc scripted(w: World) =
     ## A deterministic stand-in for an overlord, exercising every command
     ## kind including ones that will be refused or will fail to arrive.
+    for unit in w.units:
+      if unit.orderFailed:
+        inc failureQueries
+    let before = liveGame.stateHash()
+    runBotDecisions(liveGame)
+    doAssert liveGame.stateHash() == before,
+      "BASIC failure queries must not change replay state"
     let player = (w.tick div DecisionTicks) mod PlayerCount
     var
       hall = NoEntity
@@ -831,6 +974,14 @@ block replayReproducesTheMatch:
             int32(FarmBuilding.ord), 26 + player * 60, 26)
           discard liveGame.applyCancel(player, w.units[index].id)
           break
+    if w.tick == DecisionTicks:
+      doAssert liveGame.applyHarvest(
+        LightPlayer,
+        w.units[0].id,
+        blockedTree,
+        1
+      )
+      doAssert w.units[0].orderFailed
 
   var liveHashes: seq[uint64]
   for _ in 1 .. Ticks:
@@ -840,7 +991,10 @@ block replayReproducesTheMatch:
     liveGame.recorder.recordHash(hash)
   doAssert recorder.data.actions.len > 20,
     "the scripted overlord issued only " & $recorder.data.actions.len &
-      " commands, so this proves little"
+    " commands, so this proves little"
+  doAssert failureQueries > 0, "the overlords never queried a failed order"
+  for brain in liveGame.brains:
+    doAssert not brain.failed, brain.lastError
 
   ## Round trip through the real codec, not the in-memory object.
   let data = decodeReplay(recorder.data.encodeReplay())

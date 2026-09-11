@@ -114,7 +114,6 @@ block:
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
-    run.legacyStats = replayData.header.gameVersion == LegacyGameVersion
   else:
     var gameMap: MapData
     profileBlock "map":

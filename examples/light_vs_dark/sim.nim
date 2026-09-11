@@ -63,7 +63,7 @@ type
     blockedTicks*, repathCooldown*: int32
     carryGold*, carryWood*: int32
     orderFailed*: bool
-      ## Set when an order is abandoned. The overlord reads and clears it.
+      ## Set when an order fails. Cleared by the next accepted unit order.
     animation*: AnimationSlot
     animationTicks*: int32
     deathTicks*: int32
@@ -143,7 +143,6 @@ type
     world*: World
     metrics*: MatchMetrics
     history*: MetricHistory
-    legacyStats*: bool
     recorder*: ReplayRecorder
     replayData*: ReplayData
     replayPlayer*: ReplayPlayer
@@ -1689,6 +1688,7 @@ proc applyMove*(w: World, player, unitId, x, y: int32): bool =
     return false
   if w.units[index].state == UnitInMine:
     return false
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].state = UnitMoving
   w.setGoal(index, tile2(x, y))
@@ -1702,6 +1702,7 @@ proc applyAttackMove*(w: World, player, unitId, x, y: int32): bool =
   if w.units[index].state == UnitInMine:
     return false
   let dest = tile2(x, y)
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].attackMove = true
   w.units[index].attackMoveGoal = dest
@@ -1723,6 +1724,7 @@ proc applyAttack*(w: World, player, unitId, targetId: int32): bool =
     else: w.buildingOwner(targetId)
   if owner == player or owner < 0:
     return false
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].state = UnitChasing
   w.units[index].targetId = targetId
@@ -1751,6 +1753,7 @@ proc applyHarvest*(w: World, player, unitId, target, isTree: int32): bool =
     if target < 0 or target >= GridCells or w.treeWood[target] <= 0:
       return false
 
+  w.units[index].orderFailed = false
   if isTree == 0:
     if carrying:
       w.units[index].sourceId = target
@@ -1827,6 +1830,7 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
     )
 
   let site = w.buildingIndex(siteId)
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   if w.footprintGoal(index, w.buildings[site].origin, w.buildings[site].side):
     w.units[index].state = UnitToBuild
@@ -1871,6 +1875,7 @@ proc applyCancel*(w: World, player, entityId: int32): bool =
     let index = w.ownedUnit(player, entityId)
     if index < 0 or w.units[index].state == UnitInMine:
       return false
+    w.units[index].orderFailed = false
     w.units[index].clearOrder(false)
     return true
 
@@ -2029,7 +2034,7 @@ proc mixTile(hash: var uint32, tile: Tile2) =
   hash.addHashy(tile.x)
   hash.addHashy(tile.y)
 
-proc hashWorld(w: World, includeStats = true): uint64 =
+proc hashWorld(w: World): uint64 =
   ## Hashes all authoritative state that can affect later simulation ticks.
   var hash = HashySeed
   hash.addHashy(w.tick)
@@ -2121,13 +2126,12 @@ proc hashWorld(w: World, includeStats = true): uint64 =
   for request in w.pathQueue:
     hash.addHashy(request.unitId)
     hash.mixTile(request.goal)
-  if includeStats:
-    hash.addHashy(w.stats)
+  hash.addHashy(w.stats)
   uint64(hash)
 
 proc stateHash*(game: Game): uint64 =
   ## Hashes all authoritative state that can affect later simulation ticks.
-  hashWorld(game.world, not game.legacyStats)
+  hashWorld(game.world)
 
 ## Victory
 
