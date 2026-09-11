@@ -2182,8 +2182,8 @@ proc scatterGrass*(count, randomSeed: int, matchTerrain = false) =
     )
     inc placed
 
-proc scatterRocks*(count, randomSeed: int) =
-  ## Scatters decorative half-buried boulders without changing gameplay.
+proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
+  ## Scatters decorative boulders with scaled size and burial depth.
   rockPlacements.setLen(0)
   if rockModels.len == 0 or layers.len == 0:
     return
@@ -2202,8 +2202,8 @@ proc scatterRocks*(count, randomSeed: int) =
     let
       h = gtile(x, z).tops.unpack
       model = rockRng.rand(rockModels.len - 1)
-      boulderScale = rockScaleRange.x +
-        rockRng.rand(rockScaleRange.y.float).float32
+      boulderScale = (rockScaleRange.x +
+        rockRng.rand(rockScaleRange.y.float).float32) * scale
     rockPlacements.add TreePlacement(
       model: model,
       position: vec3(

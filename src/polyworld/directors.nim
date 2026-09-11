@@ -23,7 +23,7 @@ type
     radius*, height*: float32
     visible*, alive*: bool
     hp*, maxHp*, activity*, progress*, gold*: int32
-    fighting*, complete*, returned*: bool
+    fighting*, complete*, returned*, damageOnly*: bool
     idleScore*, combatScore*: float32
   EventKind* = enum
     AttackEvent, DamageEvent, DeathEvent, HealEvent, ProgressEvent,
@@ -171,6 +171,15 @@ proc eventScore(director: Director, event: DirectorEvent): float32 =
     return 0
   event.score * (1 - 0.35'f * age / event.lifetime)
 
+proc eligible(director: Director, subject: Subject): bool =
+  ## Requires recent direct damage for subjects excluded from idle shots.
+  if not subject.damageOnly:
+    return true
+  for event in director.events:
+    if event.subject == subject.id and event.kind == DamageEvent and
+      director.eventScore(event) > 0:
+        return true
+
 proc score(director: Director, subject: Subject): float32 =
   ## Scores observed events with a small, bounded preference for variety.
   result = if subject.owner >= 0: max(subject.idleScore, 1) else: 0
@@ -215,8 +224,12 @@ proc advance*(director: var Director, dt: float32, enabled: bool,
     neighborScore = -1.0'f
     major = false
     sceneMajor = false
+    waitingForDamage = false
   for i, subject in director.subjects:
     if not subject.valid:
+      continue
+    if not director.eligible(subject):
+      waitingForDamage = true
       continue
     let score = director.score(subject)
     if subject.id == director.subject.id:
@@ -240,7 +253,7 @@ proc advance*(director: var Director, dt: float32, enabled: bool,
     director.lastMajor = director.time
   if sceneMajor:
     director.sceneUntil = director.time + AftermathSeconds
-  let finished = complete or best < 0
+  let finished = complete or (best < 0 and not waitingForDamage)
   if finished and not director.completed:
     if not director.finalResults:
       director.finalStarted = director.time

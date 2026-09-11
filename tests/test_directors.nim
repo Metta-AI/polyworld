@@ -61,6 +61,83 @@ block:
   doAssert director.events.len == 1
   doAssert director.events[0].kind == ProgressEvent
 
+echo "Testing idle gods ignore nearby action and non-damage events"
+block:
+  var
+    director = initDirector()
+    god = subject(1, idle = 3)
+    creep = subject(2, 2, idle = 22)
+  god.damageOnly = true
+  god.hp = 30
+  god.combatScore = 165
+  creep.combatScore = 70
+  director.observe(@[god, creep])
+  director.refresh(@[god, creep])
+  director.step(0)
+  doAssert director.subject.id == creep.id
+  for kind in [ProgressEvent, HealEvent, ReturnEvent]:
+    director.reset()
+    director.refresh(@[god, creep])
+    director.noteEvent(god, kind, 165)
+    director.noteEvent(creep, AttackEvent, 70)
+    director.step(0)
+    doAssert director.subject.id == creep.id
+
+echo "Testing gods yield to marching creeps as soon as damage expires"
+block:
+  var
+    director = initDirector()
+    god = subject(1, idle = 3)
+  let creep = subject(2, 100, idle = 22)
+  god.damageOnly = true
+  god.combatScore = 165
+  director.observe(@[god, creep])
+  director.refresh(@[god, creep])
+  director.step(0)
+  director.step(2)
+  doAssert director.subject.id == creep.id
+  god.hp -= 1
+  director.observe(@[god, creep])
+  director.refresh(@[god, creep])
+  director.step(0.1)
+  doAssert director.subject.id == god.id
+  director.step(1.3)
+  doAssert director.subject.id == creep.id
+  director.reset()
+  director.observe(@[god, creep])
+  director.refresh(@[god, creep])
+  director.step(0)
+  doAssert director.subject.id == creep.id
+
+echo "Testing nearby idle gods cannot replace a removed subject"
+block:
+  var
+    director = initDirector()
+    god = subject(2, 2, idle = 3)
+  let
+    hero = subject(1)
+    creep = subject(3, 100, idle = 8)
+  god.damageOnly = true
+  director.refresh(@[hero, god, creep])
+  director.step(0)
+  doAssert director.subject.id == hero.id
+  director.refresh(@[god, creep])
+  director.step(0)
+  doAssert director.subject.id == creep.id
+
+echo "Testing idle gods alone do not imply the match has ended"
+block:
+  var
+    director = initDirector()
+    god = subject(1)
+  god.damageOnly = true
+  director.refresh(@[god])
+  director.step(0)
+  doAssert not director.locked
+  doAssert not director.finalResults
+  director.step(0, complete = true)
+  doAssert director.finalResults
+
 echo "Testing every tick survives fast playback and low frame rates"
 block:
   for ticksPerFrame in [1, 2, 4, 16]:
