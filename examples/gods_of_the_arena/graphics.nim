@@ -186,6 +186,8 @@ proc runGraphics*() =
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
     selectionOutline = initSelectionOutline()
+    occlusionOutline = initSelectionOutline(OccludedOutline)
+    showOccludedCharacters = true
     worldBarRenderer = initWorldBarRenderer()
     playerLabels = layoutNames(
       sk.atlas.fonts["WorldName"],
@@ -330,7 +332,8 @@ proc runGraphics*() =
 
   const
     SeekCheckpointTicks = TickRate * 10
-    HeroWorldBarWidth = 1.75'f32
+    HeroWorldBarScale = 0.75'f
+    HeroWorldBarWidth = 1.75'f * HeroWorldBarScale
     TowerWorldBarWidth = 2.4'f32
     FootmanWorldBarWidth = 0.95'f32
 
@@ -493,7 +496,7 @@ proc runGraphics*() =
             value: health,
             maximum: maximumHealth,
             delayedValue: delayedHealth,
-            height: 0.16'f32,
+            height: 0.16'f * HeroWorldBarScale,
             color: healthColor(health, maximumHealth),
             showDamageTrail: true
           ),
@@ -501,11 +504,17 @@ proc runGraphics*() =
             value: max(hero.mana, 0'i32).float32,
             maximum: max(hero.maxMana, 1'i32).float32,
             delayedValue: max(hero.mana, 0'i32).float32,
-            height: 0.1'f32,
+            height: 0.1'f * HeroWorldBarScale,
             color: rgbx(60, 125, 231, 255)
           )
         ]
-      renderer.addResourceBars(anchor, HeroWorldBarWidth, bars)
+      renderer.addResourceBars(
+        anchor,
+        HeroWorldBarWidth,
+        bars,
+        gap = DefaultGap * HeroWorldBarScale,
+        border = DefaultBorder * HeroWorldBarScale
+      )
     for tower in run.world.towers:
       if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
         continue
@@ -731,6 +740,8 @@ proc runGraphics*() =
       actionCam.toggle(followSelection)
     elif button == KeyT:
       scene.toggleShading()
+    elif button == KeyO:
+      showOccludedCharacters = not showOccludedCharacters
     elif (button == KeyF or button == KeyG) and
         options.playerSlot > 0 and
         not run.replayMode:
@@ -1736,11 +1747,12 @@ proc runGraphics*() =
           clockHour(float32(run.world.tick) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
-        # One loop for both passes: footmen, heroes, and gods render into
-        # the sun's depth map first, then for the camera.
-        proc drawWorldCharacters() =
+        proc drawWorldCharacters(livingOnly = false) =
+          ## Uses identical poses for shadows, occlusion masks, and the camera.
           for footman in run.world.footmen:
             if not visibleInView(footman.team, footman.position):
+              continue
+            if livingOnly and (footman.hp <= 0 or footman.state == Dying):
               continue
             let
               model = footmanModels[footman.team]
@@ -1753,6 +1765,8 @@ proc runGraphics*() =
                 model, clip, footman.animTicks, footman.state == Dying))
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
+              continue
+            if livingOnly and (hero.hp <= 0 or hero.state == Dying):
               continue
             var
               animation = hero.animClip
@@ -1781,6 +1795,8 @@ proc runGraphics*() =
           for god in gods:
             if not visibleInView(
                 god.team, run.world.forts[god.team.ord].center):
+              continue
+            if livingOnly and run.world.forts[god.team.ord].hp <= 0:
               continue
             let
               model = footmanModels[god.team]
@@ -1823,6 +1839,14 @@ proc runGraphics*() =
             towerScale(tower.tier),
             viewProjection
           )
+
+        if showOccludedCharacters:
+          occlusionOutline.beginMask(window.size)
+          beginCharacters(scene, window, view, projection, cameraEye)
+          drawWorldCharacters(livingOnly = true)
+          finishCharacters(scene)
+          # Only opaque scenery is in the window depth buffer at this point.
+          occlusionOutline.drawOutline(OccludedOutlineColor)
 
         beginCharacters(scene, window, view, projection, cameraEye)
         drawWorldCharacters()
@@ -1925,4 +1949,6 @@ proc runGraphics*() =
     saveRecording()
   particles.closeParticles()
   spellEffects.closeSpellRenderer()
+  selectionOutline.closeSelectionOutline()
+  occlusionOutline.closeSelectionOutline()
   finishGameProfile()
