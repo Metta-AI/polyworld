@@ -179,7 +179,7 @@ proc runGraphics*() =
       DirtSurface.float32,
       vec3(0.90'f32, 0.86'f32, 0.76'f32),
       vec3(0.58'f32, 0.54'f32, 0.48'f32),
-      2
+      5
     )
     setTileMaterial(
       QuarryRimKind.int,
@@ -187,7 +187,7 @@ proc runGraphics*() =
       GravelSurface.float32,
       vec3(0.92'f32, 0.88'f32, 0.76'f32),
       vec3(0.62'f32, 0.56'f32, 0.48'f32),
-      2
+      4
     )
     setTileMaterial(
       HillRockKind.int,
@@ -203,7 +203,7 @@ proc runGraphics*() =
       DirtSurface.float32,
       vec3(0.88'f32, 0.92'f32, 0.76'f32),
       vec3(0.66'f32, 0.62'f32, 0.52'f32),
-      1
+      3
     )
     scatterGrass(1_500, run.map.seed, matchTerrain = true)
     scatterRocks(180, run.map.seed, scale = 0.25'f)
