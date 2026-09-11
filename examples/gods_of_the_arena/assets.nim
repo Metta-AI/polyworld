@@ -10,6 +10,60 @@ const
     "tower_square_small1", "tower_square_tall1", "tower_square_tall2",
     "building2", "magiccrystal1"
   ]
+  ArenaDecorPacks* = [
+    DataRoot & "/terrain/toon_enchanted_meadow/props.glb",
+    DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
+    DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
+    DataRoot & "/terrain/toon_golden_valley/rocks.glb"
+  ]
+  ArenaDecorNodes*: array[4, seq[string]] = [
+    @["lamp_post_01a", "wood_barrel_01a", "wood_crate_01a",
+      "wood_fence_pole_01a", "pier_bollard_01a", "pier_bollard_02a",
+      "boat_01a", "boat_wreck_01a", "rope_01a", "wood_cart_01a",
+      "wood_fence_01a", "wood_wheel_01a"],
+    @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
+      "flower_bush_01a", "flower_bush_02a", "bush_01a", "bush_02a",
+      "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
+      "grass_patch_04a", "grass_patch_05a", "lily_flower_01a",
+      "lily_flower_02a", "lily_flower_03a", "plant_01a", "plant_02a",
+      "plant_03a", "plant_04a", "plant_05a", "plant_06a", "plant_07a",
+      "mushroom_01a", "mushroom_03a", "mushroom_06a",
+      "tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a",
+      "tree_06a"],
+    @["rock_small_01a", "rock_small_02a", "rock_small_03a",
+      "rock_small_04a", "rock_medium_01a", "rock_medium_02a",
+      "rock_medium_03a"],
+    @["cliff_01a", "cliff_02a", "rock_large_01a",
+      "rock_large_02a", "rock_large_03a", "rock_large_04a",
+      "rock_platform_01a", "rock_platform_02a"]
+  ]
+  ## Curated one-mesh KayKit models. The pinned gltf reader decodes their
+  ## EXT_meshopt_compression and KHR_mesh_quantization streams directly.
+  KayKitDecorPaths* = [
+    DataRoot & "/cogcraft/nature/kaykit_bloom_tree_5_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_tree_3_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_tree_6_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_bare_tree_1_b.glb",
+    DataRoot & "/cogcraft/nature/kaykit_bare_tree_2_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_bush_1_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_bush_3_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_bush_4_b.glb",
+    DataRoot & "/cogcraft/nature/kaykit_bloom_bush_2_a.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_grass_1_c.glb",
+    DataRoot & "/cogcraft/nature/kaykit_plains_grass_2_b.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_rock_2_e.glb",
+    DataRoot & "/cogcraft/nature/kaykit_forest_rock_5_b.glb",
+    DataRoot & "/cogcraft/nature/kaykit_mesa_rock_3_a.glb",
+    DataRoot & "/cogcraft/town/resource_crate_medium_wood.glb",
+    DataRoot & "/cogcraft/town/tool_rope_bundle.glb",
+    DataRoot & "/cogcraft/town/resource_berry_basket.glb",
+    DataRoot & "/cogcraft/town/holiday_lantern.glb",
+    DataRoot & "/cogcraft/town/tool_pickaxe.glb",
+    DataRoot & "/cogcraft/town/tool_shovel.glb",
+    DataRoot & "/cogcraft/town/resource_stone_chunks.glb",
+    DataRoot & "/cogcraft/dungeon/kaykit_dungeon_bucket_pickaxes.glb",
+    DataRoot & "/cogcraft/dungeon/scaffold_frame_large.glb"
+  ]
   GotaTerrainAssets* =
     when defined(emscripten): WebTerrainAssets
     else: DefaultTerrainAssets
@@ -96,13 +150,22 @@ const
     ]
   ]
 
+proc arenaDecorPaths*(): seq[string] =
+  ## Uses whole packs natively and independently packed nodes in browsers.
+  for i, pack in ArenaDecorPacks:
+    result.add propPaths(pack, ArenaDecorNodes[i])
+
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
   result.add terrainAssets(
-    DenseTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
+    MixedTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
   )
   result.add propAssets(TowerPack, TowerProps)
+  for i, pack in ArenaDecorPacks:
+    result.add propAssets(pack, ArenaDecorNodes[i])
+  for path in KayKitDecorPaths:
+    result.add modelAsset(path)
   var parts: seq[string]
   for look in HeroLooks:
     for part in look:
