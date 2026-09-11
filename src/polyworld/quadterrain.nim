@@ -1354,12 +1354,14 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
 
 proc loadPropPack*(
     paths: openArray[string], unitHeight = true, brightness = 1.0'f,
-    only: seq[string] = @[], textured = false, repeatTexture = false
+    only: seq[string] = @[], textured = false, repeatTexture = false,
+    textureSize = 0
 ): PropPack =
   ## Loads named glTF props, scaled to unit height unless disabled.
   ## Brightness adjusts baked colors; textured keeps material images.
   ## RepeatTexture tiles those images beyond their UV edges.
-  ## Textured packs require a current GL context.
+  ## TextureSize optionally caps the square atlas resolution. Textured packs
+  ## require a current GL context.
   result = PropPack()
   var images: seq[Image]
   for path in paths:
@@ -1370,6 +1372,8 @@ proc loadPropPack*(
     var size = 1
     for image in images:
       size = max(size, max(image.width, image.height))
+    if textureSize > 0:
+      size = min(size, textureSize)
     var chains: seq[seq[Image]]
     for image in images:
       let square =
@@ -1393,10 +1397,12 @@ proc loadPropPack*(
 
 proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f,
-    only: seq[string] = @[], textured = false, repeatTexture = false
+    only: seq[string] = @[], textured = false, repeatTexture = false,
+    textureSize = 0
 ): PropPack =
   ## Loads an original single-file prop pack through the shared collector.
-  loadPropPack(@[path], unitHeight, brightness, only, textured, repeatTexture)
+  loadPropPack(
+    @[path], unitHeight, brightness, only, textured, repeatTexture, textureSize)
 
 proc hasProp*(pack: PropPack, name: string): bool =
   ## Returns whether a pack contains a model with the requested node name.
