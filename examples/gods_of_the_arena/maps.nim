@@ -122,10 +122,10 @@ const
   LandmarkHillAccessMouths* = [(63, 24), (64, 103)]
   LandmarkHillRadius* = 14
   LandmarkHillTopSteps* = 28'i32
-  QuarrySites* = [(37, 63), (90, 64)]
-  QuarryAccessMouths* = [(24, 63), (103, 64)]
-  QuarryShoulderRadius* = 12
-  QuarryRadius* = 9
+  QuarrySites* = [(31, 65), (96, 62)]
+  QuarryAccessMouths* = [(24, 65), (103, 62)]
+  QuarryShoulderRadius* = 11
+  QuarryRadius* = 8
   QuarryFloorRadius* = 3
   QuarryFloorSteps* = -20'i32
   HillRockOutcrops* = [
