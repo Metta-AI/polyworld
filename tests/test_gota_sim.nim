@@ -362,10 +362,15 @@ block:
   beside.x += 40_000
   run.world.heroes[red].place(beside)
   run.world.heroes[blue].attackObjectId = run.world.heroes[red].id
+  run.world.heroes[blue].manualSpells = false
   run.world.heroes[blue].hp = run.world.heroes[blue].maxHp div 2
   run.world.heroes[blue].mana = run.world.heroes[blue].maxMana
   for slot in HeroAbilitySlot:
     run.world.heroes[blue].cooldowns[slot] = 0
+    run.world.heroes[blue].charges[slot] =
+      heroAbility(run.world.heroes[blue].class, slot).abilitySpec.charges
+    run.world.heroes[blue].recharges[slot] = 0
+  run.world.heroTurnTicks = 1
   advanceGame()
   var used = false
   for slot in HeroAbilitySlot:
