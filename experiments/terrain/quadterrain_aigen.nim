@@ -203,10 +203,6 @@ proc loadTreeTextures(): seq[seq[Image]] =
 
 let treeTextureArray = buildTextureArray(loadTreeTextures(), GL_REPEAT)
 
-window.runeInputEnabled = true
-window.onRune = proc(rune: Rune) =
-  sk.inputRunes.add(rune)
-
 ## Shaders
 
 var
