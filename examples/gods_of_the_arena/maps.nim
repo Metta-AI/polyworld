@@ -190,25 +190,26 @@ proc generateMap*(seed: int32): MapData {.measure.} =
   ## Builds the authored arena skeleton, then varies only natural detail.
   ## Gameplay geometry remains point-symmetric for every seed.
   var
-    laneCore: array[GridTiles * GridTiles, bool]
-    laneShoulder: array[GridTiles * GridTiles, bool]
-    laneClear: array[GridTiles * GridTiles, bool]
-    towerCourts: array[GridTiles * GridTiles, bool]
-    towerCourtCenters: array[GridTiles * GridTiles, bool]
-    hillockTerrain: array[GridTiles * GridTiles, bool]
-    landmarkHill: array[GridTiles * GridTiles, bool]
-    landmarkHillCore: array[GridTiles * GridTiles, bool]
-    hillRock: array[GridTiles * GridTiles, bool]
-    quarryTerrain: array[GridTiles * GridTiles, bool]
-    quarryFloor: array[GridTiles * GridTiles, bool]
-    quarryShoulder: array[GridTiles * GridTiles, bool]
-    landmarkAccess: array[GridTiles * GridTiles, bool]
-    barracksPads: array[GridTiles * GridTiles, bool]
+    laneCore = newSeq[bool](GridTiles * GridTiles)
+    laneShoulder = newSeq[bool](GridTiles * GridTiles)
+    laneClear = newSeq[bool](GridTiles * GridTiles)
+    towerCourts = newSeq[bool](GridTiles * GridTiles)
+    towerCourtCenters = newSeq[bool](GridTiles * GridTiles)
+    hillockTerrain = newSeq[bool](GridTiles * GridTiles)
+    landmarkHill = newSeq[bool](GridTiles * GridTiles)
+    landmarkHillCore = newSeq[bool](GridTiles * GridTiles)
+    hillRock = newSeq[bool](GridTiles * GridTiles)
+    quarryTerrain = newSeq[bool](GridTiles * GridTiles)
+    quarryFloor = newSeq[bool](GridTiles * GridTiles)
+    quarryShoulder = newSeq[bool](GridTiles * GridTiles)
+    landmarkAccess = newSeq[bool](GridTiles * GridTiles)
+    barracksPads = newSeq[bool](GridTiles * GridTiles)
 
   proc stamp(
-      mask: var array[GridTiles * GridTiles, bool],
+      mask: var openArray[bool],
       cx, cz, radius: int
   ) =
+    ## Marks the circular footprint inside the map bounds.
     for dz in -radius .. radius:
       for dx in -radius .. radius:
         if dx * dx + dz * dz > radius * radius:
@@ -220,9 +221,10 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           mask[z * GridTiles + x] = true
 
   proc stroke(
-      mask: var array[GridTiles * GridTiles, bool],
+      mask: var openArray[bool],
       ax, az, bx, bz, radius: int
   ) =
+    ## Marks a continuous path using overlapping circular footprints.
     let steps = max(abs(bx - ax), abs(bz - az)) * 4
     for step in 0 .. steps:
       let
@@ -371,7 +373,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       stamp(barracksPads, site.x, site.z, 2)
 
   proc touches(
-      mask: var array[GridTiles * GridTiles, bool], cx, cz: int
+      mask: openArray[bool], cx, cz: int
   ): bool =
     ## A corner belongs to a mask when any tile sharing it belongs.
     for dz in -1 .. 0:
@@ -593,7 +595,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       shallowCrossingBlend(cx, cz, MidFordCenter[0], MidFordCenter[1])
     )
 
-  var cornerHeights: array[(GridTiles + 1) * (GridTiles + 1), int16]
+  var cornerHeights = newSeq[int16]((GridTiles + 1) * (GridTiles + 1))
   for z in 0 .. GridTiles:
     for x in 0 .. GridTiles:
       cornerHeights[z * (GridTiles + 1) + x] = int16(makeCorner(x, z))
