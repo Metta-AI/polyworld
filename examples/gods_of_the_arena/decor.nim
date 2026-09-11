@@ -24,9 +24,7 @@ const
     "plant_04a", "plant_05a", "plant_06a", "rock_small_01a",
     "rock_small_02a", "rock_small_03a", "rock_small_04a"
   ]
-  RiverTrees = [
-    "tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a", "tree_06a"
-  ]
+  RiverShrubs = ["flower_bush_01a", "flower_bush_02a"]
   Reeds = ["plant_01a", "plant_02a", "plant_03a", "plant_07a"]
   WaterLilies = ["lily_flower_01a", "lily_flower_02a", "lily_flower_03a"]
   OpenGroundDecor = [
@@ -178,7 +176,6 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
   var
     riverTreesPlaced = 0
     reedsPlaced = 0
-    liliesPlaced = 0
     treeSites: seq[tuple[x, z: int]]
 
   for z in 2 ..< GridTiles - 2:
@@ -208,9 +205,9 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
             jitterX = (rng.unit() - 0.5'f32) * 0.45'f32
             jitterZ = (rng.unit() - 0.5'f32) * 0.45'f32
           pack.placePair(
-            RiverTrees[int(rng.below(RiverTrees.len.int32))], x, z,
+            RiverShrubs[int(rng.below(RiverShrubs.len.int32))], x, z,
             jitterX, jitterZ, rng.unit() * 2.0'f32 * PI.float32,
-            3.15'f32 + rng.unit() * 1.15'f32,
+            0.68'f32 + rng.unit() * 0.30'f32,
             vec3(0.82'f32, 0.91'f32, 0.78'f32)
           )
           treeSites.add((x, z))
@@ -231,9 +228,11 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
         )
         reedsPlaced += 2
 
+      # No scan-order cap: a low chance across every eligible water tile
+      # keeps pads distributed from mouth to mouth instead of exhausting a
+      # budget in the first (top) reach visited by this loop.
       if water.tiles[index].exists and water.tiles[mirrorIndex].exists and
-          liliesPlaced < 48 * DecorRichness and
-          rng.chance(7 * DecorRichness):
+          rng.chance(6):
         pack.placeWaterPair(
           WaterLilies[int(rng.below(WaterLilies.len.int32))], x, z,
           (rng.unit() - 0.5'f32) * 0.5'f32,
@@ -242,19 +241,32 @@ proc placeRiverDecor(pack: PropPack, seed: int32) =
           0.22'f32 + rng.unit() * 0.18'f32,
           vec3(0.92'f32, 1.0'f32, 0.90'f32)
         )
-        liliesPlaced += 2
 
-  # A sound skiff and an old wreck make the broad outer reaches feel used.
-  # These sit away from all crossings, and their mirrored partners keep the
-  # same amount of visual information on both team halves of the map.
-  pack.placeWaterPair(
-    "boat_wreck_01a", 113, 14, 0.15'f32, -0.10'f32, 0.72'f32, 0.78'f32,
-    vec3(0.82'f32, 0.76'f32, 0.66'f32)
-  )
-  pack.placeWaterPair(
-    "boat_01a", 87, 41, -0.12'f32, 0.08'f32, -0.68'f32, 0.92'f32,
-    vec3(0.90'f32, 0.84'f32, 0.72'f32)
-  )
+  # Boats now punctuate the upper, middle, and lower reaches. Their anchors
+  # remain clear of all three wading lanes and mirror into a full-river set.
+  for (name, x, z, jitterX, jitterZ, rotation, scale) in [
+    ("boat_wreck_01a", 113, 14, 0.15'f32, -0.10'f32, 0.72'f32, 0.78'f32),
+    ("boat_01a", 96, 32, -0.12'f32, 0.08'f32, -0.68'f32, 0.88'f32),
+    ("boat_01a", 80, 48, 0.10'f32, -0.12'f32, 0.58'f32, 0.82'f32)
+  ]:
+    pack.placeWaterPair(
+      name, x, z, jitterX, jitterZ, rotation, scale,
+      vec3(0.88'f32, 0.82'f32, 0.70'f32))
+
+  # Painted boulders half-submerged in three separated reaches read as small
+  # rocky cascades/rapids in the animated water. They reuse the loaded Meadow
+  # rock pack, so the richer river adds no browser download payload.
+  for (name, x, z, jitterX, jitterZ, rotation, scale) in [
+    ("rock_medium_01a", 119, 8, 0.10'f32, -0.15'f32, 0.25'f32, 0.82'f32),
+    ("rock_small_03a", 117, 10, -0.18'f32, 0.12'f32, -0.45'f32, 0.66'f32),
+    ("rock_medium_03a", 101, 27, 0.15'f32, 0.10'f32, 0.70'f32, 0.76'f32),
+    ("rock_small_01a", 98, 30, -0.12'f32, -0.15'f32, -0.20'f32, 0.58'f32),
+    ("rock_medium_02a", 83, 45, 0.12'f32, -0.12'f32, 0.45'f32, 0.72'f32),
+    ("rock_small_04a", 78, 50, -0.15'f32, 0.10'f32, -0.55'f32, 0.54'f32)
+  ]:
+    pack.placePair(
+      name, x, z, jitterX, jitterZ, rotation, scale,
+      vec3(0.92'f32, 0.94'f32, 0.88'f32))
 
 proc placeLaneLandmarks(pack: PropPack) =
   ## Successive silhouettes along the outer lane give travel a readable
@@ -306,7 +318,7 @@ proc placeLaneLandmarks(pack: PropPack) =
     ("wood_fence_01a", 114, 87, 0.0'f32, 0.0'f32, 0.1'f32, 1.08'f32),
     ("wood_fence_pole_01a", 115, 90, 0.0'f32, 0.0'f32, 0.25'f32, 0.95'f32),
     ("rock_small_04a", 113, 89, -0.1'f32, 0.1'f32, 0.5'f32, 0.58'f32),
-    ("bush_02a", 114, 85, 0.2'f32, -0.1'f32, -0.35'f32, 0.64'f32)
+    ("flower_bush_02a", 114, 85, 0.2'f32, -0.1'f32, -0.35'f32, 0.64'f32)
   ], vec3(0.88'f32, 0.88'f32, 0.76'f32), 4.5'f32)
 
 proc placeArenaDecor*(pack: PropPack, seed: int32) =
@@ -434,7 +446,7 @@ proc placeArenaDecor*(pack: PropPack, seed: int32) =
     ("rock_medium_01a", 98, 31, 0.4'f32, 0.75'f32),
     ("flower_bush_01a", 96, 28, -0.3'f32, 0.65'f32),
     ("rock_medium_02a", 31, 98, 1.2'f32, 0.70'f32),
-    ("bush_01a", 28, 96, 0.2'f32, 0.70'f32),
+    ("flower_bush_01a", 28, 96, 0.2'f32, 0.70'f32),
     ("rock_medium_03a", 122, 3, 0.1'f32, 1.35'f32),
     ("rock_medium_01a", 124, 5, 1.0'f32, 1.15'f32),
     ("rock_medium_02a", 120, 1, -0.6'f32, 1.10'f32)
@@ -500,17 +512,18 @@ proc placePainterlyLandmarks*(pack: PropPack, seed: int32) =
   var rng = initRng(seed, LandmarkDecorStream)
 
   # Layered forest-edge silhouettes tie the authored groves into the meadow.
-  for (x, z, turn, tree) in [
-    (50, 30, 0.2'f32, "tree_03a"),
-    (30, 50, 1.1'f32, "tree_05a"),
-    (58, 38, -0.5'f32, "tree_01a")
+  for (x, z, turn, shrub) in [
+    (50, 30, 0.2'f32, "flower_bush_01a"),
+    (30, 50, 1.1'f32, "flower_bush_02a"),
+    (58, 38, -0.5'f32, "flower_bush_01a")
   ]:
     pack.placeLaneEdgePair(
-      tree, x, z, 0.15'f32, -0.10'f32, turn,
-      3.15'f32 + rng.unit() * 0.55'f32,
+      shrub, x, z, 0.15'f32, -0.10'f32, turn,
+      0.78'f32 + rng.unit() * 0.20'f32,
       vec3(0.82'f32, 0.91'f32, 0.78'f32), 4.25'f32)
     pack.placeLaneEdgePair(
-      "bush_02a", x + 2, z - 1, 0.1'f32, -0.2'f32, turn + 0.7'f32,
+      "flower_bush_02a", x + 2, z - 1, 0.1'f32, -0.2'f32,
+      turn + 0.7'f32,
       0.72'f32 + rng.unit() * 0.18'f32,
       vec3(0.86'f32, 0.94'f32, 0.81'f32), 4.25'f32)
     pack.placeLaneEdgePair(
@@ -518,11 +531,11 @@ proc placePainterlyLandmarks*(pack: PropPack, seed: int32) =
       turn - 0.4'f32, 0.48'f32,
       vec3(0.90'f32, 0.96'f32, 0.84'f32), 4.25'f32)
 
-  # A wind-shaped meadow tree and Golden Valley boulders crown each hill.
-  # Their offset placement keeps the summit centre and ascent unobstructed.
+  # Golden Valley boulders and low meadow growth crown each hill. Their
+  # offset placement keeps the summit centre and ascent unobstructed.
   let hill = LandmarkHillSites[0]
   for (name, dx, dz, rotation, scale) in [
-    ("tree_06a", -4, 1, 0.35'f32, 3.25'f32),
+    ("flower_bush_02a", -4, 1, 0.35'f32, 0.88'f32),
     ("rock_large_01a", -5, 3, 0.75'f32, 0.82'f32),
     ("rock_large_04a", 5, 3, -0.45'f32, 0.76'f32),
     ("rock_platform_02a", 3, 6, 0.2'f32, 0.58'f32),
