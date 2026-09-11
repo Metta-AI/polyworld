@@ -2,7 +2,7 @@
 ##
 ## Decorations never alter pathing, vision, simulation state, or the map hash.
 ## Low silhouettes live on lane verges and riverbanks; taller landmarks are
-## limited to the central causeway. Every placement has a rotated partner.
+## limited to the central shallows. Every placement has a rotated partner.
 
 import
   std/math,
@@ -13,6 +13,7 @@ import
 const
   DecorStream = 0xA24BAED4963EE407'u64
   RiverDecorStream = 0x3C6EF372FE94F82B'u64
+  LandmarkDecorStream = 0xBB67AE8584CAA73B'u64
   VergeDecorBudget = 260
   VergePlants = [
     "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
@@ -119,7 +120,7 @@ proc placeLaneVignette(
 
 proc nearWater(x, z, radius: int): bool =
   ## Finds dry bank tiles bordering the rendered channel, including its
-  ## wider calm reaches around the fords and middle causeway.
+  ## wider calm reaches around the three fords.
   let water = layers[WaterLayer]
   for dz in -radius .. radius:
     for dx in -radius .. radius:
@@ -352,8 +353,8 @@ proc placeArenaDecor*(pack: PropPack, seed: int32) =
       )
       placed += 2
 
-  # Four substantial lamps announce the causeway from its outer edges while
-  # keeping the full diagonal combat surface visually open.
+  # Four substantial lamps announce the central ford from its dry outer edges
+  # while keeping the full diagonal wading route visually open.
   for (x, z, rotation) in [
     (57, 63, 0.75'f32),
     (63, 57, -0.75'f32)
@@ -452,3 +453,64 @@ proc placeArenaDecor*(pack: PropPack, seed: int32) =
       name, x, z, 0, 0, rotation, scale,
       vec3(0.88'f32, 0.82'f32, 0.70'f32)
     )
+
+proc placePainterlyLandmarks*(pack: PropPack, seed: int32) =
+  ## Completes the landmark compositions with the same painted Meadow and
+  ## Golden Valley families used by the terrain, without changing collision
+  ## or lane clearance.
+  if pack == nil or layers.len == 0:
+    return
+  var rng = initRng(seed, LandmarkDecorStream)
+
+  # Layered forest-edge silhouettes tie the authored groves into the meadow.
+  for (x, z, turn, tree) in [
+    (50, 30, 0.2'f32, "tree_03a"),
+    (30, 50, 1.1'f32, "tree_05a"),
+    (58, 38, -0.5'f32, "tree_01a")
+  ]:
+    pack.placeLaneEdgePair(
+      tree, x, z, 0.15'f32, -0.10'f32, turn,
+      3.15'f32 + rng.unit() * 0.55'f32,
+      vec3(0.82'f32, 0.91'f32, 0.78'f32), 4.25'f32)
+    pack.placeLaneEdgePair(
+      "bush_02a", x + 2, z - 1, 0.1'f32, -0.2'f32, turn + 0.7'f32,
+      0.72'f32 + rng.unit() * 0.18'f32,
+      vec3(0.86'f32, 0.94'f32, 0.81'f32), 4.25'f32)
+    pack.placeLaneEdgePair(
+      "grass_patch_05a", x - 2, z + 1, -0.1'f32, 0.2'f32,
+      turn - 0.4'f32, 0.48'f32,
+      vec3(0.90'f32, 0.96'f32, 0.84'f32), 4.25'f32)
+
+  # A wind-shaped meadow tree and Golden Valley boulders crown each hill.
+  # Their offset placement keeps the summit centre and ascent unobstructed.
+  let hill = LandmarkHillSites[0]
+  for (name, dx, dz, rotation, scale) in [
+    ("tree_06a", -4, 1, 0.35'f32, 3.25'f32),
+    ("rock_large_01a", -5, 3, 0.75'f32, 0.82'f32),
+    ("rock_large_04a", 5, 3, -0.45'f32, 0.76'f32),
+    ("rock_platform_02a", 3, 6, 0.2'f32, 0.58'f32),
+    ("flower_bush_01a", -2, 5, -0.3'f32, 0.62'f32)
+  ]:
+    pack.placeLaneEdgePair(
+      name, hill[0] + dx, hill[1] + dz, 0, 0,
+      rotation + rng.unit() * 0.3'f32, scale,
+      vec3(0.91'f32, 0.92'f32, 0.84'f32), 4.25'f32)
+
+  # A coherent Meadow work site sits against the quarry's rear wall: a cart,
+  # loose wheel, rope and supplies replace the low-poly mining kit. Golden
+  # Valley stone reinforces the excavated lip while the floor stays open.
+  let quarry = QuarrySites[0]
+  for (name, dx, dz, rotation, scale) in [
+    ("rock_large_03a", -5, -2, 0.25'f32, 0.72'f32),
+    ("rock_platform_01a", 5, -2, -0.55'f32, 0.56'f32),
+    ("wood_cart_01a", -4, 2, 1.25'f32, 0.88'f32),
+    ("wood_wheel_01a", -2, 4, 0.15'f32, 0.62'f32),
+    ("wood_crate_01a", 0, 4, -0.30'f32, 0.58'f32),
+    ("wood_barrel_01a", 2, 4, 0.40'f32, 0.62'f32),
+    ("rope_01a", 1, 3, 0.75'f32, 0.42'f32),
+    ("wood_fence_01a", -5, 1, 1.45'f32, 0.82'f32)
+  ]:
+    pack.placeLaneEdgePair(
+      name, quarry[0] + dx, quarry[1] + dz, 0, 0,
+      rotation + rng.unit() * 0.25'f32, scale,
+      vec3(0.90'f32, 0.84'f32, 0.72'f32), 4.25'f32)

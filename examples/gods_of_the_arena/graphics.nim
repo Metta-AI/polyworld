@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, content, decor, kaykit_decor, sim, game, maps, replays, ui,
+  assets, content, decor, sim, game, maps, replays, ui,
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
@@ -308,7 +308,6 @@ proc runGraphics*() =
   var
     towerPack: PropPack
     decorPack: PropPack
-    kaykitPack: PropPack
   profileBlock "props":
     towerPack = loadPropPack(propPaths(TowerPack, TowerProps))
     for name in TowerProps:
@@ -325,9 +324,7 @@ proc runGraphics*() =
       for name in nodes:
         doAssert decorPack.hasProp(name), "missing arena decoration: " & name
     decorPack.placeArenaDecor(run.map.seed)
-    kaykitPack = loadPropPack(KayKitDecorPaths, brightness = 1.08'f32)
-    kaykitPack.placeKayKitDecor(
-      run.map.seed, LandmarkHillSites[0], QuarrySites[0])
+    decorPack.placePainterlyLandmarks(run.map.seed)
     towerPack.placeProp(
       "magiccrystal1",
       tileCenter(BlueFortLayer, FortOuterRadius, FortOuterRadius),
