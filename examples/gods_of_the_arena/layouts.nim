@@ -1,6 +1,7 @@
 ## Current-frame HUD rectangles, composed from fixed rows and columns.
 
 import
+  std/math,
   vmath,
   polyworld/[gameuis, stackpanels]
 
@@ -28,8 +29,12 @@ type
     abilities*: array[6, GameUiPanel]
 
   InventoryPanels* = object
-    title*, contents*, gold*: GameUiPanel
+    title*, shop*, contents*, gold*: GameUiPanel
     slots*: array[6, GameUiPanel]
+
+  ShopPanels* = object
+    panel*, heading*, catalog*, footer*: GameUiPanel
+    cards*: array[20, GameUiPanel]
 
 proc clockPanels*(panel: GameUiPanel): ClockPanels =
   ## Stacks the clock's icon and caption above its centered time.
@@ -82,7 +87,22 @@ proc detailsPanels*(panel: GameUiPanel): DetailsPanels =
 proc inventoryPanels*(panel: GameUiPanel): InventoryPanels =
   ## Stacks the clickable title, two inventory rows, and currency footer.
   var rows = panel.stack(TopToBottom, vec2(14, 10))
-  result.title = rows.takeRow(28, 12)
+  var heading = rows.takeRow(28, 12).stack(LeftToRight)
+  result.title = heading.takeColumn(112, 4)
+  result.shop = heading.takeRest()
   result.contents = rows.takeRow(72 * 2 + 5, 1)
   result.gold = rows.takeRow(31)
   stackGrid(result.contents, vec2(72), 3, vec2(4, 5), result.slots)
+
+proc shopPanels*(size: Vec2): ShopPanels =
+  ## Fits all twenty items and the inventory into the full-screen shop.
+  result.panel = GameUiPanel(origin: vec2(24), size: size - vec2(48))
+  var rows = result.panel.stack(TopToBottom, vec2(24))
+  result.heading = rows.takeRow(72, 20)
+  result.catalog = rows.takeRow(rows.remainingSpace.y - 132, 20)
+  result.footer = rows.takeRest()
+  let cell = vec2(
+    floor((result.catalog.size.x - 16 * 4) / 5),
+    floor((result.catalog.size.y - 16 * 3) / 4)
+  )
+  stackGrid(result.catalog, cell, 5, vec2(16), result.cards)

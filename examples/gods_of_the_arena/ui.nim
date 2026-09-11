@@ -5,7 +5,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
-  content, sim, game, controls, layouts
+  content, sim, game, controls, layouts, shops
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -13,8 +13,6 @@ const
   IconTiny = 16.0'f32
   IconSmall = 64.0'f32
   IconLarge = 128.0'f32
-  ShopIcon = 32.0'f32
-  ShopWell = ShopIcon + 4
   BadgeSmall = 16.0'f
   BadgeLarge = 64.0'f32
   AbilityKeys = ["Q", "W", "E", "R", "F", "G"]
@@ -33,9 +31,6 @@ const
     "gota_warlock",
     "gota_berserker"
   ]
-  ShopColumns = 5
-
-var shopOpen = false
 
 type
   HudChrome = object
@@ -76,6 +71,8 @@ type
     itemCounts: array[InventorySlots, int32]
     abilities: array[HeroAbilitySlot, Ability]
     cooldowns: array[HeroAbilitySlot, int32]
+    charges: array[HeroAbilitySlot, int32]
+    recharges: array[HeroAbilitySlot, int32]
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
@@ -155,7 +152,7 @@ proc mouseOverUi*(
     primaryId = 0'i32
 ): bool =
   ## Returns whether the pointer is over a visible game UI panel.
-  if window.statsContains(mouse) or mouseOverDebugMenu(mouse):
+  if shopOpen or window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   if primaryId == 0:
@@ -289,6 +286,8 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         inventory: hero.inventory,
         itemCounts: hero.itemCounts,
         abilities: spec.abilities,
+        charges: hero.charges,
+        recharges: hero.recharges,
         cooldowns: hero.cooldowns
       )
   for footman in run.world.footmen:
@@ -640,6 +639,10 @@ proc drawUi*(
     focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  if shopOpen and options.playerSlot > 0 and not run.replayMode:
+    sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
+      currentLayout(window).size, transport.playing)
+    return
   let table = currentStats()
   statsState.syncDirector(actionCam, table, window.tabHeld)
   let
@@ -834,8 +837,15 @@ proc drawUi*(
         let
           i = slot.ord
           well = details.abilities[i]
-          spec = selection.abilities[slot].abilitySpec
-          remaining = selection.cooldowns[slot]
+          spec =
+            if run.world.legacyAbilities:
+              selection.abilities[slot].legacyAbilitySpec
+            else:
+              selection.abilities[slot].abilitySpec
+          empty = not run.world.legacyAbilities and selection.charges[slot] == 0
+          remaining =
+            if empty: max(selection.cooldowns[slot], selection.recharges[slot])
+            else: selection.cooldowns[slot]
         sk.drawAbilityIcon(
           well,
           abilityIconKey(selection.abilities[slot]),
@@ -844,7 +854,21 @@ proc drawUi*(
           else:
             rgbx(255, 255, 255, 255)
         )
-        sk.drawCooldownSweep(well, remaining, spec.cooldownTicks)
+        sk.drawCooldownSweep(
+          well, remaining, if empty: spec.rechargeTicks else: spec.cooldownTicks
+        )
+        if options.playerSlot > 0 and not run.replayMode and
+          selection.id == run.world.heroes[options.playerSlot - 1].id:
+            if window.hudClicked(sk, well):
+              armedAbility = slot.ord.int32
+            if armedAbility == slot.ord.int32:
+              let color = rgbx(255, 223, 133, 255)
+              sk.drawRect(well.origin, vec2(well.size.x, 3), color)
+              sk.drawRect(well.origin, vec2(3, well.size.y), color)
+              sk.drawRect(well.origin + vec2(well.size.x - 3, 0),
+                vec2(3, well.size.y), color)
+              sk.drawRect(well.origin + vec2(0, well.size.y - 3),
+                vec2(well.size.x, 3), color)
       for i in 0 .. 1:
         let
           well = details.abilities[4 + i]
@@ -861,38 +885,27 @@ proc drawUi*(
     else:
       0'i32
   if playerHero:
-    let title = inventory.title
-    if window.hudClicked(sk, title):
-      shopOpen = not shopOpen
-  if playerHero and shopOpen:
-    var
-      index = 0
-      shopSlots: array[Item.high.ord, GameUiPanel]
-    stackGrid(
-      inventory.contents, vec2(ShopWell), ShopColumns, vec2(8, 1),
-      shopSlots
-    )
-    for item in Item:
-      if item == NoItem:
-        continue
-      let
-        slotPanel = shopSlots[index]
-      sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = ShopIcon)
-      if window.hudClicked(sk, slotPanel):
-        queueBuyItem(playerHeroId, int32(item.ord))
-      inc index
-  else:
-    for slot in 0 ..< InventorySlots:
-      let
-        slotPanel = inventory.slots[slot]
-        item =
-          if selection == nil: NoItem else: selection.inventory[slot]
-      if item != NoItem:
-        sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
-      else:
-        sk.drawSlot(slotPanel)
-      if playerHero and window.hudClicked(sk, slotPanel):
-        queueUseItem(playerHeroId, int32(slot))
+    sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
+    sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
+    sk.drawLabel("SHOP  B", inventory.shop.origin + vec2(28, 0),
+      inventory.shop.size - vec2(28, 0), rgbx(247, 221, 143, 255), "Small")
+    if window.hudClicked(sk, inventory.shop):
+      shopOpen = true
+      armedAbility = -1
+  let inventoryHero =
+    if playerHero: selectedUnit(playerHeroId, viewMode)
+    else: selection
+  for slot in 0 ..< InventorySlots:
+    let
+      slotPanel = inventory.slots[slot]
+      item =
+        if inventoryHero == nil: NoItem else: inventoryHero.inventory[slot]
+    if item != NoItem:
+      sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
+    else:
+      sk.drawSlot(slotPanel)
+    if playerHero and window.hudClicked(sk, slotPanel):
+      queueUseItem(playerHeroId, int32(slot))
 
   if selection != nil:
     let
@@ -976,7 +989,13 @@ proc drawUi*(
     for i in 0 .. 5:
       let well = details.abilities[i]
       if i < 4 and selection.kind == SelectedHero:
-        let remaining = selection.cooldowns[HeroAbilitySlot(i)]
+        let
+          slot = HeroAbilitySlot(i)
+          remaining =
+            if not run.world.legacyAbilities and selection.charges[slot] == 0:
+              max(selection.cooldowns[slot], selection.recharges[slot])
+            else:
+              selection.cooldowns[slot]
         if remaining > 0:
           sk.drawLabel(
             $cooldownSeconds(remaining),
@@ -986,6 +1005,27 @@ proc drawUi*(
             "Hud",
             CenterAlign
           )
+        if not run.world.legacyAbilities:
+          let
+            spec = selection.abilities[slot].abilitySpec
+            badge = well.origin + vec2(3, 2)
+          sk.drawRect(badge, vec2(28, 20), rgbx(0, 0, 0, 190))
+          sk.drawLabel(
+            $selection.charges[slot] & "/" & $spec.charges,
+            badge,
+            vec2(28, 20),
+            rgbx(255, 255, 255, 255),
+            "Small",
+            CenterAlign
+          )
+          if selection.recharges[slot] > 0:
+            let progress = 1 - selection.recharges[slot].float32 /
+              max(1, spec.rechargeTicks).float32
+            sk.drawRect(
+              well.origin + vec2(3, well.size.y - 5),
+              vec2((well.size.x - 6) * progress, 3),
+              rgbx(110, 190, 245, 255)
+            )
       if i >= 4 and selection.kind == SelectedHero:
         let count = selection.itemCounts[i - 4]
         if count > 1:
@@ -999,12 +1039,12 @@ proc drawUi*(
           )
       sk.drawAbilityKey(well, AbilityKeys[i])
 
-  if selection != nil and not (playerHero and shopOpen):
+  if inventoryHero != nil:
     for slot in 0 ..< InventorySlots:
-      if selection.itemCounts[slot] > 1:
+      if inventoryHero.itemCounts[slot] > 1:
         let slotPanel = inventory.slots[slot]
         sk.drawLabel(
-          $selection.itemCounts[slot],
+          $inventoryHero.itemCounts[slot],
           slotPanel.origin,
           slotPanel.size,
           rgbx(247, 221, 143, 255),
@@ -1012,7 +1052,7 @@ proc drawUi*(
           CenterAlign
         )
   sk.drawLabel(
-    if playerHero and shopOpen: "SHOP" else: "INVENTORY",
+    "INVENTORY",
     inventory.title.origin,
     inventory.title.size,
     rgbx(200, 205, 216, 255),
@@ -1025,7 +1065,7 @@ proc drawUi*(
     vec2(20)
   )
   sk.drawLabel(
-    formatAmount(if selection == nil: 0 else: selection.gold),
+    formatAmount(if inventoryHero == nil: 0 else: inventoryHero.gold),
     gold.origin + vec2(31, 0),
     vec2(gold.size.x - 31, gold.size.y),
     rgbx(232, 196, 86, 255)
@@ -1052,6 +1092,8 @@ proc drawUi*(
 
 proc drawStatsOverlay*(sk: Silky, window: Window) =
   ## Presents readable statistics above the HUD at every window width.
+  if shopOpen:
+    return
   sk.drawStatsOverlay(
     window, currentLayout(window), statsState, currentStats(), run.history
   )

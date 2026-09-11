@@ -40,6 +40,11 @@ for size in [
   vec2(7680, 4320), vec2(1080, 1920), vec2(3440, 1440)
 ]:
   let layout = initGameUiLayout(size / gameUiScale(size), TransportHeight)
+  let shop = gota.shopPanels(layout.size)
+  checkPanels(shop.panel, [shop.heading, shop.catalog, shop.footer])
+  checkPanels(shop.catalog, shop.cards)
+  doAssert shop.cards[0].size.x >= 320
+  doAssert shop.cards[0].size.y >= 160
   checkHud(layout, [
     (GameUiRegion.TopLeft, gota.PanelScore),
     (GameUiRegion.TopCenter, gota.PanelHeroes),
@@ -113,11 +118,10 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
     let
       panel = GameUiPanel(origin: origin, size: gota.PanelInventory)
       inventory = gota.inventoryPanels(panel)
-    checkPanels(panel, [inventory.title, inventory.contents, inventory.gold])
+    checkPanels(panel, [
+      inventory.title, inventory.shop, inventory.contents, inventory.gold
+    ])
     checkPanels(inventory.contents, inventory.slots)
-    var shop: array[20, GameUiPanel]
-    stackGrid(inventory.contents, vec2(36), 5, vec2(8, 1), shop)
-    checkPanels(inventory.contents, shop)
   block:
     let
       panel = GameUiPanel(origin: origin, size: lvd.PanelMinimap)
