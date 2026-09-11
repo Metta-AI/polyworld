@@ -567,11 +567,16 @@ proc worldToTile*(worldX, worldZ: float32): (int, int) =
   ## World position to ground-layer tile coordinates (unclamped).
   (int(floor(worldX + HalfGrid)), int(floor(worldZ + HalfGrid)))
 
-proc bilinearHeight(tile: Tile, offsetX, offsetZ: float32): float32 =
-  ## Samples a tile top at normalized local coordinates.
+proc triangleHeight(tile: Tile, offsetX, offsetZ: float32): float32 =
+  ## Samples the same v00-v10-v01 / v10-v11-v01 triangles emitted by the
+  ## terrain renderer. Bilinear interpolation can visibly bury props on a
+  ## non-planar tile because it describes a different surface.
   let h = tile.tops.unpack
-  (h[0] * (1 - offsetX) + h[1] * offsetX) * (1 - offsetZ) +
-    (h[2] * (1 - offsetX) + h[3] * offsetX) * offsetZ
+  if offsetX + offsetZ <= 1:
+    h[0] + (h[1] - h[0]) * offsetX + (h[2] - h[0]) * offsetZ
+  else:
+    h[1] * (1 - offsetZ) + h[2] * (1 - offsetX) +
+      h[3] * (offsetX + offsetZ - 1)
 
 proc layerHeight(
     layerIndex: int, worldX, worldZ: float32, height: var float32
@@ -586,14 +591,14 @@ proc layerHeight(
   let tile = layer.tiles[tileZ * layer.width + tileX]
   if not tile.exists:
     return false
-  height = tile.bilinearHeight(
+  height = tile.triangleHeight(
     worldX + HalfGrid - (layer.originX + tileX).float32,
     worldZ + HalfGrid - (layer.originZ + tileZ).float32
   )
   true
 
 proc groundHeight*(worldX, worldZ: float32): float32 =
-  ## Bilinear height of the ground layer at a world position.
+  ## Rendered height of the ground layer at a world position.
   discard layerHeight(0, worldX, worldZ, result)
 
 proc surfaceHeight*(worldX, worldZ: float32): float32 =

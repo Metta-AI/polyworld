@@ -66,7 +66,25 @@ layer.tiles[4].tops = [8'i16, 8'i16, 8'i16, 8'i16]
 computeWalkable()
 doAssert pathPoint(0, 1, 1).y == 32
 
+echo "Testing presentation height follows rendered terrain triangles"
+block:
+  let folded = QuadLayer(
+    originX: 0,
+    originZ: 0,
+    width: 1,
+    depth: 1,
+    tiles: @[Tile(
+      tops: [0'i16, 8'i16, 16'i16, 32'i16],
+      flags: TileExists
+    )]
+  )
+  layers = @[folded]
+  doAssert abs(groundHeight(-63.75'f32, -63.75'f32) - 0.75'f32) < 0.0001
+  doAssert abs(groundHeight(-63.25'f32, -63.25'f32) - 2.75'f32) < 0.0001
+  doAssert abs(groundHeight(-63.5'f32, -63.5'f32) - 1.5'f32) < 0.0001
+
 echo "Testing integer slope walkability"
+layers = @[layer]
 layer.tiles[0].tops = [0'i16, 0'i16, 0'i16, 64'i16]
 computeWalkable()
 doAssert not isWalkable(0, 0, 0)

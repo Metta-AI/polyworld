@@ -29,23 +29,6 @@ const
   heroDeathClip* = 2
   heroAttackClips* = [3, 4]
 
-## Lane waypoints
-
-type LaneStop = tuple[layer, x, z: int]
-
-const LaneRoutes: array[3, seq[LaneStop]] = [
-  @[(GroundLayer, 23, 20), (GroundLayer, 29, 20),
-    (GroundLayer, 107, 21), (GroundLayer, 107, 32),
-    (GroundLayer, 107, 98), (GroundLayer, 107, 104)],
-  @[(GroundLayer, 23, 21), (GroundLayer, 29, 21),
-    (GroundLayer, 48, 54), (GroundLayer, 65, 61),
-    (GroundLayer, 82, 68), (GroundLayer, 98, 106),
-    (GroundLayer, 104, 106)],
-  @[(GroundLayer, 20, 23), (GroundLayer, 20, 29),
-    (GroundLayer, 21, 107), (GroundLayer, 32, 107),
-    (GroundLayer, 98, 107), (GroundLayer, 104, 107)],
-]
-
 var
   lanePathPoints*: array[3, seq[PathPoint]]
   lanePathTiles: array[3, seq[PathTile]]
@@ -329,75 +312,31 @@ proc fixedSurfaceHeightNear(
     referenceY: int32
 ): int32
 
-proc laneWorldPlacement(
-    path: seq[PathPoint],
-    ratioPermille: int32,
-    offset: int32
-): tuple[position: WorldPoint, facing: Heading] =
-  ## Places one authoritative structure using integer path geometry.
-  let
-    index = clamp(
-      int(roundDivision(
-        int64(path.len - 1) * ratioPermille,
-        1000
-      )),
-      0,
-      path.len - 1
-    )
-    nextIndex = min(index + 1, path.len - 1)
-    previousIndex = max(index - 1, 0)
-    center = worldPoint(path[index])
-    previous = worldPoint(path[previousIndex])
-    next = worldPoint(path[nextIndex])
-    direction = next - previous
-    side = WorldPoint(x: -direction.z, z: direction.x)
-  result.facing = heading(direction.x, direction.z)
-  for amount in [offset, -offset, offset div 2, -offset div 2]:
-    var position = center + scaledPlanar(side, amount)
-    let
-      tileX = floorWorldTile(position.x) + GridTiles div 2
-      tileZ = floorWorldTile(position.z) + GridTiles div 2
-    if isWalkable(GroundLayer, tileX, tileZ):
-      position.y = fixedSurfaceHeight(position)
-      result.position = position
-      return
-  result.position = center
-  result.position.y = fixedSurfaceHeight(result.position)
-
 proc initTowers(world: World) =
-  ## Creates the lane tower records used by simulation UI and rendering.
+  ## Creates towers at the authored courts in the shared map blueprint.
   for lane in 0 .. 2:
-    let path = lanePathPoints[lane]
-    for definition in [
-      (team: RedTeam, tier: OuterTower,
-        ratio: 380'i32, offset: 180_000'i32),
-      (team: RedTeam, tier: InnerTower,
-        ratio: 220'i32, offset: 192_000'i32),
-      (team: RedTeam, tier: GateTower,
-        ratio: 55'i32, offset: 210_000'i32),
-      (team: BlueTeam, tier: OuterTower,
-        ratio: 620'i32, offset: -180_000'i32),
-      (team: BlueTeam, tier: InnerTower,
-        ratio: 780'i32, offset: -192_000'i32),
-      (team: BlueTeam, tier: GateTower,
-        ratio: 945'i32, offset: -210_000'i32)
-    ]:
-      let placement = laneWorldPlacement(
-        path,
-        definition.ratio,
-        definition.offset
-      )
-      let hitPoints = TowerHitPoints[definition.tier]
-      world.towers.add Tower(
-        id: FirstTowerId + world.towers.len.int32,
-        team: definition.team,
-        lane: lane,
-        tier: definition.tier,
-        position: placement.position,
-        facing: placement.facing,
-        hp: hitPoints,
-        maxHp: hitPoints
-      )
+    for team in Team:
+      for tier in TowerTier:
+        let
+          site = TowerSites[lane][team.ord][tier.ord]
+          hitPoints = TowerHitPoints[tier]
+        var position = WorldPoint(
+          x: int32(site.x - GridTiles div 2) * WorldScale + WorldScale div 2,
+          z: int32(site.z - GridTiles div 2) * WorldScale + WorldScale div 2
+        )
+        position.y = fixedSurfaceHeight(position)
+        world.towers.add Tower(
+          id: FirstTowerId + world.towers.len.int32,
+          team: team,
+          lane: lane,
+          tier: tier,
+          position: position,
+          facing: heading(
+            int32(site.faceX - site.x), int32(site.faceZ - site.z)
+          ),
+          hp: hitPoints,
+          maxHp: hitPoints
+        )
 
 const
   FootmanHp* = 60'i32
@@ -3123,19 +3062,19 @@ proc initLanePaths(seed: int32) =
     )
     redRampart = findPathPoints(
       GroundLayer,
-      RedFortTile + 1,
-      RedFortTile - 4,
+      RedFortTile - FortRampSideOffset,
+      RedFortTile - 1,
       RedFortLayer,
-      FortOuterRadius + FortWallRadius,
-      FortOuterRadius - 4
+      FortOuterRadius - FortRampSideOffset,
+      FortOuterRadius - FortWallRadius
     )
     blueRampart = findPathPoints(
       GroundLayer,
-      BlueFortTile - 1,
-      BlueFortTile + 4,
+      BlueFortTile + FortRampSideOffset,
+      BlueFortTile + 1,
       BlueFortLayer,
-      FortOuterRadius - FortWallRadius,
-      FortOuterRadius + 4
+      FortOuterRadius + FortRampSideOffset,
+      FortOuterRadius + FortWallRadius
     )
     redFountainPath = findPathPoints(
       GroundLayer,
