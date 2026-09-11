@@ -1,0 +1,6 @@
+awm
+awm_capture
+awm.atlas.png
+awm_*.png
+nimcache/
+build/
