@@ -181,6 +181,8 @@ type
     z*: int
 
   World* = ref object
+    legacyCombat*: bool
+      ## Replays through version 19 retain their recorded combat rules.
     stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
     footmen*: seq[Footman]
@@ -749,6 +751,13 @@ proc refreshHeroStats*(hero: Hero) =
 proc heroAttackDamage*(hero: Hero): int32 =
   ## Returns basic-attack damage including held equipment.
   heroDamage(hero.class, hero.level) + hero.heroItemBonus().damage
+
+proc heroAttackTicks*(world: World, hero: Hero): int32 =
+  ## Uses the attack cadence belonging to this live match or replay.
+  if world.legacyCombat and hero.class == VanguardKnight:
+    26'i32
+  else:
+    heroAttackTicks(hero.class)
 
 proc heroMoveSpeed*(hero: Hero): int32 =
   ## Returns movement distance including held equipment.
@@ -1520,6 +1529,8 @@ proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
+  if not world.legacyCombat and world.heroes[index].hp <= 0:
+    return false
   let item = itemFromId(itemId)
   if item == NoItem:
     return false
@@ -1883,12 +1894,48 @@ proc consumeItem(hero: Hero, slot: int) =
     hero.inventory[slot] = NoItem
     hero.itemCounts[slot] = 0
 
+proc canHitTarget(
+    world: World,
+    hero: Hero,
+    targetFootman, targetHero, targetTower, fortIndex: int,
+    range: int32
+): bool =
+  ## Requires a living, visible, exposed enemy within the strike's range.
+  var position: WorldPoint
+  if targetFootman >= 0:
+    let target = world.footmen[targetFootman]
+    if target.team == hero.team or target.hp <= 0 or target.state == Dying:
+      return false
+    position = target.position
+  elif targetHero >= 0:
+    let target = world.heroes[targetHero]
+    if target.team == hero.team or target.hp <= 0 or target.state == Dying:
+      return false
+    position = target.position
+  elif targetTower >= 0:
+    let target = world.towers[targetTower]
+    if target.team == hero.team or not world.towerExposed(target):
+      return false
+    position = target.position
+  elif fortIndex >= 0:
+    let target = world.forts[fortIndex]
+    if target.team == hero.team or target.hp <= 0 or
+      not world.fortExposed(target.team):
+        return false
+    position = target.center
+  else:
+    return false
+  within(hero.position, position, range) and
+    world.visible(hero.team, position)
+
 proc applyUseItem*(world: World, heroId, slotId: int32): bool =
   ## Spends one consumable for a heal, mana restore, or poison strike.
   let
     index = heroIndex(world, heroId)
     slot = int(slotId)
   if index < 0 or world.heroes[index].state == Dying:
+    return false
+  if not world.legacyCombat and world.heroes[index].hp <= 0:
     return false
   if slot < 0 or slot >= InventorySlots:
     return false
@@ -1928,6 +1975,15 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
           break
     if targetFootman < 0 and targetHero < 0 and
         targetTower < 0 and fortIndex < 0:
+      return false
+    if not world.legacyCombat and not world.canHitTarget(
+      world.heroes[index],
+      targetFootman,
+      targetHero,
+      targetTower,
+      fortIndex,
+      heroAttackRange(world.heroes[index].class)
+    ):
       return false
     applyHeroHit(
       world,
@@ -1989,6 +2045,15 @@ proc tryCastAbility(
       return false
     if not within(hero.position, targetPosition, spec.range):
       return false
+    if not world.legacyCombat and not world.canHitTarget(
+      hero,
+      targetFootman,
+      targetHero,
+      targetTower,
+      fortIndex,
+      spec.range
+    ):
+      return false
   of Heal:
     if hero.hp >= hero.maxHp:
       return false
@@ -2023,7 +2088,7 @@ proc tryCombatAbilities(
     hero: Hero,
     targetFootman, targetHero, targetTower, fortIndex: int
 ) =
-  ## Fires the strongest ready combat ability, then the class passive.
+  ## Fires the passive, then the strongest ready combat ability.
   discard tryCastAbility(
     world,
     hero,
@@ -2234,6 +2299,18 @@ proc updateHero(world: World, hero: Hero) =
     fortIndex
   )
 
+  if not world.legacyCombat and
+    not world.isEnemyTarget(hero, hero.attackObjectId):
+      targetFootman = -1
+      targetHero = -1
+      targetTower = -1
+      fortIndex = -1
+      hero.attackObjectId = 0
+      hero.targetFootmanId = 0
+      hero.targetHeroId = 0
+      hero.targetTowerId = 0
+      hero.attackingFort = false
+
   if targetFootman >= 0 or targetHero >= 0 or
       targetTower >= 0 or hero.attackingFort:
     hero.state = Fighting
@@ -2278,7 +2355,7 @@ proc updateHero(world: World, hero: Hero) =
       snapFacing(hero.body, hero.facing, offset)
       if hero.swingTicks < 0:
         startSwing(world, hero)
-      let duration = heroAttackTicks(hero.class)
+      let duration = world.heroAttackTicks(hero)
       inc hero.swingTicks
       if not hero.damageLanded and
           hero.swingTicks >= duration * 45 div 100:
@@ -2670,6 +2747,8 @@ proc newGame*(
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
     world: World(
+      legacyCombat: replayMode and
+        replayData.header.gameVersion <= TelemetryGameVersion,
       forts: startingForts(),
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
