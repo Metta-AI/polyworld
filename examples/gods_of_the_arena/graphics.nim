@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, content, sim, game, maps, replays, ui, controls,
+  assets, content, sim, game, maps, replays, ui, controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
   polyworld/common, polyworld/pathing,
@@ -182,6 +182,7 @@ proc runGraphics*() =
     ]
   var
     particles = initParticleSystem()
+    spellEffects = initSpellRenderer()
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
     selectionOutline = initSelectionOutline()
@@ -676,6 +677,7 @@ proc runGraphics*() =
     selectedIds: seq[int32]
     selectionPressPosition = vec2(0)
     rightPressPosition = vec2(0)
+    rightOrderStarted = false
     selectionStarted = false
     selectionAdditive = false
     attackMoveArmed = false
@@ -709,6 +711,18 @@ proc runGraphics*() =
     )
 
   window.onButtonPress = proc(button: Button) =
+    if options.playerSlot > 0 and not run.replayMode:
+      if button == KeyB:
+        shopOpen = not shopOpen
+        armedAbility = -1
+        return
+      if button == KeyEscape:
+        shopOpen = false
+        armedAbility = -1
+        attackMoveArmed = false
+        return
+      if shopOpen and button != KeySpace:
+        return
     if handleChromeKey(button):
       return
     if button == KeySpace:
@@ -1093,6 +1107,11 @@ proc runGraphics*() =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
     syncViewMode()
+    if shopOpen:
+      selectionStarted = false
+      rightOrderStarted = false
+      minimapPanning = false
+      return
     if focusPlayerHero:
       focusPlayerHero = false
       startCameraEase(cameraEase, cameraTarget)
@@ -1119,6 +1138,7 @@ proc runGraphics*() =
         window.buttonDown[KeyRightShift]
     if window.mousePressed(MouseRight) and not overUi:
       rightPressPosition = window.mousePos.vec2
+      rightOrderStarted = true
     if window.mousePressed(MouseMiddle) and
         (not overUi or window.buttonPressed[MouseMiddleKey]):
       if not playerMode():
@@ -1261,6 +1281,31 @@ proc runGraphics*() =
     selectEntity(heroId)
     clickMarks.emitClickMark(tileCenter(walk.layer, walk.x, walk.z))
 
+  proc updatePlayerSpells(viewProjection: Mat4) =
+    ## Casts quick actions and current targets, or selects an aimed ability.
+    if not playerMode() or shopOpen:
+      return
+    for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
+      if window.buttonPressed[key]:
+        let hero = heroById(run.world, playerHeroId())
+        var
+          aimX = mapCoordinate(hero.position.x + hero.facing.x)
+          aimY = mapCoordinate(hero.position.z + hero.facing.z)
+        if not mouseOverUi(window, sk.mousePos, primaryId):
+          let
+            (origin, direction) = mouseRay(
+              window.mousePos.vec2, window.size.vec2, viewProjection
+            )
+            ground = pickWalkableTile(origin, direction)
+          if ground.hit:
+            aimX = int32(layers[ground.layer].originX + ground.x)
+            aimY = int32(layers[ground.layer].originZ + ground.z)
+        attackMoveArmed = false
+        if not activatePlayerAbility(
+          run.world, hero.id, slot.int32, primaryId, aimX, aimY
+        ):
+          selectEntity(hero.id)
+
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Selects a clicked world unit, or attacks it in player mode.
     if not window.mouseReleased(MouseLeft):
@@ -1291,6 +1336,9 @@ proc runGraphics*() =
       return
     if not window.mouseReleased(MouseRight):
       return
+    if not rightOrderStarted:
+      return
+    rightOrderStarted = false
     if mouseOverUi(window, sk.mousePos, primaryId):
       return
     if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
@@ -1298,6 +1346,37 @@ proc runGraphics*() =
     let
       heroId = playerHeroId()
       picked = pickEntity(viewProjection)
+    if armedAbility >= 0:
+      let
+        hero = heroById(run.world, heroId)
+        slot = HeroAbilitySlot(armedAbility)
+        spec = heroAbility(hero.class, slot).abilitySpec
+      if hero.hp <= 0 or hero.state == Dying or hero.charges[slot] <= 0 or
+        hero.cooldowns[slot] > 0 or hero.mana < spec.manaCost:
+          return
+      if spec.casting == SelfCast:
+        queueCastTarget(heroId, armedAbility, heroId)
+      elif picked != 0 and
+        ((spec.kind == Strike and objectTeam(picked) != objectTeam(heroId)) or
+        (spec.kind != Strike and objectTeam(picked) == objectTeam(heroId))):
+          queueCastTarget(heroId, armedAbility, picked)
+      else:
+        let
+          (origin, direction) = mouseRay(
+            window.mousePos.vec2, window.size.vec2, viewProjection
+          )
+          ground = pickWalkableTile(origin, direction)
+        if not ground.hit:
+          return
+        queueCastPoint(
+          heroId, armedAbility,
+          int32(layers[ground.layer].originX + ground.x),
+          int32(layers[ground.layer].originZ + ground.z)
+        )
+      armedAbility = -1
+      attackMoveArmed = false
+      selectEntity(heroId)
+      return
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
       attackMoveArmed = false
@@ -1645,6 +1724,7 @@ proc runGraphics*() =
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
       updateWorldSelection(viewProjection)
+      updatePlayerSpells(viewProjection)
       updatePlayerOrder(viewProjection)
 
       profileBlock "drawWorld":
@@ -1674,7 +1754,16 @@ proc runGraphics*() =
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
               continue
-            let clip = heroRenderClips[hero.animClip]
+            var
+              animation = hero.animClip
+              ticks = hero.animTicks
+            if hero.hp > 0 and hero.state != Dying:
+              for spell in run.world.casts:
+                let age = run.world.tick - spell.started
+                if spell.heroId == hero.id and age >= 0 and age < 12:
+                  animation = heroAttackClips[0]
+                  ticks = age * 2
+            let clip = heroRenderClips[animation]
             drawCharacter(
               scene,
               heroModels[hero.class],
@@ -1684,7 +1773,7 @@ proc runGraphics*() =
               holdClipTime(
                 heroModels[hero.class],
                 clip,
-                hero.animTicks,
+                ticks,
                 hero.state == Dying
               ),
               sizeFactor = hero.heroSizeFactor()
@@ -1753,6 +1842,9 @@ proc runGraphics*() =
           barCameraRight,
           barCameraUp,
           cameraForward
+        )
+        spellEffects.drawSpells(
+          run.world, viewProjection, animationAlpha, viewMode
         )
         clickMarks.drawClickMarks(viewProjection)
         if showPaths:
@@ -1832,4 +1924,5 @@ proc runGraphics*() =
   if not run.replayMode:
     saveRecording()
   particles.closeParticles()
+  spellEffects.closeSpellRenderer()
   finishGameProfile()

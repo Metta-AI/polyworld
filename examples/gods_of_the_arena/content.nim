@@ -1,7 +1,9 @@
 ## Deterministic Gods of the Arena hero classes and their integer tuning.
 ## Graphics attach models and portraits to these identities separately.
 
-import polyworld/cli
+import polyworld/[cli, fxshapes]
+
+export fxshapes
 
 const
   InventorySlots* = 6
@@ -42,6 +44,8 @@ type
     RageCrucible, MoltenFist, WingedBoot, VolcanicEruption
   AbilityKind* = enum
     Strike, Heal, Restore
+  CastKind* = enum
+    SelfCast, MeleeCast, ProjectileCast, AreaCast
   HeroSpec* = object
     name*: string
     role*: string
@@ -61,6 +65,14 @@ type
     name*: string
     icon*: string
     kind*: AbilityKind
+    casting*: CastKind
+    area*: FxArea
+    effect*: FxShape
+    fromCaster*: bool
+    charges*: int32
+    rechargeTicks*: int32
+    castTicks*: int32
+    projectileSpeed*: int32
     cooldownTicks*: int32
     manaCost*: int32
     range*: int32
@@ -304,7 +316,7 @@ const
       ]
     )
   ]
-  AbilitySpecs*: array[Ability, AbilitySpec] = [
+  LegacyAbilitySpecs*: array[Ability, AbilitySpec] = [
     AbilitySpec(
       name: "Lion Guard", icon: "lion_guard",
       kind: Heal, cooldownTicks: 192, heal: 28
@@ -591,9 +603,121 @@ proc heroSpec*(class: HeroClass): HeroSpec =
   ## Returns the immutable integer tuning for one hero class.
   HeroSpecs[class]
 
+proc legacyAbilitySpec*(ability: Ability): AbilitySpec =
+  ## Returns the pre-charge tuning for historical recordings.
+  LegacyAbilitySpecs[ability]
+
 proc abilitySpec*(ability: Ability): AbilitySpec =
-  ## Returns the immutable integer tuning for one hero ability.
-  AbilitySpecs[ability]
+  ## Returns casting, charge, effect and shape tuning for one ability.
+  result = LegacyAbilitySpecs[ability]
+  result.charges = 1
+  result.rechargeTicks = result.cooldownTicks
+  result.area = FxArea(
+    shape: CircleFootprint, radius: 90_000, width: 60_000,
+    length: result.range, height: 120_000, angle: 90
+  )
+  result.effect = AoeCircleShape
+  if result.kind != Strike:
+    result.casting = SelfCast
+  elif result.range <= 110_000:
+    result.casting = MeleeCast
+  else:
+    result.casting = ProjectileCast
+    result.projectileSpeed = 45_000
+  case ability
+  of FirebrandSword, VerdantArrow, FrostLance, VoidBlade,
+    AfterlightSickle, SiegeScarab, IceSpear, MothHex, MoltenFist:
+      result.charges = 3
+      result.cooldownTicks = 2 * TickRate
+      result.rechargeTicks = 12 * TickRate
+  else:
+    discard
+  case ability
+  of BlazingBlade, GaleSlash:
+    result.casting = AreaCast
+    result.fromCaster = true
+    result.effect = if ability == GaleSlash: AoeConeShape else: ArcShape
+    result.area.shape = SectorFootprint
+    result.area.radius = result.range
+    result.area.angle = 120
+    result.castTicks = 6
+  of StormEagle, ClockworkCharge:
+    result.casting = AreaCast
+    result.fromCaster = true
+    result.effect =
+      if ability == StormEagle: AoeLineShape else: AoeCapsuleShape
+    result.area.shape =
+      if ability == StormEagle: LineFootprint else: CapsuleFootprint
+    result.area.width = 90_000
+    result.castTicks = 24
+  of LodestoneSurge, WingedBoot:
+    result.casting = AreaCast
+    result.fromCaster = true
+    result.effect = AoeConeShape
+    result.area.shape = SectorFootprint
+    result.area.radius = result.range
+    result.castTicks = 12
+  of InfernoAegis, DarkEclipse:
+    result.casting = AreaCast
+    result.fromCaster = true
+    result.effect = RingShape
+    result.area.shape = RingFootprint
+    result.area.radius = 140_000
+    result.area.innerRadius = 40_000
+    if ability == InfernoAegis:
+      result.effect = AoeCircleShape
+      result.area.shape = CircleFootprint
+      result.area.innerRadius = 0
+    result.castTicks = 12
+  of MeteorStrike, ArcaneMeteor, VolcanicEruption:
+    result.casting = AreaCast
+    result.area.radius = if ability == ArcaneMeteor: 180_000 else: 120_000
+    result.castTicks = if ability == ArcaneMeteor: 72 else: 48
+  of HealingBloom, KindredWisps:
+    result.casting = AreaCast
+    result.range = 240_000
+    result.area.radius = if ability == HealingBloom: 120_000 else: 150_000
+    result.effect =
+      if ability == HealingBloom:
+        AoeCircleShape
+      else:
+        SphereShape
+    result.castTicks = 12
+  of RicochetDisc, GolemSeed, WitheringIdol, BoneMarionette,
+    BoundVoid, DreadTotem, VoidPortal:
+      result.casting = AreaCast
+      result.area.radius = 120_000
+      result.castTicks = 24
+      case ability
+      of RicochetDisc:
+        result.effect = DiscShape
+      of GolemSeed:
+        result.effect = CylinderShape
+      of WitheringIdol:
+        result.effect = AoeCircleShape
+      of BoneMarionette:
+        result.effect = HemisphereShape
+      of BoundVoid:
+        result.effect = TorusShape
+        result.area.shape = RingFootprint
+        result.area.innerRadius = 40_000
+      of DreadTotem:
+        result.effect = BoxShape
+        result.area.shape = LineFootprint
+      of VoidPortal:
+        result.effect = HelixShape
+        result.area.shape = RingFootprint
+        result.area.innerRadius = 40_000
+      else:
+        discard
+  else:
+    discard
+  if ability == MoltenFist:
+    result.manaCost = 0
+  if result.casting == AreaCast:
+    result.projectileSpeed = 0
+    if result.range == 0:
+      result.range = if result.fromCaster: result.area.radius else: 240_000
 
 proc heroAbility*(class: HeroClass, slot: HeroAbilitySlot): Ability =
   ## Returns the ability bound to one class slot.

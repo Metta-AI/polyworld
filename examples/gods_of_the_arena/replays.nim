@@ -12,13 +12,17 @@ const
   ActionGameVersion* = 17'u16
   MetricsGameVersion* = 18'u16
   TelemetryGameVersion* = 19'u16
-  ReplayGameVersion* = 20'u16
+  CombatGameVersion* = 20'u16
+  ReplayGameVersion* = 21'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
   ActionUseItem* = 4'u8
   ActionAttackMove* = 5'u8
+  ActionCastTarget* = 6'u8
+  ActionCastPoint* = 10'u8
+  ActionManualSpells* = 14'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -85,9 +89,25 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionAttackTarget and
       action.kind != ActionBuyItem and
       action.kind != ActionUseItem and
-      action.kind != ActionAttackMove:
+      action.kind != ActionAttackMove and
+      action.kind notin ActionCastTarget .. ActionManualSpells:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
+
+proc recordCast*(
+    recorder: ReplayRecorder,
+    tick: uint32,
+    heroId, slot, first, second: int32,
+    ground: bool
+) =
+  ## Records a spell slot and object or ground aim in the existing payload.
+  if slot < 0 or slot > HeroAbilitySlot.high.ord:
+    fail("spell slot is invalid")
+  recorder.record ReplayAction(
+    tick: tick, heroId: heroId,
+    kind: (if ground: ActionCastPoint else: ActionCastTarget) + uint8(slot),
+    first: first, second: second
+  )
 
 proc recordWalkTo*(
     recorder: ReplayRecorder,
@@ -182,7 +202,7 @@ proc validate*(data: ReplayData) =
   )
   if data.header.gameVersion notin {
     LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
-    TelemetryGameVersion, ReplayGameVersion
+    TelemetryGameVersion, CombatGameVersion, ReplayGameVersion
   }:
     fail("unsupported replay game version")
   let setup = data.header.setup
@@ -225,8 +245,12 @@ proc validate*(data: ReplayData) =
         action.kind != ActionAttackTarget and
         action.kind != ActionBuyItem and
         action.kind != ActionUseItem and
-        action.kind != ActionAttackMove:
+        action.kind != ActionAttackMove and
+        action.kind notin ActionCastTarget .. ActionManualSpells:
       fail("replay action kind is invalid")
+    if data.header.gameVersion <= CombatGameVersion and
+      action.kind >= ActionCastTarget:
+        fail("historical replay contains a new spell action")
     var knownHero = false
     for hero in setup.heroes:
       if hero.id == action.heroId:
@@ -279,10 +303,10 @@ proc decodeReplay*(bytes: string): ReplayData =
   let version = bytes.replayFileHeader().gameVersion
   if version notin {
     LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
-    TelemetryGameVersion, ReplayGameVersion
+    TelemetryGameVersion, CombatGameVersion, ReplayGameVersion
   }:
     fail("unsupported replay game version")
-  if version in {TelemetryGameVersion, ReplayGameVersion}:
+  if version in {TelemetryGameVersion, CombatGameVersion, ReplayGameVersion}:
     result = decodeReplayFile(
       ReplayGame,
       version,

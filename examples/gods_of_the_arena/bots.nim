@@ -260,6 +260,73 @@ proc initHeroHost(heroId: int32): Host =
       )
     int32(accepted)
 
+  let castTargetProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Records and attempts an explicit object-targeted spell.
+    let slot = arguments[0]
+    if slot < 0 or slot > HeroAbilitySlot.high.ord:
+      return 0
+    try:
+      activeGame.recorder.recordCast(
+        uint32(activeGame.world.tick), heroId, slot, arguments[1], 0, false
+      )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyCastTarget(heroId, slot, arguments[1])
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
+  let castPointProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Records and attempts a ground-aimed spell.
+    let slot = arguments[0]
+    if slot < 0 or slot > HeroAbilitySlot.high.ord:
+      return 0
+    try:
+      activeGame.recorder.recordCast(
+        uint32(activeGame.world.tick),
+        heroId,
+        slot,
+        arguments[1],
+        arguments[2],
+        true
+      )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyCastPoint(
+      heroId, slot, arguments[1], arguments[2]
+    )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
+  let abilityChargesProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads remaining charges for one of this hero's four ability slots.
+    let index = heroIndex(activeGame.world, heroId)
+    if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
+      return 0
+    activeGame.world.heroes[index].charges[HeroAbilitySlot(arguments[0])]
+  let abilityCooldownProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads the ticks before this slot may cast again.
+    let index = heroIndex(activeGame.world, heroId)
+    if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
+      return 0
+    activeGame.world.heroes[index].cooldowns[HeroAbilitySlot(arguments[0])]
+  let abilityRechargeProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads ticks until this slot restores its next charge.
+    let index = heroIndex(activeGame.world, heroId)
+    if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
+      return 0
+    activeGame.world.heroes[index].recharges[HeroAbilitySlot(arguments[0])]
+  discard result.addFunction("castTarget", 2, castTargetProc, 80)
+  discard result.addFunction("castPoint", 3, castPointProc, 80)
+  discard result.addFunction("abilityCharges", 1, abilityChargesProc, 4)
+  discard result.addFunction("abilityCooldown", 1, abilityCooldownProc, 4)
+  discard result.addFunction("abilityRecharge", 1, abilityRechargeProc, 4)
+
   discard result.addFunction("objectCount", 0, objectCountProc, 2)
   discard result.addFunction("objectId", 1, objectIdProc, 4)
   discard result.addFunction("objectKind", 1, objectKindProc, 4)
@@ -292,6 +359,7 @@ proc loadBots*(
   var bound = false
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
+      game.world.heroes[i].manualSpells = true
       continue
     let program =
       when defined(coworld):
