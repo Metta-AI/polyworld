@@ -136,7 +136,7 @@ const
       baseMovePerTick: 5_800,
       movePerLevel: 60,
       attackRange: 70_000,
-      attackTicks: 26,
+      attackTicks: 24,
       abilities: [
         LionGuard, FirebrandSword, InfernoAegis, BlazingBlade
       ]
