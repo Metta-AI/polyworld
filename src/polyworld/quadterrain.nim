@@ -306,7 +306,9 @@ proc terrainFrag(
   # discrete. A stone survives only while coverage beats its height, so the
   # rim is ragged whole stones with dirt showing between them, and dirt then
   # height-blends into grass.
-  var ground = blended
+  var
+    ground = blended
+    groundHeight = sample0.w
   let
     worldDx = dFdx(tilePos)
     worldDy = dFdy(tilePos)
@@ -354,6 +356,7 @@ proc terrainFrag(
             surface = surface * (1.0 - amount) + source * amount
         index += 1
     ground = surface.xyz
+    groundHeight = surface.w
   if groundMaskEnabled > 0.5:
     let
       maskUv = vec2(
@@ -366,12 +369,16 @@ proc terrainFrag(
         stone = texture(terrainTextures, vec3(uv.x, uv.y, groundLayers.x))
         dirt = texture(terrainTextures, vec3(uv.x, uv.y, groundLayers.y))
         grass = texture(terrainTextures, vec3(uv.x, uv.y, groundLayers.z))
+      var maskBase = grass
+      if generatedEnabled > 0.5:
+        maskBase = vec4(ground, groundHeight)
+      let
         dirtBlend = mask.y + dirt.w * heightBlend
-        grassBlend = (1.0 - mask.y) + grass.w * heightBlend
+        grassBlend = (1.0 - mask.y) + maskBase.w * heightBlend
         groundCutoff = max(dirtBlend, grassBlend) - blendDepth
         dirtWeight = max(dirtBlend - groundCutoff, 0.0)
         grassWeight = max(grassBlend - groundCutoff, 0.0)
-        soil = (dirt.xyz * dirtWeight + grass.xyz * grassWeight) /
+        soil = (dirt.xyz * dirtWeight + maskBase.xyz * grassWeight) /
           max(dirtWeight + grassWeight, 0.001)
       ground = soil
       if stone.w >= 1.0 - mask.x:
@@ -1714,13 +1721,6 @@ const
   DirtMaterial* = 5.0'f32
   VolcanicMaterial* = 6.0'f32
   UnderwaterMaterial* = 7.0'f32
-  GeneratedTerrainTextureScale* = 1.0'f32 / 2.5'f32
-  GeneratedTerrainBlendDepth* = 0.43'f32
-  GeneratedTerrainHeightBlend* = 1.30'f32
-  GeneratedTerrainSplatCount* = 1
-  GeneratedTerrainSplatChance* = 0.40'f32
-  GeneratedTerrainSplatAmount* = 1.0'f32
-  GeneratedTerrainGrassPatchSize* = 24.0'f32
 
 var
   amplitude* = 2.91'f32   # height scale for shading; also sets the floor
@@ -3137,15 +3137,15 @@ proc initTerrain*(
     # Restore the complete authored preset together. These controls are public
     # for the terrain experiment, so a previous scene may have changed any of
     # them before another generated terrain is initialized.
-    terrainTextureScale = GeneratedTerrainTextureScale
-    terrainBlendDepth = GeneratedTerrainBlendDepth
-    terrainHeightBlend = GeneratedTerrainHeightBlend
+    terrainTextureScale = 1.0'f / 2.5'f
+    terrainBlendDepth = 0.43'f
+    terrainHeightBlend = 1.30'f
     terrainHeightBlending = true
     terrainSplats = true
-    terrainSplatCount = GeneratedTerrainSplatCount
-    terrainSplatChance = GeneratedTerrainSplatChance
-    terrainSplatAmount = GeneratedTerrainSplatAmount
-    terrainGrassPatchSize = GeneratedTerrainGrassPatchSize
+    terrainSplatCount = 1
+    terrainSplatChance = 0.40'f
+    terrainSplatAmount = 1.0'f
+    terrainGrassPatchSize = 24.0'f
     for kind, material in [
       GrassSurface, DirtSurface, GravelSurface,
       MarshSurface, CobbleSurface, ForestSurface

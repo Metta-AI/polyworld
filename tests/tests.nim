@@ -20,6 +20,7 @@ import
   test_gameuis,
   test_gota_abilities,
   test_gota_content,
+  test_gota_quarrymask,
   test_gota_replays,
   test_gota_spells,
   test_gota_terrains,
