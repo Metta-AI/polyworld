@@ -367,6 +367,7 @@
     .spell-table { width: 100%; border-collapse: collapse; }
     .spell-table th, .spell-table td { text-align: left; padding: 10px; border-bottom: 1px solid #354458; }
     .spell-table code { white-space: nowrap; }
+    #terrain pre { overflow-x: auto; padding: 16px; background: var(--well); border-radius: 8px; }
     @media (max-width: 850px) { .spell-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -380,6 +381,7 @@
         <a href="#arena">Arena</a>
         <a href="#casting">Casting</a>
         <a href="#controls">Controls</a>
+        <a href="#terrain">Terrain API</a>
         <a href="#heroes">Heroes</a>
         <a href="#shop">Shop</a>
       </nav>
@@ -476,6 +478,44 @@
         <tr><td><code>abilityRecharge(slot)</code></td><td>Read ticks until the next charge returns.</td></tr>
       </tbody></table>
       <p>Slots are zero-based and there are 24 simulation ticks per second. Cast calls return 1 on acceptance or 0 on rejection. Existing AI policies retain automatic ability use, with the same charges, footprints, delays and visible map telegraphs.</p>
+    </section>
+
+    <section id="terrain" class="panel">
+      <p class="kicker">BASIC MAP QUERIES</p>
+      <h2>Read the terrain before choosing a destination</h2>
+      <p>BASIC can read the complete static map from the start, including terrain outside your team's vision. Enemy heroes, creeps, towers, and forts still follow fog of war in the object queries. Terrain reads do not move your hero, spend resources, or change the simulation.</p>
+      <p>Use the same global tile coordinates as <code>selfX</code>, <code>selfY</code>, and <code>walkTo(x, y)</code>: 0 through 127 on both axes. Read-only values <code>mapWidth</code> and <code>mapHeight</code> are 128; <code>mapLayers</code> is 4. The two-argument calls query <code>selfLayer</code>, the hero's current navigation layer. The <code>At</code> versions take an explicit third argument and keep using global coordinates.</p>
+      <table class="spell-table"><thead><tr><th>Current layer / explicit layer</th><th>Result</th></tr></thead><tbody>
+        <tr><td><code>terrainKind(x, y)</code><br><code>terrainKindAt(x, y, layer)</code></td><td>One of the named terrain kinds below. Lane shoulders and paved courts report <code>TerrainRoad</code>; hill meadows report <code>TerrainGrass</code>; quarries and rocky outcrops report <code>TerrainRock</code>; wet banks report <code>TerrainMarsh</code>. Fort walls, ramps, and ramparts share <code>TerrainWall</code>. Ground blocked by solid fort construction also reports <code>TerrainWall</code>; an open gateway remains a road.</td></tr>
+        <tr><td><code>terrainWalkable(x, y)</code><br><code>terrainWalkableAt(x, y, layer)</code></td><td>1 if the tile's surface is walkable, otherwise 0. This tests static terrain, not unit occupancy or whether a route from the hero exists. <code>walkTo()</code> still finds the route.</td></tr>
+        <tr><td><code>terrainHeight(x, y)</code><br><code>terrainHeightAt(x, y, layer)</code></td><td>The chosen layer's surface height at the tile center, in eighths of a tile. Heights may be negative and are rounded to the nearest integer, with ties away from zero. This is the floor height, not the height of an obstacle blocking it.</td></tr>
+        <tr><td><code>terrainWaterDepth(x, y)</code><br><code>terrainWaterDepthAt(x, y, layer)</code></td><td>Water above that surface at the tile center, in eighths of a tile. Positive depth rounds up; 0 means the center is dry. A water-layer query returns the water column above its solid bed. A raised surface above the water returns 0.</td></tr>
+      </tbody></table>
+      <p>Invalid coordinates, invalid layers, and absent tiles return 0 for every query. Check <code>terrainKind() &lt;&gt; TerrainNone</code> to distinguish an existing surface at height zero from a missing surface. A query stays on its chosen layer even when that layer has no tile there.</p>
+      <table class="spell-table"><thead><tr><th>Read-only kind constant</th><th>Value</th><th>Read-only layer constant</th><th>Value</th></tr></thead><tbody>
+        <tr><td><code>TerrainNone</code></td><td>0</td><td><code>GroundLayer</code></td><td>0</td></tr>
+        <tr><td><code>TerrainGrass</code></td><td>1</td><td><code>RedFortLayer</code></td><td>1</td></tr>
+        <tr><td><code>TerrainRoad</code></td><td>2</td><td><code>BlueFortLayer</code></td><td>2</td></tr>
+        <tr><td><code>TerrainRock</code></td><td>3</td><td><code>WaterLayer</code></td><td>3</td></tr>
+        <tr><td><code>TerrainTrees</code></td><td>4</td><td colspan="2" rowspan="4">Units wade on <code>GroundLayer</code>, where the riverbed reports <code>TerrainMarsh</code> and positive water depth. <code>WaterLayer</code> describes the water surface itself and is never walkable.</td></tr>
+        <tr><td><code>TerrainMarsh</code></td><td>5</td></tr>
+        <tr><td><code>TerrainWall</code></td><td>6</td></tr>
+        <tr><td><code>TerrainWater</code></td><td>7</td></tr>
+      </tbody></table>
+      <p>A wall can block its ground tile while its rampart is walkable above. Query <code>GroundLayer</code> to inspect the ground and <code>RedFortLayer</code> or <code>BlueFortLayer</code> to inspect the construction above it.</p>
+      <pre><code>' Try the neighboring tile only when its center is dry and walkable.
+x = selfX + 1
+y = selfY
+if terrainWalkable(x, y) then
+  if terrainWaterDepth(x, y) = 0 then
+    walkTo(x, y)
+  end if
+end if
+
+' Inspect the riverbed even while standing on a rampart.
+riverKind = terrainKindAt(64, 64, GroundLayer)
+riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
+      <p>Each terrain call costs 32 work units. The usual per-decision instruction and work limits still apply, so spread a full-map scan across decisions.</p>
     </section>
 
     <section id="heroes">
