@@ -1714,6 +1714,13 @@ const
   DirtMaterial* = 5.0'f32
   VolcanicMaterial* = 6.0'f32
   UnderwaterMaterial* = 7.0'f32
+  GeneratedTerrainTextureScale* = 1.0'f32 / 2.5'f32
+  GeneratedTerrainBlendDepth* = 0.43'f32
+  GeneratedTerrainHeightBlend* = 1.30'f32
+  GeneratedTerrainSplatCount* = 1
+  GeneratedTerrainSplatChance* = 0.40'f32
+  GeneratedTerrainSplatAmount* = 1.0'f32
+  GeneratedTerrainGrassPatchSize* = 24.0'f32
 
 var
   amplitude* = 2.91'f32   # height scale for shading; also sets the floor
@@ -3127,9 +3134,18 @@ proc initTerrain*(
   initSunShadows()
   generatedTerrain = terrainStyle == GeneratedTerrain
   if generatedTerrain:
-    terrainTextureScale = 1.0'f / 2.5'f
-    terrainBlendDepth = 0.43'f
-    terrainHeightBlend = 1.30'f
+    # Restore the complete authored preset together. These controls are public
+    # for the terrain experiment, so a previous scene may have changed any of
+    # them before another generated terrain is initialized.
+    terrainTextureScale = GeneratedTerrainTextureScale
+    terrainBlendDepth = GeneratedTerrainBlendDepth
+    terrainHeightBlend = GeneratedTerrainHeightBlend
+    terrainHeightBlending = true
+    terrainSplats = true
+    terrainSplatCount = GeneratedTerrainSplatCount
+    terrainSplatChance = GeneratedTerrainSplatChance
+    terrainSplatAmount = GeneratedTerrainSplatAmount
+    terrainGrassPatchSize = GeneratedTerrainGrassPatchSize
     for kind, material in [
       GrassSurface, DirtSurface, GravelSurface,
       MarshSurface, CobbleSurface, ForestSurface
