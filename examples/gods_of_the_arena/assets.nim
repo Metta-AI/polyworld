@@ -10,6 +10,33 @@ const
     "tower_square_small1", "tower_square_tall1", "tower_square_tall2",
     "building2", "magiccrystal1"
   ]
+  ArenaDecorPacks* = [
+    DataRoot & "/terrain/toon_enchanted_meadow/props.glb",
+    DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
+    DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
+    DataRoot & "/terrain/toon_golden_valley/rocks.glb"
+  ]
+  ArenaDecorNodes*: array[4, seq[string]] = [
+    @["lamp_post_01a", "wood_barrel_01a", "wood_crate_01a",
+      "wood_fence_pole_01a", "pier_bollard_01a", "pier_bollard_02a",
+      "boat_01a", "boat_wreck_01a", "rope_01a", "wood_cart_01a",
+      "wood_fence_01a", "wood_wheel_01a"],
+    @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
+      "flower_bush_01a", "flower_bush_02a", "bush_01a", "bush_02a",
+      "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
+      "grass_patch_04a", "grass_patch_05a", "lily_flower_01a",
+      "lily_flower_02a", "lily_flower_03a", "plant_01a", "plant_02a",
+      "plant_03a", "plant_04a", "plant_05a", "plant_06a", "plant_07a",
+      "mushroom_01a", "mushroom_03a", "mushroom_06a",
+      "tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a",
+      "tree_06a"],
+    @["rock_small_01a", "rock_small_02a", "rock_small_03a",
+      "rock_small_04a", "rock_medium_01a", "rock_medium_02a",
+      "rock_medium_03a"],
+    @["cliff_01a", "cliff_02a", "rock_large_01a",
+      "rock_large_02a", "rock_large_03a", "rock_large_04a",
+      "rock_platform_01a", "rock_platform_02a"]
+  ]
   GotaTerrainAssets* =
     when defined(emscripten): WebTerrainAssets
     else: DefaultTerrainAssets
@@ -96,13 +123,20 @@ const
     ]
   ]
 
+proc arenaDecorPaths*(): seq[string] =
+  ## Uses whole packs natively and independently packed nodes in browsers.
+  for i, pack in ArenaDecorPacks:
+    result.add propPaths(pack, ArenaDecorNodes[i])
+
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
   result.add terrainAssets(
-    DenseTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
+    MixedTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
   )
   result.add propAssets(TowerPack, TowerProps)
+  for i, pack in ArenaDecorPacks:
+    result.add propAssets(pack, ArenaDecorNodes[i])
   var parts: seq[string]
   for look in HeroLooks:
     for part in look:
