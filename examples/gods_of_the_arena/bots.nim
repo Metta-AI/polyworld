@@ -2,10 +2,12 @@
 ## on the simulation.
 
 import
-  polyworld/[metrics, basic, cli, controllers, profiles, tapes],
+  polyworld/[metrics, basic, cli, controllers, pathing, profiles, tapes],
   content,
+  maps,
   sim,
-  replays
+  replays,
+  terrains
 
 when defined(coworld):
   import polyworld/coworld
@@ -23,7 +25,8 @@ type
     DataSelfMaxMana,
     DataSelfGold,
     DataSelfLevel,
-    DataWorldTick
+    DataWorldTick,
+    DataSelfLayer
 
 const
   HeroDataNames: array[HeroDataSlot, string] = [
@@ -38,7 +41,8 @@ const
     "selfMaxMana",
     "selfGold",
     "selfLevel",
-    "worldTick"
+    "worldTick",
+    "selfLayer"
   ]
 
 var
@@ -72,11 +76,41 @@ proc heroVmLimits(): Limits =
   result.maxPrintBytes = 1024
   result.maxPrintEvents = 128
 
+proc terrainProc(
+    heroId: int32,
+    field: TerrainField,
+    explicitLayer: bool
+): HostProc =
+  ## Binds one terrain field to either the hero's layer or an explicit layer.
+  result = proc(arguments: openArray[int32]): int32 =
+    ## Reads the requested static field without changing the active hero.
+    let layer =
+      if explicitLayer:
+        arguments[2]
+      else:
+        let index = heroIndex(activeGame.world, heroId)
+        if index < 0:
+          return 0
+        activeGame.world.heroes[index].navLayer
+    terrainValue(arguments[0], arguments[1], layer, field)
+
 proc initHeroHost(heroId: int32): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
   for name in HeroDataNames:
     discard result.addData(name)
+  discard result.addData("mapWidth", GridTiles.int32)
+  discard result.addData("mapHeight", GridTiles.int32)
+  discard result.addData("mapLayers", layers.len.int32)
+  for kind in TerrainKind:
+    discard result.addData($kind, kind.ord.int32)
+  for (name, layer) in [
+    ("GroundLayer", GroundLayer),
+    ("RedFortLayer", RedFortLayer),
+    ("BlueFortLayer", BlueFortLayer),
+    ("WaterLayer", WaterLayer)
+  ]:
+    discard result.addData(name, layer.int32)
 
   let objectCountProc: HostProc = proc(
       arguments: openArray[int32]
@@ -342,6 +376,19 @@ proc initHeroHost(heroId: int32): Host =
   discard result.addFunction("itemCount", 1, itemCountProc, 4)
   discard result.addFunction("buyItem", 1, buyItemProc, 20)
   discard result.addFunction("useItem", 1, useItemProc, 20)
+  for (field, name) in [
+    (TerrainKindField, "terrainKind"),
+    (TerrainWalkableField, "terrainWalkable"),
+    (TerrainHeightField, "terrainHeight"),
+    (TerrainWaterDepthField, "terrainWaterDepth")
+  ]:
+    discard result.addFunction(name, 2, terrainProc(heroId, field, false), 32)
+    discard result.addFunction(
+      name & "At",
+      3,
+      terrainProc(heroId, field, true),
+      32
+    )
 
 proc loadBots*(
     game: Game,
@@ -410,6 +457,7 @@ proc runHeroScript(game: Game, index: int) =
     vm.runtime.setData(heroDataIds[DataSelfGold], int32(hero.gold))
     vm.runtime.setData(heroDataIds[DataSelfLevel], int32(hero.level))
     vm.runtime.setData(heroDataIds[DataWorldTick], game.world.tick)
+    vm.runtime.setData(heroDataIds[DataSelfLayer], hero.navLayer)
     discard vm.runtime.run(vm.output)
     inc vm.decisions
   except BasicError as error:
