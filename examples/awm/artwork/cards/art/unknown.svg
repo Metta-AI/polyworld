@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <linearGradient id="night" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="600"><stop offset="0" stop-color="#213440"/><stop offset="1" stop-color="#08171d"/></linearGradient>
+  <rect width="800" height="600" fill="url(#night)"/><circle cx="400" cy="260" r="156" fill="none" stroke="#57706d" stroke-width="2"/><circle cx="400" cy="260" r="137" fill="none" stroke="#394e53"/>
+  <path d="M0 489 L174 265 L341 437 L425 341 L665 518 L800 384 V600 H0 Z" fill="#13252b"/><path d="M0 549 L196 412 L379 516 L512 427 L800 575 V600 H0 Z" fill="#0b1e23"/>
+  <path d="M400 86 L414 242 L510 260 L414 278 L400 433 L386 278 L290 260 L386 242 Z" fill="#8b967f" opacity="0.4"/>
+</svg>

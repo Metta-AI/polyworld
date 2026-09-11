@@ -1,0 +1,9 @@
+# Lightning texture
+
+Asset: `textures/lightning-strike.png`
+
+Generated with the built-in image generation tool on 2026-09-09. This transparent sprite is separate from the card artwork, frames, and icons; the renderer adds its animated impact particles.
+
+## Prompt
+
+Use case: stylized-concept. Asset type: production-ready transparent PNG lightning VFX texture for a fantasy card game, tall portrait 1:2 aspect ratio, ideally 1024x2048. Create ONE isolated detailed electric blue-white lightning strike. The main trunk travels vertically from a point centered at x=50%, y=5% down to a point centered at x=50%, y=95%, with an organic irregular crooked path between them. Thick intensely luminous white-hot core, jagged branching ribbons of azure and cyan plasma, several large asymmetrical forks and many delicate hairline fractal branches that spread laterally around the main trunk. Match a premium painterly fantasy illustration of a powerful lightning strike in an enchanted forest, but render ONLY the electricity. Rich electric-blue corona and wispy luminous cyan tendrils, crisp branching detail, varying thickness, dramatic energy. The central trunk should have real volume and braided detail, not a uniform straight laser line or a simple zigzag icon. Main trunk stays within the central 35% of the width; smaller branches spread across 80% width. Soft glow tapers naturally into complete transparency, with generous completely transparent margins at all four edges. Both ends taper to centered terminals; all forks stop before the canvas edges. Actual transparent background/alpha, no black or colored background, no checkerboard, no scenery, no clouds, no ground, no impact burst, no particles detached from the bolt, no text, no frame, no logo, no watermark. Single sprite, no sheet or multiple panels.

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="124" height="88" viewBox="0 0 124 88">
+  <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="124" y2="88"><stop offset="0" stop-color="#dfc796"/><stop offset="0.52" stop-color="#80633d"/><stop offset="1" stop-color="#c7a369"/></linearGradient><linearGradient id="seal" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="88"><stop offset="0" stop-color="#413c3b"/><stop offset="1" stop-color="#27242a"/></linearGradient>
+  <path d="M16 3 H105 L121 20 V68 L105 85 H21 L3 69 V16 Z" fill="#080c0e" stroke="#080c0e" stroke-width="6"/>
+  <path d="M16 3 H105 L121 20 V68 L105 85 H21 L3 69 V16 Z" fill="url(#seal)" stroke="#c1a574" stroke-width="3"/>
+  <path d="M19 10 H102 L114 25 M10 21 V63 L23 77 H103" fill="none" stroke="#b29560" stroke-width="1"/>
+  <path d="M17 28 L34 20 L51 28 V43 Q50 58 34 68 Q18 58 17 43 Z" fill="#c6a984" stroke="#e6d3ab" stroke-width="2"/>
+  <path d="M34 25 L47 31 V43 Q46 53 34 63 Z" fill="#8c7765"/><path d="M22 31 L31 27 V53" stroke="#f5dfb5" stroke-width="1.5" fill="none"/>
+</svg>

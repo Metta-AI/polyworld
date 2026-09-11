@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="850" viewBox="0 0 600 850">
+  
+    <linearGradient id="steel" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="600" y2="850"><stop offset="0" stop-color="#535354"/><stop offset="0.22" stop-color="#1c2429"/><stop offset="0.7" stop-color="#151b20"/><stop offset="1" stop-color="#3b3b39"/></linearGradient>
+    <linearGradient id="gold" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="600" y2="850"><stop offset="0" stop-color="#eedcaf"/><stop offset="0.25" stop-color="#9f7d4d"/><stop offset="0.48" stop-color="#d1b887"/><stop offset="0.75" stop-color="#70573b"/><stop offset="1" stop-color="#bc9c6a"/></linearGradient>
+    <linearGradient id="paper" gradientUnits="userSpaceOnUse" x1="0" y1="576" x2="0" y2="750"><stop offset="0" stop-color="#f2e7cb"/><stop offset="0.75" stop-color="#e4d5b2"/><stop offset="1" stop-color="#c8b589"/></linearGradient>
+    <linearGradient id="title" gradientUnits="userSpaceOnUse" x1="0" y1="25" x2="0" y2="108"><stop offset="0" stop-color="#313c40"/><stop offset="1" stop-color="#121a20"/></linearGradient>
+  
+  <!-- The central aperture is transparent: illustration is a separate layer. -->
+  <path d="M36 5 H564 Q595 5 595 36 V814 Q595 845 564 845 H36 Q5 845 5 814 V36 Q5 5 36 5 Z M28 115 V529 H572 V115 Z" fill="url(#steel)" fill-rule="evenodd"/>
+  <rect x="6" y="6" width="588" height="838" rx="30" fill="none" stroke="#05090c" stroke-width="10"/>
+  <rect x="11" y="11" width="578" height="828" rx="27" fill="none" stroke="#baa06e" stroke-width="5"/>
+  <rect x="20" y="20" width="560" height="810" rx="20" fill="none" stroke="#71664f" stroke-width="1.5"/>
+  <path d="M142 30 H550 L571 51 V94 L550 109 H143 L125 91 V48 Z" fill="url(#title)" stroke="#94784d" stroke-width="2"/>
+  <path d="M151 36 H546 L563 52 M565 96 L548 102 H150" fill="none" stroke="#dac498" stroke-width="1" opacity="0.58"/>
+  <rect x="26" y="113" width="548" height="419" fill="none" stroke="#080c10" stroke-width="8"/>
+  <rect x="27" y="113" width="546" height="417" fill="none" stroke="#baa06e" stroke-width="3"/>
+  <path d="M29 178 V134 L48 115 H92 M508 115 H553 L571 134 V178 M29 470 V510 L49 530 H89 M511 530 H551 L571 510 V470" fill="none" stroke="#d2b680" stroke-width="4"/>
+  <path d="M34 167 V137 L52 119 M548 119 L566 137 V167 M34 483 V507 L51 525 M549 525 L566 507 V483" fill="none" stroke="#34332e" stroke-width="3"/>
+  <path d="M19 538 L41 520 H559 L581 538 V562 L562 580 H38 L19 562 Z" fill="#172127" stroke="#baa06e" stroke-width="3"/>
+  <path d="M38 533 H211 M389 533 H562 M38 568 H210 M390 568 H562" fill="none" stroke="#655a42" stroke-width="1"/>
+  <path d="M34 583 H566 V725 L547 747 H53 L34 725 Z" fill="url(#paper)" stroke="#9c8254" stroke-width="2.5"/>
+  <path d="M44 601 V720 L60 737 H540 L556 720 V601" fill="none" stroke="#a48e61" stroke-width="1" opacity="0.52"/>
+  <path d="M45 590 H92 M508 590 H555 M49 596 H73 M527 596 H551" stroke="#8b744e" stroke-width="1.5"/>
+  <path d="M163 787 H242 L251 778 M349 778 L358 787 H437" fill="none" stroke="#987d53" stroke-width="1.5"/>
+  <path d="M165 793 H232 M368 793 H435" stroke="#5e5443" stroke-width="1"/>
+  <path d="M17 73 L24 61 V40 L40 24 H63 L74 17 M526 17 L537 24 H560 L576 40 V61 L583 73 M17 777 L24 789 V810 L40 826 H62 L74 833 M526 833 L538 826 H560 L576 810 V789 L583 777" fill="none" stroke="#c6ab76" stroke-width="2"/>
+  <path d="M17 285 L22 300 L17 315 L12 300 Z M583 285 L588 300 L583 315 L578 300 Z" fill="#c9b079" stroke="#161b1b"/>
+</svg>

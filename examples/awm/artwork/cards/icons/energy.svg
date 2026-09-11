@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="15" y1="0" x2="98" y2="114"><stop offset="0" stop-color="#ffe5a7"/><stop offset="0.52" stop-color="#af8141"/><stop offset="1" stop-color="#e1c594"/></linearGradient><linearGradient id="gem" gradientUnits="userSpaceOnUse" x1="20" y1="20" x2="100" y2="100"><stop offset="0" stop-color="#419092"/><stop offset="0.45" stop-color="#1a5d69"/><stop offset="1" stop-color="#102d41"/></linearGradient>
+  <path d="M60 3 L104 22 L117 60 L103 102 L60 118 L17 102 L3 60 L17 21 Z" fill="#0b1218" stroke="#080b10" stroke-width="5"/>
+  <path d="M60 5 L103 24 L114 60 L100 100 L60 115 L20 100 L6 60 L20 24 Z" fill="url(#rim)"/>
+  <path d="M60 13 L97 30 L106 60 L94 94 L60 107 L26 94 L14 60 L26 30 Z" fill="url(#gem)" stroke="#695739" stroke-width="2"/>
+  <path d="M29 32 L60 17 L94 32 M18 60 L30 90 L60 103" fill="none" stroke="#9db4a5" stroke-width="1.5" opacity="0.72"/>
+  <path d="M61 7 L56 15 H64 L60 22 L72 11 H64 L68 7 Z" fill="#fff0bc"/>
+  <path d="M25 98 L35 101 M85 101 L96 97" stroke="#ffdf94" stroke-width="2"/>
+</svg>
