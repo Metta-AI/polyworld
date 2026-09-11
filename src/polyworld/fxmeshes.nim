@@ -6,7 +6,10 @@
 
 import
   std/[math, strutils, tables],
-  jsony, opengl, shady, vmath
+  jsony, opengl, shady, vmath,
+  fxshapes
+
+export fxshapes
 
 const
   MinimumDimension = 0.0001'f
@@ -23,30 +26,6 @@ const
 type
   FxMeshError* = object of CatchableError
 
-  FxShape* = enum
-    QuadShape
-    DiscShape
-    RingShape
-    ArcShape
-    ConeShape
-    CylinderShape
-    TubeShape
-    SphereShape
-    HemisphereShape
-    TorusShape
-    BoxShape
-    RibbonShape
-    CrossPlanesShape
-    HelixShape
-    AoeCircleShape
-    AoeLineShape
-    AoeConeShape
-    AoeCapsuleShape
-
-const AoeShapes* = {AoeCircleShape, AoeLineShape, AoeConeShape,
-  AoeCapsuleShape}
-
-type
   FxAxis* = enum
     XAxis
     YAxis
@@ -68,6 +47,7 @@ type
     StreakTexture
     CellTexture
     CheckerTexture
+    SolidTexture
 
   GradientSource* = enum
     LifeGradient
@@ -1929,6 +1909,8 @@ proc cellPattern(u, v: float32, grid, seed: int): float32 =
 proc patternValue(kind: FxTexture, u, v: float32): float32 =
   ## Evaluates one procedural pattern at a texture coordinate.
   case kind
+  of SolidTexture:
+    1.0'f
   of SoftTexture:
     let d = length(vec2(u - 0.5'f, v - 0.5'f)) * 2.0'f
     smoothCurve(clamp(1.0'f - d, 0.0'f, 1.0'f))
@@ -2089,9 +2071,11 @@ proc initFxRenderer*(): FxRenderer {.raises: [FxMeshError].} =
   for kind in FxTexture:
     result.patternTextures[kind] = makePatternTexture(kind)
 
-proc uploadFxMesh*(renderer: var FxRenderer, s: FxSettings) =
-  ## Rebuilds the current shape and uploads it to the GPU buffers.
-  let mesh = buildFxMesh(s)
+proc uploadFxMesh*(
+    renderer: var FxRenderer,
+    mesh: tuple[vertices: seq[float32], indices: seq[uint32]]
+) =
+  ## Uploads packed geometry, including map-projected effect meshes.
   renderer.vertexCount = mesh.vertices.len div 12
   renderer.indexCount = mesh.indices.len
   glBindVertexArray(renderer.vertexArray)
@@ -2110,6 +2094,10 @@ proc uploadFxMesh*(renderer: var FxRenderer, s: FxSettings) =
     GL_STATIC_DRAW
   )
   glBindVertexArray(0)
+
+proc uploadFxMesh*(renderer: var FxRenderer, s: FxSettings) =
+  ## Rebuilds the current shape and uploads it to the GPU buffers.
+  renderer.uploadFxMesh(buildFxMesh(s))
 
 proc closeFxRenderer*(renderer: var FxRenderer) =
   ## Releases the fx program, buffers, and pattern textures.
@@ -2221,7 +2209,8 @@ proc drawFxMesh*(
     model: Mat4,
     time,
     life: float32,
-    wireframe = false
+    wireframe = false,
+    sizeScale = 2.0'f
 ) =
   ## Draws one uploaded fx mesh. Does not clear the framebuffer.
   if renderer.program == 0 or renderer.indexCount == 0:
@@ -2230,7 +2219,7 @@ proc drawFxMesh*(
     renderer.locations[uniform]
   var
     viewMatrix = viewProjection
-    modelMatrix = model
+    modelMatrix = model * scale(vec3(sizeScale))
   glEnable(GL_DEPTH_TEST)
   glDepthMask(GL_FALSE)
   glDisable(GL_CULL_FACE)

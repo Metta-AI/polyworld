@@ -146,6 +146,10 @@ type
     inventory*: array[InventorySlots, Item]
     itemCounts*: array[InventorySlots, int32]
     cooldowns*: array[HeroAbilitySlot, int32]
+    charges*: array[HeroAbilitySlot, int32]
+    recharges*: array[HeroAbilitySlot, int32]
+    spellsReady*: bool
+    manualSpells*: bool
 
   Fort* = object
     id*: int32
@@ -180,9 +184,23 @@ type
     x*: int
     z*: int
 
+  SpellCast* = object
+    ability*: Ability
+    heroId*: int32
+    targetId*: int32
+    origin*: WorldPoint
+    position*: WorldPoint
+    direction*: Heading
+    started*: int32
+    impact*: int32
+    ends*: int32
+    resolved*: bool
+
   World* = ref object
     legacyCombat*: bool
       ## Replays through version 19 retain their recorded combat rules.
+    legacyAbilities*: bool
+    casts*: seq[SpellCast]
     stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
     footmen*: seq[Footman]
@@ -280,7 +298,7 @@ proc distanceSquared(first, second: WorldPoint): int64 =
     z = int64(first.z) - int64(second.z)
   x * x + z * z
 
-proc within(first, second: WorldPoint, distance: int32): bool =
+proc within*(first, second: WorldPoint, distance: int32): bool =
   ## Tests a planar range using squared authoritative integer units.
   distanceSquared(first, second) <= int64(distance) * int64(distance)
 
@@ -1524,19 +1542,40 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   world.heroes[index].attackObjectId = targetId
   true
 
-proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
-  ## Spends gold to put one shop item into a hero inventory.
+proc purchaseReason*(world: World, heroId, itemId: int32): string =
+  ## Returns an empty string when a purchase is allowed, or its rejection.
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
-    return false
+    return "Available when alive"
   if not world.legacyCombat and world.heroes[index].hp <= 0:
-    return false
+    return "Available when alive"
   let item = itemFromId(itemId)
   if item == NoItem:
-    return false
+    return "Unknown item"
   let spec = item.itemSpec
   if world.heroes[index].gold < spec.cost:
+    return "Not enough gold"
+  var empty = false
+  for slot in 0 ..< InventorySlots:
+    if world.heroes[index].inventory[slot] == NoItem:
+      empty = true
+    elif world.heroes[index].inventory[slot] == item:
+      if spec.kind == Equipment:
+        return "Already equipped"
+      if world.heroes[index].itemCounts[slot] >= MaxItemStack:
+        return "Stack full"
+      return ""
+  if not empty:
+    return "Inventory full"
+
+proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
+  ## Spends gold to put one shop item into a hero inventory.
+  if world.purchaseReason(heroId, itemId).len > 0:
     return false
+  let
+    index = heroIndex(world, heroId)
+    item = itemFromId(itemId)
+    spec = item.itemSpec
   var
     stackSlot = -1
     emptySlot = -1
@@ -1839,12 +1878,29 @@ proc respawn(hero: Hero) =
   hero.navLayer = bindNavLayer(hero.spawnPosition)
   for slot in HeroAbilitySlot:
     hero.cooldowns[slot] = 0
+  hero.spellsReady = false
 
-proc tickHeroCooldowns(hero: Hero) =
-  ## Counts down every ability slot that is waiting to be used again.
+proc initHeroCharges(hero: Hero) =
+  ## Starts a new life with every ability fully charged.
+  for slot in HeroAbilitySlot:
+    hero.charges[slot] = heroAbility(hero.class, slot).abilitySpec.charges
+    hero.recharges[slot] = 0
+  hero.spellsReady = true
+
+proc tickHeroCooldowns(world: World, hero: Hero) =
+  ## Advances spell cooldowns and restores spent charges one at a time.
+  if not world.legacyAbilities and not hero.spellsReady:
+    hero.initHeroCharges()
   for slot in HeroAbilitySlot:
     if hero.cooldowns[slot] > 0:
       dec hero.cooldowns[slot]
+    if not world.legacyAbilities and hero.recharges[slot] > 0:
+      dec hero.recharges[slot]
+      if hero.recharges[slot] == 0:
+        let spec = heroAbility(hero.class, slot).abilitySpec
+        hero.charges[slot] = min(hero.charges[slot] + 1, spec.charges)
+        if hero.charges[slot] < spec.charges:
+          hero.recharges[slot] = spec.rechargeTicks
 
 proc regenHeroMana(hero: Hero, tick: int32) =
   ## Restores a small amount of mana on a stable cadence.
@@ -1999,6 +2055,308 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
   world.heroes[index].consumeItem(slot)
   true
 
+proc spellTarget*(world: World, id: int32, value: var WorldObject): bool =
+  ## Resolves an existing object without depending on the script query cache.
+  let hero = heroIndex(world, id)
+  if hero >= 0:
+    let target = world.heroes[hero]
+    value = WorldObject(id: id, team: target.team, position: target.position,
+      hp: target.hp, alive: target.hp > 0 and target.state != Dying)
+    return true
+  let footman = footmanIndex(world, id)
+  if footman >= 0:
+    let target = world.footmen[footman]
+    value = WorldObject(id: id, team: target.team, position: target.position,
+      hp: target.hp, alive: target.hp > 0 and target.state != Dying)
+    return true
+  let tower = towerIndex(world, id)
+  if tower >= 0:
+    let target = world.towers[tower]
+    value = WorldObject(id: id, team: target.team, position: target.position,
+      hp: target.hp, alive: world.towerExposed(target))
+    return true
+  for fort in world.forts:
+    if fort.id == id:
+      value = WorldObject(id: id, team: fort.team, position: fort.center,
+        hp: fort.hp, alive: fort.hp > 0 and world.fortExposed(fort.team))
+      return true
+  false
+
+proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
+  ## Applies one effect, checking living targets and structure protection again.
+  let
+    caster = heroIndex(world, spell.heroId)
+    spec = spell.ability.abilitySpec
+  var target: WorldObject
+  if caster < 0 or not world.spellTarget(id, target) or not target.alive:
+    return
+  let hero = world.heroes[caster]
+  if spec.kind == Strike:
+    if target.team == hero.team:
+      return
+    var fortIndex = -1
+    for i, fort in world.forts:
+      if fort.id == id:
+        fortIndex = i
+    world.applyHeroHit(
+      hero, spec.damage, world.footmanIndex(id), world.heroIndex(id),
+      world.towerIndex(id), fortIndex
+    )
+  elif target.team == hero.team:
+    let index = world.heroIndex(id)
+    if index >= 0:
+      let ally = world.heroes[index]
+      ally.hp = min(ally.maxHp, ally.hp + spec.heal)
+      ally.mana = min(ally.maxMana, ally.mana + spec.restore)
+
+proc spellContains*(spell: SpellCast, area: FxArea, point: WorldPoint): bool =
+  ## Transforms a target into the spell's fixed local frame before hit testing.
+  let
+    offset = point - spell.position
+    x = int32((int64(offset.x) * spell.direction.z -
+      int64(offset.z) * spell.direction.x) div WorldScale)
+    z = int32((int64(offset.x) * spell.direction.x +
+      int64(offset.z) * spell.direction.z) div WorldScale)
+  area.contains(x, z, offset.y)
+
+proc resolveSpell(world: World, spell: var SpellCast) =
+  ## Resolves one area or single-target impact exactly once.
+  spell.resolved = true
+  let spec = spell.ability.abilitySpec
+  if spec.casting == SelfCast:
+    world.hitSpellTarget(spell, spell.heroId)
+    return
+  if spec.casting != AreaCast and spell.targetId != 0:
+    world.hitSpellTarget(spell, spell.targetId)
+    return
+  var
+    footprint = spec.area
+    frame = spell
+    nearest = int64.high
+    nearestId = 0'i32
+  if spec.casting != AreaCast:
+    footprint = FxArea(
+      shape: CapsuleFootprint, width: 30_000, height: 120_000,
+      length: max(30_000'i32, int32(integerSqrt(
+        distanceSquared(spell.origin, spell.position))))
+    )
+    frame.position = spell.origin
+  template affect(id: int32, position: WorldPoint) =
+    if frame.spellContains(footprint, position):
+      if spec.casting == AreaCast:
+        world.hitSpellTarget(spell, id)
+      else:
+        var target: WorldObject
+        let caster = world.heroIndex(spell.heroId)
+        if caster >= 0 and world.spellTarget(id, target) and target.alive and
+          target.team != world.heroes[caster].team:
+            let distance = distanceSquared(spell.origin, position)
+            if distance < nearest:
+              nearest = distance
+              nearestId = id
+  for hero in world.heroes:
+    affect(hero.id, hero.position)
+  if spec.kind == Strike:
+    for footman in world.footmen:
+      affect(footman.id, footman.position)
+    for tower in world.towers:
+      affect(tower.id, tower.position)
+    for fort in world.forts:
+      affect(fort.id, fort.center)
+  if nearestId != 0:
+    world.hitSpellTarget(spell, nearestId)
+
+proc advanceGroundShot(world: World, spell: var SpellCast) =
+  ## Sweeps one tick of projectile travel and stops at the first enemy.
+  let
+    spec = spell.ability.abilitySpec
+    start = spell.started + spec.castTicks
+    duration = max(1'i32, spell.impact - start)
+    elapsed = clamp(world.tick - start, 0'i32, duration)
+    previous = max(0'i32, elapsed - 1)
+    caster = world.heroIndex(spell.heroId)
+    origin = spell.origin
+    destination = spell.position
+  if elapsed == 0 or caster < 0:
+    return
+  proc travel(ticks: int32): WorldPoint =
+    ## Interpolates one authoritative projectile position with integers.
+    result.x = origin.x + int32(
+      int64(destination.x - origin.x) * ticks div duration
+    )
+    result.y = origin.y + int32(
+      int64(destination.y - origin.y) * ticks div duration
+    )
+    result.z = origin.z + int32(
+      int64(destination.z - origin.z) * ticks div duration
+    )
+  let
+    first = travel(previous)
+    last = travel(elapsed)
+    distance = int32(integerSqrt(distanceSquared(first, last)))
+    radius = 15_000'i32
+    footprint = FxArea(
+      shape: CapsuleFootprint,
+      width: radius * 2,
+      length: distance + radius * 2,
+      height: 120_000
+    )
+  var
+    frame = spell
+    nearest = int64.high
+    nearestId = 0'i32
+  frame.position = first - scaledPlanar(
+    WorldPoint(x: spell.direction.x, z: spell.direction.z), radius
+  )
+  template consider(id: int32, position: WorldPoint) =
+    if frame.spellContains(footprint, position):
+      var target: WorldObject
+      if world.spellTarget(id, target) and target.alive and
+        target.team != world.heroes[caster].team:
+          let distance = distanceSquared(first, position)
+          if distance < nearest:
+            nearest = distance
+            nearestId = id
+  for hero in world.heroes:
+    consider(hero.id, hero.position)
+  for footman in world.footmen:
+    consider(footman.id, footman.position)
+  for tower in world.towers:
+    consider(tower.id, tower.position)
+  for fort in world.forts:
+    consider(fort.id, fort.center)
+  if nearestId != 0:
+    world.hitSpellTarget(spell, nearestId)
+    spell.resolved = true
+    spell.position = last
+    spell.impact = world.tick
+    spell.ends = world.tick + 12
+  elif world.tick >= spell.impact:
+    spell.resolved = true
+
+proc advanceSpells(world: World) =
+  ## Resolves due effects and bounds the retained impact presentation state.
+  var write = 0
+  for read in 0 ..< world.casts.len:
+    var spell = world.casts[read]
+    if not spell.resolved:
+      if spell.ability.abilitySpec.casting == ProjectileCast and
+        spell.targetId == 0:
+          world.advanceGroundShot(spell)
+      elif world.tick >= spell.impact:
+        world.resolveSpell(spell)
+    if world.tick < spell.ends:
+      world.casts[write] = spell
+      inc write
+  world.casts.setLen(write)
+
+proc castAbility(
+    world: World,
+    hero: Hero,
+    slot: HeroAbilitySlot,
+    targetId: int32,
+    aim: WorldPoint
+): bool =
+  ## Releases an object or ground spell after atomically checking its costs.
+  if world.legacyAbilities or hero.hp <= 0 or hero.state == Dying or
+    world.casts.len >= 512:
+      return false
+  if not hero.spellsReady:
+    hero.initHeroCharges()
+  let
+    ability = heroAbility(hero.class, slot)
+    spec = ability.abilitySpec
+  if hero.cooldowns[slot] > 0 or hero.charges[slot] <= 0 or
+    hero.mana < spec.manaCost:
+      return false
+  var
+    point = aim
+    selected = targetId
+  if spec.casting == SelfCast:
+    point = hero.position
+    selected = hero.id
+    if (spec.kind == Heal and hero.hp >= hero.maxHp) or
+      (spec.kind == Restore and hero.mana >= hero.maxMana):
+        return false
+  else:
+    if selected != 0:
+      var target: WorldObject
+      if not world.spellTarget(selected, target) or not target.alive or
+        not world.visible(hero.team, target.position):
+          return false
+      if (spec.kind == Strike and target.team == hero.team) or
+        (spec.kind != Strike and target.team != hero.team):
+          return false
+      point = target.position
+      if not within(hero.position, point, spec.range):
+        return false
+    elif not within(hero.position, point, spec.range):
+      point = hero.position + scaledPlanar(point - hero.position, spec.range)
+      point.y = fixedSurfaceHeightNear(point, aim.y)
+    if not world.visible(hero.team, point):
+      return false
+  var direction = scaledPlanar(point - hero.position, WorldScale)
+  if direction.x == 0 and direction.z == 0:
+    direction = scaledPlanar(
+      WorldPoint(x: hero.facing.x, z: hero.facing.z), WorldScale
+    )
+  if direction.x == 0 and direction.z == 0:
+    direction.z = WorldScale
+  var spell = SpellCast(
+    ability: ability, heroId: hero.id, targetId: selected,
+    origin: hero.position, position: point,
+    direction: heading(direction.x, direction.z),
+    started: world.tick, impact: world.tick + spec.castTicks
+  )
+  if spec.casting == AreaCast:
+    spell.targetId = 0
+    if spec.fromCaster:
+      spell.position = hero.position
+    elif selected != 0 and spec.area.innerRadius > 0:
+      spell.position = point - scaledPlanar(
+        direction, (spec.area.innerRadius + spec.area.radius) div 2
+      )
+  if spec.casting == ProjectileCast:
+    spell.impact += max(1'i32, int32((integerSqrt(
+      distanceSquared(spell.origin, point)) + spec.projectileSpeed - 1) div
+      max(spec.projectileSpeed, 1)))
+  spell.ends = spell.impact + 12
+  hero.mana -= spec.manaCost
+  dec hero.charges[slot]
+  hero.cooldowns[slot] = spec.cooldownTicks
+  if hero.recharges[slot] == 0:
+    hero.recharges[slot] = spec.rechargeTicks
+  hero.facing = spell.direction
+  if spell.impact <= world.tick:
+    world.resolveSpell(spell)
+  world.casts.add spell
+  true
+
+proc applyCastTarget*(world: World, heroId, slotId, targetId: int32): bool =
+  ## Casts one ability on an object, or on the caster for a self action.
+  let index = world.heroIndex(heroId)
+  if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord:
+    return false
+  let hero = world.heroes[index]
+  world.castAbility(hero, HeroAbilitySlot(slotId), targetId, hero.position)
+
+proc applyCastPoint*(
+    world: World,
+    heroId, slotId, mapX, mapY: int32
+): bool =
+  ## Casts toward a map tile, clamping empty-ground shots to their range.
+  let index = world.heroIndex(heroId)
+  if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord or
+    mapX < 0 or mapX >= GridTiles or mapY < 0 or mapY >= GridTiles:
+      return false
+  let hero = world.heroes[index]
+  var point = WorldPoint(
+    x: (mapX - GridTiles div 2) * WorldScale + WorldScale div 2,
+    z: (mapY - GridTiles div 2) * WorldScale + WorldScale div 2
+  )
+  point.y = fixedSurfaceHeightNear(point, hero.position.y)
+  world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
+
 proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
   case action.kind
@@ -2014,17 +2372,28 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     applyBuyItem(world, action.heroId, action.first)
   of ActionUseItem:
     applyUseItem(world, action.heroId, action.first)
+  of ActionCastTarget .. ActionCastPoint - 1:
+    applyCastTarget(world, action.heroId,
+      int32(action.kind - ActionCastTarget), action.first)
+  of ActionCastPoint .. ActionManualSpells - 1:
+    applyCastPoint(world, action.heroId,
+      int32(action.kind - ActionCastPoint), action.first, action.second)
+  of ActionManualSpells:
+    let index = world.heroIndex(action.heroId)
+    if index >= 0:
+      world.heroes[index].manualSpells = action.first != 0
+    false
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
-proc tryCastAbility(
+proc tryLegacyAbility(
     world: World,
     hero: Hero,
     slot: HeroAbilitySlot,
     targetFootman, targetHero, targetTower, fortIndex: int
 ): bool =
   ## Spends one ready ability if its cost, range, and target match.
-  let spec = heroAbility(hero.class, slot).abilitySpec
+  let spec = heroAbility(hero.class, slot).legacyAbilitySpec
   if hero.cooldowns[slot] > 0:
     return false
   if hero.mana < spec.manaCost:
@@ -2083,12 +2452,49 @@ proc tryCastAbility(
     hero.mana = min(hero.maxMana, hero.mana + spec.restore)
   true
 
+proc tryCastAbility(
+    world: World,
+    hero: Hero,
+    slot: HeroAbilitySlot,
+    targetFootman, targetHero, targetTower, fortIndex: int
+): bool =
+  ## Uses historical rules for old tapes and shared casts for current bots.
+  if world.legacyAbilities:
+    return tryLegacyAbility(
+      world, hero, slot, targetFootman, targetHero, targetTower, fortIndex
+    )
+  let spec = heroAbility(hero.class, slot).abilitySpec
+  var targetId = 0'i32
+  if spec.kind != Strike:
+    if spec.casting == SelfCast:
+      return world.castAbility(hero, slot, hero.id, hero.position)
+    for ally in world.heroes:
+      if ally.team == hero.team and ally.hp > 0 and ally.hp < ally.maxHp and
+        ally.state != Dying and
+        within(hero.position, ally.position, spec.range):
+          if world.castAbility(hero, slot, ally.id, ally.position):
+            return true
+    return false
+  if targetFootman >= 0:
+    targetId = world.footmen[targetFootman].id
+  elif targetHero >= 0:
+    targetId = world.heroes[targetHero].id
+  elif targetTower >= 0:
+    targetId = world.towers[targetTower].id
+  elif fortIndex >= 0:
+    targetId = world.forts[fortIndex].id
+  if targetId == 0:
+    return false
+  world.castAbility(hero, slot, targetId, hero.position)
+
 proc tryCombatAbilities(
     world: World,
     hero: Hero,
     targetFootman, targetHero, targetTower, fortIndex: int
 ) =
   ## Fires the passive, then the strongest ready combat ability.
+  if not world.legacyAbilities and hero.manualSpells:
+    return
   discard tryCastAbility(
     world,
     hero,
@@ -2288,7 +2694,8 @@ proc updateHero(world: World, hero: Hero) =
   hero.targetTowerId =
     if targetTower >= 0: world.towers[targetTower].id else: 0
 
-  tickHeroCooldowns(hero)
+  if world.legacyAbilities:
+    world.tickHeroCooldowns(hero)
   regenHeroMana(hero, world.tick)
   tryCombatAbilities(
     world,
@@ -2481,6 +2888,12 @@ proc stateHash*(game: Game): uint64 =
       hash.addHashy(hero.itemCounts[slot])
     for slot in HeroAbilitySlot:
       hash.addHashy(hero.cooldowns[slot])
+      if not world.legacyAbilities:
+        hash.addHashy(hero.charges[slot])
+        hash.addHashy(hero.recharges[slot])
+    if not world.legacyAbilities:
+      hash.addHashy(hero.spellsReady)
+      hash.addHashy(hero.manualSpells)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
@@ -2504,6 +2917,19 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.deathTicks)
     hash.addHashy(footman.surfaceHint)
     hash.addHashy(footman.navLayer)
+  if not world.legacyAbilities:
+    hash.addHashy(world.casts.len)
+    for spell in world.casts:
+      hash.addHashy(spell.ability.ord)
+      hash.addHashy(spell.heroId)
+      hash.addHashy(spell.targetId)
+      hash.addHashy(spell.origin)
+      hash.addHashy(spell.position)
+      hash.addHashy(spell.direction)
+      hash.addHashy(spell.started)
+      hash.addHashy(spell.impact)
+      hash.addHashy(spell.ends)
+      hash.addHashy(spell.resolved)
   if not game.legacyStats:
     hash.addHashy(world.stats)
   uint64(hash)
@@ -2537,6 +2963,10 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       spawnWave(world)
 
   world.tick = world.tick +% 1
+  if not world.legacyAbilities:
+    for hero in world.heroes:
+      if hero.hp > 0 and hero.state != Dying:
+        world.tickHeroCooldowns(hero)
   profileBlock "vision":
     rebuildVision(world)
   if game.historyPlayback:
@@ -2564,6 +2994,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   profileBlock "heroes":
     for hero in world.heroes:
       updateHero(world, hero)
+
+  if not world.legacyAbilities:
+    world.advanceSpells()
 
   var write = 0
   for read in 0 ..< world.footmen.len:
@@ -2749,6 +3182,8 @@ proc newGame*(
     world: World(
       legacyCombat: replayMode and
         replayData.header.gameVersion <= TelemetryGameVersion,
+      legacyAbilities: replayMode and
+        replayData.header.gameVersion <= CombatGameVersion,
       forts: startingForts(),
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
@@ -2792,11 +3227,16 @@ proc newGame*(
     else:
       liveHeroSetup(botCount)
   spawnHeroes(world, heroSetup)
+  if not world.legacyAbilities:
+    for hero in world.heroes:
+      hero.initHeroCharges()
   world.stats = newCombatStats(world.heroes.len)
   result.metrics = newMetrics(world.heroes.len, TickRate)
   for slot, hero in world.heroes:
     world.stats.teams[slot] = hero.team.ord
   doAssert world.heroes.len == heroSetup.len, "every configured hero must spawn"
+  # A freed world's address can be reused with the same vision source keys.
+  visionSkipWorld = nil
   rebuildVision(world)
   world.heroTurnStart = seededHeroTurnStart(world)
   if replayMode:

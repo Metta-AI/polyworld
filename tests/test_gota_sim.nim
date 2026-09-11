@@ -17,6 +17,45 @@ doAssert run.world.heroes.len == 10,
   "run this test with " &
     "--bot:examples/gods_of_the_arena/players/base.bas:10"
 
+echo "Testing human spell commands, AI casts, and charges replay exactly"
+block:
+  let hero = run.world.heroes[0]
+  hero.manualSpells = true
+  let initial = run.world.clone()
+  for tick in 0 ..< 1000:
+    if tick mod 48 == 0:
+      queueCastPoint(
+        hero.id,
+        int32(PrimaryAbility),
+        mapCoordinate(hero.position.x),
+        mapCoordinate(hero.position.z) + 2
+      )
+      queueCastTarget(hero.id, int32(PassiveAbility), hero.id)
+    advanceGame()
+  doAssert run.recorder.data.actions[0].kind == ActionManualSpells
+  let
+    data = decodeReplay(run.recorder.data.encodeReplay())
+    replay = newGame(run.map, 240, 10, true, data)
+  replay.historyPlayback = true
+  replay.replayPlayer = initReplayPlayer(data)
+  for tick in 0 ..< data.hashes.len:
+    replay.tickWorld(nil)
+  doAssert replay.hashCheck.mismatches == 0, replay.hashCheck.error
+  doAssert replay.stateHash() == run.stateHash()
+  doAssert replay.world.heroes[0].manualSpells
+  doAssert replay.world.heroes[0].charges == hero.charges
+  let
+    frontier = run.stateHash()
+    actions = run.recorder.data.actions.len
+  run.world.restore(initial)
+  run.replayPlayer = initReplayPlayer(data)
+  run.historyPlayback = true
+  for tick in 0 ..< data.hashes.len:
+    advanceGame()
+  doAssert run.recorder.data.actions.len == actions
+  doAssert run.stateHash() == frontier
+  run.historyPlayback = false
+
 echo "Testing the decision rotation reaches the state hash"
 block:
   let base = hashNow()
@@ -414,8 +453,30 @@ block:
   run.world.heroes[0].gold = 10000
   run.world.heroes[0].inventory = default(typeof(run.world.heroes[0].inventory))
   queueBuyItem(heroId, int32(ManaPotion.ord))
+  let serial = purchaseReceipt.serial
   flushPlayerCommands(run)
   doAssert run.metrics.read(0, run.world.tick).commands == 1
+  doAssert purchaseReceipt.serial == serial + 1
+  doAssert purchaseReceipt.accepted
+  doAssert purchaseReceipt.itemId == int32(ManaPotion.ord)
+  doAssert run.world.purchaseReason(heroId, int32(ManaPotion.ord)) == ""
+  run.world.heroes[0].itemCounts[0] = MaxItemStack
+  doAssert run.world.purchaseReason(heroId, int32(ManaPotion.ord)) == "Stack full"
+  queueBuyItem(heroId, int32(ManaPotion.ord))
+  flushPlayerCommands(run)
+  doAssert not purchaseReceipt.accepted
+  doAssert run.metrics.read(0, run.world.tick).commands == 1
+  run.world.heroes[0].inventory = [
+    ManaPotion, SteelHelmet, SteelBuckler, LeatherGauntlets,
+    RangerBoots, RubyAmulet
+  ]
+  doAssert run.world.purchaseReason(heroId, int32(SteelHelmet.ord)) ==
+    "Already equipped"
+  doAssert run.world.purchaseReason(heroId, int32(KnightArmor.ord)) ==
+    "Inventory full"
+  run.world.heroes[0].gold = 0
+  doAssert run.world.purchaseReason(heroId, int32(ManaPotion.ord)) ==
+    "Not enough gold"
   run.world.restore(savedWorld)
   run.metrics = savedMetrics
   run.recorder = savedRecorder

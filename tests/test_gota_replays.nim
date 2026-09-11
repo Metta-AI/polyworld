@@ -63,15 +63,36 @@ doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
 echo "Testing old combat replays keep their version when saved again"
-block:
+for version in [TelemetryGameVersion, CombatGameVersion]:
   var historical = recorder.data
-  historical.header.gameVersion = TelemetryGameVersion
+  historical.header.gameVersion = version
   let saved = historical.encodeReplay()
-  doAssert saved.replayFileHeader().gameVersion == TelemetryGameVersion
+  doAssert saved.replayFileHeader().gameVersion == version
   let restored = decodeReplay(saved)
-  doAssert restored.header.gameVersion == TelemetryGameVersion
+  doAssert restored.header.gameVersion == version
   doAssert restored.actions == historical.actions
   doAssert restored.hashes == historical.hashes
+
+echo "Testing every spell slot and manual control round trip"
+block:
+  let spells = initReplayRecorder(setup)
+  spells.record ReplayAction(
+    tick: 1, heroId: 100, kind: ActionManualSpells, first: 1
+  )
+  for slot in 0'i32 .. 3'i32:
+    spells.recordCast(2, 100, slot, 105, 0, false)
+    spells.recordCast(2, 100, slot, 64, 42, true)
+  spells.recordHash(123)
+  spells.recordHash(456)
+  let restored = decodeReplay(spells.data.encodeReplay())
+  doAssert restored.actions == spells.data.actions
+  var historical = spells.data
+  historical.header.gameVersion = CombatGameVersion
+  try:
+    discard historical.encodeReplay()
+    doAssert false, "old combat rules must reject new spell commands"
+  except ReplayError:
+    discard
 
 echo "Testing exact-tick action playback"
 let player = initReplayPlayer(decoded)
