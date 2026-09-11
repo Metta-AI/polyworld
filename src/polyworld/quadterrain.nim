@@ -1453,7 +1453,7 @@ proc placeProp*(
     stretch = vec3(1, 1, 1)
 ) =
   ## Adds one named prop to the next baked terrain mesh. The tint multiplies
-  ## the paint of textured models and is ignored by vertex-coloured ones.
+  ## both textured paint and baked vertex colours.
   ## Stretch scales each model axis on its own, before the turn, for pieces
   ## that must fit an opening the kit did not size them for.
   if not pack.hasProp(name):
@@ -2249,7 +2249,8 @@ proc bakeInstance(
     rotation,
     instanceScale: float32,
     writeIndex: var int,
-    stretch = vec3(1, 1, 1)
+    stretch = vec3(1, 1, 1),
+    tint = vec3(1, 1, 1)
 ) =
   ## Writes one transformed prop instance into the shared baked prop mesh.
   let
@@ -2266,9 +2267,9 @@ proc bakeInstance(
     propMesh[writeIndex] = position.x + cosine * x - sine * z
     propMesh[writeIndex + 1] = position.y + y
     propMesh[writeIndex + 2] = position.z + sine * x + cosine * z
-    propMesh[writeIndex + 3] = model.vertices[i + 3]
-    propMesh[writeIndex + 4] = model.vertices[i + 4]
-    propMesh[writeIndex + 5] = model.vertices[i + 5]
+    propMesh[writeIndex + 3] = model.vertices[i + 3] * tint.x
+    propMesh[writeIndex + 4] = model.vertices[i + 4] * tint.y
+    propMesh[writeIndex + 5] = model.vertices[i + 5] * tint.z
     propMesh[writeIndex + 6] = cosine * normalX - sine * normalZ
     propMesh[writeIndex + 7] = model.vertices[i + 7]
     propMesh[writeIndex + 8] = sine * normalX + cosine * normalZ
@@ -2577,7 +2578,10 @@ proc bakeTreeTiles(writeIndex: var int) =
         choice.textureLayer,
         vec3(
           (ground.originX + x).float32 - HalfGrid + 0.5,
-          (h[0] + h[1] + h[2] + h[3]) / 4.0,
+          # Tile centres lie on the renderer's v10-v01 diagonal. Sampling
+          # that edge keeps roots on the visible terrain instead of on the
+          # bilinear/four-corner mean of a non-planar slope.
+          (h[1] + h[2]) / 2.0,
           (ground.originZ + z).float32 - HalfGrid + 0.5
         ),
         choice.rotation,
@@ -2615,7 +2619,8 @@ proc rebuildTreeMesh() =
       placement.rotation,
       placement.scale,
       writeIndex,
-      placement.stretch
+      placement.stretch,
+      placement.tint
     )
   doAssert writeIndex == propMesh.len
   rebuildTexturedBatches()
