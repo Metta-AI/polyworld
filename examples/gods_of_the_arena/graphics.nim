@@ -1739,7 +1739,15 @@ proc runGraphics*() =
         drawWorldCharacters()
         finishCharacters(scene)
 
-        drawWater(viewProjection, cameraEye)
+        let waterTime =
+          (run.world.tick.float32 + renderAlpha) / TickRate.float32
+        drawWater(
+          viewProjection,
+          cameraEye,
+          offset = vec2(waterTime * 0.25'f, 0),
+          opacity = 0.5'f,
+          highlightOpacity = 0.0'f
+        )
         particles.drawParticles(
           viewProjection,
           barCameraRight,
