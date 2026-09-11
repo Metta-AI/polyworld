@@ -429,11 +429,22 @@ proc packModel(packer: var AssetPacker, asset: Asset) =
         packer.uriBytes(directory, image["uri"].getStr)
       else:
         doc.viewBytes(buffers, image["bufferView"].getInt)
+    var png = bytes.startsWith("\x89PNG")
+    let jpeg = bytes.startsWith("\xff\xd8")
+    if asset.size > 0 and (png or jpeg):
+      let sourceImage = decodeImage(bytes)
+      if max(sourceImage.width, sourceImage.height) > asset.size:
+        let scale = asset.size.float / max(
+          sourceImage.width, sourceImage.height).float
+        bytes = sourceImage.resize(
+          max(1, int(sourceImage.width.float * scale)),
+          max(1, int(sourceImage.height.float * scale))
+        ).encodePng()
+        png = true
     let
-      png = bytes.startsWith("\x89PNG")
       extension =
         if png: ".png"
-        elif bytes.startsWith("\xff\xd8"): ".jpg"
+        elif jpeg: ".jpg"
         elif bytes.startsWith("\xABKTX 20"): ".ktx2"
         elif bytes.startsWith("RIFF"): ".webp"
         else:
