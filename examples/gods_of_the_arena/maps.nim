@@ -10,7 +10,7 @@ import
 
 const
   FordCenters = [(107, 21), (21, 107)]
-  MidCausewayCenter* = (64, 64)
+  MidFordCenter* = (64, 64)
   RedFortTile* = 20
   BlueFortTile* = GridTiles - 1 - RedFortTile
   FortPlateauRadius* = 15
@@ -38,7 +38,7 @@ const
   WaterDepthSteps* = 3'i32
     ## Caps wading depth at 3/8 of a tile, around a footman's knees.
   WaterLevelSteps = RiverBedSteps + WaterDepthSteps
-  FordBedSteps = -4'i32
+  ShallowBedSteps = WaterLevelSteps - 1
   FortWallHeightSteps = 36'i32
   FortCrenellationRiseSteps* = 12'i32
   FortGateClearanceSteps = 24'i32
@@ -46,6 +46,8 @@ const
   ForestNoiseStream = 0xD1B54A32D192ED03'u64
   ForestDetailStream = 0x8CB92BA72F3D8DD7'u64
   HillDetailStream = 0x6A09E667F3BCC909'u64
+  HillContourStream = 0x510E527FADE682D1'u64
+  QuarryContourStream = 0x9B05688C2B3E6C1F'u64
   ForestRollStream = 0x2545F4914F6CDD1D'u64
   ForestDensityPercent = 90'i64
     ## Chance of a candidate at the forest map's peak.
@@ -192,12 +194,13 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     towerCourtCenters: array[GridTiles * GridTiles, bool]
     hillockTerrain: array[GridTiles * GridTiles, bool]
     landmarkHill: array[GridTiles * GridTiles, bool]
+    landmarkHillCore: array[GridTiles * GridTiles, bool]
     hillRock: array[GridTiles * GridTiles, bool]
     quarryTerrain: array[GridTiles * GridTiles, bool]
+    quarryCore: array[GridTiles * GridTiles, bool]
     quarryFloor: array[GridTiles * GridTiles, bool]
     landmarkAccess: array[GridTiles * GridTiles, bool]
     barracksPads: array[GridTiles * GridTiles, bool]
-    causeway: array[GridTiles * GridTiles, bool]
 
   proc stamp(
       mask: var array[GridTiles * GridTiles, bool],
@@ -225,6 +228,42 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         z = az + int(roundDivision(int64(bz - az) * step, divisor))
       stamp(mask, x, z, radius)
 
+  proc naturalOffset(
+      x, z: int, stream: uint64, period, roughness: int
+  ): int =
+    ## The same low-frequency perturbation is sampled at each rotated pair,
+    ## preserving competitive symmetry while avoiding perfect circles.
+    let
+      mirrorX = GridTiles - 1 - x
+      mirrorZ = GridTiles - 1 - z
+      detail = int64(valueNoise(seed, stream, x, z, period)) +
+        int64(valueNoise(seed, stream, mirrorX, mirrorZ, period))
+    int(roundDivision(
+      detail * int64(roughness), int64(MapBlendScale) * 2
+    ))
+
+  proc naturalDisc(
+      x, z, cx, cz, radius: int,
+      stream: uint64,
+      period, roughness: int
+  ): bool =
+    let
+      dx = int64(x - cx)
+      dz = int64(z - cz)
+      distance = int(integerSqrt(dx * dx + dz * dz))
+    distance <= radius + naturalOffset(x, z, stream, period, roughness)
+
+  proc naturalCornerOffset(
+      x, z: int, stream: uint64, period, roughness: int
+  ): int32 =
+    ## Corners rotate around GridTiles rather than GridTiles - 1. Keeping a
+    ## separate sampler makes the rendered surface exactly point-symmetric.
+    let detail = int64(valueNoise(seed, stream, x, z, period)) +
+      int64(valueNoise(seed, stream, GridTiles - x, GridTiles - z, period))
+    int32(roundDivision(
+      detail * int64(roughness), int64(MapBlendScale) * 2
+    ))
+
   for route in LaneRoutes:
     for i in 0 ..< route.len - 1:
       let
@@ -244,11 +283,33 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         stamp(towerCourts, site.x, site.z, 5)
         stamp(towerCourtCenters, site.x, site.z, 3)
         stamp(laneClear, site.x, site.z, 8)
-  stroke(causeway, 57, 57, 71, 71, 2)
   for (x, z, radius, _) in ForestHillocks:
     stamp(hillockTerrain, x, z, radius)
-  for (x, z) in LandmarkHillSites:
-    stamp(landmarkHill, x, z, LandmarkHillRadius)
+  for z in 0 ..< GridTiles:
+    for x in 0 ..< GridTiles:
+      for (hillX, hillZ) in LandmarkHillSites:
+        if naturalDisc(
+            x, z, hillX, hillZ, LandmarkHillRadius,
+            HillContourStream, 7, 3):
+          landmarkHill[z * GridTiles + x] = true
+        if naturalDisc(
+            x, z, hillX, hillZ, LandmarkHillRadius - 2,
+            HillContourStream, 6, 1):
+          landmarkHillCore[z * GridTiles + x] = true
+  # Preserve every authored grove where an irregular hill lobe reaches into
+  # it. Trees can follow the slope, but the meadow material should not erase
+  # the grove's collision-bearing planting sites.
+  for site in AuthoredGroveSites:
+    for offset in AuthoredGroveOffsets:
+      let
+        x = site.x + offset[0]
+        z = site.z + offset[1]
+        mirrorX = GridTiles - 1 - x
+        mirrorZ = GridTiles - 1 - z
+      landmarkHill[z * GridTiles + x] = false
+      landmarkHillCore[z * GridTiles + x] = false
+      landmarkHill[mirrorZ * GridTiles + mirrorX] = false
+      landmarkHillCore[mirrorZ * GridTiles + mirrorX] = false
   for i, site in LandmarkHillSites:
     let mouth = LandmarkHillAccessMouths[i]
     stroke(landmarkAccess, mouth[0], mouth[1], site[0], site[1], 2)
@@ -264,9 +325,21 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           dz = z - hillZ
         if dx * dx + dz * dz <= 9:
           hillRock[z * GridTiles + x] = false
-  for (x, z) in QuarrySites:
-    stamp(quarryTerrain, x, z, QuarryRadius)
-    stamp(quarryFloor, x, z, QuarryFloorRadius)
+  for z in 0 ..< GridTiles:
+    for x in 0 ..< GridTiles:
+      for (quarryX, quarryZ) in QuarrySites:
+        if naturalDisc(
+            x, z, quarryX, quarryZ, QuarryRadius,
+            QuarryContourStream, 5, 2):
+          quarryTerrain[z * GridTiles + x] = true
+        if naturalDisc(
+            x, z, quarryX, quarryZ, QuarryRadius - 2,
+            QuarryContourStream, 5, 1):
+          quarryCore[z * GridTiles + x] = true
+        if naturalDisc(
+            x, z, quarryX, quarryZ, QuarryFloorRadius,
+            QuarryContourStream, 4, 1):
+          quarryFloor[z * GridTiles + x] = true
   for i, site in QuarrySites:
     let mouth = QuarryAccessMouths[i]
     stroke(landmarkAccess, mouth[0], mouth[1], site[0], site[1], 2)
@@ -325,7 +398,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       if distance < 28:
         width2 = min(width2, 18'i32 + distance div 3)
     let midDistance = crossingDistance(
-      cx2, cz2, MidCausewayCenter[0], MidCausewayCenter[1]
+      cx2, cz2, MidFordCenter[0], MidFordCenter[1]
     )
     if midDistance < 30:
       width2 = min(width2, 20'i32 + midDistance div 3)
@@ -340,6 +413,23 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         int64(MapBlendScale) * int64(MapBlendScale)
       ))
     MapBlendScale - cubic
+
+  proc shallowCrossingBlend(cx, cz, crossingX, crossingZ: int): int32 =
+    ## Holds a broad, calm knee-deep shelf under the whole lane, then eases
+    ## back into the riverbed over five tiles without creating steep rims.
+    let
+      dx = int64(cx - crossingX)
+      dz = int64(cz - crossingZ)
+      distance = integerSqrt(
+        (dx * dx + dz * dz) *
+        int64(MapBlendScale) * int64(MapBlendScale)
+      )
+      linear = clamp(
+        int32((10'i64 * MapBlendScale - distance) div 5),
+        0'i32,
+        MapBlendScale
+      )
+    smoothstep(linear)
 
   proc makeCorner(cx, cz: int): int32 =
     ## Corner height as a pure function of the corner coordinate: tiles that
@@ -401,33 +491,19 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           dx2 = int64(cx * 2 - (hillX * 2 + 1))
           dz2 = int64(cz * 2 - (hillZ * 2 + 1))
           distance2 = int32(integerSqrt(dx2 * dx2 + dz2 * dz2))
-        if distance2 < LandmarkHillRadius * 2:
+          contour = naturalCornerOffset(
+            cx, cz, HillContourStream, 7, 3) * 2
+          shapedDistance2 = max(distance2 - contour, 0'i32)
+          crown = LandmarkHillTopSteps + naturalCornerOffset(
+            cx, cz, HillDetailStream, 9, 2)
+        if shapedDistance2 < LandmarkHillRadius * 2:
           let amount = smoothstep(
-            (LandmarkHillRadius.int32 * 2 - distance2) * MapBlendScale div
+            (LandmarkHillRadius.int32 * 2 - shapedDistance2) * MapBlendScale div
               (LandmarkHillRadius.int32 * 2)
           )
-          result = blendHeight(result, LandmarkHillTopSteps, amount)
+          result = blendHeight(result, crown, amount)
 
     result = blendHeight(result, RiverBedSteps, riverBlend(cx * 2, cz * 2))
-    for (fordX, fordZ) in FordCenters:
-      let
-        deltaX = int64(cx - fordX)
-        deltaZ = int64(cz - fordZ)
-        distance = integerSqrt(
-          (deltaX * deltaX + deltaZ * deltaZ) *
-          int64(MapBlendScale) * int64(MapBlendScale)
-        )
-        amount = smoothstep(MapBlendScale - int32(distance div 8))
-      result = blendHeight(result, FordBedSteps, amount)
-    let
-      midX = int64(cx - MidCausewayCenter[0])
-      midZ = int64(cz - MidCausewayCenter[1])
-      midDistance = integerSqrt(
-        (midX * midX + midZ * midZ) *
-        int64(MapBlendScale) * int64(MapBlendScale)
-      )
-      midAmount = smoothstep(MapBlendScale - int32(midDistance div 8))
-    result = blendHeight(result, FordBedSteps, midAmount)
 
     # The quarry is a shallow, fully traversable excavation below world zero.
     # A smooth outer cut leads to a flatter working floor rather than a pit
@@ -438,12 +514,17 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           dx2 = int64(cx * 2 - (quarryX * 2 + 1))
           dz2 = int64(cz * 2 - (quarryZ * 2 + 1))
           distance2 = int32(integerSqrt(dx2 * dx2 + dz2 * dz2))
-        if distance2 < QuarryRadius * 2:
+          contour = naturalCornerOffset(
+            cx, cz, QuarryContourStream, 5, 2) * 2
+          shapedDistance2 = max(distance2 - contour, 0'i32)
+          floorHeight = QuarryFloorSteps + naturalCornerOffset(
+            cx, cz, QuarryContourStream xor HillDetailStream, 6, 1)
+        if shapedDistance2 < QuarryRadius * 2:
           let amount = smoothstep(
-            (QuarryRadius.int32 * 2 - distance2) * MapBlendScale div
-              ((QuarryRadius - QuarryFloorRadius).int32 * 2)
+            (QuarryRadius.int32 * 2 - shapedDistance2) * MapBlendScale div
+              (QuarryRadius.int32 * 2)
           )
-          result = blendHeight(result, QuarryFloorSteps, amount)
+          result = blendHeight(result, floorHeight, amount)
 
     # Tower courts are deliberately flat combat rooms. Their shoulders fade
     # into the surrounding terrain over two tiles.
@@ -469,6 +550,20 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           int32(FortPlateauRadius + 4 - ring) * MapBlendScale div 4
         )
         result = blendHeight(result, plateau, amount)
+
+    # The wading shelves win over nearby road and tower-court smoothing so
+    # no dry terrain seam or steep lip can interrupt the visible river.
+    for (fordX, fordZ) in FordCenters:
+      result = blendHeight(
+        result,
+        ShallowBedSteps,
+        shallowCrossingBlend(cx, cz, fordX, fordZ)
+      )
+    result = blendHeight(
+      result,
+      ShallowBedSteps,
+      shallowCrossingBlend(cx, cz, MidFordCenter[0], MidFordCenter[1])
+    )
 
   var cornerHeights: array[(GridTiles + 1) * (GridTiles + 1), int16]
   for z in 0 .. GridTiles:
@@ -496,11 +591,15 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         kind =
           if quarryFloor[z * GridTiles + x]:
             QuarryFloorKind
-          elif quarryTerrain[z * GridTiles + x]:
+          elif quarryTerrain[z * GridTiles + x] and
+              (quarryCore[z * GridTiles + x] or naturalOffset(
+                x, z, QuarryContourStream xor ForestDetailStream, 4, 2) >= 0):
             QuarryRimKind
           elif hillRock[z * GridTiles + x]:
             HillRockKind
-          elif landmarkHill[z * GridTiles + x]:
+          elif landmarkHill[z * GridTiles + x] and
+              (landmarkHillCore[z * GridTiles + x] or naturalOffset(
+                x, z, HillContourStream xor ForestDetailStream, 5, 2) >= 0):
             LandmarkHillKind
           elif nearRiver and heightSum < 10:
             MarshTile
@@ -543,10 +642,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       let fortRing = min(
         max(abs(x - RedFortTile), abs(z - RedFortTile)),
         max(abs(x - BlueFortTile), abs(z - BlueFortTile)))
-      if causeway[z * GridTiles + x] and laneCore[z * GridTiles + x] and
-          gtile(x, z).kind in [MarshTile, WetBankKind]:
-        gtile(x, z).kind = StoneTile
-      elif towerCourtCenters[z * GridTiles + x] and fortRing > 1 and
+      if towerCourtCenters[z * GridTiles + x] and fortRing > 1 and
           gtile(x, z).kind notin [MarshTile, WetBankKind] and
           not gtile(x, z).impassable:
         gtile(x, z).kind = StoneTile
