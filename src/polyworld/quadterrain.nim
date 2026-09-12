@@ -2167,10 +2167,22 @@ proc showAllTerrain*() =
 
 ## Prop scattering
 
-proc scatterGrass*(count, randomSeed: int, matchTerrain = false) =
+proc scatterGrass*(
+    count, randomSeed: int,
+    matchTerrain = false,
+    exclusionMask: openArray[uint8] = [],
+    exclusionMaskSize = 0,
+    exclusionMaskChannels = 0,
+    exclusionThreshold = 96'u8
+) =
   ## Grass puffs: walkable decoration scattered on plain grass tiles only,
   ## jittered inside the tile, optionally colored from the terrain beneath.
+  ## A visual-material mask can suppress puffs where paint replaces grass.
   ## Call after the ground layer is built and before bakeTerrain.
+  if exclusionMask.len > 0:
+    doAssert exclusionMaskSize > 0 and exclusionMaskChannels > 0
+    doAssert exclusionMask.len ==
+      exclusionMaskSize * exclusionMaskSize * exclusionMaskChannels
   grassPlacements.setLen(0)
   grassMatchesTerrain = matchTerrain
   if grassModels.len == 0 or layers.len == 0:
@@ -2194,6 +2206,23 @@ proc scatterGrass*(count, randomSeed: int, matchTerrain = false) =
       offsetZ = 0.15'f32 + grassRng.rand(0.7).float32
       height = (h[0] * (1 - offsetX) + h[1] * offsetX) * (1 - offsetZ) +
         (h[2] * (1 - offsetX) + h[3] * offsetX) * offsetZ
+    if exclusionMask.len > 0:
+      let
+        maskX = clamp(int(
+          (x.float32 + offsetX) * exclusionMaskSize.float32 /
+            layers[0].width.float32), 0, exclusionMaskSize - 1)
+        maskZ = clamp(int(
+          (z.float32 + offsetZ) * exclusionMaskSize.float32 /
+            layers[0].depth.float32), 0, exclusionMaskSize - 1)
+        maskIndex = (maskZ * exclusionMaskSize + maskX) *
+          exclusionMaskChannels
+      var painted = false
+      for channel in 0 ..< exclusionMaskChannels:
+        if exclusionMask[maskIndex + channel] >= exclusionThreshold:
+          painted = true
+          break
+      if painted:
+        continue
     grassPlacements.add TreePlacement(
       model: grassRng.rand(grassModels.len - 1),
       position: vec3(
