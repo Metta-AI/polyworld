@@ -37,10 +37,17 @@ block:
     (towerCenterGravel, towerCenterDirt) = tileCenter(mask, tower.x, tower.z)
     (towerEdgeGravel, towerEdgeDirt) = tileCenter(
       mask, tower.x, tower.z + 3)
+    (towerCornerGravel, towerCornerDirt) = tileCenter(
+      mask, tower.x + 3, tower.z + 2)
+    (_, roadBesideTowerDirt) = tileCenter(mask, tower.x, tower.z - 4)
   doAssert towerCenterGravel < 24 and towerCenterDirt < 24,
     "the tower's stone centre should remain visible"
   doAssert towerEdgeGravel > 150 and towerEdgeDirt < 24,
     "the cobble court should feather into a gravel collar, not grass or dirt"
+  doAssert towerCornerGravel > 100 and towerCornerDirt < 24,
+    "gravel should cover the square tile corner before fading into grass"
+  doAssert roadBesideTowerDirt > 240,
+    "a tower court must not punch a grass hole into the lane core"
 
   var
     dirtFeather = 0
