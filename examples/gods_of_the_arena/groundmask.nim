@@ -6,6 +6,7 @@
 import std/math
 
 import maps
+import polyworld/noises
 import polyworld/pathing
 
 const
@@ -17,12 +18,12 @@ const
     QuarryShoulderRadius.float32 - QuarryDirtFullRadius + 0.5'f32
   QuarryGravelFullRadius = QuarryFloorRadius.float32 - 0.5'f32
   QuarryGravelFadeWidth = 2.0'f32
-  RoadDirtFullRadius = 3.1'f32
-  RoadDirtFadeWidth = 1.2'f32
-  RoadGravelInnerRadius = 1.65'f32
-  RoadGravelInnerFade = 0.75'f32
-  RoadGravelOuterRadius = 3.0'f32
-  RoadGravelOuterFade = 1.0'f32
+  RoadDirtFullRadius = 2.65'f32
+  RoadDirtFadeWidth = 1.05'f32
+  RoadGravelInnerRadius = 1.35'f32
+  RoadGravelInnerFade = 0.65'f32
+  RoadGravelOuterRadius = 2.55'f32
+  RoadGravelOuterFade = 0.85'f32
   TowerCourtClearRadius = 3.5'f32
   TowerCourtClearFade = 1.0'f32
 
@@ -68,6 +69,30 @@ proc laneDistance(x, z: float32): float32 =
         route[i + 1].z.float32 + 0.5'f32
       ))
 
+proc symmetricRoadNoise(tx, ty, spacing: int, stream: uint64): float32 =
+  let
+    mirrorX = GroundMaskSize - 1 - tx
+    mirrorY = GroundMaskSize - 1 - ty
+    detail = valueNoise(0x47A'i32, stream, tx, ty, spacing) +
+      valueNoise(0x47A'i32, stream, mirrorX, mirrorY, spacing)
+  detail.float32 / (MapBlendScale.float32 * 2.0'f32)
+
+proc roadContourDistance(tx, ty: int, distance: float32): float32 =
+  ## Break the ruler-straight distance field into small grass fingers and dirt
+  ## pockets. Mirrored value-noise pairs keep the contour field rotationally
+  ## stable without producing an obviously repeating wave along straightaways.
+  let
+    broad = 1.00'f32 * symmetricRoadNoise(
+      tx, ty, 19, 0xA0761D6478BD642F'u64)
+    medium = 0.55'f32 * symmetricRoadNoise(
+      tx, ty, 9, 0xE7037ED1A0B428DB'u64)
+    fine = 0.24'f32 * symmetricRoadNoise(
+      tx, ty, 4, 0x8EBC6AF09C88C6E3'u64)
+    edgeAmount = clamp(
+      (distance - 0.9'f32) / 1.8'f32, 0.0'f32, 1.0'f32)
+    offset = clamp(broad + medium + fine, -0.75'f32, 0.75'f32)
+  distance - offset * edgeAmount
+
 proc roadVisibility(x, z: float32): float32 =
   ## Let the authored cobble courts own tower footprints and keep this ground
   ## mask off the raised fort layers.
@@ -99,15 +124,22 @@ proc buildArenaGroundMask*(): seq[uint8] =
       let
         x = (tx.float32 + 0.5'f32) / GroundMaskTexelsPerTile.float32
         z = (ty.float32 + 0.5'f32) / GroundMaskTexelsPerTile.float32
-        roadDistance = laneDistance(x, z)
+        roadDistance = roadContourDistance(tx, ty, laneDistance(x, z))
         roadVisible = roadVisibility(x, z)
-        roadDirt = smoothCoverage(
-          roadDistance, RoadDirtFullRadius, RoadDirtFadeWidth) * roadVisible
-        roadGravel = smoothCoverage(
-          roadDistance, RoadGravelOuterRadius, RoadGravelOuterFade) *
+        edgePorosity = symmetricRoadNoise(
+          tx, ty, 6, 0x589965CC75374CC3'u64)
+        gravelDistance = roadDistance - 0.22'f32 * edgePorosity
+      var roadDirt = smoothCoverage(
+        roadDistance, RoadDirtFullRadius, RoadDirtFadeWidth) * roadVisible
+      if roadDirt < 1.0'f32:
+        roadDirt *= clamp(
+          0.82'f32 + edgePorosity * 0.55'f32, 0.30'f32, 1.0'f32)
+      let roadGravel = smoothCoverage(
+          gravelDistance, RoadGravelOuterRadius, RoadGravelOuterFade) *
           (1.0'f32 - smoothCoverage(
-            roadDistance, RoadGravelInnerRadius, RoadGravelInnerFade)) *
-          roadVisible
+            gravelDistance, RoadGravelInnerRadius, RoadGravelInnerFade)) *
+          roadVisible * clamp(
+            0.82'f32 - edgePorosity * 0.48'f32, 0.35'f32, 1.0'f32)
       var quarryDistance = float32.high
       for site in QuarrySites:
         quarryDistance = min(quarryDistance, contourDistance(
