@@ -24,12 +24,12 @@ const
   RoadGravelInnerFade = 0.65'f32
   RoadGravelOuterRadius = 2.55'f32
   RoadGravelOuterFade = 0.85'f32
-  TowerCourtDirtClearRadius = 3.5'f32
-  TowerCourtDirtClearFade = 1.0'f32
-  TowerGravelInnerRadius = 1.75'f32
-  TowerGravelInnerFade = 0.85'f32
-  TowerGravelFullRadius = 3.25'f32
-  TowerGravelOuterFade = 1.15'f32
+  TowerStoneDirtClearRadius = 1.05'f32
+  TowerStoneDirtClearFade = 0.70'f32
+  TowerGravelInnerRadius = 1.10'f32
+  TowerGravelInnerFade = 1.05'f32
+  TowerGravelFullRadius = 3.70'f32
+  TowerGravelOuterFade = 1.30'f32
 
 proc smoothCoverage(distance, fullRadius, fadeWidth: float32): float32 =
   let t = clamp((distance - fullRadius) / fadeWidth, 0.0'f32, 1.0'f32)
@@ -105,9 +105,9 @@ proc fortVisibility(x, z: float32): float32 =
       return 0
   result = 1
 
-proc towerDirtVisibility(x, z: float32): float32 =
-  ## Cobbled tower courts interrupt lane dirt, but gravel is allowed to meet
-  ## and feather through their outer stones.
+proc towerStoneVisibility(x, z: float32): float32 =
+  ## Protect only the tower's stone footing from dirt. Clearing the entire
+  ## court would punch grass-colored holes into the lane core beside towers.
   result = 1
   for teamSites in TowerSites:
     for sideSites in teamSites:
@@ -116,15 +116,18 @@ proc towerDirtVisibility(x, z: float32): float32 =
           dx = x - (site.x.float32 + 0.5'f32)
           dz = z - (site.z.float32 + 0.5'f32)
           distance = sqrt(dx * dx + dz * dz)
-          court = smoothCoverage(
-            distance, TowerCourtDirtClearRadius, TowerCourtDirtClearFade)
-        result *= 1.0'f32 - court
+          footing = smoothCoverage(
+            distance, TowerStoneDirtClearRadius, TowerStoneDirtClearFade)
+        result *= 1.0'f32 - footing
 
 proc towerGravelCoverage(tx, ty: int, x, z: float32): float32 =
   ## An irregular gravel collar bridges each cobble court into the lane and
   ## surrounding grass without burying the tower's stone centre.
-  let contour = 0.32'f32 * symmetricRoadNoise(
-    tx, ty, 11, 0x1F83D9ABFB41BD6B'u64)
+  let contour =
+    0.48'f32 * symmetricRoadNoise(
+      tx, ty, 11, 0x1F83D9ABFB41BD6B'u64) +
+    0.20'f32 * symmetricRoadNoise(
+      tx, ty, 5, 0xD1B54A32D192ED03'u64)
   for teamSites in TowerSites:
     for sideSites in teamSites:
       for site in sideSites:
@@ -152,7 +155,7 @@ proc buildArenaGroundMask*(): seq[uint8] =
         z = (ty.float32 + 0.5'f32) / GroundMaskTexelsPerTile.float32
         roadDistance = roadContourDistance(tx, ty, laneDistance(x, z))
         paintedGroundVisible = fortVisibility(x, z)
-        roadDirtVisible = paintedGroundVisible * towerDirtVisibility(x, z)
+        roadDirtVisible = paintedGroundVisible * towerStoneVisibility(x, z)
         edgePorosity = symmetricRoadNoise(
           tx, ty, 6, 0x589965CC75374CC3'u64)
         gravelDistance = roadDistance - 0.22'f32 * edgePorosity
