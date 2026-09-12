@@ -24,8 +24,12 @@ const
   RoadGravelInnerFade = 0.65'f32
   RoadGravelOuterRadius = 2.55'f32
   RoadGravelOuterFade = 0.85'f32
-  TowerCourtClearRadius = 3.5'f32
-  TowerCourtClearFade = 1.0'f32
+  TowerCourtDirtClearRadius = 3.5'f32
+  TowerCourtDirtClearFade = 1.0'f32
+  TowerGravelInnerRadius = 1.75'f32
+  TowerGravelInnerFade = 0.85'f32
+  TowerGravelFullRadius = 3.25'f32
+  TowerGravelOuterFade = 1.15'f32
 
 proc smoothCoverage(distance, fullRadius, fadeWidth: float32): float32 =
   let t = clamp((distance - fullRadius) / fadeWidth, 0.0'f32, 1.0'f32)
@@ -93,13 +97,17 @@ proc roadContourDistance(tx, ty: int, distance: float32): float32 =
     offset = clamp(broad + medium + fine, -0.75'f32, 0.75'f32)
   distance - offset * edgeAmount
 
-proc roadVisibility(x, z: float32): float32 =
-  ## Let the authored cobble courts own tower footprints and keep this ground
-  ## mask off the raised fort layers.
+proc fortVisibility(x, z: float32): float32 =
+  ## Keep painted ground materials off the raised fort layers.
   for fort in [RedFortTile, BlueFortTile]:
     if max(abs(x - (fort.float32 + 0.5'f32)),
         abs(z - (fort.float32 + 0.5'f32))) <= FortPlateauRadius.float32 + 0.5'f32:
       return 0
+  result = 1
+
+proc towerDirtVisibility(x, z: float32): float32 =
+  ## Cobbled tower courts interrupt lane dirt, but gravel is allowed to meet
+  ## and feather through their outer stones.
   result = 1
   for teamSites in TowerSites:
     for sideSites in teamSites:
@@ -109,8 +117,26 @@ proc roadVisibility(x, z: float32): float32 =
           dz = z - (site.z.float32 + 0.5'f32)
           distance = sqrt(dx * dx + dz * dz)
           court = smoothCoverage(
-            distance, TowerCourtClearRadius, TowerCourtClearFade)
+            distance, TowerCourtDirtClearRadius, TowerCourtDirtClearFade)
         result *= 1.0'f32 - court
+
+proc towerGravelCoverage(tx, ty: int, x, z: float32): float32 =
+  ## An irregular gravel collar bridges each cobble court into the lane and
+  ## surrounding grass without burying the tower's stone centre.
+  let contour = 0.32'f32 * symmetricRoadNoise(
+    tx, ty, 11, 0x1F83D9ABFB41BD6B'u64)
+  for teamSites in TowerSites:
+    for sideSites in teamSites:
+      for site in sideSites:
+        let
+          dx = x - (site.x.float32 + 0.5'f32)
+          dz = z - (site.z.float32 + 0.5'f32)
+          distance = sqrt(dx * dx + dz * dz) - contour
+          outer = smoothCoverage(
+            distance, TowerGravelFullRadius, TowerGravelOuterFade)
+          center = smoothCoverage(
+            distance, TowerGravelInnerRadius, TowerGravelInnerFade)
+        result = max(result, outer * (1.0'f32 - center))
 
 proc toByte(value: float32): uint8 =
   uint8(clamp(value * 255.0'f32 + 0.5'f32, 0.0'f32, 255.0'f32))
@@ -125,12 +151,13 @@ proc buildArenaGroundMask*(): seq[uint8] =
         x = (tx.float32 + 0.5'f32) / GroundMaskTexelsPerTile.float32
         z = (ty.float32 + 0.5'f32) / GroundMaskTexelsPerTile.float32
         roadDistance = roadContourDistance(tx, ty, laneDistance(x, z))
-        roadVisible = roadVisibility(x, z)
+        paintedGroundVisible = fortVisibility(x, z)
+        roadDirtVisible = paintedGroundVisible * towerDirtVisibility(x, z)
         edgePorosity = symmetricRoadNoise(
           tx, ty, 6, 0x589965CC75374CC3'u64)
         gravelDistance = roadDistance - 0.22'f32 * edgePorosity
       var roadDirt = smoothCoverage(
-        roadDistance, RoadDirtFullRadius, RoadDirtFadeWidth) * roadVisible
+        roadDistance, RoadDirtFullRadius, RoadDirtFadeWidth) * roadDirtVisible
       if roadDirt < 1.0'f32:
         roadDirt *= clamp(
           0.82'f32 + edgePorosity * 0.55'f32, 0.30'f32, 1.0'f32)
@@ -138,7 +165,7 @@ proc buildArenaGroundMask*(): seq[uint8] =
           gravelDistance, RoadGravelOuterRadius, RoadGravelOuterFade) *
           (1.0'f32 - smoothCoverage(
             gravelDistance, RoadGravelInnerRadius, RoadGravelInnerFade)) *
-          roadVisible * clamp(
+          paintedGroundVisible * clamp(
             0.82'f32 - edgePorosity * 0.48'f32, 0.35'f32, 1.0'f32)
       var quarryDistance = float32.high
       for site in QuarrySites:
@@ -151,7 +178,9 @@ proc buildArenaGroundMask*(): seq[uint8] =
           quarryDistance, QuarryGravelFullRadius, QuarryGravelFadeWidth) *
           quarryDirt
         dirt = max(roadDirt, quarryDirt)
-        gravel = max(roadGravel, quarryGravel)
+        towerGravel = towerGravelCoverage(tx, ty, x, z) *
+          paintedGroundVisible
+        gravel = max(max(roadGravel, towerGravel), quarryGravel)
         index = (ty * GroundMaskSize + tx) * GroundMaskChannels
       result[index] = toByte(gravel)
       result[index + 1] = toByte(dirt)

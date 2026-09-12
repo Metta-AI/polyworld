@@ -32,6 +32,16 @@ block:
   doAssert tileCenter(mask, 62, 24) == (0'u8, 0'u8),
     "the visual road should not sprawl far beyond the clear lane"
 
+  let
+    tower = TowerSites[0][0][0]
+    (towerCenterGravel, towerCenterDirt) = tileCenter(mask, tower.x, tower.z)
+    (towerEdgeGravel, towerEdgeDirt) = tileCenter(
+      mask, tower.x, tower.z + 3)
+  doAssert towerCenterGravel < 24 and towerCenterDirt < 24,
+    "the tower's stone centre should remain visible"
+  doAssert towerEdgeGravel > 150 and towerEdgeDirt < 24,
+    "the cobble court should feather into a gravel collar, not grass or dirt"
+
   var
     dirtFeather = 0
     gravelFeather = 0
