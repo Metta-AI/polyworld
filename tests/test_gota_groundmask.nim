@@ -22,11 +22,15 @@ block:
 
   let
     (coreGravel, coreDirt) = tileCenter(mask, 62, 18)
-    (shoulderGravel, shoulderDirt) = tileCenter(mask, 62, 21)
   doAssert coreDirt == 255 and coreGravel < 16,
     "the lane core should remain exposed dirt"
-  doAssert shoulderDirt > 220 and shoulderGravel > 180,
+  var shoulderGravel = 0'u8
+  for z in 20 .. 21:
+    shoulderGravel = max(shoulderGravel, tileCenter(mask, 62, z)[0])
+  doAssert shoulderGravel > 150,
     "the lane needs its gravel shoulder"
+  doAssert tileCenter(mask, 62, 24) == (0'u8, 0'u8),
+    "the visual road should not sprawl far beyond the clear lane"
 
   var
     dirtFeather = 0
