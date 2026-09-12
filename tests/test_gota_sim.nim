@@ -126,6 +126,15 @@ block:
   advanceGame()
   doAssert hashNow() != before, "a tick that changes nothing is suspicious"
 
+echo "Testing every tower matches the longest hero attack range"
+block:
+  var longestHeroRange = 0'i32
+  for class in HeroClass:
+    longestHeroRange = max(longestHeroRange, heroAttackRange(class))
+  for tier in TowerTier:
+    doAssert TowerAttackRanges[tier] >= longestHeroRange,
+      $tier & " can be outranged by a hero"
+
 echo "Testing towers expose outer, inner, then gate"
 block:
   var lane: array[TowerTier, int]

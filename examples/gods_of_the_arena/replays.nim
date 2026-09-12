@@ -13,7 +13,7 @@ const
   MetricsGameVersion* = 18'u16
   TelemetryGameVersion* = 19'u16
   CombatGameVersion* = 20'u16
-  ReplayGameVersion* = 22'u16
+  ReplayGameVersion* = 23'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8

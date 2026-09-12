@@ -231,9 +231,9 @@ const
   TowerHitPoints*: array[TowerTier, int32] = [600'i32, 800, 1_000]
   TowerDamages*: array[TowerTier, int32] = [14'i32, 18, 22]
   TowerAttackRanges*: array[TowerTier, int32] = [
-    300_000'i32,
-    330_000,
-    360_000
+    390_000'i32,
+    390_000,
+    390_000
   ]
   TowerAttackTicks* = TickRate
   TowerSiegeRange* = 105_000'i32
