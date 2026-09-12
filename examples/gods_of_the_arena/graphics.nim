@@ -218,13 +218,21 @@ proc runGraphics*() =
     # Paint lane and quarry tops independently of their gameplay tile kinds.
     # The mask restores soft road borders, preserves the gravel shoulders,
     # feathers quarry earth, and breaks up working floors with gravel relief.
-    uploadGroundMask(buildArenaGroundMask(), GroundMaskSize)
+    let arenaGroundMask = buildArenaGroundMask()
+    uploadGroundMask(arenaGroundMask, GroundMaskSize)
     setGroundLayers(
       GravelSurface.float32,
       DirtSurface.float32,
       GrassSurface.float32
     )
-    scatterGrass(1_500, run.map.seed, matchTerrain = true)
+    scatterGrass(
+      1_500,
+      run.map.seed,
+      matchTerrain = true,
+      exclusionMask = arenaGroundMask,
+      exclusionMaskSize = GroundMaskSize,
+      exclusionMaskChannels = GroundMaskChannels
+    )
     scatterRocks(180, run.map.seed, scale = 0.25'f)
 
   let scene = newCharacterScene(window)
