@@ -378,11 +378,15 @@ proc terrainFrag(
         groundCutoff = max(dirtBlend, grassBlend) - blendDepth
         dirtWeight = max(dirtBlend - groundCutoff, 0.0)
         grassWeight = max(grassBlend - groundCutoff, 0.0)
-        soil = (dirt.xyz * dirtWeight + maskBase.xyz * grassWeight) /
-          max(dirtWeight + grassWeight, 0.001)
+        soilTotal = max(dirtWeight + grassWeight, 0.001)
+        soil = (dirt.xyz * dirtWeight + maskBase.xyz * grassWeight) / soilTotal
+        soilHeight = (dirt.w * dirtWeight + maskBase.w * grassWeight) / soilTotal
       ground = soil
-      if stone.w >= 1.0 - mask.x:
-        ground = stone.xyz
+      if generatedEnabled > 0.5:
+        let gravelAmount = surfaceAmount(mask.x, soilHeight, stone.w)
+        ground = soil * (1.0 - gravelAmount) + stone.xyz * gravelAmount
+      elif stone.w >= 1.0 - mask.x:
+          ground = stone.xyz
   # Ground ring: a curb of cut stones sampled around a circle rather than
   # across the world, one stone row spanning the band, dropping out past
   # the outer edge the same way the cobbles do. The polar coordinate jumps

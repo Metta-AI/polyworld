@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, content, decor, sim, game, maps, quarrymask, replays, ui,
+  assets, content, decor, sim, game, groundmask, maps, replays, ui,
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
@@ -124,6 +124,16 @@ proc runGraphics*() =
       GotaTreeStyle, GeneratedTerrain, PaintedRocks, FortTextures,
       settings = GotaTerrainAssets
     )
+    # Road gameplay stays tile-authored; its visible dirt and gravel are
+    # painted below at sub-tile resolution so the lane edges remain soft.
+    setTileMaterial(
+      RoadTile.int,
+      GrassSurface.float32,
+      DirtSurface.float32,
+      vec3(1),
+      vec3(0.78'f32, 0.74'f32, 0.62'f32),
+      1
+    )
     for i, kind in [RedFortKind, BlueFortKind]:
       let material = (SurfaceNames.len + i).float32
       let
@@ -143,9 +153,9 @@ proc runGraphics*() =
       )
     setTileMaterial(
       LaneShoulderKind.int,
-      GravelSurface.float32,
+      GrassSurface.float32,
       DirtSurface.float32,
-      vec3(0.94'f32, 0.92'f32, 0.84'f32),
+      vec3(1),
       vec3(0.78'f32, 0.74'f32, 0.62'f32),
       4
     )
@@ -177,7 +187,7 @@ proc runGraphics*() =
       QuarryFloorKind.int,
       GrassSurface.float32,
       DirtSurface.float32,
-      vec3(0.90'f32, 0.86'f32, 0.76'f32),
+      vec3(1),
       vec3(0.58'f32, 0.54'f32, 0.48'f32),
       5
     )
@@ -185,7 +195,7 @@ proc runGraphics*() =
       QuarryRimKind.int,
       GrassSurface.float32,
       GravelSurface.float32,
-      vec3(0.92'f32, 0.88'f32, 0.76'f32),
+      vec3(1),
       vec3(0.62'f32, 0.56'f32, 0.48'f32),
       4
     )
@@ -201,14 +211,14 @@ proc runGraphics*() =
       QuarryShoulderKind.int,
       GrassSurface.float32,
       DirtSurface.float32,
-      vec3(0.88'f32, 0.92'f32, 0.76'f32),
+      vec3(1),
       vec3(0.66'f32, 0.62'f32, 0.52'f32),
       3
     )
-    # Paint quarry tops independently of their gameplay tile kinds. The
-    # sub-tile mask feathers exposed earth through the approved height blend,
-    # and lets gravel details break up the working-floor boundary.
-    uploadGroundMask(buildQuarryGroundMask(), QuarryMaskSize)
+    # Paint lane and quarry tops independently of their gameplay tile kinds.
+    # The mask restores soft road borders, preserves the gravel shoulders,
+    # feathers quarry earth, and breaks up working floors with gravel relief.
+    uploadGroundMask(buildArenaGroundMask(), GroundMaskSize)
     setGroundLayers(
       GravelSurface.float32,
       DirtSurface.float32,
