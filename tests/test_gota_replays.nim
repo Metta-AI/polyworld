@@ -136,7 +136,7 @@ removeFile(path)
 echo "Testing replay validation"
 block:
   var previousArena = encoded
-  previousArena[ReplayMagic.len + 2] = char(21)
+  previousArena[ReplayMagic.len + 2] = char(22)
   previousArena[ReplayMagic.len + 3] = char(0)
   try:
     discard decodeReplay(previousArena)
