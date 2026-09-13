@@ -2,6 +2,7 @@ import std/options
 import vmath
 import gltf/[common, models]
 import polyworld/picking
+import polyworld/animblend
 import polyworld/characters
 
 proc triangle(z = 0'f32): Node =
@@ -89,6 +90,16 @@ block:
   doAssert model.pickCharacter(vec3(0, 0, 5), vec3(0, 0, -1), vec3(0), 0, 0, 0) == -1
   doAssert abs(model.pickCharacter(vec3(4, 0, 5), vec3(0, 0, -1), vec3(0), 0, 0, 0) - 5) < 1e-6
   doAssert abs(model.pickCharacter(vec3(4, 0, -5), vec3(0, 0, 1), vec3(0), 0, 0, 0) - 5) < 1e-6
+  root.animations = @[AnimationClip(name: "move", duration: 1,
+    channels: @[AnimationChannel(target: joint, path: AnimTranslation,
+      interpolation: aiLinear, times: @[0'f32, 1],
+      valuesVec3: @[vec3(4, 0, 0), vec3(6, 0, 0)])])]
+  let player = newClipPlayer(root)
+  player.play(0, fade = 0)
+  player.seek(1)
+  joint.pos = vec3(4, 0, 0) # Simulate another shared instance's last pose.
+  doAssert model.pickCharacter(
+    player, vec3(6, 0, 5), vec3(0, 0, -1), vec3(0), 0) == 5
 
 echo "Picking rejects non-finite origins and invalid distance intervals"
 block:
