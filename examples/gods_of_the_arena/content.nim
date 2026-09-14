@@ -157,7 +157,7 @@ const
       name: "Ranger",
       role: "Mobile ranged carry",
       attackStyle: RangedAttack,
-      baseHitPoints: 210,
+      baseHitPoints: 200,
       hitPointsPerLevel: 38,
       baseMana: 110,
       manaPerLevel: 8,
@@ -366,7 +366,7 @@ const
     ),
     AbilitySpec(
       name: "Meteor Strike", icon: "meteor_strike",
-      kind: Strike, cooldownTicks: 216, manaCost: 50,
+      kind: Strike, cooldownTicks: 216, manaCost: 53,
       range: 360_000, damage: 70
     ),
     AbilitySpec(
@@ -412,7 +412,7 @@ const
     ),
     AbilitySpec(
       name: "Sanguine Chalice", icon: "sanguine_chalice",
-      kind: Heal, cooldownTicks: 192, heal: 26
+      kind: Heal, cooldownTicks: 192, heal: 28
     ),
     AbilitySpec(
       name: "Afterlight Sickle", icon: "afterlight_sickle",
@@ -457,7 +457,7 @@ const
     AbilitySpec(
       name: "Ice Spear", icon: "ice_spear",
       kind: Strike, cooldownTicks: 96, manaCost: 30,
-      range: 360_000, damage: 44
+      range: 380_000, damage: 44
     ),
     AbilitySpec(
       name: "Bone Marionette", icon: "bone_marionette",
