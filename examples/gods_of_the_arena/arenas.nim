@@ -13,7 +13,7 @@ const
   ArenaKindStride* = 8'u32
   ArenaRockKind* = ArenaKindBase + ArenaKindStride * 2
   ArenaHeightStep = 4'i32
-  ArenaWallHeight = 24'i16
+  ArenaWallHeight = 18'i16
   ArenaWaterDepth* = 3'i16
 
 type
@@ -31,6 +31,8 @@ type
     layers*: seq[QuadLayer]
     layout*: ArenaLayout
     minimap*: seq[uint32]
+    mainRoads*: seq[bool]
+      ## Visual lane classification, including their ramp segments.
 
 proc arenaKind*(kind: uint32): uint32 {.raises: [].} =
   ## Resolves faction-specific materials to the game's terrain categories.
@@ -289,8 +291,9 @@ proc buildArena*(config: MapConfig): ArenaData =
     if tile.surface == grids.WallSurface:
       var wall = packed
       wall.bottoms = packed.tops
+      # Keep wall tops level above the castle, including beside gate ramps.
       for height in wall.tops.mitems:
-        height += ArenaWallHeight
+        height = ArenaHeightStep.int16 * 4 + ArenaWallHeight
       let layer = (if tile.side == layouts.Northeast: 1 else: 2)
       result.layers[layer].tiles[index] = wall
     elif tile.terrain == grids.LakeGround:
@@ -298,3 +301,18 @@ proc buildArena*(config: MapConfig): ArenaData =
       for i in 0 .. 3:
         water.tops[i] = -ArenaHeightStep.int16 * 2'i16 + ArenaWaterDepth
       result.layers[3].tiles[index] = water
+  result.mainRoads.setLen(count)
+  for index in 0 ..< count div 2:
+    let tile = grid.cells[index]
+    if not tile.road:
+      continue
+    let point = vec2(
+      (index mod resolution).float32 + 0.5'f,
+      (index div resolution).float32 + 0.5'f
+    ) * grid.tileSize
+    for road in map.roads:
+      if lengthSq(layouts.nearest(road, point) - point) <=
+        (config.roadWidth / 2) ^ 2:
+          result.mainRoads[index] = true
+          result.mainRoads[count - 1 - index] = true
+          break

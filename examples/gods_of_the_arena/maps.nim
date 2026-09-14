@@ -24,6 +24,7 @@ type MapData* = object
   preset*: MapConfig
   layout*: ArenaLayout
   minimap*: seq[uint32]
+  mainRoads*: seq[bool]
 
 var activeMapResolution = GridTiles
 
@@ -108,6 +109,7 @@ proc generateMap*(
     preset: preset,
     hash: uint64(hash),
     layout: savedArena.layout,
-    minimap: savedArena.minimap
+    minimap: savedArena.minimap,
+    mainRoads: savedArena.mainRoads
   )
   battleMapHash = result.hash

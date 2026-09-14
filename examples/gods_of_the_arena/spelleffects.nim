@@ -3,7 +3,7 @@
 import
   std/math,
   vmath,
-  polyworld/[fxmeshes, pathing],
+  polyworld/[fxmeshes, pathing, quadterrain],
   content, sim
 
 type
@@ -64,6 +64,7 @@ proc footprintSettings*(area: FxArea): FxSettings =
 proc mapHeight(position: Vec3): float32 =
   ## Keeps warnings on the terrain and above shallow water.
   result = surfaceHeightNear(position.x, position.z, position.y)
+  result += groundOffset(position.x, position.z)
   let (x, z) = worldToTile(position.x, position.z)
   for layer in layers:
     if not layer.water:
