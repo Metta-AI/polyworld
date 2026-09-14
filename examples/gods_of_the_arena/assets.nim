@@ -5,6 +5,12 @@ import
 const
   LogoPath* = DataRoot & "/themes/gota/gota_logo.png"
   FortTextures* = ["mossy-building-stone-1", "dry-stacked-stone-1"]
+  CryptTextures* = [
+    "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-stone-2",
+    "crypt-grate-1"
+  ]
+  ArenaTextures* = @FortTextures & @CryptTextures
+  GotaBoulderNames* = ["rock_small_02a", "rock_small_03a"]
   TowerPack* = DataRoot & "/terrain/tower_defense_kit.glb"
   TowerProps* = [
     "tower_square_small1", "tower_square_tall1", "tower_square_tall2",
@@ -38,9 +44,7 @@ const
   GotaTerrainAssets* =
     when defined(emscripten): WebTerrainAssets
     else: DefaultTerrainAssets
-  GotaTreeStyle* =
-    when defined(emscripten): DenseTrees
-    else: MixedTrees
+  GotaTreeStyle* = DenseTrees
   GotaDecorTextureSize* =
     when defined(emscripten): 256
     else: 512
@@ -136,7 +140,7 @@ proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
   result.add terrainAssets(
-    DenseTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets, FortTextures
+    GotaTreeStyle, GeneratedTerrain, PaintedRocks, WebTerrainAssets, ArenaTextures
   )
   result.add propAssets(TowerPack, TowerProps, textureSize = 256)
   for i, pack in ArenaDecorPacks:

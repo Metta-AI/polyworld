@@ -36,7 +36,8 @@ proc kindAt(layerIndex, mapX, mapY: int32, tile: Tile): TerrainKind =
   ## Maps visual materials and blocked construction to stable terrain kinds.
   if layers[int(layerIndex)].water:
     return TerrainWater
-  case tile.kind
+  let kind = arenaKind(tile.kind)
+  case kind
   of TreeTile:
     return TerrainTrees
   of RedFortKind, BlueFortKind:
@@ -54,7 +55,7 @@ proc kindAt(layerIndex, mapX, mapY: int32, tile: Tile): TerrainKind =
       var cover: Tile
       if readTile(i.int32, mapX, mapY, cover):
         return TerrainWall
-  case tile.kind
+  case kind
   of GrassTile, LandmarkHillKind:
     TerrainGrass
   of RoadTile, StoneTile, LaneShoulderKind, TowerCourtKind:

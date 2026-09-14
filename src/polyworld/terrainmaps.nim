@@ -74,7 +74,7 @@ proc buildTerrainMap*(
           x = i mod layer.width
           z = i div layer.width
         var material = kindMaterials[min(tile.kind.int, kindMaterials.high)]
-        if tile.exists and tile.kind == GrassTile:
+        if tile.exists and material == GrassSurface:
           let
             heights = tile.tops.unpack()
             elevation = (heights[0] + heights[1] + heights[2] + heights[3]) /
