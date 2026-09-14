@@ -140,7 +140,7 @@ doAssert replayBytes.find("bestDistance = 2147483647") < 0
 removeFile(path)
 
 echo "Testing replay validation"
-for version in [21, 27]:
+for version in [21, 27, 28]:
   var unsupported = encoded
   unsupported[ReplayMagic.len + 2] = char(version)
   unsupported[ReplayMagic.len + 3] = char(0)

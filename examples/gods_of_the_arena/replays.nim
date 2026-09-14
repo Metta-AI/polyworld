@@ -20,7 +20,7 @@ const
   InitialArenaGameVersion* = 24'u16
   CryptArenaGameVersion* = 25'u16
   PresetGameVersion* = 26'u16
-  ReplayGameVersion* = 28'u16
+  ReplayGameVersion* = 29'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
