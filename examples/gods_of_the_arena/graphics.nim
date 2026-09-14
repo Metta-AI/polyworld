@@ -21,7 +21,7 @@ when defined(takeScreenshot):
   import std/os
 
 const
-  DefaultCameraDistance = 17.0'f
+  DefaultCameraDistance = 17.0'f / 1.2'f
   AtlasPath = TmpRoot & "/gota.atlas.png"
   CryptRockSurface = SurfaceNames.len + FortTextures.len
   CryptRubbleSurface = CryptRockSurface + 1
@@ -585,7 +585,7 @@ proc runGraphics*() =
       return
     terrainVisionTick = run.world.tick
     terrainVisionMode = viewMode
-    var values = newSeq[uint8](GridTiles * GridTiles)
+    var values = newSeq[uint8](mapTiles() * mapTiles())
     if viewMode == 0:
       for value in values.mitems:
         value = 255
@@ -596,7 +596,9 @@ proc runGraphics*() =
           if run.world.teamVisible[team][i] != 0: 255
           elif run.world.teamExplored[team][i] != 0: 48
           else: 0
-    uploadTerrainVisibility(blurVisibility(values, GridTiles, GridTiles))
+    uploadTerrainVisibility(
+      blurVisibility(values, mapTiles().int32, mapTiles().int32), mapTiles()
+    )
 
   proc screenPosition(position: Vec3, viewProjection: Mat4): Vec2 =
     ## Projects a world position into window pixel coordinates.
@@ -865,7 +867,7 @@ proc runGraphics*() =
       followRate = 1.0,
       zoomRate = 0.7,
       holdSeconds = 2.8,
-      mapSpan = HalfGrid * 2
+      mapSpan = mapHalfSize() * 2
     )
     transport = initPlayer(
       live = not run.replayMode,
@@ -1338,14 +1340,14 @@ proc runGraphics*() =
         let panSpeed = cameraDistance * 0.0015
         cameraTarget.x -= delta.x * panSpeed
         cameraTarget.z -= delta.y * panSpeed
-        cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
-        cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+        cameraTarget.x = clamp(cameraTarget.x, -mapHalfSize(), mapHalfSize())
+        cameraTarget.z = clamp(cameraTarget.z, -mapHalfSize(), mapHalfSize())
       elif applyRtsPan(
           cameraTarget,
           rtsPanDir(window),
           dt,
           cameraDistance,
-          HalfGrid
+          mapHalfSize()
         ):
         cancelCameraEase(cameraEase)
       else:
@@ -1363,15 +1365,15 @@ proc runGraphics*() =
         panSpeed = cameraDistance * 0.0015
       cameraTarget.x -= delta.x * panSpeed
       cameraTarget.z -= delta.y * panSpeed
-      cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
-      cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+      cameraTarget.x = clamp(cameraTarget.x, -mapHalfSize(), mapHalfSize())
+      cameraTarget.z = clamp(cameraTarget.z, -mapHalfSize(), mapHalfSize())
     if not minimapPanning and
         applyRtsPan(
           cameraTarget,
           rtsPanDir(window),
           dt,
           cameraDistance,
-          HalfGrid
+          mapHalfSize()
         ):
       followSelection = false
       actionCam.takeManual()
@@ -1443,8 +1445,8 @@ proc runGraphics*() =
     if not walk.hit:
       return
     let
-      mapX = int32(layers[walk.layer].originX + walk.x)
-      mapY = int32(layers[walk.layer].originZ + walk.z)
+      mapX = int32(layers[walk.layer].originX + walk.x - mapOrigin())
+      mapY = int32(layers[walk.layer].originZ + walk.z - mapOrigin())
     if attackMove:
       queueAttackMove(heroId, mapX, mapY)
     else:
@@ -1469,8 +1471,8 @@ proc runGraphics*() =
             )
             ground = pickWalkableTile(origin, direction)
           if ground.hit:
-            aimX = int32(layers[ground.layer].originX + ground.x)
-            aimY = int32(layers[ground.layer].originZ + ground.z)
+            aimX = int32(layers[ground.layer].originX + ground.x - mapOrigin())
+            aimY = int32(layers[ground.layer].originZ + ground.z - mapOrigin())
         attackMoveArmed = false
         if not activatePlayerAbility(
           run.world, hero.id, slot.int32, primaryId, aimX, aimY
@@ -1541,8 +1543,8 @@ proc runGraphics*() =
           return
         queueCastPoint(
           heroId, armedAbility,
-          int32(layers[ground.layer].originX + ground.x),
-          int32(layers[ground.layer].originZ + ground.z)
+          int32(layers[ground.layer].originX + ground.x - mapOrigin()),
+          int32(layers[ground.layer].originZ + ground.z - mapOrigin())
         )
       armedAbility = -1
       attackMoveArmed = false

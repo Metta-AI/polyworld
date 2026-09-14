@@ -99,8 +99,8 @@ proc initHeroHost(heroId: int32): Host =
   result = initHost()
   for name in HeroDataNames:
     discard result.addData(name)
-  discard result.addData("mapWidth", GridTiles.int32)
-  discard result.addData("mapHeight", GridTiles.int32)
+  discard result.addData("mapWidth", mapTiles().int32)
+  discard result.addData("mapHeight", mapTiles().int32)
   discard result.addData("mapLayers", layers.len.int32)
   for kind in TerrainKind:
     discard result.addData($kind, kind.ord.int32)

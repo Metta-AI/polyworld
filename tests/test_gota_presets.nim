@@ -13,6 +13,7 @@ let
     "max_ticks": 100,
     "map_preset": {
       "seed": 55,
+      "map_size": 128,
       "jungle_roads": 24,
       "camp_radius": 34,
       "camps_touch_roads": false
@@ -20,16 +21,21 @@ let
   }""")
 doAssert saved.mapPreset == defaultConfig()
 doAssert saved.seed == 54
+doAssert saved.mapPreset.mapSize == 116
 doAssert custom.seed == 1988
 doAssert custom.maxTicks == 100
 doAssert custom.mapPreset.seed == 55
+doAssert custom.mapPreset.mapSize == 128
 doAssert custom.mapPreset.jungleRoads == 24
 doAssert custom.mapPreset.campRadius == 34
 doAssert not custom.mapPreset.campsTouchRoads
 doAssert custom.mapPreset.roadWidth == defaultConfig().roadWidth
 doAssert parseConfig(custom.toJson()) == custom
 for bytes in [
-  "{", "{\"mapPreset\": {\"jungleRoads\": 999999}}",
+  "{", "{\"mapPreset\": {\"mapSize\": 0}}",
+  "{\"mapPreset\": {\"mapSize\": 97}}",
+  "{\"mapPreset\": {\"mapSize\": 258}}",
+  "{\"mapPreset\": {\"jungleRoads\": 999999}}",
   "{\"mapPreset\": {\"lakeCrossings\": 3}}",
   "{\"mapPreset\": {\"roadWidth\": -1}}"
 ]:

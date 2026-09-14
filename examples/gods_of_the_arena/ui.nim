@@ -5,7 +5,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
-  content, sim, game, controls, layouts, shops
+  content, sim, game, controls, layouts, shops, maps
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -424,7 +424,7 @@ proc updateMinimapCamera*(
       mouse,
       area.origin,
       area.size,
-      HalfGrid
+      mapHalfSize()
     )
     cameraTarget.x = point.x
     cameraTarget.z = point.y
@@ -435,12 +435,12 @@ proc minimapPosition(position: Vec3, panel: GameUiPanel): Vec2 =
   let area = panel.minimapMap()
   let
     x = clamp(
-      (position.x + HalfGrid) / (HalfGrid * 2),
+      (position.x + mapHalfSize()) / (mapHalfSize() * 2),
       0.0'f32,
       1.0'f32
     )
     y = clamp(
-      (position.z + HalfGrid) / (HalfGrid * 2),
+      (position.z + mapHalfSize()) / (mapHalfSize() * 2),
       0.0'f32,
       1.0'f32
     )
@@ -464,7 +464,7 @@ proc drawMinimapCamera(
       aspect,
       area.origin,
       area.size,
-      HalfGrid
+      mapHalfSize()
     ),
     rgbx(255, 242, 187, 255)
   )
@@ -742,15 +742,15 @@ proc drawUi*(
   sk.drawFrame(
     GameUiPanel(origin: mapArea.origin, size: mapArea.size)
   )
-  if run.map.minimap.len == GridTiles * GridTiles:
-    let tileSize = mapArea.size / GridTiles.float32
-    for y in 0 ..< GridTiles:
+  if run.map.minimap.len == mapTiles() * mapTiles():
+    let tileSize = mapArea.size / mapTiles().float32
+    for y in 0 ..< mapTiles():
       var x = 0
-      while x < GridTiles:
-        let color = run.map.minimap[y * GridTiles + x]
+      while x < mapTiles():
+        let color = run.map.minimap[y * mapTiles() + x]
         var finish = x + 1
-        while finish < GridTiles and
-          run.map.minimap[y * GridTiles + finish] == color:
+        while finish < mapTiles() and
+          run.map.minimap[y * mapTiles() + finish] == color:
             finish.inc
         sk.drawRect(
           mapArea.origin + vec2(x.float32, y.float32) * tileSize,

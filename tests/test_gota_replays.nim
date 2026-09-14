@@ -10,7 +10,7 @@ let setup = Setup(
   mapSeed: 2026,
   mapHash: 0x123456789ABCDEF0'u64,
   tickRate: uint16(TickRate),
-  gridTiles: 128,
+  gridTiles: 116,
   spawnIntervalTicks: uint32(TickRate) * 10,
   maximumTicks: 20,
   heroes: @[
@@ -65,10 +65,13 @@ doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 echo "Testing old combat replays keep their version when saved again"
 for version in [
   TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
-  PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion
+  PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion,
+  PresetGameVersion
 ]:
   var historical = recorder.data
   historical.header.gameVersion = version
+  historical.header.setup.gridTiles = 128
+  historical.config.mapPreset.mapSize = 128
   let saved = historical.encodeReplay()
   doAssert saved.replayFileHeader().gameVersion == version
   let restored = decodeReplay(saved)
