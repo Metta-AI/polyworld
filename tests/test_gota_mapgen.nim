@@ -24,6 +24,9 @@ doAssert map.layout.barracks.len == 12
 doAssert map.seed == 54
 doAssert gameMaps.generateMap(1988).hash == map.hash,
   "Match randomness must not select a different map preset."
+var
+  wallCount = 0
+  slopedWallCount = 0
 for y in 0 ..< Size:
   for x in 0 ..< Size:
     let tile = tiles.cells[y * Size + x]
@@ -33,6 +36,24 @@ for y in 0 ..< Size:
       int32(tile.passable)
     doAssert terrainValue(x.int32, y.int32, 0, TerrainKindField) !=
       TerrainNone.ord
+    if tile.surface == editorTiles.WallSurface:
+      let
+        layer =
+          if tile.side == editorMaps.Northeast:
+            gameMaps.RedFortLayer
+          else:
+            gameMaps.BlueFortLayer
+        wall = layers[layer].tiles[y * Size + x]
+        ground = layers[0].tiles[y * Size + x]
+      inc wallCount
+      doAssert wall.exists and wall.impassable
+      doAssert wall.bottoms == ground.tops,
+        "Walls must reach the ground beside ramps."
+      # Castle ground is 16 eighths high, with 18 eighths of wall above it.
+      doAssert wall.tops == [34'i16, 34, 34, 34],
+        "Wall tops must stay level across gate ramps."
+      if ground.tops != [16'i16, 16, 16, 16]:
+        inc slopedWallCount
     if tile.surface == editorTiles.TreeSurface:
       let expected =
         if tile.side == editorMaps.Northeast:
@@ -67,6 +88,7 @@ for y in 0 ..< Size:
         let link = edgeLink(0, x, y, [3, 0, 1, 2][direction.ord])
         doAssert link.open == tiles.canStep(x, y, direction),
           "Cliff or ramp differs from the editor at " & $(x, y, direction)
+doAssert wallCount > 0 and slopedWallCount > 0
 for lane in map.layout.lanes:
   for i in 1 ..< lane.len:
     let

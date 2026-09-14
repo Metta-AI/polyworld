@@ -3,7 +3,7 @@
 import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, content, sim, game, maps, replays, ui,
+  assets, brushes, content, landscapes, sim, game, maps, replays, ui,
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
@@ -18,27 +18,33 @@ import
     visions, worldbars, worldtexts]
 
 when defined(takeScreenshot):
-  import std/os
+  import std/[os, strutils]
 
 const
   DefaultCameraDistance = 17.0'f / 1.2'f
   AtlasPath = TmpRoot & "/gota.atlas.png"
+  MossyStoneSurface = SurfaceNames.len
   CryptRockSurface = SurfaceNames.len + FortTextures.len
   CryptRubbleSurface = CryptRockSurface + 1
   CryptRoadSurface = CryptRockSurface + 2
-  CryptStoneSurface = CryptRockSurface + 3
-  CryptGrateSurface = CryptRockSurface + 4
+  CryptTrailSurface = CryptRockSurface + 3
+  CryptWallSurface = CryptRockSurface + 3
+  CryptFortSurface = CryptRockSurface + 4
+  CryptSpawnSurface = CryptRockSurface + 5
+  # Match crypt-rock-1's mean RGB while preserving the rock texture detail.
+  CryptRockTint = vec3(0.993051'f, 0.760436'f, 0.854697'f)
 
 type
   GraphicsError = object of CatchableError
 
 proc renderPoint(position: WorldPoint): Vec3 =
   ## Converts authoritative integer coordinates at the rendering boundary.
-  vec3(
+  result = vec3(
     position.x.float32 / WorldScale.float32,
     position.y.float32 / WorldScale.float32,
     position.z.float32 / WorldScale.float32
   )
+  result.y += groundOffset(result.x, result.z)
 
 proc renderFacing(value: Heading): float32 =
   ## Converts an integer heading to the renderer's angular convention.
@@ -51,7 +57,8 @@ proc renderSite(point: PathPoint): Vec3 =
     0,
     point.z.float32 / PathUnitsPerTile.float32
   )
-  result.y = groundHeight(result.x, result.z)
+  result.y = groundHeight(result.x, result.z) +
+    groundOffset(result.x, result.z)
 
 proc addAbilityIcons(builder: AtlasBuilder) =
   ## Packs every hero ability art file used by the action bar.
@@ -138,6 +145,15 @@ proc runGraphics*() =
       GotaTreeStyle, GeneratedTerrain, PaintedRocks, ArenaTextures,
       settings = GotaTerrainAssets
     )
+    let landscape = buildLandscape(
+      layers[GroundLayer],
+      run.map.mainRoads,
+      run.map.preset.seed,
+      CryptRoadSurface,
+      CryptTrailSurface
+    )
+    groundRelief = landscape.relief
+    groundMaterialOverrides = landscape.materials
     # Blend road materials at sub-tile resolution without changing pathing.
     setTileMaterial(
       RoadTile.int,
@@ -150,7 +166,7 @@ proc runGraphics*() =
     for i, kind in [RedFortKind, BlueFortKind]:
       let material =
         if i == 0:
-          CryptStoneSurface.float32
+          CryptWallSurface.float32
         else:
           (SurfaceNames.len + i).float32
       let
@@ -173,10 +189,10 @@ proc runGraphics*() =
     for side in 0 .. 1:
       let surfaces = [
         [GrassSurface, OliveSurface, GravelSurface, CobbleSurface,
-          CobbleSurface, DirtSurface, DirtSurface, GravelSurface],
-        [CryptRockSurface, CryptRubbleSurface, CryptStoneSurface,
-          CryptStoneSurface, CryptGrateSurface, CryptRoadSurface,
-          CryptRoadSurface, CryptRubbleSurface]
+          MossyStoneSurface, DirtSurface, DirtSurface, GravelSurface],
+        [CryptRockSurface, CryptRubbleSurface, CryptFortSurface,
+          CryptFortSurface, CryptSpawnSurface, CryptRoadSurface,
+          CryptTrailSurface, CryptTrailSurface]
       ]
       for i, surface in surfaces[side]:
         setTileMaterial(
@@ -309,18 +325,34 @@ proc runGraphics*() =
     for nodes in ArenaDecorNodes:
       for name in nodes:
         doAssert decorPack.hasProp(name), "missing arena decoration: " & name
-    let boulders = loadPropPack(
-      propPaths(PaintedRockPath, GotaBoulderNames),
-      only = @GotaBoulderNames,
-      textured = true,
-      repeatTexture = true,
-      textureSize = GotaDecorTextureSize
-    )
+    let
+      brush = mixBrush(layers[GroundLayer], run.map.preset.seed)
+      boulders = loadPropPack(
+        propPaths(PaintedRockPath, GotaBoulderNames),
+        only = @GotaBoulderNames,
+        textured = true,
+        repeatTexture = true,
+        textureSize = GotaDecorTextureSize
+      )
+    treeTileBrightness = brush.trees
     boulders.plantRocks(
       GotaBoulderNames,
       ArenaRockKind,
       ArenaSeed,
-      height = 1.6'f
+      height = 1.6'f,
+      sizeRange = vec2(0.5'f, 1.5'f),
+      burial = 0.4'f,
+      tint = CryptRockTint,
+      mask = brush.darkRocks
+    )
+    boulders.plantRocks(
+      GotaBoulderNames,
+      TreeTile,
+      ArenaSeed,
+      height = 1.6'f,
+      sizeRange = vec2(0.5'f, 1.5'f),
+      burial = 0.4'f,
+      mask = brush.lightRocks
     )
     for camp in run.map.layout.camps:
       let center = renderSite(camp)

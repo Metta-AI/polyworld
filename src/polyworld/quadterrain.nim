@@ -9,7 +9,7 @@
 import
   std/[random, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, pixie/internal, shady, vmath,
-  assets, common, pathing, shadows, terrainblends, terrainmaps,
+  assets, common, pathing, shadows, terrainblends, terrainmaps, terrainreliefs,
   terrainsurfaces, textures, toon
 
 ## Shaders
@@ -617,10 +617,12 @@ proc treeVert(
     vertPos: Vec3,
     vertUv: Vec3,
     normal: Vec3,
+    vertBrightness: float32,
     fragUv: var Vec3,
     fragmentNormal: var Vec3,
     fragmentPosition: var Vec3,
-    shadowPos: var Vec3
+    shadowPos: var Vec3,
+    fragBrightness: var float32
 ) =
   ## Emits textured tree vertex outputs for the generated OpenGL shader.
   gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
@@ -630,6 +632,7 @@ proc treeVert(
     vertPos.z + normal.z * 0.08
   )
   fragUv = vertUv
+  fragBrightness = vertBrightness
   fragmentNormal = normal
   fragmentPosition = vertPos
 
@@ -638,7 +641,8 @@ proc treeFrag(
     fragUv: Vec3,
     fragmentNormal,
     fragmentPosition: Vec3,
-    shadowPos: Vec3
+    shadowPos: Vec3,
+    fragBrightness: float32
 ) =
   ## Cuts out foliage by alpha and shades the painting from either side.
   let texel = texture(treeTextures, fragUv)
@@ -655,7 +659,7 @@ proc treeFrag(
       texture(visibilityTex, visibilityUv).x
     )
     litColor = envShadeTwoSided(
-      texel.xyz, fragmentNormal, sampleSunShadow(shadowPos))
+      texel.xyz * fragBrightness, fragmentNormal, sampleSunShadow(shadowPos))
     gray = dot(litColor, vec3(0.30, 0.59, 0.11)) * 0.32
   fragColor = vec4(
     litColor.x * visibility + gray * (1.0 - visibility),
@@ -1721,6 +1725,7 @@ const
   TerrainTextureSize = 1024
   GeneratedTextureSize = 256
   TerrainVertexSize = 21
+  TreeVertexSize = 10
   GrassMaterial* = 0.0'f32
   SandMaterial* = 1.0'f32
   CliffMaterial* = 2.0'f32
@@ -1747,6 +1752,12 @@ var
   treeHeight* = 6.0'f32   # tallest tree in tiles, before per-tree jitter
   treeWidth* = 0.0'f
     ## Maximum crown diameter in tiles, or zero to keep the pack proportions.
+  treeTileBrightness*: seq[float32]
+    ## Optional ground-tile tree brightness; zero omits a tree.
+  groundRelief*: TerrainRelief
+    ## Visual corner offsets, leaving packed gameplay elevations unchanged.
+  groundMaterialOverrides*: seq[int]
+    ## Optional generated ground materials; minus one keeps the tile style.
   autumnTrees* = false    # leafy trees may also wear red and yellow
   seed* = 1988            # seeds the per-tile tree rng in bakeTreeTiles
   layerVertexRanges*: seq[Slice[int]]
@@ -1966,7 +1977,8 @@ proc rebuildTerrainData() =
       amplitude,
       terrainSplatCount,
       terrainSplatChance,
-      terrainAverageColors.len
+      terrainAverageColors.len,
+      groundMaterialOverrides
     )
   except TerrainMapError:
     raise newException(QuadTerrainError, getCurrentExceptionMsg())
@@ -2186,6 +2198,18 @@ proc showAllTerrain*() =
 
 ## Prop scattering
 
+proc groundOffset*(worldX, worldZ: float32): float32 =
+  ## Reads the visual ground displacement for props, units, and effects.
+  if layers.len > 0:
+    result = reliefHeight(groundRelief, layers[0], worldX, worldZ)
+
+proc renderTops(layerIndex, index: int): array[4, float32] =
+  ## Adds optional visual relief to one tile's unpacked ground corners.
+  result = layers[layerIndex].tiles[index].tops.unpack
+  if layerIndex == 0 and groundRelief.len > 0:
+    for corner in 0 .. 3:
+      result[corner] += groundRelief[index][corner]
+
 proc scatterGrass*(
     count, randomSeed: int,
     matchTerrain = false,
@@ -2220,7 +2244,7 @@ proc scatterGrass*(
         gtile(x, z).kind != GrassTile:
       continue
     let
-      h = gtile(x, z).tops.unpack
+      h = renderTops(0, z * layers[0].width + x)
       offsetX = 0.15'f32 + grassRng.rand(0.7).float32
       offsetZ = 0.15'f32 + grassRng.rand(0.7).float32
       height = (h[0] * (1 - offsetX) + h[1] * offsetX) * (1 - offsetZ) +
@@ -2259,16 +2283,23 @@ proc plantRocks*(
     names: openArray[string],
     kind: uint32,
     randomSeed: int,
-    height = 1.6'f
+    height = 1.6'f,
+    sizeRange = vec2(0.8'f, 1.2'f),
+    burial = 0.2'f,
+    tint = vec3(1),
+    mask: openArray[bool] = []
 ) =
-  ## Places a stable boulder on every tile of the requested blocker kind.
+  ## Plants tinted blocker rocks with a seeded size range and buried fraction.
   if pack == nil or names.len == 0 or layers.len == 0:
     return
   let ground = layers[0]
+  doAssert mask.len == 0 or mask.len == ground.tiles.len
   for z in 0 ..< ground.depth:
     for x in 0 ..< ground.width:
       let tile = ground.tiles[z * ground.width + x]
       if not tile.exists or tile.kind != kind:
+        continue
+      if mask.len > 0 and not mask[z * ground.width + x]:
         continue
       var rng = initRand(
         x.int64 * 73_856_093 + z.int64 * 19_349_663 +
@@ -2276,17 +2307,19 @@ proc plantRocks*(
       )
       let
         model = rng.rand(names.high)
-        size = height * (0.8'f + rng.rand(0.4).float32)
-        tops = tile.tops.unpack()
+        size = height * (sizeRange.x +
+          rng.rand((sizeRange.y - sizeRange.x).float).float32)
+        tops = renderTops(0, z * ground.width + x)
       pack.placeProp(
         names[model],
         vec3(
           (ground.originX + x).float32 - HalfGrid + 0.5'f,
-          (tops[1] + tops[2]) / 2 - size * 0.2'f,
+          (tops[1] + tops[2]) / 2 - size * burial,
           (ground.originZ + z).float32 - HalfGrid + 0.5'f
         ),
         rotation = rng.rand(2 * PI).float32,
-        scale = size
+        scale = size,
+        tint = tint
       )
 
 proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
@@ -2307,7 +2340,7 @@ proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
         gtile(x, z).kind != RockTile:
       continue  # natural rock only; StoneTile construction gets none
     let
-      h = gtile(x, z).tops.unpack
+      h = renderTops(0, z * layers[0].width + x)
       model = rockRng.rand(rockModels.len - 1)
       boulderScale = (rockScaleRange.x +
         rockRng.rand(rockScaleRange.y.float).float32) * scale
@@ -2332,7 +2365,7 @@ var
   propVertexArray, propVertexBuffer: GLuint
   propMesh: seq[float32]   # x y z r g b nx ny nz; grass, boulders, props
   treeVertexArray, treeVertexBuffer: GLuint
-  treeMesh: seq[float32]   # x y z u v layer nx ny nz; textured trees
+  treeMesh: seq[float32]   # x y z u v layer nx ny nz brightness.
   waterVertexArray, waterVertexBuffer: GLuint
   waterMesh: seq[float32]  # x y z nx ny nz
 
@@ -2448,7 +2481,8 @@ proc bakeTree(
     position: Vec3,
     rotation,
     instanceScale,
-    widthScale: float32,
+    widthScale,
+    brightness: float32,
     writeIndex: var int
 ) =
   ## Writes one transformed tree instance into the baked tree mesh.
@@ -2475,7 +2509,8 @@ proc bakeTree(
     treeMesh[writeIndex + 6] = cosine * normal.x - sine * normal.z
     treeMesh[writeIndex + 7] = normal.y
     treeMesh[writeIndex + 8] = sine * normal.x + cosine * normal.z
-    writeIndex += 9
+    treeMesh[writeIndex + 9] = brightness
+    writeIndex += TreeVertexSize
     i += 8
 
 proc treeTileSeed(x, z: int): int64 {.inline.} =
@@ -2514,6 +2549,13 @@ proc chooseTree(x, z: int): TreeChoice =
       )
     )
 
+proc treeBrightness(index: int): float32 =
+  ## Reads visual tree overrides or the ordinary tree tile material.
+  if treeTileBrightness.len > 0:
+    return treeTileBrightness[index]
+  if layers[0].tiles[index].kind == TreeTile:
+    return 1
+
 proc treeMeshFloatCount(): int =
   ## Counts the exact float storage needed by the baked tree mesh.
   if treeModels.len > 0 and layers.len > 0:
@@ -2521,9 +2563,9 @@ proc treeMeshFloatCount(): int =
     for z in 0 ..< ground.depth:
       for x in 0 ..< ground.width:
         let tile = ground.tiles[z * ground.width + x]
-        if tile.exists and tile.kind == TreeTile:
-          # 8 floats per source vertex become 9 (uv gains the layer).
-          result += treeModels[chooseTree(x, z).model].vertices.len div 8 * 9
+        if tile.exists and treeBrightness(z * ground.width + x) > 0:
+          result += treeModels[chooseTree(x, z).model].vertices.len div 8 *
+            TreeVertexSize
 
 proc propMeshFloatCount(): int =
   ## Counts the exact float storage needed by the baked prop mesh.
@@ -2661,17 +2703,18 @@ proc rebuildTexturedBatches() =
     )
 
 proc bakeTreeTiles(writeIndex: var int) =
-  ## Tree tiles carry their tree in the tile data.
+  ## Plants tile trees using optional visual replacements and brightness.
   if treeModels.len == 0 or layers.len == 0:
     return
   let ground = layers[0]
   for z in 0 ..< ground.depth:
     for x in 0 ..< ground.width:
       let t = ground.tiles[z * ground.width + x]
-      if not t.exists or t.kind != TreeTile:
+      let brightness = treeBrightness(z * ground.width + x)
+      if not t.exists or brightness <= 0:
         continue
       let
-        h = t.tops.unpack
+        h = renderTops(0, z * ground.width + x)
         choice = chooseTree(x, z)
       bakeTree(
         treeModels[choice.model],
@@ -2687,6 +2730,7 @@ proc bakeTreeTiles(writeIndex: var int) =
         choice.rotation,
         choice.scale,
         choice.widthScale,
+        brightness,
         writeIndex
       )
 
@@ -2694,6 +2738,8 @@ proc rebuildTreeMesh() =
   ## Bakes trees, grass, rocks, and props into their colored or textured lists.
   if treeVertexBuffer == 0:
     return  # initTerrain hasn't created the buffers yet
+  doAssert treeTileBrightness.len == 0 or
+    (layers.len > 0 and treeTileBrightness.len == layers[0].tiles.len)
   treeMesh = newSeq[float32](treeMeshFloatCount())
   var treeIndex = 0
   bakeTreeTiles(treeIndex)
@@ -2903,7 +2949,7 @@ proc emitLayer(
   var faceNormals = newSeq[Vec3](layer.tiles.len)
   for i, t in layer.tiles:
     if t.exists:
-      faceNormals[i] = faceNormal(t.tops.unpack)
+      faceNormals[i] = faceNormal(renderTops(layerIndex, i))
   for z in 0 ..< layer.depth:
     for x in 0 ..< w:
       let
@@ -2916,7 +2962,7 @@ proc emitLayer(
         x1 = x0 + 1
         z0 = (layer.originZ + z).float32 - HalfGrid
         z1 = z0 + 1
-        h = t.tops.unpack
+        h = renderTops(layerIndex, i)
         b = t.bottoms.unpack
         v00 = vec3(x0, h[0], z0)
         v10 = vec3(x1, h[1], z0)
@@ -3011,7 +3057,7 @@ proc emitLayer(
         )
       else:
         let n = layer.tiles[z * w + x + 1]
-        let nh = n.tops.unpack
+        let nh = renderTops(layerIndex, z * w + x + 1)
         if h[1] != nh[0] or h[3] != nh[2]:
           # The cliff face belongs to the higher side; use its skirt color.
           let cliffStyle =
@@ -3054,7 +3100,7 @@ proc emitLayer(
         )
       else:
         let n = layer.tiles[(z + 1) * w + x]
-        let nh = n.tops.unpack
+        let nh = renderTops(layerIndex, (z + 1) * w + x)
         if h[2] != nh[0] or h[3] != nh[1]:
           let cliffStyle =
             if h[2] + h[3] >= nh[0] + nh[1]:
@@ -3216,6 +3262,9 @@ proc initTerrain*(
   if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
     raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
   terrainMaterialSize = settings.size
+  treeTileBrightness.setLen(0)
+  groundRelief.setLen(0)
+  groundMaterialOverrides.setLen(0)
   terrainMaterialPaths.setLen(0)
   terrainMaterialCompressed = false
   initSunShadows()
@@ -3576,7 +3625,7 @@ proc initTerrain*(
   glGenBuffers(1, treeVertexBuffer.addr)
   glBindBuffer(GL_ARRAY_BUFFER, treeVertexBuffer)
   block:
-    const stride = (9 * sizeof(float32)).GLsizei
+    const stride = (TreeVertexSize * sizeof(float32)).GLsizei
     let positionLocation = glGetAttribLocation(treeProgram, "vertPos")
     doAssert positionLocation >= 0
     glEnableVertexAttribArray(positionLocation.GLuint)
@@ -3601,6 +3650,13 @@ proc initTerrain*(
     glVertexAttribPointer(
       normalLocation.GLuint, 3, cGL_FLOAT, GL_FALSE, stride,
       cast[pointer](6 * sizeof(float32))
+    )
+    let brightnessLocation = glGetAttribLocation(treeProgram, "vertBrightness")
+    doAssert brightnessLocation >= 0
+    glEnableVertexAttribArray(brightnessLocation.GLuint)
+    glVertexAttribPointer(
+      brightnessLocation.GLuint, 1, cGL_FLOAT, GL_FALSE, stride,
+      cast[pointer](9 * sizeof(float32))
     )
 
   glGenVertexArrays(1, waterVertexArray.addr)
@@ -3656,7 +3712,7 @@ proc initTerrain*(
   glBindVertexArray(treeDepthVertexArray)
   glBindBuffer(GL_ARRAY_BUFFER, treeVertexBuffer)
   block:
-    const stride = (9 * sizeof(float32)).GLsizei
+    const stride = (TreeVertexSize * sizeof(float32)).GLsizei
     let positionLocation = glGetAttribLocation(
       sunCutoutProgramId(), "vertPos")
     doAssert positionLocation >= 0
@@ -3735,6 +3791,8 @@ proc bakeTerrain*(
   mesh.setLen(0)
   waterMesh.setLen(0)
   layerVertexRanges.setLen(0)
+  doAssert groundRelief.len == 0 or
+    (layers.len > 0 and groundRelief.len == layers[0].tiles.len)
   let floorY = -amplitude - 6
   if rebuildWalkability:
     computeWalkable()
@@ -3919,7 +3977,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
 
   if treeMesh.len > 0:
     drawTexturedMesh(
-      treeVertexArray, treeTextureArray, treeMesh.len div 9, mvp)
+      treeVertexArray, treeTextureArray, treeMesh.len div TreeVertexSize, mvp)
   for batch in texturedBatches.mitems:
     if batch.mesh.len > 0:
       drawTexturedBatch(batch, mvp)
@@ -3987,7 +4045,7 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) =
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D_ARRAY, treeTextureArray)
     glBindVertexArray(treeDepthVertexArray)
-    glDrawArrays(GL_TRIANGLES, 0, (treeMesh.len div 9).GLsizei)
+    glDrawArrays(GL_TRIANGLES, 0, (treeMesh.len div TreeVertexSize).GLsizei)
   for batch in texturedBatches.mitems:
     if batch.mesh.len == 0:
       continue
