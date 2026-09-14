@@ -28,6 +28,7 @@ const
   ]
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
   HudReferenceSize* = vec2(1920, 1080)
+  HudDoubleScaleSize = HudReferenceSize * 2.0'f * 0.8'f
   HudDaySeconds* = 300'i32
     ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
@@ -332,7 +333,7 @@ proc fitUiScale*(windowSize, contentSize: Vec2): float32 =
 
 proc gameUiScale*(windowSize: Vec2): float32 =
   ## Uses the same crisp HUD breakpoints for every game window.
-  fitUiScale(
+  result = fitUiScale(
     windowSize,
     proc(layoutSize: Vec2): bool =
       ## Checks both dimensions against the shared reference viewport.
@@ -340,6 +341,9 @@ proc gameUiScale*(windowSize: Vec2): float32 =
         layoutSize.y >= HudReferenceSize.y,
     UiCrispSteps
   )
+  if windowSize.x >= HudDoubleScaleSize.x and
+    windowSize.y >= HudDoubleScaleSize.y:
+      result = max(result, 2.0'f)
 
 proc gameUiScale*(window: Window): float32 =
   ## Uses the shared HUD breakpoints for the current drawable size.

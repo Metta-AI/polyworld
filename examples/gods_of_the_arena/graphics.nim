@@ -659,7 +659,7 @@ proc runGraphics*() =
             maximum: maximumHealth,
             delayedValue: delayedHealth,
             height: 0.16'f * HeroWorldBarScale,
-            color: healthColor(health, maximumHealth),
+            color: teamHudColor(hero.team),
             showDamageTrail: true
           ),
           WorldResourceBar(
@@ -667,7 +667,7 @@ proc runGraphics*() =
             maximum: max(hero.maxMana, 1'i32).float32,
             delayedValue: max(hero.mana, 0'i32).float32,
             height: 0.1'f * HeroWorldBarScale,
-            color: rgbx(60, 125, 231, 255)
+            color: ManaColor
           )
         ]
       renderer.addResourceBars(
@@ -696,7 +696,7 @@ proc runGraphics*() =
           maximum: maximumHealth,
           delayedValue: delayedHealth,
           height: 0.14'f32,
-          color: healthColor(health, maximumHealth),
+          color: teamHudColor(tower.team),
           showDamageTrail: true
         )]
       renderer.addResourceBars(anchor, TowerWorldBarWidth, bars)
@@ -722,7 +722,7 @@ proc runGraphics*() =
             maximum: maximumHealth,
             delayedValue: delayedHealth,
             height: 0.1'f32,
-            color: healthColor(health, maximumHealth),
+            color: teamHudColor(footman.team),
             showDamageTrail: true
           )]
         renderer.addResourceBars(anchor, FootmanWorldBarWidth, bars)

@@ -35,6 +35,14 @@ type
   ShopPanels* = object
     panel*, heading*, catalog*, footer*: GameUiPanel
     cards*: array[20, GameUiPanel]
+    compact*: bool
+
+proc scorePanel*(layout: GameUiLayout): GameUiPanel =
+  ## Moves the score below the hero roster when they cannot fit side by side.
+  let heroes = layout.panel(GameUiRegion.TopCenter, PanelHeroes)
+  result = layout.panel(GameUiRegion.TopLeft, PanelScore)
+  if result.overlaps(heroes, 48):
+    result.origin.y = heroes.origin.y + heroes.size.y + 48
 
 proc clockPanels*(panel: GameUiPanel): ClockPanels =
   ## Stacks the clock's icon and caption above its centered time.
@@ -96,13 +104,22 @@ proc inventoryPanels*(panel: GameUiPanel): InventoryPanels =
 
 proc shopPanels*(size: Vec2): ShopPanels =
   ## Fits all twenty items and the inventory into the full-screen shop.
-  result.panel = GameUiPanel(origin: vec2(24), size: size - vec2(48))
-  var rows = result.panel.stack(TopToBottom, vec2(24))
-  result.heading = rows.takeRow(72, 20)
-  result.catalog = rows.takeRow(rows.remainingSpace.y - 132, 20)
+  result.compact = size.x < 1920 or size.y < 1080
+  let
+    margin = if result.compact: 16.0'f else: 24.0'f
+    gap = if result.compact: 12.0'f else: 20.0'f
+    gridGap = if result.compact: 12.0'f else: 16.0'f
+    footerHeight = if result.compact: 112.0'f else: 132.0'f
+  result.panel = GameUiPanel(
+    origin: vec2(margin),
+    size: vec2(floor(size.x), floor(size.y)) - vec2(margin * 2)
+  )
+  var rows = result.panel.stack(TopToBottom, vec2(margin))
+  result.heading = rows.takeRow(72, gap)
+  result.catalog = rows.takeRow(rows.remainingSpace.y - footerHeight, gap)
   result.footer = rows.takeRest()
   let cell = vec2(
-    floor((result.catalog.size.x - 16 * 4) / 5),
-    floor((result.catalog.size.y - 16 * 3) / 4)
+    floor((result.catalog.size.x - gridGap * 4) / 5),
+    floor((result.catalog.size.y - gridGap * 3) / 4)
   )
-  stackGrid(result.catalog, cell, 5, vec2(16), result.cards)
+  stackGrid(result.catalog, cell, 5, vec2(gridGap), result.cards)
