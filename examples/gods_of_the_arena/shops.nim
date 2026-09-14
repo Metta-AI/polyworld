@@ -83,14 +83,19 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
       enabled = reason.len == 0 and waitingItem == NoItem
       hovered = sk.hovered(card)
     sk.drawTab(card, hovered = hovered and enabled)
-    var rows = card.stack(TopToBottom, vec2(12))
+    let
+      padding = if layout.compact: 8.0'f else: 12.0'f
+      iconSize = if layout.compact: 48.0'f else: 72.0'f
+    var rows = card.stack(TopToBottom, vec2(padding))
     let name = rows.takeRow(26, 6)
     sk.drawLabel(spec.name, name.origin, name.size, White, "Bold")
-    var body = rows.takeRow(72, 6).stack(LeftToRight)
+    var body = rows.takeRow(iconSize, 6).stack(LeftToRight)
     let
-      icon = body.take(vec2(72), 12)
+      icon = body.take(vec2(iconSize), padding)
       description = body.takeRest()
-    sk.drawWellImage(icon, itemIconKey(item), iconSize = 64)
+    sk.drawWellImage(
+      icon, itemIconKey(item), iconSize = if layout.compact: 32 else: 64
+    )
     sk.drawLabel(spec.itemDescription, description.origin, description.size,
       Muted)
     let price = rows.takeRest()

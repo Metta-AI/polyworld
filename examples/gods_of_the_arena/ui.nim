@@ -19,6 +19,7 @@ const
   ScoreIcons = ["tower", "kills", "deaths"]
   CooldownFill = rgbx(8, 10, 16, 180)
   IconTint = rgbx(245, 230, 190, 255)
+  ManaColor* = rgbx(238, 202, 65, 255)
   HeroPortraitKeys: array[HeroClass, string] = [
     "gota_vanguard_knight",
     "gota_ranger",
@@ -78,7 +79,7 @@ type
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
   result.layout = layout
-  result.score = layout.panel(GameUiRegion.TopLeft, PanelScore)
+  result.score = layout.scorePanel()
   result.heroes = layout.panel(GameUiRegion.TopCenter, PanelHeroes)
   result.clock = layout.panel(GameUiRegion.TopRight, PanelClock)
   result.minimap = layout.panel(GameUiRegion.BottomLeft, PanelMinimap)
@@ -190,8 +191,8 @@ proc renderPoint(position: WorldPoint): Vec3 =
     position.z.float32 / WorldScale.float32
   )
 
-proc teamHudColor(team: Team): ColorRGBX =
-  ## Returns a readable HUD color for one team.
+proc teamHudColor*(team: Team): ColorRGBX =
+  ## Returns the team's color for HUD markers and health bars.
   if team == RedTeam:
     rgbx(224, 80, 83, 255)
   else:
@@ -559,14 +560,14 @@ proc drawHeroMeters(
     hpBar.size,
     hero.hp.float32,
     hero.maxHp.float32,
-    rgbx(70, 190, 95, 255)
+    teamHudColor(hero.team)
   )
   sk.drawBar(
     manaBar.origin,
     manaBar.size,
     hero.mana.float32,
     hero.maxMana.float32,
-    rgbx(65, 126, 224, 255)
+    ManaColor
   )
   sk.drawBadge(
     portrait.origin + vec2(-4, portrait.size.y - BadgeSmall + 3),
@@ -993,14 +994,14 @@ proc drawUi*(
       hpBar.size,
       selection.hp,
       selection.maxHp,
-      rgbx(66, 188, 91, 255),
+      teamColor,
       hudScratch
     )
     sk.drawSprite(
       "health",
       hpBar.origin + vec2(4, 4),
       vec2(20),
-      rgbx(66, 188, 91, 255)
+      teamColor
     )
     if selection.maxMana > 0:
       sk.drawValueBar(
@@ -1008,14 +1009,14 @@ proc drawUi*(
         manaBar.size,
         selection.mana,
         selection.maxMana,
-        rgbx(61, 124, 225, 255),
+        ManaColor,
         (writeRatio(hudScratch, selection.mana.int, selection.maxMana.int); hudScratch)
       )
       sk.drawSprite(
         "mana",
         manaBar.origin + vec2(4, 4),
         vec2(20),
-        rgbx(186, 214, 255, 255)
+        ManaColor
       )
     if selection.nextXp > 0:
       sk.drawValueBar(
