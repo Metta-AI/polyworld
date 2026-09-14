@@ -1,11 +1,11 @@
 import
   std/[json, os, osproc, sha1, streams, strutils, times],
   curly,
-  herostats
+  herostats, herosites
 
 type
   Options = object
-    directory, ending: string
+    directory, ending, site: string
     hours, jobs: int
     offline, help: bool
   Worker = object
@@ -20,7 +20,7 @@ proc stop() {.noconv.} =
 
 proc arguments(values: seq[string]): Options =
   ## Parses download window and local concurrency without hidden defaults.
-  result = Options(hours: 24, jobs: 4)
+  result = Options(hours: 24, jobs: 4, site: defaultHeroSite())
   var i = 0
   while i < values.len:
     let parts = values[i].split('=', maxsplit = 1)
@@ -29,7 +29,9 @@ proc arguments(values: seq[string]): Options =
       result.help = true
     of "--offline":
       result.offline = true
-    of "--out", "--end", "--hours", "--jobs":
+    of "--no-site":
+      result.site = ""
+    of "--out", "--end", "--hours", "--jobs", "--site":
       var value: string
       if parts.len == 2:
         value = parts[1]
@@ -42,6 +44,8 @@ proc arguments(values: seq[string]): Options =
         result.directory = absolutePath(value)
       of "--end":
         result.ending = value
+      of "--site":
+        result.site = absolutePath(value)
       else:
         var number: int
         try:
@@ -168,13 +172,18 @@ Run:
   --out PATH    Output directory; reuse it to resume the frozen window.
   --jobs N      Concurrent local replay processes (default 4, max 32).
   --offline     Rebuild reports from saved evidence without network access.
+  --site PATH   Website checkout (default POLYWORLD_BUFF or sibling checkout).
+  --no-site     Generate local reports only.
 
 Writes manifest.json, replay files, per-game JSON, report.html, heroes.csv,
 heroes_by_version.csv, appearances.csv, and summary.json. Reusing --out
 resumes its original window. Use a new directory for a fresh last 24 hours.
 All recorded hashes and league seat scores must match. Incomplete coverage
-is listed in the report and returns exit status 2. No games are submitted."""
+is listed in the report and returns exit status 2. No games are submitted.
+When the website checkout is present, also updates GOTA/heros/index.html
+and hero_assets using its shared styling. Git commit/push remains manual."""
     return 0
+  checkHeroSite(options.site)
   let ending = if options.ending.len > 0: timestamp(options.ending)
     else: getTime()
   if options.directory.len == 0:
@@ -220,6 +229,7 @@ is listed in the report and returns exit status 2. No games are submitted."""
   if not options.offline:
     analyze(options.directory, manifest, options.jobs)
   let summary = publishStats(options.directory, manifest)
+  updateHeroSite(options.directory / "report.html", options.site)
   echo "Report: ", options.directory / "report.html"
   echo summary["verified_games"].getInt, " verified games, ",
     summary["excluded"].len, " excluded requests"

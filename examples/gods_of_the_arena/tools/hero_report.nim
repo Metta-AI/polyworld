@@ -1,7 +1,7 @@
 import
   std/[json, os],
   jsony,
-  heropages
+  heropages, herosites
 
 const Root = currentSourcePath().parentDir.parentDir.parentDir.parentDir
 
@@ -16,10 +16,28 @@ proc readDocument(path: string): JsonNode =
 
 proc main() =
   ## Rebuilds HTML from saved statistics without compiling the simulator.
-  let arguments = commandLineParams()
+  var
+    arguments: seq[string]
+    site = defaultHeroSite()
+    i = 0
+  let values = commandLineParams()
+  while i < values.len:
+    case values[i]
+    of "--no-site":
+      site = ""
+    of "--site":
+      inc i
+      if i >= values.len:
+        raise newException(HeroReportError, "Missing value for --site")
+      site = absolutePath(values[i])
+    else:
+      arguments.add(values[i])
+    inc i
   if arguments.len notin 1 .. 2:
-    echo "Usage: hero_report ANALYSIS_DIRECTORY [REPORT_HTML]"
+    echo "Usage: hero_report ANALYSIS_DIRECTORY [REPORT_HTML] " &
+      "[--site CHECKOUT | --no-site]"
     quit(1)
+  checkHeroSite(site)
   let
     directory = absolutePath(arguments[0])
     summary = readDocument(directory / "summary.json")
@@ -53,6 +71,7 @@ proc main() =
     appearances,
     getEnv("POLYWORLD_DATA", Root.parentDir / "polyworld_data")
   )
+  updateHeroSite(path, site)
   echo "Report: ", path
 
 try:
