@@ -159,7 +159,8 @@
         "scores",
         "ticks",
         "seed",
-        "outcome"
+        "outcome",
+        "total_xp"
       ],
       "properties": {
         "scores": {
@@ -196,6 +197,15 @@
           "type": "array",
           "items": {
             "type": "boolean"
+          }
+        },
+        "total_xp": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "items": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

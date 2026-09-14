@@ -324,10 +324,12 @@ proc completedSignal(signal: cint) {.noconv.} =
   ## Exits successfully when the runner terminates a completed episode.
   exitnow(QuitSuccess)
 
-proc finishCoworld*(results: CoworldResults) =
+proc finishCoworld*(results: CoworldResults, totalXp: seq[int] = @[]) =
   ## Finalizes private outputs before publishing the successful result marker.
   if results.scores.len != logs.len or not fileExists(replayPath):
     raise newException(CoworldError, "Incomplete Coworld results or replay")
+  if totalXp.len > 0 and totalXp.len != logs.len:
+    raise newException(CoworldError, "XP results do not match the roster")
   for slot in 0 ..< logs.len:
     playerLog(slot, "\nPlayer slot " & $slot & " completed.\n")
   closePlayerLogs()
@@ -338,6 +340,10 @@ proc finishCoworld*(results: CoworldResults) =
     stderr.flushFile()
   except IOError as error:
     raise newException(CoworldError, "Cannot flush game logs: " & error.msg)
-  writeAtomic(resultsPath, results.toJson())
+  var bytes = results.toJson()
+  if totalXp.len > 0:
+    bytes.setLen(bytes.len - 1)
+    bytes.add ",\"total_xp\":" & totalXp.toJson() & "}"
+  writeAtomic(resultsPath, bytes)
   discard posix.signal(SIGTERM, completedSignal)
   waitForCollection()
