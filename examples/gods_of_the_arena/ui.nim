@@ -64,6 +64,7 @@ type
     gold: int
     level: int
     damage: int32
+    attackCasting: CastKind
     moveSpeed: float32
     attackSpeed: float32
     attackRange: float32
@@ -280,6 +281,7 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         gold: hero.gold,
         level: hero.level,
         damage: hero.heroAttackDamage,
+        attackCasting: hero.class.heroAttackCasting,
         moveSpeed: moveSpeed,
         attackSpeed: TickRate.float32 / max(attackTicks, 1),
         attackRange: attackRange,
@@ -740,6 +742,27 @@ proc drawUi*(
   sk.drawFrame(
     GameUiPanel(origin: mapArea.origin, size: mapArea.size)
   )
+  if run.map.minimap.len == GridTiles * GridTiles:
+    let tileSize = mapArea.size / GridTiles.float32
+    for y in 0 ..< GridTiles:
+      var x = 0
+      while x < GridTiles:
+        let color = run.map.minimap[y * GridTiles + x]
+        var finish = x + 1
+        while finish < GridTiles and
+          run.map.minimap[y * GridTiles + finish] == color:
+            finish.inc
+        sk.drawRect(
+          mapArea.origin + vec2(x.float32, y.float32) * tileSize,
+          vec2((finish - x).float32, 1) * tileSize,
+          rgbx(
+            uint8((color shr 16) and 255),
+            uint8((color shr 8) and 255),
+            uint8(color and 255),
+            255
+          )
+        )
+        x = finish
   sk.drawRect(
     mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
     vec2(4),
@@ -833,6 +856,28 @@ proc drawUi*(
       actionCam.takeManual()
       focusPlayerHero = true
     if selection.kind == SelectedHero:
+      let
+        basic = GameUiPanel(
+          origin: portrait.origin + vec2(0, 158), size: vec2(40)
+        )
+        melee = selection.attackCasting == MeleeCast
+      sk.drawWellImage(
+        basic, if melee: "attack" else: "bow", iconSize = 32
+      )
+      sk.drawLabel(
+        "BASIC ATTACK",
+        basic.origin + vec2(46, 2),
+        vec2(108, 18),
+        rgbx(247, 221, 143, 255),
+        "Small"
+      )
+      sk.drawLabel(
+        (if melee: "Melee" else: "Ranged") & ": " & $selection.damage,
+        basic.origin + vec2(46, 20),
+        vec2(108, 18),
+        rgbx(236, 238, 244, 255),
+        "Small"
+      )
       for slot in HeroAbilitySlot:
         let
           i = slot.ord

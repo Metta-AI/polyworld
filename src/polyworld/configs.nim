@@ -13,15 +13,21 @@ type
   PlayerConfig* = object
     name*: string
 
-  GameConfig* = object
+  MatchConfig*[Preset] = object
     players*: seq[PlayerConfig]
     seed*: int32 = 2026
     maxTicks*: int32 = DefaultDurationTicks
     spawnIntervalTicks*: int32 = 240
     playerSlot*: int32
     dayCount*: int32
+    when Preset isnot void:
+      mapPreset*: Preset
 
-proc renameHook*(value: var GameConfig, fieldName: var string) =
+  GameConfig* = MatchConfig[void]
+
+proc renameHook*[Preset](
+    value: var MatchConfig[Preset], fieldName: var string
+) =
   ## Maps the platform's snake case config fields to Nim field names.
   var
     name: string
@@ -33,6 +39,31 @@ proc renameHook*(value: var GameConfig, fieldName: var string) =
       name.add(if upper: character.toUpperAscii else: character)
       upper = false
   fieldName = name
+
+proc gameConfig*[Preset](config: MatchConfig[Preset]): GameConfig =
+  ## Copies the shared match settings without game-specific map parameters.
+  GameConfig(
+    players: config.players,
+    seed: config.seed,
+    maxTicks: config.maxTicks,
+    spawnIntervalTicks: config.spawnIntervalTicks,
+    playerSlot: config.playerSlot,
+    dayCount: config.dayCount
+  )
+
+proc withMapPreset*[Preset](
+    config: GameConfig, preset: Preset
+): MatchConfig[Preset] =
+  ## Adds a typed map preset to the shared match settings.
+  MatchConfig[Preset](
+    players: config.players,
+    seed: config.seed,
+    maxTicks: config.maxTicks,
+    spawnIntervalTicks: config.spawnIntervalTicks,
+    playerSlot: config.playerSlot,
+    dayCount: config.dayCount,
+    mapPreset: preset
+  )
 
 proc displayName*(player: PlayerConfig, slot: int): string =
   ## Formats a player label without changing the recorded configuration.

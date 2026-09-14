@@ -1,0 +1,158 @@
+import polyworld/pathing
+import ../examples/gods_of_the_arena/maps as gameMaps
+import ../examples/gods_of_the_arena/generation/maps as editorMaps
+import ../examples/gods_of_the_arena/generation/tiles as editorTiles
+import ../examples/gods_of_the_arena/[sim, replays, terrains]
+
+echo "Checking the saved editor preset in the game."
+doAssert editorMaps.defaultConfig().campRadius == 36
+doAssert editorMaps.defaultConfig().jungleRoads == 32
+doAssert editorMaps.defaultConfig().campsTouchRoads
+doAssert gameMaps.generateMap(54, InitialArena).hash == 1257703624'u64,
+  "Version 24 recordings must retain their original map."
+doAssert gameMaps.generateMap(54, CryptArena).hash == 3673208403'u64,
+  "Version 25 recordings must retain their original map."
+let
+  preview = editorMaps.generateMap(editorMaps.defaultConfig())
+  tiles = editorTiles.buildTiles(preview)
+  map = gameMaps.generateMap(54)
+doAssert not map.legacy
+doAssert map.layout.camps.len == 14
+doAssert map.layout.barracks.len == 12
+doAssert map.seed == 54
+doAssert gameMaps.generateMap(1988).hash == map.hash,
+  "Match randomness must not select a different map preset."
+for y in 0 ..< GridTiles:
+  for x in 0 ..< GridTiles:
+    let tile = tiles.cells[y * GridTiles + x]
+    doAssert isWalkable(0, x, y) == tile.passable,
+      "Walkability differs from the editor at " & $(x, y)
+    doAssert terrainValue(x.int32, y.int32, 0, TerrainWalkableField) ==
+      int32(tile.passable)
+    doAssert terrainValue(x.int32, y.int32, 0, TerrainKindField) !=
+      TerrainNone.ord
+    if tile.surface == editorTiles.TreeSurface:
+      let expected =
+        if tile.side == editorMaps.Northeast:
+          TerrainRock
+        else:
+          TerrainTrees
+      doAssert terrainValue(x.int32, y.int32, 0, TerrainKindField) ==
+        expected.ord
+    var interior = x > 0 and y > 0 and x < GridTiles - 1 and y < GridTiles - 1
+    if interior:
+      for dz in -1 .. 1:
+        for dx in -1 .. 1:
+          let neighbor = tiles.cells[(y + dz) * GridTiles + x + dx]
+          if neighbor.terrain != tile.terrain or neighbor.ramp:
+            interior = false
+    if interior and tile.surface == editorTiles.NaturalSurface:
+      let heights = layers[0].tiles[y * GridTiles + x].tops
+      if heights[0] == heights[1] and heights[0] == heights[2] and
+        heights[0] == heights[3]:
+          case tile.terrain
+          of editorTiles.LowGround:
+            doAssert heights[0] == 0
+          of editorTiles.HighGround:
+            doAssert heights[0] == 8
+          of editorTiles.CastleGround, editorTiles.KeepGround,
+            editorTiles.SpawnGround:
+              doAssert heights[0] == 16
+          of editorTiles.LakeGround:
+            doAssert heights[0] == -8
+    if tile.passable:
+      for direction in editorTiles.Direction:
+        let link = edgeLink(0, x, y, [3, 0, 1, 2][direction.ord])
+        doAssert link.open == tiles.canStep(x, y, direction),
+          "Cliff or ramp differs from the editor at " & $(x, y, direction)
+for lane in map.layout.lanes:
+  for i in 1 ..< lane.len:
+    let
+      first = lane[i - 1]
+      last = lane[i]
+    doAssert findTilePath(0, first.x, first.z, 0, last.x, last.z).len > 0
+let first = map.layout.lanes[0][0]
+proc checkAccess(point: PathPoint) =
+  ## Checks that a generated clearing or spawn reaches the lane network.
+  let
+    x = int((point.x + GridTiles div 2 * PathUnitsPerTile) div PathUnitsPerTile)
+    z = int((point.z + GridTiles div 2 * PathUnitsPerTile) div PathUnitsPerTile)
+  doAssert findTilePath(0, first.x, first.z, 0, x, z).len > 0,
+    "Generated site is unreachable at " & $(x, z)
+for point in map.layout.camps:
+  checkAccess(point)
+for point in map.layout.spawns:
+  checkAccess(point)
+for site in map.layout.barracks:
+  checkAccess(site.spawn)
+echo "Game terrain matches every editor tile and movement edge."
+
+echo "Checking generated towers, hero spawns, and paired barracks in play."
+let game = newGame(map, 100_000, 10, false, ReplayData())
+game.world.heroTurnTicks = 100_000
+doAssert game.world.towers.len == 18
+for tower in game.world.towers:
+  let point = map.layout.towers[tower.lane][tower.team.ord][tower.tier.ord].position
+  doAssert tower.position.x == point.x * (WorldScale div PathUnitsPerTile)
+  doAssert tower.position.z == point.z * (WorldScale div PathUnitsPerTile)
+for hero in game.world.heroes:
+  let tile = tiles.cells[
+    mapCoordinate(hero.position.z).int * GridTiles +
+    mapCoordinate(hero.position.x).int
+  ]
+  doAssert tile.terrain == editorTiles.SpawnGround
+game.tickWorld(nil)
+doAssert game.world.footmen.len == 12
+for team in sim.Team:
+  for lane in 0 .. 2:
+    let sites = game.world.barracksPairs[team.ord][lane]
+    doAssert sites[0] != sites[1], "Both creeps must use their own barracks."
+for tick in 1 .. 500:
+  game.tickWorld(nil)
+for footman in game.world.footmen:
+  let tile = tiles.cells[
+    mapCoordinate(footman.position.z).int * GridTiles +
+    mapCoordinate(footman.position.x).int
+  ]
+  doAssert tile.terrain notin {
+    editorTiles.CastleGround, editorTiles.KeepGround, editorTiles.SpawnGround
+  }, "A creep failed to march out of its generated fort."
+echo "Generated structures and all twelve creep spawns passed."
+echo "Map fingerprint: ", map.hash, "; simulation fingerprint: ", game.stateHash()
+
+echo "Checking that direct movement respects cliffs and crosses ramps."
+for edge in [editorTiles.CliffEdge, editorTiles.RampEdge]:
+  var
+    sourceX = -1
+    sourceZ = -1
+  for z in 1 ..< GridTiles - 1:
+    for x in 1 ..< GridTiles - 2:
+      let index = z * GridTiles + x
+      if sourceX < 0 and tiles.cells[index].passable and
+        tiles.cells[index + 1].passable and
+        tiles.cells[index].edges[editorTiles.East] == edge:
+          sourceX = x
+          sourceZ = z
+  doAssert sourceX >= 0, "No walkable tiles found on either side of the edge."
+  let trial = newGame(map, 100_000, 10, false, ReplayData())
+  trial.world.heroes.setLen(1)
+  trial.world.towers.setLen(0)
+  trial.world.spawnTimerTicks = 100_000
+  trial.world.heroTurnTicks = 100_000
+  let
+    hero = trial.world.heroes[0]
+    origin = WorldPoint(
+      x: (sourceX.int32 - GridTiles div 2) * WorldScale + WorldScale div 2,
+      z: (sourceZ.int32 - GridTiles div 2) * WorldScale + WorldScale div 2
+    )
+    target = WorldPoint(x: origin.x + WorldScale, z: origin.z)
+  hero.place(origin)
+  hero.movePath = @[target]
+  hero.movePathLayers = @[0'i32]
+  hero.hasMoveTarget = true
+  for tick in 0 ..< 60:
+    trial.tickWorld(nil)
+  let expectedX = sourceX + int(edge == editorTiles.RampEdge)
+  doAssert mapCoordinate(hero.position.x).int == expectedX,
+    "Direct movement did not respect " & $edge
+echo "Cliffs block direct movement and ramps allow it."

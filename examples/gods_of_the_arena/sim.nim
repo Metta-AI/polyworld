@@ -42,6 +42,8 @@ var
   heroPathTiles: seq[PathTile]
   gotaWalkLayer: int
   gotaWalkDestLayer: int
+  gotaWalkOrigin: FixedVec2
+  gotaWalkEdges: bool
 
 ## Simulation
 
@@ -180,9 +182,13 @@ type
     resolved*: bool
 
   World* = ref object
+    legacyMap*: bool
+    heroSpawns*: array[2, WorldPoint]
+    barracksPairs*: array[2, array[3, array[2, WorldPoint]]]
     legacyCombat*: bool
       ## Replays through version 19 retain their recorded combat rules.
     legacyAbilities*: bool
+    legacyAttacks*: bool
     casts*: seq[SpellCast]
     stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
@@ -238,7 +244,7 @@ const
   TowerAttackTicks* = TickRate
   TowerSiegeRange* = 105_000'i32
 
-proc config*(game: Game): GameConfig =
+proc config*(game: Game): GotaConfig =
   ## Reads the match configuration owned by the live or loaded replay.
   if game.recorder != nil:
     game.recorder.data.config
@@ -312,18 +318,31 @@ proc fixedSurfaceHeightNear(
     referenceY: int32
 ): int32
 
-proc initTowers(world: World) =
-  ## Creates towers at the authored courts in the shared map blueprint.
+proc initTowers(world: World, map: MapData) =
+  ## Creates towers at the courts selected by this map's layout.
   for lane in 0 .. 2:
     for team in Team:
       for tier in TowerTier:
-        let
-          site = TowerSites[lane][team.ord][tier.ord]
-          hitPoints = TowerHitPoints[tier]
-        var position = WorldPoint(
-          x: int32(site.x - GridTiles div 2) * WorldScale + WorldScale div 2,
-          z: int32(site.z - GridTiles div 2) * WorldScale + WorldScale div 2
-        )
+        let hitPoints = TowerHitPoints[tier]
+        var
+          position: WorldPoint
+          facing: Heading
+        if map.legacy:
+          let site = TowerSites[lane][team.ord][tier.ord]
+          position = WorldPoint(
+            x: int32(site.x - GridTiles div 2) * WorldScale + WorldScale div 2,
+            z: int32(site.z - GridTiles div 2) * WorldScale + WorldScale div 2
+          )
+          facing = heading(
+            int32(site.faceX - site.x), int32(site.faceZ - site.z)
+          )
+        else:
+          let site = map.layout.towers[lane][team.ord][tier.ord]
+          position = worldPoint(site.position)
+          facing = heading(
+            site.facing.x - site.position.x,
+            site.facing.z - site.position.z
+          )
         position.y = fixedSurfaceHeight(position)
         world.towers.add Tower(
           id: FirstTowerId + world.towers.len.int32,
@@ -331,9 +350,7 @@ proc initTowers(world: World) =
           lane: lane,
           tier: tier,
           position: position,
-          facing: heading(
-            int32(site.faceX - site.x), int32(site.faceZ - site.z)
-          ),
+          facing: facing,
           hp: hitPoints,
           maxHp: hitPoints
         )
@@ -378,9 +395,9 @@ const
   HeroDeathTicks = 24'i32
   FortHp* = 400'i32
 
-proc startingForts(): array[2, Fort] =
-  ## Places the two forts on their canonical map tiles.
-  [
+proc startingForts(map: MapData): array[2, Fort] =
+  ## Places both gods at the selected layout's fort centers.
+  result = [
     Fort(
       id: RedFortId,
       team: RedTeam,
@@ -404,6 +421,9 @@ proc startingForts(): array[2, Fort] =
       )
     )
   ]
+  if not map.legacy:
+    for team in Team:
+      result[team.ord].center = worldPoint(map.layout.forts[team.ord])
 
 proc cloneHeroes(heroes: seq[Hero]): seq[Hero] =
   ## Copies each hero so two worlds never share a path seq.
@@ -461,10 +481,11 @@ proc buildSightTerrain(): tuple[
   for z in 0 ..< ground.depth:
     for x in 0 ..< ground.width:
       let index = z * ground.width + x
-      if ground.tiles[index].kind == TreeTile:
-        result.blockerHeights[
-          (ground.originZ + z) * GridTiles + ground.originX + x
-        ] = 24
+      if ground.tiles[index].kind == TreeTile or
+        ground.tiles[index].kind == ArenaRockKind:
+          result.blockerHeights[
+            (ground.originZ + z) * GridTiles + ground.originX + x
+          ] = 24
   for value in result.terrainHeights.mitems:
     if value == int16.low:
       value = 0
@@ -834,11 +855,27 @@ proc inWalkMargin(pos: FixedVec2): bool =
     z >= -HalfGridUnits + Margin and z <= HalfGridUnits - Margin
 
 proc tilesWalkable(pos: FixedVec2): bool =
-  ## Current nav layer, plus the next waypoint layer while crossing a ramp.
+  ## Keeps body movement on walkable tiles and on the open side of cliffs.
   if not inWalkMargin(pos):
     return false
   let (x, z) = walkWorldCell(pos)
-  worldLayersOpen(gotaWalkLayer, gotaWalkDestLayer, x, z)
+  if not worldLayersOpen(gotaWalkLayer, gotaWalkDestLayer, x, z):
+    return false
+  if not gotaWalkEdges:
+    return true
+  let (originX, originZ) = walkWorldCell(gotaWalkOrigin)
+  lineClear(
+    PathTile(
+      layer: gotaWalkLayer.int32,
+      x: int32(originX - layers[gotaWalkLayer].originX),
+      z: int32(originZ - layers[gotaWalkLayer].originZ)
+    ),
+    PathTile(
+      layer: gotaWalkLayer.int32,
+      x: int32(x - layers[gotaWalkLayer].originX),
+      z: int32(z - layers[gotaWalkLayer].originZ)
+    )
+  )
 
 proc bindNavLayer(position: WorldPoint): int32 =
   ## Picks the packed layer under a spawn or teleport.
@@ -930,6 +967,7 @@ proc tryMove(
 ) =
   ## Turns toward the offset, then walks along facing with wall-slide.
   gotaWalkLayer = int(footman.navLayer)
+  gotaWalkOrigin = footman.body.pos
   gotaWalkDestLayer =
     if destLayer < 0: gotaWalkLayer else: int(destLayer)
   steer(
@@ -947,6 +985,7 @@ proc tryMove(
 proc tryMove(hero: Hero, direction: WorldPoint, destLayer = -1'i32) =
   ## Turns and walks a hero at its level-scaled tile-space speed.
   gotaWalkLayer = int(hero.navLayer)
+  gotaWalkOrigin = hero.body.pos
   gotaWalkDestLayer =
     if destLayer < 0: gotaWalkLayer else: int(destLayer)
   steer(
@@ -1027,7 +1066,11 @@ proc spawnHeroes(world: World, setup: openArray[ReplayHero]) =
       lane = int(heroSetup.lane)
       class = HeroClass(heroSetup.class)
       path = lanePathPoints[lane]
-      start = world.barracksSpawns[team.ord][lane]
+      start =
+        if world.legacyMap:
+          world.barracksSpawns[team.ord][lane]
+        else:
+          world.heroSpawns[team.ord]
       inner =
         if team == RedTeam:
           worldPoint(path[min(3, path.len - 1)])
@@ -1113,8 +1156,12 @@ proc spawnWave(world: World) {.measure.} =
     return
   for team in [RedTeam, BlueTeam]:
     for lane in 0 .. 2:
-      let start = world.barracksSpawns[team.ord][lane]
       for i in 0 .. 1:
+        let start =
+          if world.legacyMap:
+            world.barracksSpawns[team.ord][lane]
+          else:
+            world.barracksPairs[team.ord][lane][i]
         let
           id = world.nextFootmanId
           placed = start + WorldPoint(
@@ -1122,7 +1169,7 @@ proc spawnWave(world: World) {.measure.} =
             z: world.rng.below(72_001) - 36_000
           )
         inc world.nextFootmanId
-        world.footmen.add Footman(
+        var footman = Footman(
           id: id,
           team: team,
           lane: lane,
@@ -1135,6 +1182,14 @@ proc spawnWave(world: World) {.measure.} =
           surfaceHint: start.y,
           navLayer: bindNavLayer(placed)
         )
+        if not world.legacyMap:
+          var nearest = int64.high
+          for waypoint in 0 ..< laneWorldPaths[lane].len:
+            let distance = distanceSquared(start, footman.waypointAt(waypoint))
+            if distance < nearest:
+              nearest = distance
+              footman.waypointIndex = waypoint
+        world.footmen.add(footman)
 
 proc mapCoordinate*(value: int32): int32 =
   ## Converts one world coordinate to a clamped script map coordinate.
@@ -1382,6 +1437,13 @@ proc setHeroDestination(
   hero.moveTileY = targetY
   hero.hasMoveTarget = true
   true
+
+proc stopHeroPath(hero: Hero) =
+  ## Drops the finished chase so a hero can acquire nearby creeps again.
+  hero.hasMoveTarget = false
+  hero.movePath.setLen(0)
+  hero.movePathLayers.setLen(0)
+  hero.movePathIndex = 0
 
 proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
@@ -2476,8 +2538,10 @@ proc tryCombatAbilities(
     fortIndex
   )
 
-proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
-  ## Returns the closest visible enemy within `radius`, or 0.
+proc nearestEnemy(
+    world: World, hero: Hero, radius: int32, creepsOnly = false
+): int32 =
+  ## Returns the closest visible enemy, optionally restricting it to creeps.
   var bestSquared = int64(radius) * int64(radius)
   for footman in world.footmen:
     if footman.team == hero.team or
@@ -2489,6 +2553,8 @@ proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
     if squared <= bestSquared:
       bestSquared = squared
       result = footman.id
+  if creepsOnly:
+    return
   for other in world.heroes:
     if other.id == hero.id or
         other.team == hero.team or
@@ -2521,15 +2587,17 @@ proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
       bestSquared = squared
       result = fort.id
 
-proc acquireRadius(hero: Hero): int32 =
+proc acquireRadius(world: World, hero: Hero): int32 =
   ## Returns the search radius for idle or attack-move acquisition.
   if hero.attackMoving:
     if hero.class.heroSpec.attackStyle == MeleeAttack:
       return HeroMeleeAttackMoveRange
     return heroAttackRange(hero.class)
-  if hero.class.heroSpec.attackStyle == MeleeAttack and
-      not hero.hasMoveTarget:
-    return HeroMeleeIdleRange
+  if not hero.hasMoveTarget:
+    if hero.class.heroAttackCasting == MeleeCast:
+      return HeroMeleeIdleRange
+    if not world.legacyAttacks:
+      return heroAttackRange(hero.class)
   0
 
 proc updateHero(world: World, hero: Hero) =
@@ -2596,10 +2664,14 @@ proc updateHero(world: World, hero: Hero) =
     if targetFootman < 0 and targetHero < 0 and targetTower < 0 and
         not hero.attackingFort:
       hero.attackObjectId = 0
+      if not world.legacyAttacks and not hero.attackMoving:
+        hero.stopHeroPath()
   if hero.attackObjectId == 0:
-    let radius = hero.acquireRadius()
+    let radius = world.acquireRadius(hero)
     if radius > 0:
-      hero.attackObjectId = world.nearestEnemy(hero, radius)
+      hero.attackObjectId = world.nearestEnemy(
+        hero, radius, creepsOnly = not world.legacyAttacks
+      )
       if hero.attackObjectId != 0:
         targetFootman = footmanIndex(world, hero.attackObjectId)
         if targetFootman >= 0:
@@ -2647,6 +2719,9 @@ proc updateHero(world: World, hero: Hero) =
 
   if not world.legacyCombat and
     not world.isEnemyTarget(hero, hero.attackObjectId):
+      if not world.legacyAttacks and hero.attackObjectId != 0 and
+        not hero.attackMoving:
+          hero.stopHeroPath()
       targetFootman = -1
       targetHero = -1
       targetTower = -1
@@ -2731,6 +2806,9 @@ proc separateBodies(first, second: var Body, layer: int32) =
   ## Pushes two living units apart while keeping both on this layer.
   gotaWalkLayer = int(layer)
   gotaWalkDestLayer = int(layer)
+  gotaWalkOrigin = first.pos
+  if gotaWalkEdges and not tilesWalkable(second.pos):
+    return
   separatePair(first, second, tilesWalkable)
 
 proc addHashy(hash: var uint32, value: WorldPoint) =
@@ -3020,18 +3098,23 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     except ReplayError as error:
       game.recordingError = error.msg
 
-proc initLanePaths(seed: int32) =
+proc initLanePaths(map: MapData) =
   ## Builds shared lane polylines on the generated map.
   for lane in 0 .. 2:
+    let route =
+      if map.legacy:
+        LaneRoutes[lane]
+      else:
+        map.layout.lanes[lane]
     lanePathPoints[lane].setLen(0)
     lanePathTiles[lane].setLen(0)
-    for i in 0 ..< LaneRoutes[lane].len - 1:
+    for i in 0 ..< route.len - 1:
       let
-        a = LaneRoutes[lane][i]
-        b = LaneRoutes[lane][i + 1]
+        a = route[i]
+        b = route[i + 1]
         segment = findTilePath(a.layer, a.x, a.z, b.layer, b.x, b.z)
       doAssert segment.len > 0,
-        &"lane {lane} seed {seed}: no path {a} -> {b}; " &
+        &"lane {lane} seed {map.seed}: no path {a} -> {b}; " &
         &"walkable {isWalkable(a.layer, a.x, a.z)} -> " &
         &"{isWalkable(b.layer, b.x, b.z)}"
       for tileIndex, tile in segment:
@@ -3043,6 +3126,8 @@ proc initLanePaths(seed: int32) =
           int(tile.x),
           int(tile.z)
         )
+  if not map.legacy:
+    return
   let
     redTunnel = findPathPoints(
       GroundLayer,
@@ -3119,11 +3204,14 @@ proc newGame*(
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
     world: World(
+      legacyMap: map.legacy,
       legacyCombat: replayMode and
         replayData.header.gameVersion <= TelemetryGameVersion,
       legacyAbilities: replayMode and
         replayData.header.gameVersion <= CombatGameVersion,
-      forts: startingForts(),
+      legacyAttacks: replayMode and
+        replayData.header.gameVersion <= ArenaGameVersion,
+      forts: startingForts(map),
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
       scriptObjects: newSeqOfCap[WorldObject](256),
@@ -3136,13 +3224,27 @@ proc newGame*(
     replayData: replayData
   )
   let world = result.world
+  gotaWalkEdges = not map.legacy
   world.spawnIntervalTicks = spawnInterval
   world.rng = initRng(map.seed)
-  initLanePaths(map.seed)
-  initTowers(world)
+  initLanePaths(map)
+  initTowers(world, map)
   for lane in 0 .. 2:
     world.barracksSpawns[RedTeam.ord][lane] = worldPoint(lanePathPoints[lane][0])
     world.barracksSpawns[BlueTeam.ord][lane] = worldPoint(lanePathPoints[lane][^1])
+  if not map.legacy:
+    for team in Team:
+      var point = worldPoint(map.layout.spawns[team.ord])
+      point.y = fixedSurfaceHeight(point)
+      world.heroSpawns[team.ord] = point
+    var counts: array[2, array[3, int]]
+    for site in map.layout.barracks:
+      var point = worldPoint(site.spawn)
+      point.y = fixedSurfaceHeight(point)
+      let index = counts[site.team][site.lane]
+      doAssert index < 2
+      world.barracksPairs[site.team][site.lane][index] = point
+      counts[site.team][site.lane].inc
   sightTerrain = buildSightTerrain()
   let visionCells = GridTiles * GridTiles
   for team in Team:
@@ -3151,7 +3253,12 @@ proc newGame*(
   for lane in 0 .. 2:
     laneWorldPaths[lane].setLen(0)
     laneWorldLayers[lane].setLen(0)
-    for tile in smoothPathTiles(lanePathTiles[lane]):
+    let route =
+      if map.legacy:
+        smoothPathTiles(lanePathTiles[lane])
+      else:
+        lanePathTiles[lane]
+    for tile in route:
       laneWorldPaths[lane].add worldPoint(pathPoint(
         int(tile.layer),
         int(tile.x),

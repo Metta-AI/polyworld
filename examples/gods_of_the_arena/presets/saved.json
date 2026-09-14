@@ -1,0 +1,18 @@
+{
+  "seed": 54,
+  "mapPreset": {
+    "seed": 54,
+    "highSize": 511,
+    "castleSize": 295,
+    "roadWidth": 62,
+    "roadWobble": 73,
+    "lakeWidth": 80,
+    "lakeWobble": 30,
+    "campRadius": 36,
+    "stemLength": 50,
+    "jungleRoads": 32,
+    "campScatter": 35,
+    "lakeCrossings": 4,
+    "campsTouchRoads": true
+  }
+}

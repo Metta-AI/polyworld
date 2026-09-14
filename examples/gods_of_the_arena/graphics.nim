@@ -23,6 +23,11 @@ when defined(takeScreenshot):
 const
   DefaultCameraDistance = 17.0'f
   AtlasPath = TmpRoot & "/gota.atlas.png"
+  CryptRockSurface = SurfaceNames.len + FortTextures.len
+  CryptRubbleSurface = CryptRockSurface + 1
+  CryptRoadSurface = CryptRockSurface + 2
+  CryptStoneSurface = CryptRockSurface + 3
+  CryptGrateSurface = CryptRockSurface + 4
 
 type
   GraphicsError = object of CatchableError
@@ -38,6 +43,15 @@ proc renderPoint(position: WorldPoint): Vec3 =
 proc renderFacing(value: Heading): float32 =
   ## Converts an integer heading to the renderer's angular convention.
   arctan2(value.x.float32, value.z.float32)
+
+proc renderSite(point: PathPoint): Vec3 =
+  ## Positions a generated structure on the packed ground beneath its feet.
+  result = vec3(
+    point.x.float32 / PathUnitsPerTile.float32,
+    0,
+    point.z.float32 / PathUnitsPerTile.float32
+  )
+  result.y = groundHeight(result.x, result.z)
 
 proc addAbilityIcons(builder: AtlasBuilder) =
   ## Packs every hero ability art file used by the action bar.
@@ -116,12 +130,12 @@ proc runGraphics*() =
     )
   let splash = startSplash(sk, window)
   profileBlock "terrain":
-    amplitude = 1.4'f32
-    seed = run.map.seed
-    treeHeight = 5.8'f
+    amplitude = (if run.map.legacy: 1.4'f else: 2.8'f)
+    seed = (if run.map.legacy: run.map.seed else: ArenaSeed)
+    treeHeight = 5.8'f / 2
     treeWidth = 0.0'f
     initTerrain(
-      GotaTreeStyle, GeneratedTerrain, PaintedRocks, FortTextures,
+      GotaTreeStyle, GeneratedTerrain, PaintedRocks, ArenaTextures,
       settings = GotaTerrainAssets
     )
     # Road gameplay stays tile-authored; its visible dirt and gravel are
@@ -135,10 +149,15 @@ proc runGraphics*() =
       1
     )
     for i, kind in [RedFortKind, BlueFortKind]:
-      let material = (SurfaceNames.len + i).float32
+      let material =
+        if not run.map.legacy and i == 0:
+          CryptStoneSurface.float32
+        else:
+          (SurfaceNames.len + i).float32
       let
         topTint =
-          if i == 0: vec3(1.08'f32, 0.76'f32, 0.68'f32)
+          if not run.map.legacy and i == 0: vec3(1)
+          elif i == 0: vec3(1.08'f32, 0.76'f32, 0.68'f32)
           else: vec3(0.72'f32, 0.84'f32, 1.08'f32)
         sideTint =
           if i == 0: vec3(0.82'f32, 0.56'f32, 0.50'f32)
@@ -215,25 +234,54 @@ proc runGraphics*() =
       vec3(0.66'f32, 0.62'f32, 0.52'f32),
       3
     )
-    # Paint lane and quarry tops independently of their gameplay tile kinds.
-    # The mask restores soft road borders, preserves the gravel shoulders,
-    # feathers quarry earth, and breaks up working floors with gravel relief.
-    let arenaGroundMask = buildArenaGroundMask()
-    uploadGroundMask(arenaGroundMask, GroundMaskSize)
-    setGroundLayers(
-      GravelSurface.float32,
-      DirtSurface.float32,
-      GrassSurface.float32
-    )
-    scatterGrass(
-      1_500,
-      run.map.seed,
-      matchTerrain = true,
-      exclusionMask = arenaGroundMask,
-      exclusionMaskSize = GroundMaskSize,
-      exclusionMaskChannels = GroundMaskChannels
-    )
-    scatterRocks(180, run.map.seed, scale = 0.25'f)
+    if not run.map.legacy:
+      terrainBlendDepth = 0.65'f
+      terrainHeightBlend = 1.0'f
+      for side in 0 .. 1:
+        let surfaces = [
+          [GrassSurface, OliveSurface, GravelSurface, CobbleSurface,
+            CobbleSurface, DirtSurface, DirtSurface, GravelSurface],
+          [CryptRockSurface, CryptRubbleSurface, CryptStoneSurface,
+            CryptStoneSurface, CryptGrateSurface, CryptRoadSurface,
+            CryptRoadSurface, CryptRubbleSurface]
+        ]
+        for i, surface in surfaces[side]:
+          setTileMaterial(
+            int(ArenaKindBase) + side * int(ArenaKindStride) + i,
+            surface.float32,
+            (if side == 0: GravelSurface else: CryptRockSurface).float32,
+            vec3(1),
+            vec3(0.8'f),
+            (if i >= 5: 5'i32 else: 2'i32)
+          )
+      setTileMaterial(
+        ArenaRockKind.int,
+        CryptRockSurface.float32,
+        CryptRockSurface.float32,
+        vec3(1),
+        vec3(0.8'f),
+        2
+      )
+    else:
+      # Paint lane and quarry tops independently of their gameplay tile kinds.
+      # The mask restores soft road borders, preserves the gravel shoulders,
+      # feathers quarry earth, and breaks up working floors with gravel relief.
+      let arenaGroundMask = buildArenaGroundMask()
+      uploadGroundMask(arenaGroundMask, GroundMaskSize)
+      setGroundLayers(
+        GravelSurface.float32,
+        DirtSurface.float32,
+        GrassSurface.float32
+      )
+      scatterGrass(
+        1_500,
+        run.map.seed,
+        matchTerrain = true,
+        exclusionMask = arenaGroundMask,
+        exclusionMaskSize = GroundMaskSize,
+        exclusionMaskChannels = GroundMaskChannels
+      )
+      scatterRocks(180, run.map.seed, scale = 0.25'f)
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -325,8 +373,20 @@ proc runGraphics*() =
     vec4(tint.x, tint.y, tint.z, 1)
 
   proc placeStaticStructures(pack: PropPack) =
-    ## Three deliberately spaced barracks form a river-facing arc beyond the
-    ## nexus, while leaving straight visual corridors to all three entrances.
+    ## Places each map's barracks beside the gates that spawn its lane creeps.
+    if not run.map.legacy:
+      for site in run.map.layout.barracks:
+        pack.placeProp(
+          "building2",
+          renderSite(site.position),
+          arctan2(
+            (site.facing.x - site.position.x).float32,
+            (site.facing.z - site.position.z).float32
+          ),
+          BarracksScale,
+          structureTint(Team(site.team))
+        )
+      return
     for team in Team:
       for site in BarracksSites[team.ord]:
         let facing = arctan2(
@@ -348,26 +408,48 @@ proc runGraphics*() =
     for name in TowerProps:
       doAssert towerPack.hasProp(name), "missing tower kit prop: " & name
     towerPack.placeStaticStructures()
-    towerPack.placeProp(
-      "magiccrystal1",
-      tileCenter(RedFortLayer, FortOuterRadius, FortOuterRadius),
-      scale = FountainScale,
-      tint = structureTint(RedTeam)
-    )
+    if run.map.legacy:
+      towerPack.placeProp(
+        "magiccrystal1",
+        tileCenter(RedFortLayer, FortOuterRadius, FortOuterRadius),
+        scale = FountainScale,
+        tint = structureTint(RedTeam)
+      )
     decorPack = loadPropPack(
       arenaDecorPaths(), textured = true, textureSize = GotaDecorTextureSize)
     for nodes in ArenaDecorNodes:
       for name in nodes:
         doAssert decorPack.hasProp(name), "missing arena decoration: " & name
-    decorPack.placeArenaDecor(run.map.seed)
-    decorPack.placePainterlyLandmarks(run.map.seed)
-    towerPack.placeProp(
-      "magiccrystal1",
-      tileCenter(BlueFortLayer, FortOuterRadius, FortOuterRadius),
-      rotation = PI.float32,
-      scale = FountainScale,
-      tint = structureTint(BlueTeam)
-    )
+    if run.map.legacy:
+      decorPack.placeArenaDecor(run.map.seed)
+      decorPack.placePainterlyLandmarks(run.map.seed)
+      towerPack.placeProp(
+        "magiccrystal1",
+        tileCenter(BlueFortLayer, FortOuterRadius, FortOuterRadius),
+        rotation = PI.float32,
+        scale = FountainScale,
+        tint = structureTint(BlueTeam)
+      )
+    else:
+      let boulders = loadPropPack(
+        propPaths(PaintedRockPath, GotaBoulderNames),
+        only = @GotaBoulderNames,
+        textured = true,
+        repeatTexture = true,
+        textureSize = GotaDecorTextureSize
+      )
+      boulders.plantRocks(
+        GotaBoulderNames,
+        ArenaRockKind,
+        ArenaSeed,
+        height = 1.6'f
+      )
+      for camp in run.map.layout.camps:
+        let center = renderSite(camp)
+        decorPack.placeProp("wood_crate_01a", center, scale = 0.6'f)
+        decorPack.placeProp(
+          "wood_barrel_01a", center + vec3(0.6'f, 0, 0.4'f), scale = 0.65'f
+        )
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
   drawSplash(sk, window, splash.name)

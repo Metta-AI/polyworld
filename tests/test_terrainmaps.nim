@@ -103,6 +103,19 @@ block:
   expectTerrainError:
     discard buildTerrainMap([layer], Kinds, 12, materialCount = 1)
 
+echo "Testing custom grass kinds retain the original natural variation"
+block:
+  let
+    original = flatLayer(32, 32)
+    custom = flatLayer(32, 32)
+    kinds = @Kinds & @[GrassSurface]
+  for tile in custom.tiles.mitems:
+    tile.kind = Kinds.len.uint32
+  let
+    first = buildTerrainMap([original], kinds, 54)
+    second = buildTerrainMap([custom], kinds, 54)
+  doAssert first == second
+
 echo "Testing empty, water, multiple, and malformed layers"
 block:
   let
