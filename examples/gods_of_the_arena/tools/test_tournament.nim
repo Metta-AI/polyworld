@@ -379,8 +379,8 @@ block:
   doAssert "Match history" notin html
   doAssert "id=matches" notin html
   doAssert html.count("id=player-stats") == 1
-  for label in ["Avg gold", "Avg XP", "Avg level", "Avg kills", "Avg deaths",
-      "Avg assists", "KDA ratio", "Avg tower kills", "Avg last hits"]:
+  for label in ["Gold earned", "XP / level", "K / D / A", "KDA ratio",
+      "towers", "last hits", "GPM / XPM"]:
     doAssert label in html
 
 echo "Checking player outcomes, objective counts, coverage and mono averages"
@@ -413,13 +413,20 @@ block:
   doAssert rows[0]["avg_deaths"].getFloat == 1
   doAssert rows[0]["avg_assists"].getFloat == 10
   doAssert rows[0]["avg_level"].getFloat == 2
+  doAssert rows[0]["max_level"].getInt == 5
+  doAssert rows[0]["gpm"].getFloat == 300
+  doAssert abs(rows[0]["xpm"].getFloat - 302.0 / 1.5) < 0.000001
   doAssert rows[0]["kda"].getFloat == 12
   doAssert abs(rows[0]["avg_xp"].getFloat - 302.0 / 3) < 0.000001
   doAssert rows[1]["losses"].getInt == 1
   doAssert rows[2]["kda"].getFloat == 6.5
   doAssert playerRows(sample, records) == rows
   records[0].delete("player_stats")
-  doAssert playerRows(sample, records)[2]["avg_gold"].kind == JNull
+  let partial = playerRows(sample, records)
+  doAssert partial[2]["avg_gold"].kind == JNull
+  doAssert partial[2]["max_level"].kind == JNull
+  doAssert partial[2]["gpm"].kind == JNull
+  doAssert partial[0]["gpm"].getFloat == 400
   for mutation in ["xp", "slot", "policy_version_id", "gold"]:
     let invalid = statsFor(sample, sample["schedule"][1], records[1]["result"])
     invalid["heroes"][0][mutation] = newJNull()

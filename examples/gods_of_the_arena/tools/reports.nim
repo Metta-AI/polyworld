@@ -13,9 +13,9 @@ proc escape*(value: string): string =
   value.multiReplace(("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"),
     ("\"", "&quot;"), ("'", "&#39;"))
 
-proc number(value: float64): string =
-  ## Formats compact human-readable values with up to two decimal places.
-  result = formatFloat(value, ffDecimal, 2)
+proc number(value: float64, places = 2): string =
+  ## Formats compact human-readable values with the requested precision.
+  result = formatFloat(value, ffDecimal, places)
   result.trimZeros()
   var position = result.find('.')
   if position < 0:
@@ -26,10 +26,10 @@ proc number(value: float64): string =
     result.insert(",", position)
     position -= 3
 
-proc number(value: JsonNode): string =
+proc number(value: JsonNode, places = 2): string =
   ## Marks missing observations with an em dash.
   if value == nil or value.kind == JNull: "—"
-  else: number(value.getFloat)
+  else: number(value.getFloat, places)
 
 proc standings(panel, rows: JsonNode): string =
   ## Renders one escaped table of policy averages and displayed ranks.
@@ -78,47 +78,87 @@ proc panelHtml(panel: JsonNode): string =
     number(panel["stability"]["run"]) & "</p></article>"
 
 proc playersHtml(rows: JsonNode): string =
-  ## Shows every policy's outcomes, economy and combat in one scrollable table.
+  ## Groups each player's statistics into compact pairs without nested scrolling.
   const Columns = [
-    ("games", "Games"), ("wins", "Wins"), ("losses", "Losses"),
-    ("timeouts", "Timeouts"), ("win_rate", "Win %"),
-    ("avg_gold", "Avg gold"), ("avg_xp", "Avg XP"),
-    ("avg_level", "Avg level"), ("avg_kills", "Avg kills"),
-    ("avg_deaths", "Avg deaths"), ("avg_assists", "Avg assists"),
-    ("kda", "KDA ratio"), ("avg_tower_kills", "Avg tower kills"),
-    ("avg_last_hits", "Avg last hits"),
-    ("avg_banked_gold", "Avg unspent gold"), ("avg_minutes", "Avg minutes"),
-    ("mixed", "Mixed games"), ("mono", "Mono games"),
-    ("stats_games", "Stats games")
+    ("name", "Player"), ("games", "Games"), ("win_rate", "Win rate"),
+    ("avg_xp", "XP / level"), ("kda", "K / D / A"),
+    ("avg_gold", "Gold earned"), ("avg_last_hits", "Objectives"),
+    ("xpm", "GPM / XPM")
   ]
+  proc cell(field, label, primary, secondary: string,
+      row: JsonNode, color = ""): string =
+    ## Keeps visible labels and sortable raw values beside each grouped stat.
+    let value = if row[field].kind == JNull: "" else: $row[field]
+    result = "<td data-label=\"" & label & "\" data-value=\"" &
+      escape(value) & "\"><span class=\"stat-main " & color & "\">" &
+      primary & "</span><small class=stat-sub>" & secondary & "</small></td>"
+
   result = "<section class=\"panel players\" id=players>" &
-    "<h2>Player statistics</h2><p class=note>Both formats combined. " &
-    "One appearance per policy per game; mono teams average their five " &
-    "heroes first. Gold and XP are lifetime earnings. " &
-    "Last hits are footman kills. " &
-    "KDA = (kills + assists) / max(1, deaths).</p>" &
-    "<div class=scroll tabindex=0 role=region " &
-    "aria-label=\"Player statistics, scroll horizontally for more columns\">" &
-    "<table id=player-stats><thead><tr><th scope=col>Player</th>" &
-    "<th scope=col>Policy</th>"
-  for (_, label) in Columns:
-    result.add "<th scope=col>" & label & "</th>"
+    "<div class=players-heading><h2>Player statistics</h2>" &
+    "<span class=note>Both formats · Per-player averages</span></div>" &
+    "<table id=player-stats aria-label=\"Player statistics\">" &
+    "<thead><tr>"
+  for (field, label) in Columns:
+    result.add "<th scope=col aria-sort=none><button type=button " &
+      "data-sort=\"" & field & "\">" & label &
+      " <span class=sort-mark aria-hidden=true>↕</span></button></th>"
   result.add "</tr></thead><tbody>"
   for row in rows:
-    result.add "<tr><th scope=row>" & escape(row["name"].getStr) &
-      "</th><td class=policy title=\"" & escape(row["id"].getStr) & "\">" &
-      escape(row["version"].getStr) & "</td>"
-    for (field, _) in Columns:
-      result.add "<td>" & number(row[field]) & "</td>"
+    let
+      rate = row["win_rate"]
+      color = if rate.kind == JNull: "muted"
+        elif rate.getFloat >= 50: "stat-win" else: "stat-loss"
+      wins = number(rate, 1) & (if rate.kind == JNull: "" else: "%")
+      outcomes = number(row["wins"]) & "W / " &
+        number(row["losses"]) & "L / " & number(row["timeouts"]) & "T"
+      bar = "<span class=win-track aria-hidden=true><i style=\"width:" &
+        number(rate.getFloat, 2) & "%\"></i></span>"
+    result.add "<tr data-policy=\"" & escape(row["id"].getStr) &
+      "\"><th scope=row data-value=\"" & escape(row["name"].getStr) &
+      "\" title=\"" & escape(row["id"].getStr) & "\">" &
+      "<span class=stat-main>" & escape(row["name"].getStr) &
+      "</span><small class=stat-sub>" & escape(row["version"].getStr) &
+      "</small></th>"
+    result.add cell("games", "Games", number(row["games"]),
+      number(row["mixed"]) & " / " & number(row["mono"]),
+      row)
+    result.add cell("win_rate", "Win rate", wins & bar, outcomes, row, color)
+    result.add cell("avg_xp", "XP / level", number(row["avg_xp"], 0),
+      "Lv " & number(row["avg_level"], 1) & " / " &
+      number(row["max_level"]) & " max", row, "stat-xp")
+    result.add cell("kda", "K / D / A", number(row["avg_kills"], 1) &
+      " / " & number(row["avg_deaths"], 1) & " / " &
+      number(row["avg_assists"], 1), number(row["kda"]) & " KDA ratio", row)
+    result.add cell("avg_gold", "Gold earned", number(row["avg_gold"], 0),
+      number(row["avg_banked_gold"], 0) & " unspent", row, "stat-gold")
+    result.add cell("avg_last_hits", "Objectives",
+      number(row["avg_last_hits"], 1) & " LH",
+      number(row["avg_tower_kills"], 1) & " towers", row)
+    result.add cell("xpm", "GPM / XPM", number(row["gpm"], 0) &
+      " / " & number(row["xpm"], 0),
+      number(row["avg_minutes"], 1) & " min / game", row)
     result.add "</tr>"
-  result.add "</tbody></table></div>"
+  result.add "</tbody></table><div class=players-notes>" &
+    "<p class=note>Games: mixed / mono. Level: average / max. " &
+    "LH: last hits. W / L / T: wins / losses / timeouts.</p>" &
+    "<details><summary>Stat definitions</summary><p class=note>" &
+    "Mono games average five heroes. Max level is the highest hero level " &
+    "reached. Last hits are footman kills. Gold and XP are lifetime " &
+    "earnings. K / D / A are separate averages; " &
+    "KDA ratio = total kills + assists, divided by max(1, total deaths). " &
+    "GPM and XPM divide earnings by simulated minutes. " &
+    "Click a column heading to sort.</p></details>"
   for row in rows:
     if row["stats_games"].getInt < row["games"].getInt:
       result.add "<p class=note>Replay statistics are still being collected. " &
-        "Stats games shows coverage for combat, gold and level averages; " &
-        "XP and outcomes include every completed game.</p>"
+        "XP and outcomes include every completed game. Replay coverage: "
+      var coverage: seq[string]
+      for player in rows:
+        coverage.add(escape(player["name"].getStr) & " " &
+          number(player["stats_games"]) & "/" & number(player["games"]))
+      result.add coverage.join(" · ") & ".</p>"
       break
-  result.add "</section>"
+  result.add "</div></section>"
 
 proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
   ## Embeds real GotA assets and Nim-generated browser code in one HTML file.
