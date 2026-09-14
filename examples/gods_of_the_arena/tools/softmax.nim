@@ -86,6 +86,16 @@ proc transport*(client: Softmax): Client =
   result.request = proc(verb, path: string, body: JsonNode): JsonNode =
     ## Preserves the saved request payload exactly on every retry.
     client.request(verb, path, body)
+  result.download = proc(url: string): string =
+    ## Fetches public replay artifacts without forwarding Softmax credentials.
+    require(url.startsWith("https://"), "Replay URL must use HTTPS")
+    try:
+      let response = client.http.get(url, timeout = 60)
+      require(response.code == 200,
+        "Replay download returned HTTP " & $response.code)
+      result = response.body
+    except CatchableError as error:
+      raise newException(TournamentError, "Replay download: " & error.msg)
 
 proc entries(client: Softmax, path: string): seq[JsonNode] =
   ## Exhausts a cursor-paginated API listing without dropping later entrants.
