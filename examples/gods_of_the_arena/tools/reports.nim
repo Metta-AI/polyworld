@@ -1,7 +1,7 @@
 import
   std/[base64, json, os, strutils],
   jsony,
-  tournaments
+  tournaments, sites
 
 const
   BrowserPath {.strdefine.} = Root / "tmp/gota/tools/report.js"
@@ -77,15 +77,57 @@ proc panelHtml(panel: JsonNode): string =
     number(panel["stability"]["score"]) & " · Streak: " &
     number(panel["stability"]["run"]) & "</p></article>"
 
-proc render*(summary: JsonNode, dataRoot: string): string =
+proc playersHtml(rows: JsonNode): string =
+  ## Shows every policy's outcomes, economy and combat in one scrollable table.
+  const Columns = [
+    ("games", "Games"), ("wins", "Wins"), ("losses", "Losses"),
+    ("timeouts", "Timeouts"), ("win_rate", "Win %"),
+    ("avg_gold", "Avg gold"), ("avg_xp", "Avg XP"),
+    ("avg_level", "Avg level"), ("avg_kills", "Avg kills"),
+    ("avg_deaths", "Avg deaths"), ("avg_assists", "Avg assists"),
+    ("kda", "KDA ratio"), ("avg_tower_kills", "Avg tower kills"),
+    ("avg_last_hits", "Avg last hits"),
+    ("avg_banked_gold", "Avg unspent gold"), ("avg_minutes", "Avg minutes"),
+    ("mixed", "Mixed games"), ("mono", "Mono games"),
+    ("stats_games", "Stats games")
+  ]
+  result = "<section class=\"panel players\" id=players>" &
+    "<h2>Player statistics</h2><p class=note>Both formats combined. " &
+    "One appearance per policy per game; mono teams average their five " &
+    "heroes first. Gold and XP are lifetime earnings. " &
+    "Last hits are footman kills. " &
+    "KDA = (kills + assists) / max(1, deaths).</p>" &
+    "<div class=scroll tabindex=0 role=region " &
+    "aria-label=\"Player statistics, scroll horizontally for more columns\">" &
+    "<table id=player-stats><thead><tr><th scope=col>Player</th>" &
+    "<th scope=col>Policy</th>"
+  for (_, label) in Columns:
+    result.add "<th scope=col>" & label & "</th>"
+  result.add "</tr></thead><tbody>"
+  for row in rows:
+    result.add "<tr><th scope=row>" & escape(row["name"].getStr) &
+      "</th><td class=policy title=\"" & escape(row["id"].getStr) & "\">" &
+      escape(row["version"].getStr) & "</td>"
+    for (field, _) in Columns:
+      result.add "<td>" & number(row[field]) & "</td>"
+    result.add "</tr>"
+  result.add "</tbody></table></div>"
+  for row in rows:
+    if row["stats_games"].getInt < row["games"].getInt:
+      result.add "<p class=note>Replay statistics are still being collected. " &
+        "Stats games shows coverage for combat, gold and level averages; " &
+        "XP and outcomes include every completed game.</p>"
+      break
+  result.add "</section>"
+
+proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
   ## Embeds real GotA assets and Nim-generated browser code in one HTML file.
   let
     percent = 100.0 * summary["completed"].getInt.float64 /
       max(1, summary["target"].getInt).float64
     interval = summary["settings"]["check_every"].getInt
     status = escape(summary["status"].getStr)
-  var body = "<header class=wrap><img class=logo src=\"@@logo@@\" " &
-    "alt=\"Gods of the Arena\"></header><main class=wrap>" &
+  var body = navigation() & "<main class=wrap>" &
     "<section class=\"panel run-panel\" aria-label=\"Tournament progress\">" &
     "<div class=run-head><div><div class=kicker>Tournament report</div>" &
     "<h1>" & escape(summary["run"].getStr) & "</h1></div>" &
@@ -116,7 +158,7 @@ proc render*(summary: JsonNode, dataRoot: string): string =
       "@@\" alt=\"\"><div><b>" & value & "</b><small>" & label &
       "</small></div></div>"
   body.add "</div><nav aria-label=\"Report sections\"><a href=#mixed>Mixed " &
-    "teams</a><a href=#mono>Mono teams</a><a href=#matches>Match history" &
+    "teams</a><a href=#mono>Mono teams</a><a href=#players>Player statistics" &
     "</a></nav>"
   for kind in Formats:
     body.add "<section id=" & kind & "><div class=format-head>" &
@@ -130,48 +172,16 @@ proc render*(summary: JsonNode, dataRoot: string): string =
       if panel["format"].getStr == kind:
         body.add panelHtml(panel)
     body.add "</div></section>"
-  body.add "<details class=\"panel matches\" id=matches><summary>Match " &
-    "history <span class=muted>· " & $summary["matches"].len &
-    " scheduled games</span></summary><div class=match-list>"
-  for match in summary["matches"]:
-    body.add "<details class=match id=\"match-" & match["id"].getStr &
-      "\"><summary>#" & match["id"].getStr & " · " &
-      capitalizeAscii(match["format"].getStr) & " · " &
-      escape(match["state"].getStr) & " · " &
-      escape(match["outcome"].getStr) & "</summary><div class=team-grid>"
-    for side in 0 ..< 2:
-      body.add "<div><b class=" & (if side == 0: "red>RED" else: "blue>BLUE") &
-        " TEAM</b>"
-      for slot in side * 5 ..< side * 5 + 5:
-        let policy = summary["roster"][match["seats"][slot].getInt]
-        body.add "<p>" & $(slot mod 5 + 1) & ". " &
-          escape(policy["name"].getStr) & " <span class=muted>" &
-          escape(policy["version"].getStr) & "</span></p>"
-      body.add "</div>"
-    body.add "</div><p class=note>Seed " & $match["seed"].getInt & " · " &
-      number(match["minutes"]) & " simulated minutes · " &
-      number(match["attempts"]) & " submission attempts</p>"
-    let replay = match["replay"].getStr
-    if replay.startsWith("https://") or replay.startsWith("http://"):
-      body.add "<a href=\"" & escape(replay) & "\" target=_blank " &
-        "rel=\"noopener noreferrer\">Watch replay ↗</a>"
-    if match["error"].getStr.len > 0:
-      body.add "<p class=error>" & escape(match["error"].getStr) & "</p>"
-    body.add "</details>"
-  body.add "</div></details><footer>Game release " &
+  body.add playersHtml(summary["players"])
+  body.add "<footer>Game release " &
     escape(summary["release"]["version"].getStr) & " · " &
     escape(summary["release"]["id"].getStr) & " · Sampling seed " &
     $summary["settings"]["seed"].getInt & " · Run " &
     escape(summary["id"].getStr) & ". Reports and exports are rebuilt " &
     "from saved game results.</footer></main>"
   result = Template.replace("@@body@@", body)
-  for (key, path) in [
-    ("regular", "fonts/Rubik-Regular.ttf"),
-    ("bold", "fonts/Rubik-Bold.ttf"), ("logo", "themes/gota/gota_logo.png"),
-    ("victory", "icons/victory.png"), ("experience", "icons/experience.png"),
-    ("chalice", "icons/chalice.png"), ("champion", "icons/champion.png"),
-    ("stats", "icons/stats.png"), ("day", "icons/day.png")
-  ]:
+  result = result.replace("@@site-style@@", siteStyles(siteRoot))
+  for (key, path) in Assets:
     require(fileExists(dataRoot / path), "Missing report asset: " & path)
     let mime = if path.endsWith(".ttf"): "font/ttf" else: "image/png"
     result = result.replace("@@" & key & "@@", "data:" & mime &
@@ -192,10 +202,11 @@ proc csvValue(row: JsonNode, field: string): string =
 
 proc publish*(directory: string, run: JsonNode, records: seq[JsonNode],
     status: string, dataRoot: string, error = "", controls = Controls()) =
-  ## Atomically publishes JSON, HTML, and six CSV standings exports.
+  ## Atomically publishes JSON, HTML, and leaderboard and player CSV exports.
   let summary = summarize(run, records, status, error)
   saveJson(directory / "summary.json", summary, controls)
-  saveBytes(directory / "report.html", render(summary, dataRoot), controls)
+  let html = render(summary, dataRoot, controls.siteRoot)
+  saveBytes(directory / "report.html", html, controls)
   const Fields = ["rank", "name", "version", "id", "appearances",
     "value", "tied", "movement"]
   for panel in summary["panels"]:
@@ -207,6 +218,17 @@ proc publish*(directory: string, run: JsonNode, records: seq[JsonNode],
       csv.add(values.join(",") & "\n")
     saveBytes(directory / "exports" / (panel["id"].getStr & ".csv"), csv,
       controls)
+  var fields: seq[string]
+  for field, value in summary["players"][0]:
+    fields.add(field)
+  var csv = fields.join(",") & "\n"
+  for row in summary["players"]:
+    var values: seq[string]
+    for field in fields:
+      values.add(csvValue(row, field))
+    csv.add(values.join(",") & "\n")
+  saveBytes(directory / "exports/players.csv", csv, controls)
+  updateSite(html, dataRoot, controls.siteRoot, controls)
   echo status, ": ", summary["completed"].getInt, "/",
     summary["target"].getInt, " complete, ", summary["running"].getInt,
     " running, ", summary["failed"].getInt, " failed"

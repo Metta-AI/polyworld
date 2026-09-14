@@ -14,7 +14,7 @@ body{margin:0;background:radial-gradient(ellipse at top,#1c2028,var(--bg) 900px)
 b,strong,th,.kicker,.badge,nav{font-weight:700}
 small,.note,.tie,.ladder-stability,footer{font-size:14px;font-weight:400}
 h1,h2{font-size:28px;font-weight:700}
-h3,.fact b,.matches>summary{font-size:22px;font-weight:700}
+h3,.fact b{font-size:22px;font-weight:700}
 a{color:var(--gold);text-decoration:none}
 a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--gold);outline-offset:3px}
@@ -36,7 +36,7 @@ p{line-height:1.6}
 .counts{display:flex;gap:22px;flex-wrap:wrap;color:var(--muted)}
 .counts b{color:var(--text)}
 .error{white-space:pre-wrap;overflow-wrap:anywhere;color:#ffadb0;border-left:3px solid var(--red);padding:10px;background:var(--well)}
-nav{display:flex;gap:24px;margin:24px 0;color:var(--muted)}
+nav{display:flex;flex-wrap:wrap;gap:24px;margin:24px 0;color:var(--muted)}
 .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:30px}
 .fact{display:flex;align-items:center;gap:12px;padding:16px}
 .fact img{width:26px;height:26px}
@@ -61,20 +61,22 @@ tbody tr:first-child td{color:var(--gold)}
 .down{color:var(--red)}
 .tie{color:var(--muted)}
 .note{color:var(--muted);line-height:1.5}
-.matches{margin:30px 0}
-.matches summary{cursor:pointer;color:var(--gold)}
-.match-list{display:grid;gap:8px;margin-top:18px}
-.match{background:var(--well);border:1px solid var(--line);border-radius:10px;padding:12px}
-.match summary{font-size:inherit;font-weight:400}
-.team-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}
-.team-grid p{margin:3px 0}
-.red{color:var(--red)}
-.blue{color:#83a9ff}
+.players{margin:30px 0;min-width:0}
+.players .scroll{max-height:640px;border:1px solid var(--line);border-radius:8px}
+.players table{white-space:nowrap}
+.players th,.players td{padding:12px}
+.players thead th{position:sticky;top:0;background:var(--well);z-index:1}
+.players th:first-child{position:sticky;left:0;text-align:left;background:var(--well)}
+.players thead th:first-child{z-index:2}
+.players tbody th{color:var(--text);font-weight:400}
+.players td.policy{min-width:190px;max-width:250px;white-space:normal}
+.players tbody tr:first-child td{color:inherit}
 footer{margin:30px 0 40px;color:var(--muted);line-height:1.8;overflow-wrap:anywhere}
 @media(max-width:1150px){.ladders{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:800px){.ladders{grid-template-columns:1fr}}
-@media(max-width:650px){.facts{grid-template-columns:1fr}.panel{padding:16px}nav{gap:14px}.wrap{width:calc(100% - 20px)}.team-grid{grid-template-columns:1fr}.counts{gap:12px}.logo{width:340px;max-width:100%}}
+@media(max-width:650px){.facts{grid-template-columns:1fr}.panel{padding:16px}nav{gap:14px}.wrap{width:calc(100% - 20px)}.counts{gap:12px}.logo{width:340px;max-width:100%}.players th:first-child{max-width:120px;white-space:normal}}
 </style>
+@@site-style@@
 </head>
 <body data-run="@@id@@" data-status="@@status@@">
 @@body@@
