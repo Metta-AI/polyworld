@@ -158,7 +158,7 @@ proc testRecording() =
       var previous: ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
       previous.header = partial.header
       previous.header.gameVersion = MetricsGameVersion
-      previous.config = partial.config
+      previous.config = partial.config.gameConfig()
       previous.actions = partial.actions
       previous.hashes = partial.hashes
       previous.metrics.tickRate = partial.metrics.tickRate
