@@ -43,7 +43,6 @@ var
   gotaWalkLayer: int
   gotaWalkDestLayer: int
   gotaWalkOrigin: FixedVec2
-  gotaWalkEdges: bool
 
 ## Simulation
 
@@ -182,13 +181,8 @@ type
     resolved*: bool
 
   World* = ref object
-    legacyMap*: bool
     heroSpawns*: array[2, WorldPoint]
     barracksPairs*: array[2, array[3, array[2, WorldPoint]]]
-    legacyCombat*: bool
-      ## Replays through version 19 retain their recorded combat rules.
-    legacyAbilities*: bool
-    legacyAttacks*: bool
     casts*: seq[SpellCast]
     stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
@@ -196,7 +190,6 @@ type
     heroes*: seq[Hero]
     forts*: array[2, Fort]
     towers*: seq[Tower]
-    barracksSpawns*: array[2, array[3, WorldPoint]]
     spawnIntervalTicks*: int32
     spawnTimerTicks*: int32
     gameOver*: bool
@@ -220,7 +213,6 @@ type
     world*: World
     metrics*: MatchMetrics
     history*: MetricHistory
-    legacyStats*: bool
     map*: MapData
     recorder*: ReplayRecorder
     replayData*: ReplayData
@@ -323,26 +315,14 @@ proc initTowers(world: World, map: MapData) =
   for lane in 0 .. 2:
     for team in Team:
       for tier in TowerTier:
-        let hitPoints = TowerHitPoints[tier]
-        var
-          position: WorldPoint
-          facing: Heading
-        if map.legacy:
-          let site = TowerSites[lane][team.ord][tier.ord]
-          position = WorldPoint(
-            x: int32(site.x - GridTiles div 2) * WorldScale + WorldScale div 2,
-            z: int32(site.z - GridTiles div 2) * WorldScale + WorldScale div 2
-          )
-          facing = heading(
-            int32(site.faceX - site.x), int32(site.faceZ - site.z)
-          )
-        else:
-          let site = map.layout.towers[lane][team.ord][tier.ord]
-          position = worldPoint(site.position)
+        let
+          hitPoints = TowerHitPoints[tier]
+          site = map.layout.towers[lane][team.ord][tier.ord]
           facing = heading(
             site.facing.x - site.position.x,
             site.facing.z - site.position.z
           )
+        var position = worldPoint(site.position)
         position.y = fixedSurfaceHeight(position)
         world.towers.add Tower(
           id: FirstTowerId + world.towers.len.int32,
@@ -366,6 +346,7 @@ const
   FootmanTowerSightRadius = 7 * WorldScale
   FootmanMeleeRange* = 54_000'i32
   FortRange = 255_000'i32
+  FortSightRadius = 14'i32
   HeroMeleeIdleRange* = 150_000'i32
     ## Standing melee heroes auto-attack enemies this close.
   HeroMeleeAttackMoveRange* = 480_000'i32
@@ -397,33 +378,13 @@ const
 
 proc startingForts(map: MapData): array[2, Fort] =
   ## Places both gods at the selected layout's fort centers.
-  result = [
-    Fort(
-      id: RedFortId,
-      team: RedTeam,
+  for team in Team:
+    result[team.ord] = Fort(
+      id: (if team == RedTeam: RedFortId else: BlueFortId),
+      team: team,
       hp: FortHp,
-      center: WorldPoint(
-        x: (RedFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2,
-        z: (RedFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2
-      )
-    ),
-    Fort(
-      id: BlueFortId,
-      team: BlueTeam,
-      hp: FortHp,
-      center: WorldPoint(
-        x: (BlueFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2,
-        z: (BlueFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2
-      )
+      center: worldPoint(map.layout.forts[team.ord])
     )
-  ]
-  if not map.legacy:
-    for team in Team:
-      result[team.ord].center = worldPoint(map.layout.forts[team.ord])
 
 proc cloneHeroes(heroes: seq[Hero]): seq[Hero] =
   ## Copies each hero so two worlds never share a path seq.
@@ -596,7 +557,7 @@ proc rebuildVision*(world: World) {.measure.} =
         visionSources.add VisionSource(
           x: tile.x,
           z: tile.z,
-          radius: FortOuterRadius + 2,
+          radius: FortSightRadius,
           eyeHeight: 28
         )
     revealVision(
@@ -731,11 +692,8 @@ proc heroAttackDamage*(hero: Hero): int32 =
   heroDamage(hero.class, hero.level) + hero.heroItemBonus().damage
 
 proc heroAttackTicks*(world: World, hero: Hero): int32 =
-  ## Uses the attack cadence belonging to this live match or replay.
-  if world.legacyCombat and hero.class == VanguardKnight:
-    26'i32
-  else:
-    heroAttackTicks(hero.class)
+  ## Returns the hero class's current basic-attack cadence.
+  heroAttackTicks(hero.class)
 
 proc heroMoveSpeed*(hero: Hero): int32 =
   ## Returns movement distance including held equipment.
@@ -859,8 +817,6 @@ proc tilesWalkable(pos: FixedVec2): bool =
   let (x, z) = walkWorldCell(pos)
   if not worldLayersOpen(gotaWalkLayer, gotaWalkDestLayer, x, z):
     return false
-  if not gotaWalkEdges:
-    return true
   let (originX, originZ) = walkWorldCell(gotaWalkOrigin)
   lineClear(
     PathTile(
@@ -1064,11 +1020,7 @@ proc spawnHeroes(world: World, setup: openArray[ReplayHero]) =
       lane = int(heroSetup.lane)
       class = HeroClass(heroSetup.class)
       path = lanePathPoints[lane]
-      start =
-        if world.legacyMap:
-          world.barracksSpawns[team.ord][lane]
-        else:
-          world.heroSpawns[team.ord]
+      start = world.heroSpawns[team.ord]
       inner =
         if team == RedTeam:
           worldPoint(path[min(3, path.len - 1)])
@@ -1155,12 +1107,8 @@ proc spawnWave(world: World) {.measure.} =
   for team in [RedTeam, BlueTeam]:
     for lane in 0 .. 2:
       for i in 0 .. 1:
-        let start =
-          if world.legacyMap:
-            world.barracksSpawns[team.ord][lane]
-          else:
-            world.barracksPairs[team.ord][lane][i]
         let
+          start = world.barracksPairs[team.ord][lane][i]
           id = world.nextFootmanId
           placed = start + WorldPoint(
             x: world.rng.below(72_001) - 36_000,
@@ -1180,13 +1128,12 @@ proc spawnWave(world: World) {.measure.} =
           surfaceHint: start.y,
           navLayer: bindNavLayer(placed)
         )
-        if not world.legacyMap:
-          var nearest = int64.high
-          for waypoint in 0 ..< laneWorldPaths[lane].len:
-            let distance = distanceSquared(start, footman.waypointAt(waypoint))
-            if distance < nearest:
-              nearest = distance
-              footman.waypointIndex = waypoint
+        var nearest = int64.high
+        for waypoint in 0 ..< laneWorldPaths[lane].len:
+          let distance = distanceSquared(start, footman.waypointAt(waypoint))
+          if distance < nearest:
+            nearest = distance
+            footman.waypointIndex = waypoint
         world.footmen.add(footman)
 
 proc mapCoordinate*(value: int32): int32 =
@@ -1546,7 +1493,7 @@ proc purchaseReason*(world: World, heroId, itemId: int32): string =
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return "Available when alive"
-  if not world.legacyCombat and world.heroes[index].hp <= 0:
+  if world.heroes[index].hp <= 0:
     return "Available when alive"
   let item = itemFromId(itemId)
   if item == NoItem:
@@ -1888,12 +1835,12 @@ proc initHeroCharges(hero: Hero) =
 
 proc tickHeroCooldowns(world: World, hero: Hero) =
   ## Advances spell cooldowns and restores spent charges one at a time.
-  if not world.legacyAbilities and not hero.spellsReady:
+  if not hero.spellsReady:
     hero.initHeroCharges()
   for slot in HeroAbilitySlot:
     if hero.cooldowns[slot] > 0:
       dec hero.cooldowns[slot]
-    if not world.legacyAbilities and hero.recharges[slot] > 0:
+    if hero.recharges[slot] > 0:
       dec hero.recharges[slot]
       if hero.recharges[slot] == 0:
         let spec = heroAbility(hero.class, slot).abilitySpec
@@ -1990,7 +1937,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
     slot = int(slotId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
-  if not world.legacyCombat and world.heroes[index].hp <= 0:
+  if world.heroes[index].hp <= 0:
     return false
   if slot < 0 or slot >= InventorySlots:
     return false
@@ -2031,7 +1978,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
     if targetFootman < 0 and targetHero < 0 and
         targetTower < 0 and fortIndex < 0:
       return false
-    if not world.legacyCombat and not world.canHitTarget(
+    if not world.canHitTarget(
       world.heroes[index],
       targetFootman,
       targetHero,
@@ -2257,7 +2204,7 @@ proc castAbility(
     aim: WorldPoint
 ): bool =
   ## Releases an object or ground spell after atomically checking its costs.
-  if world.legacyAbilities or hero.hp <= 0 or hero.state == Dying or
+  if hero.hp <= 0 or hero.state == Dying or
     world.casts.len >= 512:
       return false
   if not hero.spellsReady:
@@ -2385,83 +2332,13 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
-proc tryLegacyAbility(
-    world: World,
-    hero: Hero,
-    slot: HeroAbilitySlot,
-    targetFootman, targetHero, targetTower, fortIndex: int
-): bool =
-  ## Spends one ready ability if its cost, range, and target match.
-  let spec = heroAbility(hero.class, slot).legacyAbilitySpec
-  if hero.cooldowns[slot] > 0:
-    return false
-  if hero.mana < spec.manaCost:
-    return false
-  let hasTarget =
-    targetFootman >= 0 or targetHero >= 0 or
-    targetTower >= 0 or fortIndex >= 0
-  var targetPosition = hero.position
-  if hasTarget:
-    targetPosition =
-      if targetFootman >= 0: world.footmen[targetFootman].position
-      elif targetHero >= 0: world.heroes[targetHero].position
-      elif targetTower >= 0: world.towers[targetTower].position
-      else: world.forts[fortIndex].center
-  case spec.kind
-  of Strike:
-    if not hasTarget:
-      return false
-    if not within(hero.position, targetPosition, spec.range):
-      return false
-    if not world.legacyCombat and not world.canHitTarget(
-      hero,
-      targetFootman,
-      targetHero,
-      targetTower,
-      fortIndex,
-      spec.range
-    ):
-      return false
-  of Heal:
-    if hero.hp >= hero.maxHp:
-      return false
-  of Restore:
-    if hero.mana >= hero.maxMana:
-      return false
-  hero.mana -= spec.manaCost
-  hero.cooldowns[slot] = spec.cooldownTicks
-  case spec.kind
-  of Strike:
-    applyHeroHit(
-      world,
-      hero,
-      spec.damage,
-      targetFootman,
-      targetHero,
-      targetTower,
-      fortIndex
-    )
-    if spec.heal > 0:
-      hero.hp = min(hero.maxHp, hero.hp + spec.heal)
-    if spec.restore > 0:
-      hero.mana = min(hero.maxMana, hero.mana + spec.restore)
-  of Heal:
-    hero.hp = min(hero.maxHp, hero.hp + spec.heal)
-  of Restore:
-    hero.mana = min(hero.maxMana, hero.mana + spec.restore)
-  true
-
 proc tryCastAbility(
     world: World,
     hero: Hero,
     slot: HeroAbilitySlot,
     targetFootman, targetHero, targetTower, fortIndex: int
 ): bool =
-  ## Uses historical rules for old tapes and shared casts for current bots.
-  if world.legacyAbilities:
-    return tryLegacyAbility(
-      world, hero, slot, targetFootman, targetHero, targetTower, fortIndex
-    )
+  ## Attempts an automatic cast using the current spell rules.
   let spec = heroAbility(hero.class, slot).abilitySpec
   var targetId = 0'i32
   if spec.kind != Strike:
@@ -2492,7 +2369,7 @@ proc tryCombatAbilities(
     targetFootman, targetHero, targetTower, fortIndex: int
 ) =
   ## Fires the passive, then the strongest ready strike or support ability.
-  if not world.legacyAbilities and hero.manualSpells:
+  if hero.manualSpells:
     return
   discard tryCastAbility(
     world,
@@ -2591,8 +2468,7 @@ proc acquireRadius(world: World, hero: Hero): int32 =
   if not hero.hasMoveTarget:
     if hero.class.heroAttackCasting == MeleeCast:
       return HeroMeleeIdleRange
-    if not world.legacyAttacks:
-      return heroAttackRange(hero.class)
+    return heroAttackRange(hero.class)
   0
 
 proc updateHero(world: World, hero: Hero) =
@@ -2659,13 +2535,13 @@ proc updateHero(world: World, hero: Hero) =
     if targetFootman < 0 and targetHero < 0 and targetTower < 0 and
         not hero.attackingFort:
       hero.attackObjectId = 0
-      if not world.legacyAttacks and not hero.attackMoving:
+      if not hero.attackMoving:
         hero.stopHeroPath()
   if hero.attackObjectId == 0:
     let radius = world.acquireRadius(hero)
     if radius > 0:
       hero.attackObjectId = world.nearestEnemy(
-        hero, radius, creepsOnly = not world.legacyAttacks
+        hero, radius, creepsOnly = true
       )
       if hero.attackObjectId != 0:
         targetFootman = footmanIndex(world, hero.attackObjectId)
@@ -2700,8 +2576,6 @@ proc updateHero(world: World, hero: Hero) =
   hero.targetTowerId =
     if targetTower >= 0: world.towers[targetTower].id else: 0
 
-  if world.legacyAbilities:
-    world.tickHeroCooldowns(hero)
   regenHeroMana(hero, world.tick)
   tryCombatAbilities(
     world,
@@ -2712,20 +2586,18 @@ proc updateHero(world: World, hero: Hero) =
     fortIndex
   )
 
-  if not world.legacyCombat and
-    not world.isEnemyTarget(hero, hero.attackObjectId):
-      if not world.legacyAttacks and hero.attackObjectId != 0 and
-        not hero.attackMoving:
-          hero.stopHeroPath()
-      targetFootman = -1
-      targetHero = -1
-      targetTower = -1
-      fortIndex = -1
-      hero.attackObjectId = 0
-      hero.targetFootmanId = 0
-      hero.targetHeroId = 0
-      hero.targetTowerId = 0
-      hero.attackingFort = false
+  if not world.isEnemyTarget(hero, hero.attackObjectId):
+    if hero.attackObjectId != 0 and not hero.attackMoving:
+      hero.stopHeroPath()
+    targetFootman = -1
+    targetHero = -1
+    targetTower = -1
+    fortIndex = -1
+    hero.attackObjectId = 0
+    hero.targetFootmanId = 0
+    hero.targetHeroId = 0
+    hero.targetTowerId = 0
+    hero.attackingFort = false
 
   if targetFootman >= 0 or targetHero >= 0 or
       targetTower >= 0 or hero.attackingFort:
@@ -2802,7 +2674,7 @@ proc separateBodies(first, second: var Body, layer: int32) =
   gotaWalkLayer = int(layer)
   gotaWalkDestLayer = int(layer)
   gotaWalkOrigin = first.pos
-  if gotaWalkEdges and not tilesWalkable(second.pos):
+  if not tilesWalkable(second.pos):
     return
   separatePair(first, second, tilesWalkable)
 
@@ -2900,12 +2772,10 @@ proc stateHash*(game: Game): uint64 =
       hash.addHashy(hero.itemCounts[slot])
     for slot in HeroAbilitySlot:
       hash.addHashy(hero.cooldowns[slot])
-      if not world.legacyAbilities:
-        hash.addHashy(hero.charges[slot])
-        hash.addHashy(hero.recharges[slot])
-    if not world.legacyAbilities:
-      hash.addHashy(hero.spellsReady)
-      hash.addHashy(hero.manualSpells)
+      hash.addHashy(hero.charges[slot])
+      hash.addHashy(hero.recharges[slot])
+    hash.addHashy(hero.spellsReady)
+    hash.addHashy(hero.manualSpells)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
@@ -2929,21 +2799,19 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.deathTicks)
     hash.addHashy(footman.surfaceHint)
     hash.addHashy(footman.navLayer)
-  if not world.legacyAbilities:
-    hash.addHashy(world.casts.len)
-    for spell in world.casts:
-      hash.addHashy(spell.ability.ord)
-      hash.addHashy(spell.heroId)
-      hash.addHashy(spell.targetId)
-      hash.addHashy(spell.origin)
-      hash.addHashy(spell.position)
-      hash.addHashy(spell.direction)
-      hash.addHashy(spell.started)
-      hash.addHashy(spell.impact)
-      hash.addHashy(spell.ends)
-      hash.addHashy(spell.resolved)
-  if not game.legacyStats:
-    hash.addHashy(world.stats)
+  hash.addHashy(world.casts.len)
+  for spell in world.casts:
+    hash.addHashy(spell.ability.ord)
+    hash.addHashy(spell.heroId)
+    hash.addHashy(spell.targetId)
+    hash.addHashy(spell.origin)
+    hash.addHashy(spell.position)
+    hash.addHashy(spell.direction)
+    hash.addHashy(spell.started)
+    hash.addHashy(spell.impact)
+    hash.addHashy(spell.ends)
+    hash.addHashy(spell.resolved)
+  hash.addHashy(world.stats)
   uint64(hash)
 
 proc settleSurface(position: var WorldPoint, surfaceHint: int32) =
@@ -2975,10 +2843,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       spawnWave(world)
 
   world.tick = world.tick +% 1
-  if not world.legacyAbilities:
-    for hero in world.heroes:
-      if hero.hp > 0 and hero.state != Dying:
-        world.tickHeroCooldowns(hero)
+  for hero in world.heroes:
+    if hero.hp > 0 and hero.state != Dying:
+      world.tickHeroCooldowns(hero)
   profileBlock "vision":
     rebuildVision(world)
   if game.historyPlayback:
@@ -3007,8 +2874,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     for hero in world.heroes:
       updateHero(world, hero)
 
-  if not world.legacyAbilities:
-    world.advanceSpells()
+  world.advanceSpells()
 
   var write = 0
   for read in 0 ..< world.footmen.len:
@@ -3096,11 +2962,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 proc initLanePaths(map: MapData) =
   ## Builds shared lane polylines on the generated map.
   for lane in 0 .. 2:
-    let route =
-      if map.legacy:
-        LaneRoutes[lane]
-      else:
-        map.layout.lanes[lane]
+    let route = map.layout.lanes[lane]
     lanePathPoints[lane].setLen(0)
     lanePathTiles[lane].setLen(0)
     for i in 0 ..< route.len - 1:
@@ -3121,63 +2983,6 @@ proc initLanePaths(map: MapData) =
           int(tile.x),
           int(tile.z)
         )
-  if not map.legacy:
-    return
-  let
-    redTunnel = findPathPoints(
-      GroundLayer,
-      RedFortTile + FortOuterRadius + 1,
-      RedFortTile,
-      GroundLayer,
-      RedFortTile + 3,
-      RedFortTile
-    )
-    blueTunnel = findPathPoints(
-      GroundLayer,
-      BlueFortTile - FortOuterRadius - 1,
-      BlueFortTile,
-      GroundLayer,
-      BlueFortTile - 3,
-      BlueFortTile
-    )
-    redRampart = findPathPoints(
-      GroundLayer,
-      RedFortTile - FortRampSideOffset,
-      RedFortTile - 1,
-      RedFortLayer,
-      FortOuterRadius - FortRampSideOffset,
-      FortOuterRadius - FortWallRadius
-    )
-    blueRampart = findPathPoints(
-      GroundLayer,
-      BlueFortTile + FortRampSideOffset,
-      BlueFortTile + 1,
-      BlueFortLayer,
-      FortOuterRadius + FortRampSideOffset,
-      FortOuterRadius + FortWallRadius
-    )
-    redFountainPath = findPathPoints(
-      GroundLayer,
-      RedFortTile + FortOuterRadius + 1,
-      RedFortTile,
-      RedFortLayer,
-      FortOuterRadius,
-      FortOuterRadius
-    )
-    blueFountainPath = findPathPoints(
-      GroundLayer,
-      BlueFortTile - FortOuterRadius - 1,
-      BlueFortTile,
-      BlueFortLayer,
-      FortOuterRadius,
-      FortOuterRadius
-    )
-  doAssert redTunnel.len > 0, "red fort gate tunnel is unreachable"
-  doAssert blueTunnel.len > 0, "blue fort gate tunnel is unreachable"
-  doAssert redRampart.len > 0, "red fort rampart is unreachable"
-  doAssert blueRampart.len > 0, "blue fort rampart is unreachable"
-  doAssert redFountainPath.len > 0, "red fountain dais is unreachable"
-  doAssert blueFountainPath.len > 0, "blue fountain dais is unreachable"
 
 proc sampleMetrics*(game: Game, force = false) =
   ## Samples deterministic world counters and independent VM telemetry.
@@ -3199,13 +3004,6 @@ proc newGame*(
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
     world: World(
-      legacyMap: map.legacy,
-      legacyCombat: replayMode and
-        replayData.header.gameVersion <= TelemetryGameVersion,
-      legacyAbilities: replayMode and
-        replayData.header.gameVersion <= CombatGameVersion,
-      legacyAttacks: replayMode and
-        replayData.header.gameVersion <= ArenaGameVersion,
       forts: startingForts(map),
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
@@ -3214,32 +3012,25 @@ proc newGame*(
     ),
     map: map,
     replayMode: replayMode,
-    legacyStats: replayMode and
-      replayData.header.gameVersion == LegacyGameVersion,
     replayData: replayData
   )
   let world = result.world
-  gotaWalkEdges = not map.legacy
   world.spawnIntervalTicks = spawnInterval
   world.rng = initRng(map.seed)
   initLanePaths(map)
   initTowers(world, map)
-  for lane in 0 .. 2:
-    world.barracksSpawns[RedTeam.ord][lane] = worldPoint(lanePathPoints[lane][0])
-    world.barracksSpawns[BlueTeam.ord][lane] = worldPoint(lanePathPoints[lane][^1])
-  if not map.legacy:
-    for team in Team:
-      var point = worldPoint(map.layout.spawns[team.ord])
-      point.y = fixedSurfaceHeight(point)
-      world.heroSpawns[team.ord] = point
-    var counts: array[2, array[3, int]]
-    for site in map.layout.barracks:
-      var point = worldPoint(site.spawn)
-      point.y = fixedSurfaceHeight(point)
-      let index = counts[site.team][site.lane]
-      doAssert index < 2
-      world.barracksPairs[site.team][site.lane][index] = point
-      counts[site.team][site.lane].inc
+  for team in Team:
+    var point = worldPoint(map.layout.spawns[team.ord])
+    point.y = fixedSurfaceHeight(point)
+    world.heroSpawns[team.ord] = point
+  var counts: array[2, array[3, int]]
+  for site in map.layout.barracks:
+    var point = worldPoint(site.spawn)
+    point.y = fixedSurfaceHeight(point)
+    let index = counts[site.team][site.lane]
+    doAssert index < 2
+    world.barracksPairs[site.team][site.lane][index] = point
+    counts[site.team][site.lane].inc
   sightTerrain = buildSightTerrain()
   let visionCells = mapTiles() * mapTiles()
   for team in Team:
@@ -3248,12 +3039,7 @@ proc newGame*(
   for lane in 0 .. 2:
     laneWorldPaths[lane].setLen(0)
     laneWorldLayers[lane].setLen(0)
-    let route =
-      if map.legacy:
-        smoothPathTiles(lanePathTiles[lane])
-      else:
-        lanePathTiles[lane]
-    for tile in route:
+    for tile in lanePathTiles[lane]:
       laneWorldPaths[lane].add worldPoint(pathPoint(
         int(tile.layer),
         int(tile.x),
@@ -3268,9 +3054,8 @@ proc newGame*(
     else:
       liveHeroSetup(botCount)
   spawnHeroes(world, heroSetup)
-  if not world.legacyAbilities:
-    for hero in world.heroes:
-      hero.initHeroCharges()
+  for hero in world.heroes:
+    hero.initHeroCharges()
   world.stats = newCombatStats(world.heroes.len)
   result.metrics = newMetrics(world.heroes.len, TickRate)
   for slot, hero in world.heroes:

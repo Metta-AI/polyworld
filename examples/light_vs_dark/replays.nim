@@ -11,6 +11,8 @@ import
 const
   ReplayGame* = "light_vs_dark"
   ReplayFormatVersion* = 3'u16
+  ## This client supports only this gameplay version. Bump it when rules change.
+  ## Older replays use their archived client; never add compatibility branches.
   ReplayGameVersion* = 16'u16
 
   ActionMove* = 1'u8

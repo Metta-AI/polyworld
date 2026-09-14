@@ -17,8 +17,6 @@ const
   ArenaWaterDepth* = 3'i16
 
 type
-  ArenaEdition* = enum
-    InitialArena, CryptArena, ConfiguredArena
   ArenaStop* = tuple[layer, x, z: int]
   ArenaSite* = object
     position*, facing*, spawn*: PathPoint
@@ -165,29 +163,15 @@ proc material(tile: grids.Tile): uint32 {.raises: [].} =
     return base + 6
   base + uint32(tile.terrain.ord)
 
-proc historicalPreset*(edition: ArenaEdition): MapConfig {.raises: [].} =
-  ## Restores the controls from recordings that predate stored map presets.
-  result = MapConfig(
-    mapSize: 128, seed: 54, lakeCrossings: 4, jungleRoads: 50,
-    highSize: 511, castleSize: 295, roadWidth: 62, roadWobble: 73,
-    lakeWidth: 80, lakeWobble: 30, campRadius: 36, stemLength: 50,
-    campScatter: 35, campsTouchRoads: false
-  )
-  if edition == InitialArena:
-    result.campRadius = 29
-
-proc buildArena*(
-    config: MapConfig, edition = ConfiguredArena
-): ArenaData =
+proc buildArena*(config: MapConfig): ArenaData =
   ## Converts the saved editor preset into immutable packed game terrain.
   config.validate()
   let
     resolution = config.mapSize
     origin = (GridTiles - resolution) div 2
     map = layouts.generateMap(config)
-    grid = grids.buildTiles(map, edition != ConfiguredArena)
+    grid = grids.buildTiles(map)
     count = resolution * resolution
-    heightScale = (if edition == InitialArena: 1'i16 else: 2'i16)
   result.layout = makeLayout(map, resolution)
   for color in grid.colors():
     result.minimap.add(color.r.uint32 shl 16 or color.g.uint32 shl 8 or
@@ -262,38 +246,37 @@ proc buildArena*(
   var heights = newSeq[int16](parents.len)
   for i in 0 ..< heights.len:
     if weights[i] > 0:
-      heights[i] = int16(sums[i] div weights[i]) * heightScale
-  if edition != InitialArena:
-    # Ease steep approach corners while keeping joined edges at one height.
-    var changes = newSeq[int32](heights.len)
-    for iteration in 0 ..< 32:
-      var steep = false
-      for index, tile in grid.cells:
-        if not tile.passable:
+      heights[i] = int16(sums[i] div weights[i]) * 2'i16
+  # Ease steep approach corners while keeping joined edges at one height.
+  var changes = newSeq[int32](heights.len)
+  for iteration in 0 ..< 32:
+    var steep = false
+    for index, tile in grid.cells:
+      if not tile.passable:
+        continue
+      for corners in [[0, 1, 2], [3, 2, 1]]:
+        let
+          first = root(index * 4 + corners[0])
+          second = root(index * 4 + corners[1])
+          third = root(index * 4 + corners[2])
+          dx = heights[second].int32 - heights[first].int32
+          dz = heights[third].int32 - heights[first].int32
+        if dx * dx + dz * dz <= 128:
           continue
-        for corners in [[0, 1, 2], [3, 2, 1]]:
-          let
-            first = root(index * 4 + corners[0])
-            second = root(index * 4 + corners[1])
-            third = root(index * 4 + corners[2])
-            dx = heights[second].int32 - heights[first].int32
-            dz = heights[third].int32 - heights[first].int32
-          if dx * dx + dz * dz <= 128:
-            continue
-          steep = true
-          let mean = (heights[first].int32 + heights[second].int32 +
-            heights[third].int32) div 3
-          for corner in [first, second, third]:
-            changes[corner] += cmp(mean, heights[corner].int32).int32
-      if not steep:
-        break
-      doAssert iteration < 31, "Arena ramp smoothing did not converge."
-      for i in 0 ..< heights.len:
-        heights[i] += cmp(changes[i], 0'i32).int16
-        changes[i] = 0
+        steep = true
+        let mean = (heights[first].int32 + heights[second].int32 +
+          heights[third].int32) div 3
+        for corner in [first, second, third]:
+          changes[corner] += cmp(mean, heights[corner].int32).int32
+    if not steep:
+      break
+    doAssert iteration < 31, "Arena ramp smoothing did not converge."
+    for i in 0 ..< heights.len:
+      heights[i] += cmp(changes[i], 0'i32).int16
+      changes[i] = 0
   for index, tile in grid.cells:
     var packed = pathing.Tile(flags: TileExists, kind: material(tile))
-    if edition != InitialArena and tile.surface == grids.TreeSurface and
+    if tile.surface == grids.TreeSurface and
       tile.side == layouts.Northeast:
         packed.kind = ArenaRockKind
     packed.impassable = not tile.passable
@@ -313,5 +296,5 @@ proc buildArena*(
     elif tile.terrain == grids.LakeGround:
       var water = pathing.Tile(flags: TileExists, bottoms: packed.tops)
       for i in 0 .. 3:
-        water.tops[i] = -ArenaHeightStep.int16 * heightScale + ArenaWaterDepth
+        water.tops[i] = -ArenaHeightStep.int16 * 2'i16 + ArenaWaterDepth
       result.layers[3].tiles[index] = water

@@ -179,25 +179,4 @@ for class in [VanguardKnight, Ranger, Arcanist]:
   game.tickWorld(nil)
   doAssert game.world.heroes[0].attackObjectId == 0
 
-echo "Testing old arena replays retain historical target acquisition"
-for class in [VanguardKnight, Ranger]:
-  let
-    game = attackGame(class)
-    hero = game.world.heroes[0]
-    other = game.enemyHero(60_000)
-  game.world.legacyAttacks = true
-  game.tickWorld(nil)
-  doAssert hero.attackObjectId ==
-    (if class == VanguardKnight: other.id else: 0)
-
-echo "Testing replay versions select the recorded basic attack rules"
-block:
-  let game = attackGame(Ranger)
-  for version in [ArenaGameVersion, ReplayGameVersion]:
-    let recorder = initReplayRecorder(game.currentSetup(20))
-    recorder.data.header.gameVersion = version
-    let replay = newGame(game.map, 240, 10, true, recorder.data)
-    doAssert replay.world.legacyAttacks == (version == ArenaGameVersion)
-    doAssert not replay.world.legacyAbilities
-
 echo "GOTA basic attack tests passed"

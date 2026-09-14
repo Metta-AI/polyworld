@@ -56,13 +56,13 @@ proc kindAt(layerIndex, mapX, mapY: int32, tile: Tile): TerrainKind =
       if readTile(i.int32, mapX, mapY, cover):
         return TerrainWall
   case kind
-  of GrassTile, LandmarkHillKind:
+  of GrassTile:
     TerrainGrass
-  of RoadTile, StoneTile, LaneShoulderKind, TowerCourtKind:
+  of RoadTile, StoneTile:
     TerrainRoad
-  of RockTile, QuarryFloorKind, QuarryRimKind, QuarryShoulderKind, HillRockKind:
+  of RockTile:
     TerrainRock
-  of MarshTile, WetBankKind:
+  of MarshTile:
     TerrainMarsh
   else:
     TerrainNone

@@ -122,19 +122,7 @@ block:
   var gameMap: MapData
   profileBlock "map":
     gameMap =
-      if replayMode and
-        replayData.header.gameVersion <= PreviousMapGameVersion:
-          generateLegacyMap(mapSeed)
-      elif replayMode and
-        replayData.header.gameVersion == InitialArenaGameVersion:
-          generateMap(mapSeed, InitialArena)
-      elif replayMode and
-        replayData.header.gameVersion == CryptArenaGameVersion:
-          generateMap(mapSeed, CryptArena)
-      elif replayMode and
-        replayData.header.gameVersion == PresetGameVersion:
-          generateMap(mapSeed, replayData.config.mapPreset, CryptArena)
-      elif replayMode:
+      if replayMode:
         generateMap(mapSeed, replayData.config.mapPreset)
       else:
         generateMap(mapSeed, matchConfig.mapPreset)
@@ -151,7 +139,6 @@ block:
   if replayMode:
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
-    run.legacyStats = replayData.header.gameVersion == LegacyGameVersion
   else:
     loadBots(run, options.botGroups, options.playerSlot)
     run.recorder = initReplayRecorder(

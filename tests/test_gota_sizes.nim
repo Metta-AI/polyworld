@@ -4,21 +4,6 @@ import
 import ../examples/gods_of_the_arena/generation/maps as editorMaps
 import ../examples/gods_of_the_arena/generation/tiles as editorTiles
 
-echo "Testing the original version 26 preset."
-var original = defaultConfig()
-original.mapSize = 128
-original.roadWidth = 62
-let historical = generateMap(54, original, CryptArena)
-doAssert historical.hash == 3213363289'u64
-let oldGame = newGame(historical, 240, 10, false, ReplayData())
-var oldData = initReplayData(oldGame.currentSetup(60), original)
-oldData.header.gameVersion = PresetGameVersion
-let restoredOld = decodeReplay(oldData.encodeReplay())
-doAssert restoredOld.config.mapPreset == original
-doAssert restoredOld.header.setup.gridTiles == 128
-doAssert generateMap(54, restoredOld.config.mapPreset, CryptArena).hash == historical.hash
-doAssert restoredOld.encodeReplay() == oldData.encodeReplay()
-
 for size in [64, 96, 100, 116, 128, 192, 256]:
   echo "Testing a ", size, " tile preset and its replay."
   var preset = defaultConfig()

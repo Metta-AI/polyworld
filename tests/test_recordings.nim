@@ -68,6 +68,40 @@ proc testRecording() =
   let emptyPlayback = playFile(path)
   doAssert emptyPlayback.exitCode == 0, emptyPlayback.output
 
+  echo "Testing each client rejects every other gameplay version"
+  let encoded = empty.encodeReplay()
+  for version in 0'u16 .. ReplayGameVersion + 1:
+    if version == ReplayGameVersion:
+      continue
+    var invalid = empty
+    invalid.header.gameVersion = version
+    try:
+      discard invalid.encodeReplay()
+      doAssert false, "encoding another gameplay version must fail"
+    except ReplayError:
+      discard
+    var wrongVersion = encoded
+    wrongVersion[ReplayMagic.len + 2] = char(version and 0xff)
+    wrongVersion[ReplayMagic.len + 3] = char(version shr 8)
+    try:
+      discard decodeReplay(wrongVersion)
+      doAssert false, "another gameplay version must require its own client"
+    except ReplayError:
+      discard
+    let wrongPayload = encodeReplayFile(
+      ReplayGame, ReplayGameVersion, invalid
+    )
+    try:
+      discard decodeReplay(wrongPayload)
+      doAssert false, "the payload must also match this gameplay version"
+    except ReplayError:
+      discard
+
+  echo "Testing the bundled demo belongs to this client"
+  let demo = loadReplay("examples" / ReplayGame / "replays" / "demo.replay")
+  doAssert demo.header.gameVersion == ReplayGameVersion
+  doAssert demo.hashes.len > 0
+
   echo "Testing replay config agrees with the recorded match"
   for check in 0 ..< 4:
     var invalid = empty
@@ -152,37 +186,6 @@ proc testRecording() =
     doAssert continuedPlayback.exitCode == 0, continuedPlayback.output
     doAssert continuedPlayback.output.contains(apmSummary()),
       continuedPlayback.output
-
-    when not defined(recordLvd):
-      echo "Testing older embedded CPU/APM recordings retain only CPU"
-      var previous: ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
-      previous.header = partial.header
-      previous.header.gameVersion = MetricsGameVersion
-      when defined(recordGota):
-        previous.header.setup.gridTiles = 128
-      previous.config = partial.config.gameConfig()
-      previous.actions = partial.actions
-      previous.hashes = partial.hashes
-      previous.metrics.tickRate = partial.metrics.tickRate
-      previous.metrics.interval = partial.metrics.interval
-      for frame in partial.metrics.frames:
-        var sample = LegacyTelemetryFrame(tick: frame.tick)
-        for row in frame.rows:
-          sample.rows.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
-        previous.metrics.frames.add sample
-      for row in partial.metrics.final:
-        previous.metrics.final.add LegacyTelemetryRow(cpu: row.cpu, apm: 9999)
-      let converted = decodeReplay(encodeReplayFile(
-        ReplayGame, MetricsGameVersion, previous, MaxReplayBytes
-      ))
-      doAssert converted.metrics == partial.metrics
-      var expected = partial
-      when defined(recordGota):
-        expected.header.gameVersion = TelemetryGameVersion
-        expected.header.setup.gridTiles = 128
-        expected.config.mapPreset.mapSize = 128
-        expected.config.mapPreset.roadWidth = 62
-      doAssert decodeReplay(encodeReplay(converted)) == expected
 
   echo "Testing divergent replays exit with failure"
   var corrupt = partial
