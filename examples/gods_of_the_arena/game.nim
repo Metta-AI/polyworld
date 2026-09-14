@@ -131,6 +131,9 @@ block:
       elif replayMode and
         replayData.header.gameVersion == CryptArenaGameVersion:
           generateMap(mapSeed, CryptArena)
+      elif replayMode and
+        replayData.header.gameVersion == PresetGameVersion:
+          generateMap(mapSeed, replayData.config.mapPreset, CryptArena)
       elif replayMode:
         generateMap(mapSeed, replayData.config.mapPreset)
       else:

@@ -173,7 +173,10 @@ proc knob(
   sk.arc(center, 20, start, theta, 3, tint)
   sk.circle(center, 13, PanelColor)
   sk.circle(center + vec2(cos(theta), sin(theta)) * 9, 2.5, tint)
-  sk.label($value.int, x + 58, y + 33, TextColor, "Value")
+  let number =
+    if value == floor(value): $value.int
+    else: formatFloat(value, ffDecimal, 1)
+  sk.label(number, x + 58, y + 33, TextColor, "Value")
 
 proc slider(
   app: App,
@@ -258,9 +261,13 @@ proc drawSidebar(app: App) =
   var
     roads = app.config.jungleRoads.float32
     crossings = app.config.lakeCrossings.float32
+    mapSize = app.config.mapSize.float32
   app.slider(8, "Jungle roads", roads, 18, 50, 2, 24, 520, 112)
   app.slider(9, "Camp scatter", app.config.campScatter, 0, 60, 1, 144, 520, 112)
-  app.slider(10, "Lake crossings", crossings, 0, 6, 2, 24, 569, 232)
+  app.slider(10, "Lake crossings", crossings, 0, 6, 2, 24, 569, 112)
+  app.slider(11, "Map tiles", mapSize, MinimumMapSize,
+    MaximumMapSize, 2, 144, 569, 112)
+  app.config.mapSize = mapSize.int
   app.config.jungleRoads = roads.int
   app.config.lakeCrossings = crossings.int
   app.checkbox(
@@ -297,19 +304,19 @@ proc drawSidebar(app: App) =
 proc drawTiles(app: App, origin: Vec2, size: float32) =
   ## Draws crisp pixel-aligned tiles, merging identical colors within each row.
   let sk = app.sk
-  var edges: array[TileCount + 1, Vec2]
-  for i in 0 .. TileCount:
+  var edges = newSeq[Vec2](app.tiles.resolution + 1)
+  for i in 0 .. app.tiles.resolution:
     let
-      offset = size * i.float32 / TileCount.float32
+      offset = size * i.float32 / app.tiles.resolution.float32
       point = (origin + vec2(offset)) * sk.uiScale
     edges[i] = vec2(round(point.x), round(point.y)) / sk.uiScale
-  for y in 0 ..< TileCount:
+  for y in 0 ..< app.tiles.resolution:
     var x = 0
-    while x < TileCount:
-      let color = app.tileColors[y * TileCount + x]
+    while x < app.tiles.resolution:
+      let color = app.tileColors[y * app.tiles.resolution + x]
       var finish = x + 1
-      while finish < TileCount and
-        app.tileColors[y * TileCount + finish] == color:
+      while finish < app.tiles.resolution and
+        app.tileColors[y * app.tiles.resolution + finish] == color:
           finish.inc
       sk.drawRect(
         vec2(edges[x].x, edges[y].y),
@@ -327,7 +334,7 @@ proc drawCanvas(app: App) =
     origin = vec2(304 + (available.x - size) / 2, 90)
   sk.label("THE BATTLEGROUND", 304, 25, TextColor, "Small")
   sk.label(
-    $TileCount & " x " & $TileCount &
+    $app.tiles.resolution & " x " & $app.tiles.resolution &
       " tiles   /   18 towers   /   14 camps   /   12 barracks",
     304,
     61,
@@ -401,10 +408,10 @@ proc drawCanvas(app: App) =
   var caption = app.status
   if sk.mousePos.overlaps(rect(origin, vec2(size))):
     let
-      point = (sk.mousePos - origin) / size * TileCount.float32
-      x = clamp(point.x.int, 0, TileCount - 1)
-      y = clamp(point.y.int, 0, TileCount - 1)
-      tile = app.tiles.cells[y * TileCount + x]
+      point = (sk.mousePos - origin) / size * app.tiles.resolution.float32
+      x = clamp(point.x.int, 0, app.tiles.resolution - 1)
+      y = clamp(point.y.int, 0, app.tiles.resolution - 1)
+      tile = app.tiles.cells[y * app.tiles.resolution + x]
     caption &= "  |  Tile " & $x & ", " & $y & "  |  Height " & $tile.height
     if app.walkableOnly:
       caption &= (if tile.passable: "  |  Walkable" else: "  |  Blocked")
@@ -413,7 +420,8 @@ proc drawCanvas(app: App) =
     elif CliffEdge in tile.edges:
       caption &= "  |  Cliff edge"
     for barrack in app.map.barracks:
-      if length(point * TileSize - barrack.position) < BarrackRadius * 2:
+      let distance = length(point * app.tiles.tileSize - barrack.position)
+      if distance < BarrackRadius * 2:
         let lane =
           if barrack.team == Southwest:
             ["West", "South", "Middle"][barrack.lane]

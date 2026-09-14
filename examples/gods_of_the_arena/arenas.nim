@@ -18,7 +18,7 @@ const
 
 type
   ArenaEdition* = enum
-    InitialArena, CryptArena
+    InitialArena, CryptArena, ConfiguredArena
   ArenaStop* = tuple[layer, x, z: int]
   ArenaSite* = object
     position*, facing*, spawn*: PathPoint
@@ -48,24 +48,27 @@ proc arenaKind*(kind: uint32): uint32 {.raises: [].} =
   else:
     RoadTile
 
-proc arenaPoint(point: Vec2): PathPoint {.raises: [].} =
+proc arenaPoint(point: Vec2, resolution: int): PathPoint {.raises: [].} =
   ## Quantizes editor coordinates into the game's integer path coordinates.
   PathPoint(
-    x: int32(round(point.x / layouts.MapSize * GridTiles.float32 *
-      PathUnitsPerTile.float32)) - GridTiles div 2 * PathUnitsPerTile,
-    z: int32(round(point.y / layouts.MapSize * GridTiles.float32 *
-      PathUnitsPerTile.float32)) - GridTiles div 2 * PathUnitsPerTile
+    x: int32(round(point.x / layouts.MapSize * resolution.float32 *
+      PathUnitsPerTile.float32)) - resolution.int32 div 2 * PathUnitsPerTile,
+    z: int32(round(point.y / layouts.MapSize * resolution.float32 *
+      PathUnitsPerTile.float32)) - resolution.int32 div 2 * PathUnitsPerTile
   )
 
-proc stop(point: Vec2): ArenaStop {.raises: [].} =
+proc stop(point: Vec2, resolution: int): ArenaStop {.raises: [].} =
   ## Reads the exact editor tile beneath one lane waypoint.
+  let tileSize = layouts.MapSize / resolution.float32
   (
     0,
-    clamp(int(point.x / grids.TileSize), 0, GridTiles - 1),
-    clamp(int(point.y / grids.TileSize), 0, GridTiles - 1)
+    clamp(int(point.x / tileSize), 0, resolution - 1),
+    clamp(int(point.y / tileSize), 0, resolution - 1)
   )
 
-proc makeLayout(map: layouts.MapData): ArenaLayout {.raises: [].} =
+proc makeLayout(
+    map: layouts.MapData, resolution: int
+): ArenaLayout {.raises: [].} =
   ## Shares lanes, structure positions, and camp clearings with the editor.
   const Lanes = [0, 2, 1]
   for source, lane in Lanes:
@@ -73,15 +76,18 @@ proc makeLayout(map: layouts.MapData): ArenaLayout {.raises: [].} =
     for j in 0 ..< road.len:
       let
         index = (if source == 1: j else: road.high - j)
-        point = road[index].stop()
+        point = road[index].stop(resolution)
       if result.lanes[lane].len == 0 or result.lanes[lane][^1] != point:
         result.lanes[lane].add(point)
   for team in 0 .. 1:
-    result.forts[1 - team] = arenaPoint(map.forts[team])
+    result.forts[1 - team] = arenaPoint(map.forts[team], resolution)
     var center: Vec2
     for point in map.spawns[team]:
       center += point
-    result.spawns[1 - team] = arenaPoint(center / map.spawns[team].len.float32)
+    result.spawns[1 - team] = arenaPoint(
+      center / map.spawns[team].len.float32,
+      resolution
+    )
   var towers: array[3, array[2, seq[ArenaSite]]]
   for tower in map.towers:
     var
@@ -98,8 +104,8 @@ proc makeLayout(map: layouts.MapData): ArenaLayout {.raises: [].} =
         facing = nearest
     let team = 1 - tower.team.ord
     towers[lane][team].add(ArenaSite(
-      position: arenaPoint(tower.position),
-      facing: arenaPoint(facing),
+      position: arenaPoint(tower.position, resolution),
+      facing: arenaPoint(facing, resolution),
       team: team,
       lane: lane
     ))
@@ -121,14 +127,14 @@ proc makeLayout(map: layouts.MapData): ArenaLayout {.raises: [].} =
         result.towers[lane][team][tier] = towers[lane][team][tier]
   for barrack in map.barracks:
     result.barracks.add(ArenaSite(
-      position: arenaPoint(barrack.position),
-      facing: arenaPoint(barrack.route[1]),
-      spawn: arenaPoint(barrack.spawn),
+      position: arenaPoint(barrack.position, resolution),
+      facing: arenaPoint(barrack.route[1], resolution),
+      spawn: arenaPoint(barrack.spawn, resolution),
       lane: Lanes[barrack.lane],
       team: 1 - barrack.team.ord
     ))
   for camp in map.camps:
-    result.camps.add(arenaPoint(camp.position))
+    result.camps.add(arenaPoint(camp.position, resolution))
 
 proc elevation(tile: grids.Tile): int32 {.raises: [].} =
   ## Converts the editor's terrain levels into compact game height steps.
@@ -162,7 +168,7 @@ proc material(tile: grids.Tile): uint32 {.raises: [].} =
 proc historicalPreset*(edition: ArenaEdition): MapConfig {.raises: [].} =
   ## Restores the controls from recordings that predate stored map presets.
   result = MapConfig(
-    seed: 54, lakeCrossings: 4, jungleRoads: 50,
+    mapSize: 128, seed: 54, lakeCrossings: 4, jungleRoads: 50,
     highSize: 511, castleSize: 295, roadWidth: 62, roadWobble: 73,
     lakeWidth: 80, lakeWobble: 30, campRadius: 36, stemLength: 50,
     campScatter: 35, campsTouchRoads: false
@@ -171,23 +177,27 @@ proc historicalPreset*(edition: ArenaEdition): MapConfig {.raises: [].} =
     result.campRadius = 29
 
 proc buildArena*(
-    config: MapConfig, edition = CryptArena
+    config: MapConfig, edition = ConfiguredArena
 ): ArenaData =
   ## Converts the saved editor preset into immutable packed game terrain.
   config.validate()
   let
+    resolution = config.mapSize
+    origin = (GridTiles - resolution) div 2
     map = layouts.generateMap(config)
-    grid = grids.buildTiles(map)
-    count = GridTiles * GridTiles
+    grid = grids.buildTiles(map, edition != ConfiguredArena)
+    count = resolution * resolution
     heightScale = (if edition == InitialArena: 1'i16 else: 2'i16)
-  result.layout = makeLayout(map)
+  result.layout = makeLayout(map, resolution)
   for color in grid.colors():
     result.minimap.add(color.r.uint32 shl 16 or color.g.uint32 shl 8 or
       color.b.uint32)
   for layer in 0 .. 3:
     result.layers.add(QuadLayer(
-      width: GridTiles,
-      depth: GridTiles,
+      originX: origin,
+      originZ: origin,
+      width: resolution,
+      depth: resolution,
       slab: layer != 0,
       water: layer == 3,
       tiles: newSeq[pathing.Tile](count)
@@ -209,10 +219,10 @@ proc buildArena*(
   proc join(a, b: int) {.raises: [].} =
     ## Shares corner heights only across edges that the editor permits.
     parents[root(b)] = root(a)
-  for y in 0 ..< GridTiles:
-    for x in 0 ..< GridTiles:
+  for y in 0 ..< resolution:
+    for x in 0 ..< resolution:
       let
-        index = y * GridTiles + x
+        index = y * resolution + x
         tile = grid.cells[index]
         corner = index * 4
       if tile.ramp:
@@ -220,11 +230,11 @@ proc buildArena*(
           let
             direction = normalize(ramp.points[1] - ramp.points[0])
             center = (ramp.points[0] + ramp.points[1]) / 2
-            point = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) * grids.TileSize
+            point = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) * grid.tileSize
             across = abs(dot(point - center, vec2(-direction.y, direction.x)))
             along = abs(dot(point - center, direction))
-          if across > ramp.width / 2 + grids.TileSize or
-            along > layouts.RampLength / 2 + grids.TileSize:
+          if across > ramp.width / 2 + grid.tileSize or
+            along > layouts.RampLength / 2 + grid.tileSize:
               continue
           let
             first = elevation(grid.tileAt(ramp.approaches[0]))
@@ -232,19 +242,19 @@ proc buildArena*(
           for i in 0 .. 3:
             let
               point = vec2((x + i mod 2).float32,
-                (y + i div 2).float32) * grids.TileSize
+                (y + i div 2).float32) * grid.tileSize
               fraction = clamp(dot(point - ramp.points[0], direction) /
                 length(ramp.points[1] - ramp.points[0]), 0'f, 1'f)
             values[corner + i] = int32(round(
               first.float32 + (last - first).float32 * fraction
             ))
           break
-      if x < GridTiles - 1 and tile.edges[grids.East] != grids.CliffEdge:
+      if x < resolution - 1 and tile.edges[grids.East] != grids.CliffEdge:
         join(corner + 1, corner + 4)
         join(corner + 3, corner + 6)
-      if y < GridTiles - 1 and tile.edges[grids.South] != grids.CliffEdge:
-        join(corner + 2, corner + GridTiles * 4)
-        join(corner + 3, corner + GridTiles * 4 + 1)
+      if y < resolution - 1 and tile.edges[grids.South] != grids.CliffEdge:
+        join(corner + 2, corner + resolution * 4)
+        join(corner + 3, corner + resolution * 4 + 1)
   for i, value in values:
     let group = root(i)
     sums[group] += value

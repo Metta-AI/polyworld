@@ -4,7 +4,11 @@ import
 
 proc attackGame(class: HeroClass): Game =
   ## Isolates basic attacks in the arena with manual spell control.
-  result = newGame(generateMap(2026), 240, 10, false, ReplayData())
+  # The measured chase corridor belongs to the original 128 tile preset.
+  var preset = defaultConfig()
+  preset.mapSize = 128
+  preset.roadWidth = 62
+  result = newGame(generateMap(2026, preset), 240, 10, false, ReplayData())
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:

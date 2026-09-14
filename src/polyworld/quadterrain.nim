@@ -883,6 +883,7 @@ var
   terrainTexturesLocation, visibilityTexLocation: GLint
   groundMaskLocation, groundMaskEnabledLocation, groundLayersLocation: GLint
   groundRingLocation, groundRingShapeLocation: GLint
+  visibilitySize = GridTiles
   visibilityOffsetLocation, visibilityScaleLocation: GLint
   terrainTextureArray, visibilityTexture, groundMaskTexture: GLuint
   generatedLocation, heightBlendEnabledLocation: GLint
@@ -1633,9 +1634,12 @@ proc drawTexturedProp(
   glUniformMatrix4fv(
     texturedInstantMvpLocation, 1, GL_FALSE,
     cast[ptr float32](transform.addr))
-  glUniform1f(texturedInstantVisibilityOffsetLocation, HalfGrid)
   glUniform1f(
-    texturedInstantVisibilityScaleLocation, 1.0'f32 / GridTiles.float32)
+    texturedInstantVisibilityOffsetLocation,
+    visibilitySize.float32 / 2
+  )
+  glUniform1f(
+    texturedInstantVisibilityScaleLocation, 1.0'f / visibilitySize.float32)
   glUniform1f(texturedInstantAlphaCutoffLocation, TreeAlphaCutoff)
   glUniform4f(texturedInstantTintLocation, tint.x, tint.y, tint.z, tint.w)
   glActiveTexture(GL_TEXTURE1)
@@ -2047,23 +2051,38 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
     )
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
 
-proc uploadTerrainVisibility*(values: openArray[uint8]) =
+proc uploadTerrainVisibility*(
+    values: openArray[uint8], size = GridTiles
+) =
   ## Uploads one visibility value per world tile for terrain fog rendering.
   if visibilityTexture == 0:
     return
-  if values.len != GridTiles * GridTiles:
+  if size <= 0 or values.len != size * size:
     raise newException(
       QuadTerrainError,
       "terrain visibility must contain one value per world tile"
     )
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  if visibilitySize != size:
+    glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_R8.GLint,
+      size.GLsizei,
+      size.GLsizei,
+      0,
+      GL_RED,
+      GL_UNSIGNED_BYTE,
+      nil
+    )
+    visibilitySize = size
   glTexSubImage2D(
     GL_TEXTURE_2D,
     0,
     0,
     0,
-    GridTiles,
-    GridTiles,
+    size.GLsizei,
+    size.GLsizei,
     GL_RED,
     GL_UNSIGNED_BYTE,
     unsafeAddr values[0]
@@ -2160,10 +2179,10 @@ proc bindGroundMask() =
 
 proc showAllTerrain*() =
   ## Restores fully lit terrain for an omniscient spectator view.
-  var values = newSeq[uint8](GridTiles * GridTiles)
+  var values = newSeq[uint8](visibilitySize * visibilitySize)
   for value in values.mitems:
     value = 255
-  uploadTerrainVisibility(values)
+  uploadTerrainVisibility(values, visibilitySize)
 
 ## Prop scattering
 
@@ -3310,6 +3329,7 @@ proc initTerrain*(
     )
   if settings.water:
     waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
+  visibilitySize = GridTiles
   glGenTextures(1, visibilityTexture.addr)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glTexImage2D(
@@ -3769,8 +3789,8 @@ proc drawTerrainRange*(
   glUniform1f(texScaleLocation, terrainTextureScale)
   glUniform1f(blendDepthLocation, terrainBlendDepth)
   glUniform1f(heightBlendLocation, terrainHeightBlend)
-  glUniform1f(visibilityOffsetLocation, HalfGrid)
-  glUniform1f(visibilityScaleLocation, 1.0'f32 / GridTiles.float32)
+  glUniform1f(visibilityOffsetLocation, visibilitySize.float32 / 2)
+  glUniform1f(visibilityScaleLocation, 1.0'f / visibilitySize.float32)
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
@@ -3798,10 +3818,10 @@ proc drawTexturedMesh(
     GL_FALSE,
     cast[ptr float32](matrix.addr)
   )
-  glUniform1f(treeVisibilityOffsetLocation, HalfGrid)
+  glUniform1f(treeVisibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(
     treeVisibilityScaleLocation,
-    1.0'f32 / GridTiles.float32
+    1.0'f / visibilitySize.float32
   )
   glUniform1f(treeAlphaCutoffLocation, TreeAlphaCutoff)
   glActiveTexture(GL_TEXTURE1)
@@ -3826,10 +3846,10 @@ proc drawTexturedBatch(batch: TexturedBatch, mvp: Mat4) =
     GL_FALSE,
     cast[ptr float32](matrix.addr)
   )
-  glUniform1f(texturedPropVisibilityOffsetLocation, HalfGrid)
+  glUniform1f(texturedPropVisibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(
     texturedPropVisibilityScaleLocation,
-    1.0'f32 / GridTiles.float32
+    1.0'f / visibilitySize.float32
   )
   glUniform1f(texturedPropAlphaCutoffLocation, TreeAlphaCutoff)
   glActiveTexture(GL_TEXTURE1)
@@ -3859,8 +3879,8 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   glUniform1f(texScaleLocation, terrainTextureScale)
   glUniform1f(blendDepthLocation, terrainBlendDepth)
   glUniform1f(heightBlendLocation, terrainHeightBlend)
-  glUniform1f(visibilityOffsetLocation, HalfGrid)
-  glUniform1f(visibilityScaleLocation, 1.0'f32 / GridTiles.float32)
+  glUniform1f(visibilityOffsetLocation, visibilitySize.float32 / 2)
+  glUniform1f(visibilityScaleLocation, 1.0'f / visibilitySize.float32)
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
@@ -3884,10 +3904,10 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
       GL_FALSE,
       cast[ptr float32](mvp.addr)
     )
-    glUniform1f(propVisibilityOffsetLocation, HalfGrid)
+    glUniform1f(propVisibilityOffsetLocation, visibilitySize.float32 / 2)
     glUniform1f(
       propVisibilityScaleLocation,
-      1.0'f32 / GridTiles.float32
+      1.0'f / visibilitySize.float32
     )
     glActiveTexture(GL_TEXTURE1)
     glBindTexture(GL_TEXTURE_2D, visibilityTexture)
@@ -3925,10 +3945,10 @@ proc drawWater*(
   glUniform2f(waterOffsetLocation, offset.x, offset.y)
   glUniform1f(waterOpacityLocation, opacity)
   glUniform1f(waterHighlightOpacityLocation, highlightOpacity)
-  glUniform1f(waterVisibilityOffsetLocation, HalfGrid)
+  glUniform1f(waterVisibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(
     waterVisibilityScaleLocation,
-    1.0'f32 / GridTiles.float32
+    1.0'f / visibilitySize.float32
   )
   glActiveTexture(GL_TEXTURE0)
   glBindTexture(GL_TEXTURE_2D_ARRAY, waterNormalTextureArray)

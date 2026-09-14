@@ -450,7 +450,7 @@ proc buildSightTerrain(): tuple[
     blockerHeights: seq[int16]
 ] =
   ## Builds one integer occlusion grid from terrain and forest tiles.
-  let cellCount = GridTiles * GridTiles
+  let cellCount = mapTiles() * mapTiles()
   result.terrainHeights = newSeq[int16](cellCount)
   result.blockerHeights = newSeq[int16](cellCount)
   for value in result.terrainHeights.mitems:
@@ -462,13 +462,13 @@ proc buildSightTerrain(): tuple[
       for x in 0 ..< layer.width:
         let
           tile = layer.tiles[z * layer.width + x]
-          mapX = layer.originX + x
-          mapZ = layer.originZ + z
-        if not tile.exists or mapX < 0 or mapX >= GridTiles or
-            mapZ < 0 or mapZ >= GridTiles:
+          mapX = layer.originX + x - mapOrigin()
+          mapZ = layer.originZ + z - mapOrigin()
+        if not tile.exists or mapX < 0 or mapX >= mapTiles() or
+            mapZ < 0 or mapZ >= mapTiles():
           continue
         let
-          index = mapZ * GridTiles + mapX
+          index = mapZ * mapTiles() + mapX
           mean = int16(
             (int32(tile.tops[0]) + int32(tile.tops[1]) +
               int32(tile.tops[2]) + int32(tile.tops[3])) div 4
@@ -484,7 +484,7 @@ proc buildSightTerrain(): tuple[
       if ground.tiles[index].kind == TreeTile or
         ground.tiles[index].kind == ArenaRockKind:
           result.blockerHeights[
-            (ground.originZ + z) * GridTiles + ground.originX + x
+            z * ground.width + x
           ] = 24
   for value in result.terrainHeights.mitems:
     if value == int16.low:
@@ -494,15 +494,15 @@ var sightTerrain: tuple[terrainHeights, blockerHeights: seq[int16]]
 
 proc sightTile(position: WorldPoint): tuple[x, z: int32] =
   ## Converts one integer world position to the shared visibility grid.
-  result.x = int32(floorWorldTile(position.x) + GridTiles div 2)
-  result.z = int32(floorWorldTile(position.z) + GridTiles div 2)
+  result.x = int32(floorWorldTile(position.x) + mapTiles() div 2)
+  result.z = int32(floorWorldTile(position.z) + mapTiles() div 2)
 
 proc addVisionBlocker(position: WorldPoint, height: int16) =
   ## Raises one tile's occluder height for this tick's vision pass.
   let tile = sightTile(position)
-  if tile.x >= 0 and tile.x < GridTiles and
-      tile.z >= 0 and tile.z < GridTiles:
-    let index = tile.z * GridTiles + tile.x
+  if tile.x >= 0 and tile.x < mapTiles() and
+      tile.z >= 0 and tile.z < mapTiles():
+    let index = tile.z * mapTiles() + tile.x
     visionBlockers[index] = max(visionBlockers[index], height)
 
 proc fillVisionKeys(world: World, dest: var seq[int32]) =
@@ -601,8 +601,8 @@ proc rebuildVision*(world: World) {.measure.} =
         )
     revealVision(
       world.teamVisible[team.ord],
-      GridTiles,
-      GridTiles,
+      mapTiles().int32,
+      mapTiles().int32,
       sightTerrain.terrainHeights,
       visionBlockers,
       visionSources
@@ -616,10 +616,10 @@ proc rebuildVision*(world: World) {.measure.} =
 proc visible*(world: World, team: Team, position: WorldPoint): bool =
   ## Returns whether a position is currently visible to one team.
   let tile = sightTile(position)
-  tile.x >= 0 and tile.x < GridTiles and
-    tile.z >= 0 and tile.z < GridTiles and
-    world.teamVisible[team.ord].len == GridTiles * GridTiles and
-    world.teamVisible[team.ord][tile.z * GridTiles + tile.x] != 0
+  tile.x >= 0 and tile.x < mapTiles() and
+    tile.z >= 0 and tile.z < mapTiles() and
+    world.teamVisible[team.ord].len == mapTiles() * mapTiles() and
+    world.teamVisible[team.ord][tile.z * mapTiles() + tile.x] != 0
 
 proc enemyFort(team: Team): int =
   ## Returns the opposing fort index for a team.
@@ -821,11 +821,10 @@ proc fixedSurfaceHeightNear(
 
 proc canStand(x, z: int32): bool =
   ## Keeps units out of forests, blocked fort tiles, and the map rim.
-  const
-    Margin = 18_000'i32
-    HalfGridUnits = GridTiles div 2 * WorldScale
-  if x < -HalfGridUnits + Margin or x > HalfGridUnits - Margin or
-      z < -HalfGridUnits + Margin or z > HalfGridUnits - Margin:
+  const Margin = 18_000'i32
+  let halfGridUnits = mapTiles().int32 div 2 * WorldScale
+  if x < -halfGridUnits + Margin or x > halfGridUnits - Margin or
+      z < -halfGridUnits + Margin or z > halfGridUnits - Margin:
     return false
   let
     tileX = floorWorldTile(x) + GridTiles div 2 -
@@ -845,14 +844,13 @@ proc walkWorldCell(pos: FixedVec2): tuple[x, z: int] =
 
 proc inWalkMargin(pos: FixedVec2): bool =
   ## Keeps units off the map rim.
-  const
-    Margin = 18_000'i32
-    HalfGridUnits = GridTiles div 2 * WorldScale
+  const Margin = 18_000'i32
+  let halfGridUnits = mapTiles().int32 div 2 * WorldScale
   let
     x = tilesToWorld(pos.x, WorldScale)
     z = tilesToWorld(pos.y, WorldScale)
-  x >= -HalfGridUnits + Margin and x <= HalfGridUnits - Margin and
-    z >= -HalfGridUnits + Margin and z <= HalfGridUnits - Margin
+  x >= -halfGridUnits + Margin and x <= halfGridUnits - Margin and
+    z >= -halfGridUnits + Margin and z <= halfGridUnits - Margin
 
 proc tilesWalkable(pos: FixedVec2): bool =
   ## Keeps body movement on walkable tiles and on the open side of cliffs.
@@ -1125,7 +1123,7 @@ proc currentSetup*(game: Game, maximumTicks: uint32): Setup =
     mapSeed: game.map.seed,
     mapHash: game.map.hash,
     tickRate: uint16(TickRate),
-    gridTiles: uint16(GridTiles),
+    gridTiles: uint16(game.map.resolution),
     spawnIntervalTicks: uint32(game.world.spawnIntervalTicks),
     maximumTicks: maximumTicks
   )
@@ -1194,9 +1192,9 @@ proc spawnWave(world: World) {.measure.} =
 proc mapCoordinate*(value: int32): int32 =
   ## Converts one world coordinate to a clamped script map coordinate.
   int32(clamp(
-    floorWorldTile(value) + GridTiles div 2,
+    floorWorldTile(value) + mapTiles() div 2,
     0,
-    GridTiles - 1
+    mapTiles() - 1
   ))
 
 proc rawWorldObjectCount(world: World): int =
@@ -1372,15 +1370,15 @@ proc nearestNavTile(
       let
         worldX = mapX + dx
         worldZ = mapY + dz
-      if worldX < 0 or worldX >= GridTiles or
-          worldZ < 0 or worldZ >= GridTiles:
+      if worldX < 0 or worldX >= mapTiles() or
+          worldZ < 0 or worldZ >= mapTiles():
         continue
       for layerIndex, layer in layers:
         if layer.water:
           continue
         let
-          x = worldX - layer.originX
-          z = worldZ - layer.originZ
+          x = worldX + mapOrigin() - layer.originX
+          z = worldZ + mapOrigin() - layer.originZ
         if not isWalkable(layerIndex, x, z):
           continue
         let
@@ -1401,8 +1399,8 @@ proc setHeroDestination(
 ): bool =
   ## Computes and stores a server-side path for one hero destination.
   let
-    targetX = clamp(mapX, 0, GridTiles - 1)
-    targetY = clamp(mapY, 0, GridTiles - 1)
+    targetX = clamp(mapX, 0, mapTiles() - 1)
+    targetY = clamp(mapY, 0, mapTiles() - 1)
   if hero.hasMoveTarget and hero.moveTileX == targetX and
       hero.moveTileY == targetY and hero.movePathIndex < hero.movePath.len:
     return true
@@ -2348,12 +2346,12 @@ proc applyCastPoint*(
   ## Casts toward a map tile, clamping empty-ground shots to their range.
   let index = world.heroIndex(heroId)
   if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord or
-    mapX < 0 or mapX >= GridTiles or mapY < 0 or mapY >= GridTiles:
+    mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles():
       return false
   let hero = world.heroes[index]
   var point = WorldPoint(
-    x: (mapX - GridTiles div 2) * WorldScale + WorldScale div 2,
-    z: (mapY - GridTiles div 2) * WorldScale + WorldScale div 2
+    x: (mapX - mapTiles().int32 div 2) * WorldScale + WorldScale div 2,
+    z: (mapY - mapTiles().int32 div 2) * WorldScale + WorldScale div 2
   )
   point.y = fixedSurfaceHeightNear(point, hero.position.y)
   world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
@@ -3246,7 +3244,7 @@ proc newGame*(
       world.barracksPairs[site.team][site.lane][index] = point
       counts[site.team][site.lane].inc
   sightTerrain = buildSightTerrain()
-  let visionCells = GridTiles * GridTiles
+  let visionCells = mapTiles() * mapTiles()
   for team in Team:
     world.teamVisible[team.ord] = newSeq[uint8](visionCells)
     world.teamExplored[team.ord] = newSeq[uint8](visionCells)

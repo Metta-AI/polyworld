@@ -48,8 +48,8 @@ proc ground(game: Game, slot: HeroAbilitySlot, tiles = 0'i32): bool =
   let hero = game.world.heroes[0]
   game.world.applyCastPoint(
     hero.id, int32(slot),
-    (hero.position.x + GridTiles div 2 * WorldScale) div WorldScale,
-    (hero.position.z + GridTiles div 2 * WorldScale) div WorldScale + tiles
+    mapCoordinate(hero.position.x),
+    mapCoordinate(hero.position.z) + tiles
   )
 
 echo "Testing self and melee keys cast without a confirmation click"

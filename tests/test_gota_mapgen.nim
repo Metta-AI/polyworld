@@ -4,7 +4,11 @@ import ../examples/gods_of_the_arena/generation/maps as editorMaps
 import ../examples/gods_of_the_arena/generation/tiles as editorTiles
 import ../examples/gods_of_the_arena/[sim, replays, terrains]
 
+const Size = editorTiles.TileCount
+
 echo "Checking the saved editor preset in the game."
+doAssert editorMaps.defaultConfig().mapSize == 116
+doAssert editorMaps.defaultConfig().roadWidth == 52.7'f
 doAssert editorMaps.defaultConfig().campRadius == 36
 doAssert editorMaps.defaultConfig().jungleRoads == 32
 doAssert editorMaps.defaultConfig().campsTouchRoads
@@ -16,15 +20,18 @@ let
   preview = editorMaps.generateMap(editorMaps.defaultConfig())
   tiles = editorTiles.buildTiles(preview)
   map = gameMaps.generateMap(54)
+doAssert map.resolution == 116
+for layer in layers:
+  doAssert layer.width == 116 and layer.depth == 116
 doAssert not map.legacy
 doAssert map.layout.camps.len == 14
 doAssert map.layout.barracks.len == 12
 doAssert map.seed == 54
 doAssert gameMaps.generateMap(1988).hash == map.hash,
   "Match randomness must not select a different map preset."
-for y in 0 ..< GridTiles:
-  for x in 0 ..< GridTiles:
-    let tile = tiles.cells[y * GridTiles + x]
+for y in 0 ..< Size:
+  for x in 0 ..< Size:
+    let tile = tiles.cells[y * Size + x]
     doAssert isWalkable(0, x, y) == tile.passable,
       "Walkability differs from the editor at " & $(x, y)
     doAssert terrainValue(x.int32, y.int32, 0, TerrainWalkableField) ==
@@ -39,15 +46,15 @@ for y in 0 ..< GridTiles:
           TerrainTrees
       doAssert terrainValue(x.int32, y.int32, 0, TerrainKindField) ==
         expected.ord
-    var interior = x > 0 and y > 0 and x < GridTiles - 1 and y < GridTiles - 1
+    var interior = x > 0 and y > 0 and x < Size - 1 and y < Size - 1
     if interior:
       for dz in -1 .. 1:
         for dx in -1 .. 1:
-          let neighbor = tiles.cells[(y + dz) * GridTiles + x + dx]
+          let neighbor = tiles.cells[(y + dz) * Size + x + dx]
           if neighbor.terrain != tile.terrain or neighbor.ramp:
             interior = false
     if interior and tile.surface == editorTiles.NaturalSurface:
-      let heights = layers[0].tiles[y * GridTiles + x].tops
+      let heights = layers[0].tiles[y * Size + x].tops
       if heights[0] == heights[1] and heights[0] == heights[2] and
         heights[0] == heights[3]:
           case tile.terrain
@@ -75,8 +82,8 @@ let first = map.layout.lanes[0][0]
 proc checkAccess(point: PathPoint) =
   ## Checks that a generated clearing or spawn reaches the lane network.
   let
-    x = int((point.x + GridTiles div 2 * PathUnitsPerTile) div PathUnitsPerTile)
-    z = int((point.z + GridTiles div 2 * PathUnitsPerTile) div PathUnitsPerTile)
+    x = int((point.x + Size div 2 * PathUnitsPerTile) div PathUnitsPerTile)
+    z = int((point.z + Size div 2 * PathUnitsPerTile) div PathUnitsPerTile)
   doAssert findTilePath(0, first.x, first.z, 0, x, z).len > 0,
     "Generated site is unreachable at " & $(x, z)
 for point in map.layout.camps:
@@ -97,7 +104,7 @@ for tower in game.world.towers:
   doAssert tower.position.z == point.z * (WorldScale div PathUnitsPerTile)
 for hero in game.world.heroes:
   let tile = tiles.cells[
-    mapCoordinate(hero.position.z).int * GridTiles +
+    mapCoordinate(hero.position.z).int * Size +
     mapCoordinate(hero.position.x).int
   ]
   doAssert tile.terrain == editorTiles.SpawnGround
@@ -111,7 +118,7 @@ for tick in 1 .. 500:
   game.tickWorld(nil)
 for footman in game.world.footmen:
   let tile = tiles.cells[
-    mapCoordinate(footman.position.z).int * GridTiles +
+    mapCoordinate(footman.position.z).int * Size +
     mapCoordinate(footman.position.x).int
   ]
   doAssert tile.terrain notin {
@@ -125,9 +132,9 @@ for edge in [editorTiles.CliffEdge, editorTiles.RampEdge]:
   var
     sourceX = -1
     sourceZ = -1
-  for z in 1 ..< GridTiles - 1:
-    for x in 1 ..< GridTiles - 2:
-      let index = z * GridTiles + x
+  for z in 1 ..< Size - 1:
+    for x in 1 ..< Size - 2:
+      let index = z * Size + x
       if sourceX < 0 and tiles.cells[index].passable and
         tiles.cells[index + 1].passable and
         tiles.cells[index].edges[editorTiles.East] == edge:
@@ -142,8 +149,8 @@ for edge in [editorTiles.CliffEdge, editorTiles.RampEdge]:
   let
     hero = trial.world.heroes[0]
     origin = WorldPoint(
-      x: (sourceX.int32 - GridTiles div 2) * WorldScale + WorldScale div 2,
-      z: (sourceZ.int32 - GridTiles div 2) * WorldScale + WorldScale div 2
+      x: (sourceX.int32 - Size div 2) * WorldScale + WorldScale div 2,
+      z: (sourceZ.int32 - Size div 2) * WorldScale + WorldScale div 2
     )
     target = WorldPoint(x: origin.x + WorldScale, z: origin.z)
   hero.place(origin)

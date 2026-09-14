@@ -14,14 +14,14 @@ type
     TerrainHeightField, TerrainWaterDepthField
 
 proc readTile(layerIndex, mapX, mapY: int32, tile: var Tile): bool =
-  ## Reads an existing tile using global map coordinates on one exact layer.
-  if mapX < 0 or mapX >= GridTiles or mapY < 0 or mapY >= GridTiles or
+  ## Reads an existing tile using map coordinates on one exact layer.
+  if mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles() or
     layerIndex < 0 or layerIndex >= layers.len:
       return false
   let
     layer = layers[int(layerIndex)]
-    x = int(mapX) - layer.originX
-    y = int(mapY) - layer.originZ
+    x = int(mapX) + mapOrigin() - layer.originX
+    y = int(mapY) + mapOrigin() - layer.originZ
   if x < 0 or x >= layer.width or y < 0 or y >= layer.depth:
     return false
   tile = layer.tiles[y * layer.width + x]
@@ -109,8 +109,8 @@ proc terrainValue*(
     let layer = layers[int(layerIndex)]
     int32(isWalkable(
       int(layerIndex),
-      int(mapX) - layer.originX,
-      int(mapY) - layer.originZ
+      int(mapX) + mapOrigin() - layer.originX,
+      int(mapY) + mapOrigin() - layer.originZ
     ))
   of TerrainHeightField:
     int32(roundDivision(tile.heightSum().int64, 4))
