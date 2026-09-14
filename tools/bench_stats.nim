@@ -54,11 +54,9 @@ proc measure() =
       let row = run.metrics.read(slot, run.world.tick, true)
       measurement.acceptedCommands.add row.commands
       measurement.finalApm.add row.values[ApmMetric]
-    run.legacyStats = true
   measurement.gameplayHash = run.stateHash().toHex(16)
   var baseline = run.recorder.data
   when not defined(statsBaseline):
-    baseline.header.gameVersion = ActionGameVersion
     baseline.metrics = ReplayMetrics()
   let
     base = encodeReplay(baseline)

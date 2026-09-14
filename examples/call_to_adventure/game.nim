@@ -238,7 +238,6 @@ if options.replayPath.len > 0:
   run.replayData = replayData
   run.replayPlayer = initReplayPlayer(replayData)
   run.historyPlayback = true
-  run.legacyStats = replayData.header.gameVersion == LegacyGameVersion
   if replayData.header.setup != run.world.setup:
     raise newException(
       ReplayError,
