@@ -149,11 +149,26 @@ const
 
 type MapData* = object
   seed*: int32
+  resolution*: int = GridTiles
   hash*: uint64
   legacy*: bool
   preset*: MapConfig
   layout*: ArenaLayout
   minimap*: seq[uint32]
+
+var activeMapResolution = GridTiles
+
+proc mapTiles*(): int {.raises: [].} =
+  ## Reads the active map size while retaining the legacy grid before loading.
+  activeMapResolution
+
+proc mapHalfSize*(): float32 {.raises: [].} =
+  ## Returns the world extent of the centered active map.
+  mapTiles().float32 / 2
+
+proc mapOrigin*(): int {.raises: [].} =
+  ## Locates the centered map inside the engine's shared coordinate grid.
+  (GridTiles - mapTiles()) div 2
 
 proc triangleWave(value, period: int): int32 =
   ## Returns a deterministic signed triangle wave in fixed integer units.
@@ -1049,6 +1064,7 @@ proc generateLegacyMap*(seed: int32): MapData {.measure.} =
   computeWalkable()
   result.seed = seed
   result.legacy = true
+  activeMapResolution = GridTiles
   result.hash = mapFingerprint()
   battleMapHash = result.hash
 
@@ -1058,7 +1074,7 @@ var
   arenaReady: array[ArenaEdition, bool]
 
 proc generateMap*(
-    seed: int32, preset = defaultConfig(), edition = CryptArena
+    seed: int32, preset = defaultConfig(), edition = ConfiguredArena
 ): MapData {.measure.} =
   ## Generates configured terrain with a bounded cache and separate match seed.
   if not arenaReady[edition] or savedPresets[edition] != preset:
@@ -1067,6 +1083,7 @@ proc generateMap*(
     arenaReady[edition] = true
   let savedArena = savedArenas[edition]
   installImmutableLayers(savedArena.layers)
+  activeMapResolution = savedArena.layers[0].width
   var hash = uint32(mapFingerprint())
   for points in [savedArena.layout.forts, savedArena.layout.spawns]:
     for point in points:
@@ -1095,6 +1112,7 @@ proc generateMap*(
       hash.addHashy(point.z)
   result = MapData(
     seed: seed,
+    resolution: savedArena.layers[0].width,
     preset: preset,
     hash: uint64(hash),
     layout: savedArena.layout,

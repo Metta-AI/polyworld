@@ -961,7 +961,7 @@ proc lineClear*(a, b: PathTile): bool =
     guard = 0
   while tileX != tileB.x or tileZ != tileB.z:
     inc guard
-    if guard > 4 * GridTiles:
+    if guard > adx + adz:
       return false
     let
       left = int64(1 + 2 * ix) * int64(adz)

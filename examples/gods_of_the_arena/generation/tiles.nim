@@ -25,6 +25,8 @@ type
     road*, cliff*, ramp*: bool
     edges*: array[Direction, Edge]
   TileGrid* = object
+    resolution*: int
+    rasterTolerance: float32
     cells*: seq[Tile]
   MapPalette* = object
     low*, high*, castle*, keep*, spawn*, lake*: ColorRGBX
@@ -118,12 +120,16 @@ proc tileColor*(tile: Tile): ColorRGBX {.raises: [].} =
   of LakeGround:
     palette.lake
 
+proc tileSize*(grid: TileGrid): float32 {.raises: [].} =
+  ## Returns canvas units per tile for the selected raster resolution.
+  MapSize / grid.resolution.float32
+
 proc tileAt*(grid: TileGrid, point: Vec2): Tile {.raises: [].} =
   ## Reads the tile beneath a map position, clamped to the map edges.
   let
-    x = clamp((point.x / TileSize).int, 0, TileCount - 1)
-    y = clamp((point.y / TileSize).int, 0, TileCount - 1)
-  grid.cells[y * TileCount + x]
+    x = clamp((point.x / grid.tileSize).int, 0, grid.resolution - 1)
+    y = clamp((point.y / grid.tileSize).int, 0, grid.resolution - 1)
+  grid.cells[y * grid.resolution + x]
 
 proc passable*(tile: Tile): bool {.raises: [].} =
   ## Allows movement through clear ground while trees and walls block it.
@@ -131,31 +137,31 @@ proc passable*(tile: Tile): bool {.raises: [].} =
 
 proc canStep*(grid: TileGrid, x, y: int, direction: Direction): bool =
   ## Enforces tile obstacles and ramps at elevation changes.
-  if x notin 0 ..< TileCount or y notin 0 ..< TileCount:
+  if x notin 0 ..< grid.resolution or y notin 0 ..< grid.resolution:
     return false
   let
     dx = [0, 1, 0, -1][direction.ord]
     dy = [-1, 0, 1, 0][direction.ord]
     nx = x + dx
     ny = y + dy
-  if nx notin 0 ..< TileCount or ny notin 0 ..< TileCount:
+  if nx notin 0 ..< grid.resolution or ny notin 0 ..< grid.resolution:
     return false
   let
-    current = grid.cells[y * TileCount + x]
-    next = grid.cells[ny * TileCount + nx]
+    current = grid.cells[y * grid.resolution + x]
+    next = grid.cells[ny * grid.resolution + nx]
   current.passable and next.passable and current.edges[direction] != CliffEdge
 
 proc buildEdges(grid: var TileGrid) {.raises: [].} =
   ## Makes elevation boundaries impassable except at road crossings.
-  for y in 0 ..< TileCount:
-    for x in 0 ..< TileCount:
-      let index = y * TileCount + x
+  for y in 0 ..< grid.resolution:
+    for x in 0 ..< grid.resolution:
+      let index = y * grid.resolution + x
       for direction in [East, South]:
-        if (direction == East and x == TileCount - 1) or
-          (direction == South and y == TileCount - 1):
+        if (direction == East and x == grid.resolution - 1) or
+          (direction == South and y == grid.resolution - 1):
             continue
         let
-          next = index + (if direction == East: 1 else: TileCount)
+          next = index + (if direction == East: 1 else: grid.resolution)
           a = grid.cells[index]
           b = grid.cells[next]
         if a.height == b.height:
@@ -181,10 +187,10 @@ proc buildEdges(grid: var TileGrid) {.raises: [].} =
 proc assignSides(grid: var TileGrid, map: MapData) {.raises: [].} =
   ## Applies the curved palette split and preserves paired terrain data.
   var
-    boundaries: array[TileCount * 2 - 1, float32]
+    boundaries = newSeq[float32](grid.resolution * 2 - 1)
     segment = 0
   for i in 0 ..< boundaries.len:
-    let diagonal = (i + 1).float32 * TileSize / 2
+    let diagonal = (i + 1).float32 * grid.tileSize / 2
     if diagonal <= map.border[0].x or diagonal >= map.border[^1].x:
       continue
     while segment < map.border.len - 2 and
@@ -197,11 +203,11 @@ proc assignSides(grid: var TileGrid, map: MapData) {.raises: [].} =
       finish = (b.x + b.y) / 2
       t = (diagonal - start) / (finish - start)
     boundaries[i] = mix(a.x - a.y, b.x - b.y, t)
-  for y in 0 ..< TileCount div 2:
-    for x in 0 ..< TileCount:
+  for y in 0 ..< grid.resolution div 2:
+    for x in 0 ..< grid.resolution:
       let
-        index = y * TileCount + x
-        across = (x - y).float32 * TileSize - boundaries[x + y]
+        index = y * grid.resolution + x
+        across = (x - y).float32 * grid.tileSize - boundaries[x + y]
         side = (if across >= 0: Northeast else: Southwest)
       grid.cells[index].side = side
       grid.cells[grid.cells.high - index] = grid.cells[index]
@@ -216,14 +222,14 @@ proc stamp(
   ## Fills tile centers covered by a triangle using horizontal spans.
   let
     points = [
-      face.positions[0] / TileSize,
-      face.positions[1] / TileSize,
-      face.positions[2] / TileSize
+      face.positions[0] / grid.tileSize,
+      face.positions[1] / grid.tileSize,
+      face.positions[2] / grid.tileSize
     ]
     minimumY = min(points[0].y, min(points[1].y, points[2].y))
     first = max(0, ceil(minimumY - 0.5).int)
     last = min(
-      TileCount - 1,
+      grid.resolution - 1,
       floor(max(points[0].y, max(points[1].y, points[2].y)) - 0.5).int
     )
   for y in first .. last:
@@ -244,9 +250,12 @@ proc stamp(
     if intersections < 2:
       continue
     let
-      start = max(0, ceil(left - 0.5'f).int)
-      finish = min(TileCount, ceil(right - 0.5'f).int)
-      row = y * TileCount
+      start = max(0, ceil(left - 0.5'f - grid.rasterTolerance).int)
+      finish = min(
+        grid.resolution,
+        ceil(right - 0.5'f + grid.rasterTolerance).int
+      )
+      row = y * grid.resolution
     for x in start ..< finish:
       if surfaceOnly:
         grid.cells[row + x].surface = tile.surface
@@ -264,12 +273,12 @@ proc stamp(
 
 proc plantForest(grid: var TileGrid, map: MapData) {.raises: [].} =
   ## Carves round clearings and shades the remaining forest.
-  for y in 0 ..< TileCount:
-    for x in 0 ..< TileCount:
-      let index = y * TileCount + x
+  for y in 0 ..< grid.resolution:
+    for x in 0 ..< grid.resolution:
+      let index = y * grid.resolution + x
       if grid.cells[index].surface != TreeSurface:
           continue
-      let position = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) * TileSize
+      let position = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) * grid.tileSize
       var clearing = false
       for camp in map.camps:
         if lengthSq(position - camp.position) <
@@ -289,13 +298,13 @@ proc plantForest(grid: var TileGrid, map: MapData) {.raises: [].} =
     let
       radius = map.config.campRadius + CampPadding
       outside = radius + CampForest
-      first = floor((camp.position - vec2(outside)) / TileSize).ivec2
-      last = ceil((camp.position + vec2(outside)) / TileSize).ivec2
-    for y in max(0, first.y) .. min(TileCount - 1, last.y):
-      for x in max(0, first.x) .. min(TileCount - 1, last.x):
+      first = floor((camp.position - vec2(outside)) / grid.tileSize).ivec2
+      last = ceil((camp.position + vec2(outside)) / grid.tileSize).ivec2
+    for y in max(0, first.y) .. min(grid.resolution - 1, last.y):
+      for x in max(0, first.x) .. min(grid.resolution - 1, last.x):
         let
-          index = y * TileCount + x
-          point = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) * TileSize
+          index = y * grid.resolution + x
+          point = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) * grid.tileSize
           distance = lengthSq(point - camp.position)
         if distance < radius ^ 2 or distance >= outside ^ 2:
           continue
@@ -305,8 +314,8 @@ proc plantForest(grid: var TileGrid, map: MapData) {.raises: [].} =
         grid.cells[index].road = false
         grid.cells[index].ramp = false
   var rng = initRand(map.config.seed xor 0x4A17)
-  for y in countup(0, TileCount, 2):
-    for x in countup(0, TileCount, 2):
+  for y in countup(0, grid.resolution, 2):
+    for x in countup(0, grid.resolution, 2):
       let
         center = vec2(x.float32, y.float32) + vec2(
           rng.rand(-0.3 .. 0.3).float32,
@@ -314,18 +323,23 @@ proc plantForest(grid: var TileGrid, map: MapData) {.raises: [].} =
         )
         radius = rng.rand(1.6 .. 2.4).float32
         shade = rng.rand(0 .. 2).uint8
-      for cy in max(0, y - 3) .. min(TileCount - 1, y + 3):
-        for cx in max(0, x - 3) .. min(TileCount - 1, x + 3):
+      for cy in max(0, y - 3) .. min(grid.resolution - 1, y + 3):
+        for cx in max(0, x - 3) .. min(grid.resolution - 1, x + 3):
           let
-            index = cy * TileCount + cx
+            index = cy * grid.resolution + cx
             delta = vec2(cx.float32 + 0.5'f, cy.float32 + 0.5'f) - center
           if grid.cells[index].surface == TreeSurface and
             lengthSq(delta) < radius * radius:
               grid.cells[index].shade = shade
 
-proc buildTiles*(map: MapData): TileGrid =
+proc buildTiles*(map: MapData, legacyRaster = false): TileGrid =
   ## Generates the terrain tile grid with exact rotational symmetry.
-  result.cells = newSeq[Tile](TileCount * TileCount)
+  let resolution = map.config.mapSize
+  doAssert resolution > 0 and resolution mod 2 == 0
+  result.resolution = resolution
+  # Close rounding cracks along shared triangle edges in newly saved maps.
+  result.rasterTolerance = (if legacyRaster: 0'f else: 0.0001'f)
+  result.cells = newSeq[Tile](resolution * resolution)
   for tile in result.cells.mitems:
     tile.surface = TreeSurface
   for face in buildMesh(map):
@@ -363,11 +377,11 @@ proc buildTiles*(map: MapData): TileGrid =
       continue
     result.stamp(face, tile, surfaceOnly)
   result.plantForest(map)
-  for y in 0 ..< TileCount:
-    for x in 0 ..< TileCount:
-      if x notin [0, TileCount - 1] and y notin [0, TileCount - 1]:
+  for y in 0 ..< resolution:
+    for x in 0 ..< resolution:
+      if x notin [0, resolution - 1] and y notin [0, resolution - 1]:
         continue
-      let index = y * TileCount + x
+      let index = y * resolution + x
       result.cells[index].surface =
         if result.cells[index].terrain in
           {CastleGround, KeepGround, SpawnGround}:

@@ -423,7 +423,9 @@ block:
     if run.map.legacy:
       outside = ring > FortWallRadius
     else:
-      let kind = layers[GroundLayer].tiles[tileZ * GridTiles + tileX].kind
+      let
+        index = tileZ * run.map.resolution + tileX
+        kind = layers[GroundLayer].tiles[index].kind
       outside = kind < ArenaKindBase or
         (kind - ArenaKindBase) mod ArenaKindStride notin 2'u32 .. 4'u32
     break

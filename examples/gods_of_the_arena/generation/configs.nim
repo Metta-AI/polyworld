@@ -1,14 +1,20 @@
 import std/[math, strutils]
 
+const
+  DefaultMapSize* = 116
+  MinimumMapSize* = 64
+  MaximumMapSize* = 256
+
 type
   MapgenError* = object of CatchableError
   MapConfig* = object
+    mapSize*: int = DefaultMapSize
     seed*: int = 54
     lakeCrossings*: int = 4
     jungleRoads*: int = 32
     highSize*: float32 = 511
     castleSize*: float32 = 295
-    roadWidth*: float32 = 62
+    roadWidth*: float32 = 52.7'f
     roadWobble*: float32 = 73
     lakeWidth*: float32 = 80
     lakeWobble*: float32 = 30
@@ -40,6 +46,11 @@ proc renameHook*(value: var MapConfig, fieldName: var string) =
 
 proc validate*(config: MapConfig) =
   ## Rejects unsupported controls before generating terrain or reading replays.
+  if config.mapSize < MinimumMapSize or config.mapSize > MaximumMapSize or
+    config.mapSize mod 2 != 0:
+      raise newException(MapgenError,
+        "Map size must be an even number of tiles between " &
+        $MinimumMapSize & " and " & $MaximumMapSize)
   for control in [
     ("highSize", config.highSize, 450'f, 570'f),
     ("castleSize", config.castleSize, 210'f, 500'f),
