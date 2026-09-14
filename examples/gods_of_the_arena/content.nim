@@ -316,7 +316,7 @@ const
       ]
     )
   ]
-  LegacyAbilitySpecs*: array[Ability, AbilitySpec] = [
+  BaseAbilitySpecs*: array[Ability, AbilitySpec] = [
     AbilitySpec(
       name: "Lion Guard", icon: "lion_guard",
       kind: Heal, cooldownTicks: 192, heal: 28
@@ -603,13 +603,9 @@ proc heroSpec*(class: HeroClass): HeroSpec =
   ## Returns the immutable integer tuning for one hero class.
   HeroSpecs[class]
 
-proc legacyAbilitySpec*(ability: Ability): AbilitySpec =
-  ## Returns the pre-charge tuning for historical recordings.
-  LegacyAbilitySpecs[ability]
-
 proc abilitySpec*(ability: Ability): AbilitySpec =
   ## Returns casting, charge, effect and shape tuning for one ability.
-  result = LegacyAbilitySpecs[ability]
+  result = BaseAbilitySpecs[ability]
   result.charges = 1
   result.rechargeTicks = result.cooldownTicks
   result.area = FxArea(

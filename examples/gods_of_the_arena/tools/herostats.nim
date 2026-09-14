@@ -1,7 +1,7 @@
 import
   std/[algorithm, json, math, os, sequtils, sets, strutils, times, uri],
   curly, jsony, zippy,
-  polyworld/[metrics, pathing, tapes],
+  polyworld/[metrics, tapes],
   ../[content, maps, replays, sim],
   heropages
 
@@ -162,19 +162,7 @@ proc inspectReplay*(path: string, metadata: JsonNode): JsonNode =
       if bytes.startsWith("\x1f\x8b"): uncompress(bytes) else: bytes
     )
     seed = data.config.seed
-  var gameMap =
-    if data.header.gameVersion <= PreviousMapGameVersion:
-      generateLegacyMap(seed)
-    elif data.header.gameVersion == InitialArenaGameVersion:
-      generateMap(seed, InitialArena)
-    elif data.header.gameVersion == CryptArenaGameVersion:
-      generateMap(seed, CryptArena)
-    else:
-      generateMap(seed, data.config.mapPreset)
-  when compiles(gameMap.resolution):
-    if gameMap.legacy and gameMap.resolution == 0:
-      # Older generators omit resolution metadata on their terrain layers.
-      gameMap.resolution = layers[0].width
+  let gameMap = generateMap(seed, data.config.mapPreset)
   let game = newGame(
     gameMap,
     data.config.spawnIntervalTicks,

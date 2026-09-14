@@ -1,7 +1,7 @@
-## Checks legacy replay terrain and its real BASIC host interface.
+## Checks generated terrain and its real BASIC host interface.
 
 import
-  std/[os, tempfiles],
+  std/[os, strformat, tempfiles],
   polyworld/[basic, cli, pathing],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim, terrains]
 
@@ -9,76 +9,29 @@ proc terrain(field: TerrainField, x, y: int, layer = GroundLayer): int32 =
   ## Reads one field using convenient test coordinates.
   terrainValue(x.int32, y.int32, layer.int32, field)
 
-echo "Testing grass, forests, rivers, walls, and gates on the static map"
+echo "Testing grass, forests, rivers, and walls on generated maps"
 for seed in [1988'i32, 2026'i32]:
-  discard generateLegacyMap(seed)
+  let map = generateMap(seed)
   var seen: set[TerrainKind]
-  for y in 0 ..< GridTiles:
-    for x in 0 ..< GridTiles:
+  for y in 0 ..< map.resolution:
+    for x in 0 ..< map.resolution:
       let kind = TerrainKind(terrain(TerrainKindField, x, y))
       seen.incl kind
-      case kind
-      of TerrainTrees, TerrainWall:
+      doAssert terrain(TerrainWalkableField, x, y) ==
+        int32(isWalkable(GroundLayer, x, y))
+      if kind in {TerrainTrees, TerrainWall}:
         doAssert terrain(TerrainWalkableField, x, y) == 0
-      else:
-        doAssert terrain(TerrainWalkableField, x, y) ==
-          int32(isWalkable(GroundLayer, x, y))
-  doAssert {TerrainGrass, TerrainRoad, TerrainTrees, TerrainMarsh,
-    TerrainWall} <= seen
+      if kind == TerrainMarsh:
+        doAssert terrain(TerrainWaterDepthField, x, y) in 0 .. ArenaWaterDepth
+        doAssert terrain(TerrainKindField, x, y, WaterLayer) == TerrainWater.ord
+        doAssert terrain(TerrainWalkableField, x, y, WaterLayer) == 0
+  doAssert {TerrainGrass, TerrainRoad, TerrainTrees, TerrainRock,
+    TerrainMarsh, TerrainWall} <= seen
   doAssert TerrainNone notin seen
-
-  let
-    wallX = RedFortTile - FortWallRadius
-    wallY = RedFortTile + 1
-    gateX = RedFortTile + FortWallRadius
-    gateY = RedFortTile + 1
-  doAssert terrain(TerrainKindField, wallX, wallY) == TerrainWall.ord
-  doAssert terrain(TerrainWalkableField, wallX, wallY) == 0
-  doAssert terrain(TerrainKindField, wallX, wallY, RedFortLayer) ==
-    TerrainWall.ord
-  doAssert terrain(TerrainWalkableField, wallX, wallY, RedFortLayer) == 1
-  doAssert terrain(TerrainHeightField, wallX, wallY, RedFortLayer) -
-    terrain(TerrainHeightField, wallX, wallY) == 36
-  doAssert terrain(TerrainKindField, gateX, gateY) == TerrainRoad.ord
-  doAssert terrain(TerrainWalkableField, gateX, gateY) == 1
-  doAssert terrain(TerrainWalkableField, gateX, gateY, RedFortLayer) == 1
-  doAssert terrain(TerrainKindField, gateX, gateY, BlueFortLayer) == 0
-  doAssert terrain(TerrainWalkableField, wallX, RedFortTile, RedFortLayer) == 0,
-    "The raised crenellation must stay blocked above a solid wall."
-  doAssert terrain(TerrainHeightField, wallX, RedFortTile, RedFortLayer) -
-    terrain(TerrainHeightField, wallX, RedFortTile) ==
-      36 + FortCrenellationRiseSteps
-  doAssert terrain(TerrainKindField, wallX + 1, RedFortTile) == TerrainRoad.ord
-  doAssert terrain(TerrainWalkableField, wallX + 1, RedFortTile) == 1,
-    "The courtyard remains open underneath its overhanging rampart."
-
-  doAssert terrain(TerrainKindField, 64, 64) == TerrainMarsh.ord
-  doAssert terrain(TerrainWalkableField, 64, 64) == 1
-  doAssert terrain(TerrainWaterDepthField, 64, 64) == 1
-  doAssert terrain(TerrainHeightField, 64, 64) == -14
-  doAssert terrain(TerrainKindField, 64, 64, WaterLayer) == TerrainWater.ord
-  doAssert terrain(TerrainHeightField, 64, 64, WaterLayer) == -13
-  doAssert terrain(TerrainWaterDepthField, 64, 64, WaterLayer) == 1
-  doAssert terrain(TerrainWalkableField, 64, 64, WaterLayer) == 0
-  doAssert terrain(TerrainWaterDepthField, gateX, gateY) == 0
-  for site in LandmarkHillSites:
-    doAssert terrain(TerrainKindField, site[0], site[1]) == TerrainGrass.ord
-    doAssert terrain(TerrainWalkableField, site[0], site[1]) == 1
-  for site in QuarrySites:
-    doAssert terrain(TerrainKindField, site[0], site[1]) == TerrainRock.ord
-    doAssert terrain(TerrainWalkableField, site[0], site[1]) == 1
-    doAssert terrain(TerrainWaterDepthField, site[0], site[1]) == 0,
-      "The negative-height quarry floor is dry, unlike the riverbed."
-  for lane in TowerSites:
-    for team in lane:
-      for site in team:
-        doAssert terrain(TerrainKindField, site.x, site.z) == TerrainRoad.ord,
-          "A paved tower court is a surface, not a solid wall."
-        doAssert terrain(TerrainWalkableField, site.x, site.z) == 1
 
 echo "Testing invalid coordinates, missing layers, and absent surfaces"
 for field in TerrainField:
-  for coordinate in [int32.low, -1'i32, GridTiles.int32, int32.high]:
+  for coordinate in [int32.low, -1'i32, mapTiles().int32, int32.high]:
     doAssert terrainValue(coordinate, 0, GroundLayer, field) == 0
     doAssert terrainValue(0, coordinate, GroundLayer, field) == 0
   for layer in [int32.low, -1'i32, layers.len.int32, int32.high]:
@@ -90,20 +43,20 @@ echo "Testing sloped tile centers, shallow water, and raised surfaces"
 block:
   layers = @[
     QuadLayer(
-      originX: 7, originZ: 9, width: 2, depth: 1,
+      originX: 7 + mapOrigin(), originZ: 9 + mapOrigin(), width: 2, depth: 1,
       tiles: @[
         Tile(flags: TileExists, kind: MarshTile, tops: [-16'i16, -15, -15, -15]),
         Tile(flags: TileExists, kind: RockTile, tops: [0'i16, 0, 32, 32])
       ]
     ),
     QuadLayer(
-      originX: 7, originZ: 9, width: 1, depth: 1, slab: true,
+      originX: 7 + mapOrigin(), originZ: 9 + mapOrigin(), width: 1, depth: 1, slab: true,
       tiles: @[
         Tile(flags: TileExists, kind: StoneTile, tops: [8'i16, 8, 8, 8])
       ]
     ),
     QuadLayer(
-      originX: 7, originZ: 9, width: 1, depth: 1, water: true,
+      originX: 7 + mapOrigin(), originZ: 9 + mapOrigin(), width: 1, depth: 1, water: true,
       tiles: @[
         Tile(flags: TileExists, tops: [-15'i16, -15, -15, -15])
       ]
@@ -128,27 +81,45 @@ proc checkBasicTerrain() =
   let
     directory = createTempDir("gota-terrain-", "")
     path = directory / "terrain.bas"
-    game = newGame(generateLegacyMap(1988), 240, 10, false, ReplayData())
+    game = newGame(generateMap(1988), 240, 10, false, ReplayData())
   defer:
     removeDir(directory)
-  writeFile(path, """
+  var
+    wallX = -1
+    wallY = -1
+    lakeX = -1
+    lakeY = -1
+  for y in 0 ..< mapTiles():
+    for x in 0 ..< mapTiles():
+      case TerrainKind(terrain(TerrainKindField, x, y))
+      of TerrainWall:
+        wallX = x
+        wallY = y
+      of TerrainMarsh:
+        if terrain(TerrainWaterDepthField, x, y) == ArenaWaterDepth and
+          terrain(TerrainWalkableField, x, y) == 1:
+            lakeX = x
+            lakeY = y
+      else:
+        discard
+  doAssert wallX >= 0 and lakeX >= 0
+  writeFile(path, &"""
 width = mapWidth
 height = mapHeight
 layerCount = mapLayers
 myLayer = selfLayer
-kind = terrainKind(9, 21)
-walkable = terrainWalkable(9, 21)
-elevation = terrainHeight(9, 21)
-depth = terrainWaterDepth(9, 21)
-bedKind = terrainKindAt(64, 64, GroundLayer)
-bedWalkable = terrainWalkableAt(64, 64, GroundLayer)
-bedHeight = terrainHeightAt(64, 64, GroundLayer)
-bedDepth = terrainWaterDepthAt(64, 64, GroundLayer)
-waterKind = terrainKindAt(64, 64, WaterLayer)
-waterWalkable = terrainWalkableAt(64, 64, WaterLayer)
-waterHeight = terrainHeightAt(64, 64, WaterLayer)
-waterDepth = terrainWaterDepthAt(64, 64, WaterLayer)
-enemyWall = terrainKindAt(96, 107, BlueFortLayer)
+kind = terrainKind({wallX}, {wallY})
+walkable = terrainWalkable({wallX}, {wallY})
+elevation = terrainHeight({wallX}, {wallY})
+depth = terrainWaterDepth({wallX}, {wallY})
+bedKind = terrainKindAt({lakeX}, {lakeY}, GroundLayer)
+bedWalkable = terrainWalkableAt({lakeX}, {lakeY}, GroundLayer)
+bedHeight = terrainHeightAt({lakeX}, {lakeY}, GroundLayer)
+bedDepth = terrainWaterDepthAt({lakeX}, {lakeY}, GroundLayer)
+waterKind = terrainKindAt({lakeX}, {lakeY}, WaterLayer)
+waterWalkable = terrainWalkableAt({lakeX}, {lakeY}, WaterLayer)
+waterHeight = terrainHeightAt({lakeX}, {lakeY}, WaterLayer)
+waterDepth = terrainWaterDepthAt({lakeX}, {lakeY}, WaterLayer)
 noneKind = terrainKindAt(0, 0, RedFortLayer)
 badKind = terrainKind(-1, 20)
 badLayer = terrainWalkableAt(9, 21, mapLayers)
@@ -176,8 +147,8 @@ wend
   game.runBotDecisions()
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError
-    doAssert vm.runtime.getGlobal("width") == 128
-    doAssert vm.runtime.getGlobal("height") == 128
+    doAssert vm.runtime.getGlobal("width") == mapTiles().int32
+    doAssert vm.runtime.getGlobal("height") == mapTiles().int32
     doAssert vm.runtime.getGlobal("layerCount") == 4
     doAssert vm.runtime.getGlobal("myLayer") == GroundLayer
     doAssert vm.runtime.getGlobal("kind") == TerrainWall.ord
@@ -185,13 +156,14 @@ wend
     doAssert vm.runtime.getGlobal("depth") == 0
     doAssert vm.runtime.getGlobal("bedKind") == TerrainMarsh.ord
     doAssert vm.runtime.getGlobal("bedWalkable") == 1
-    doAssert vm.runtime.getGlobal("bedHeight") == -14
-    doAssert vm.runtime.getGlobal("bedDepth") == 1
+    doAssert vm.runtime.getGlobal("bedHeight") ==
+      terrain(TerrainHeightField, lakeX, lakeY)
+    doAssert vm.runtime.getGlobal("bedDepth") == ArenaWaterDepth
     doAssert vm.runtime.getGlobal("waterKind") == TerrainWater.ord
     doAssert vm.runtime.getGlobal("waterWalkable") == 0
-    doAssert vm.runtime.getGlobal("waterHeight") == -13
-    doAssert vm.runtime.getGlobal("waterDepth") == 1
-    doAssert vm.runtime.getGlobal("enemyWall") == TerrainWall.ord
+    doAssert vm.runtime.getGlobal("waterHeight") ==
+      terrain(TerrainHeightField, lakeX, lakeY, WaterLayer)
+    doAssert vm.runtime.getGlobal("waterDepth") == ArenaWaterDepth
     doAssert vm.runtime.getGlobal("noneKind") == 0
     doAssert vm.runtime.getGlobal("badKind") == 0
     doAssert vm.runtime.getGlobal("badLayer") == 0
@@ -202,10 +174,9 @@ wend
     before = game.stateHash()
     hero = game.world.heroes[0]
     vm = game.heroVms[0]
-    groundHeight = vm.runtime.getGlobal("elevation")
   for field in TerrainField:
-    for y in 0 ..< GridTiles:
-      for x in 0 ..< GridTiles:
+    for y in 0 ..< mapTiles():
+      for x in 0 ..< mapTiles():
         discard terrain(field, x, y)
   doAssert game.stateHash() == before,
     "Reading terrain must not change the simulation or consume randomness."
@@ -213,10 +184,11 @@ wend
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
   doAssert vm.runtime.getGlobal("myLayer") == RedFortLayer
-  doAssert vm.runtime.getGlobal("walkable") == 1
-  doAssert vm.runtime.getGlobal("elevation") == groundHeight + 36
+  doAssert vm.runtime.getGlobal("walkable") == 0
+  doAssert vm.runtime.getGlobal("kind") == TerrainNone.ord
+  doAssert vm.runtime.getGlobal("elevation") == 0
   doAssert vm.runtime.getGlobal("depth") == 0
-  doAssert vm.runtime.getGlobal("bedDepth") == 1,
+  doAssert vm.runtime.getGlobal("bedDepth") == ArenaWaterDepth,
     "An explicit layer query must ignore the hero's new standing layer."
 
 echo "Testing terrain queries through real BASIC bots without revealing enemies"

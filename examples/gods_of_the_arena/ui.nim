@@ -883,12 +883,8 @@ proc drawUi*(
         let
           i = slot.ord
           well = details.abilities[i]
-          spec =
-            if run.world.legacyAbilities:
-              selection.abilities[slot].legacyAbilitySpec
-            else:
-              selection.abilities[slot].abilitySpec
-          empty = not run.world.legacyAbilities and selection.charges[slot] == 0
+          spec = selection.abilities[slot].abilitySpec
+          empty = selection.charges[slot] == 0
           remaining =
             if empty: max(selection.cooldowns[slot], selection.recharges[slot])
             else: selection.cooldowns[slot]
@@ -1038,7 +1034,7 @@ proc drawUi*(
         let
           slot = HeroAbilitySlot(i)
           remaining =
-            if not run.world.legacyAbilities and selection.charges[slot] == 0:
+            if selection.charges[slot] == 0:
               max(selection.cooldowns[slot], selection.recharges[slot])
             else:
               selection.cooldowns[slot]
@@ -1051,27 +1047,26 @@ proc drawUi*(
             "Hud",
             CenterAlign
           )
-        if not run.world.legacyAbilities:
-          let
-            spec = selection.abilities[slot].abilitySpec
-            badge = well.origin + vec2(3, 2)
-          sk.drawRect(badge, vec2(28, 20), rgbx(0, 0, 0, 190))
-          sk.drawLabel(
-            $selection.charges[slot] & "/" & $spec.charges,
-            badge,
-            vec2(28, 20),
-            rgbx(255, 255, 255, 255),
-            "Small",
-            CenterAlign
+        let
+          spec = selection.abilities[slot].abilitySpec
+          badge = well.origin + vec2(3, 2)
+        sk.drawRect(badge, vec2(28, 20), rgbx(0, 0, 0, 190))
+        sk.drawLabel(
+          $selection.charges[slot] & "/" & $spec.charges,
+          badge,
+          vec2(28, 20),
+          rgbx(255, 255, 255, 255),
+          "Small",
+          CenterAlign
+        )
+        if selection.recharges[slot] > 0:
+          let progress = 1 - selection.recharges[slot].float32 /
+            max(1, spec.rechargeTicks).float32
+          sk.drawRect(
+            well.origin + vec2(3, well.size.y - 5),
+            vec2((well.size.x - 6) * progress, 3),
+            rgbx(110, 190, 245, 255)
           )
-          if selection.recharges[slot] > 0:
-            let progress = 1 - selection.recharges[slot].float32 /
-              max(1, spec.rechargeTicks).float32
-            sk.drawRect(
-              well.origin + vec2(3, well.size.y - 5),
-              vec2((well.size.x - 6) * progress, 3),
-              rgbx(110, 190, 245, 255)
-            )
       if i >= 4 and selection.kind == SelectedHero:
         let count = selection.itemCounts[i - 4]
         if count > 1:

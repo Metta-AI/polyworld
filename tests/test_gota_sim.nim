@@ -418,16 +418,11 @@ block:
       dz = int64(footman.position.z) - int64(startZ)
       tileX = int(mapCoordinate(footman.position.x))
       tileZ = int(mapCoordinate(footman.position.z))
-      ring = max(abs(tileX - RedFortTile), abs(tileZ - RedFortTile))
+      index = tileZ * run.map.resolution + tileX
+      kind = layers[GroundLayer].tiles[index].kind
     moved = dx * dx + dz * dz >= int64(2 * WorldScale) * int64(2 * WorldScale)
-    if run.map.legacy:
-      outside = ring > FortWallRadius
-    else:
-      let
-        index = tileZ * run.map.resolution + tileX
-        kind = layers[GroundLayer].tiles[index].kind
-      outside = kind < ArenaKindBase or
-        (kind - ArenaKindBase) mod ArenaKindStride notin 2'u32 .. 4'u32
+    outside = kind < ArenaKindBase or
+      (kind - ArenaKindBase) mod ArenaKindStride notin 2'u32 .. 4'u32
     break
   doAssert found, "the tracked footman disappeared"
   doAssert moved, "the tracked footman did not leave its spawn tile"

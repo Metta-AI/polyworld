@@ -9,9 +9,8 @@ import
 const
   ReplayGame* = "call_to_adventure"
   ReplayFormatVersion* = 3'u16
-  LegacyGameVersion* = 18'u16
-  ActionGameVersion* = 19'u16
-  MetricsGameVersion* = 20'u16
+  ## This client supports only this gameplay version. Bump it when rules change.
+  ## Older replays use their archived client; never add compatibility branches.
   ReplayGameVersion* = 21'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
@@ -34,8 +33,6 @@ type
       ## Use and drop use `first` as the inventory slot.
 
   ReplayHeader* = TapeHeader[Setup]
-  LegacyReplayData = ActionTape[Setup, ReplayAction]
-  PreviousReplayData = ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
   ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics]
   ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics]
   ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics]
@@ -137,12 +134,8 @@ proc validate*(data: ReplayData) =
       fail("replay configuration does not match its simulation setup")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
-    data.header.gameVersion
+    ReplayGameVersion
   )
-  if data.header.gameVersion notin {
-    LegacyGameVersion, ActionGameVersion, MetricsGameVersion, ReplayGameVersion
-  }:
-    fail("unsupported replay game version")
   data.header.setup.validateSetup()
   if data.actions.len > MaxReplayActions:
     fail("replay action limit exceeded")
@@ -166,75 +159,19 @@ proc validate*(data: ReplayData) =
     fail(error.msg)
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes the action tape and its CPU telemetry in one payload.
+  ## Encodes a validated recording for this client's gameplay version.
   data.validate()
-  if data.header.gameVersion in {LegacyGameVersion, ActionGameVersion}:
-    if data.metrics != ReplayMetrics():
-      fail("old replay versions cannot store CPU telemetry")
-    let legacy = LegacyReplayData(
-      header: data.header,
-      config: data.config,
-      actions: data.actions,
-      hashes: data.hashes
-    )
-    return encodeReplayFile(
-      ReplayGame,
-      data.header.gameVersion,
-      legacy,
-      MaxReplayBytes
-    )
-  var current = data
-  current.header.gameVersion = ReplayGameVersion
-  encodeReplayFile(ReplayGame, ReplayGameVersion, current, MaxReplayBytes)
+  encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Returns the complete replay, including its original CPU telemetry.
-  if bytes.len > MaxReplayBytes:
-    fail("replay exceeds the file size limit")
-  let version = bytes.replayFileHeader().gameVersion
-  if version notin {
-    LegacyGameVersion, ActionGameVersion, MetricsGameVersion, ReplayGameVersion
-  }:
-    fail("unsupported replay game version")
-  if version == ReplayGameVersion:
-    result = decodeReplayFile(
-      ReplayGame,
-      version,
-      bytes,
-      ReplayData,
-      MaxReplayBytes
-    )
-  elif version == MetricsGameVersion:
-    let previous = decodeReplayFile(
-      ReplayGame,
-      version,
-      bytes,
-      PreviousReplayData,
-      MaxReplayBytes
-    )
-    result = ReplayData(
-      header: previous.header,
-      config: previous.config,
-      actions: previous.actions,
-      hashes: previous.hashes,
-      metrics: previous.metrics.cpuMetrics()
-    )
-  else:
-    let legacy = decodeReplayFile(
-      ReplayGame,
-      version,
-      bytes,
-      LegacyReplayData,
-      MaxReplayBytes
-    )
-    result = ReplayData(
-      header: legacy.header,
-      config: legacy.config,
-      actions: legacy.actions,
-      hashes: legacy.hashes
-    )
-  if result.header.gameVersion != version:
-    fail("replay header versions disagree")
+  ## Rejects other gameplay versions before decoding the recording.
+  result = decodeReplayFile(
+    ReplayGame,
+    ReplayGameVersion,
+    bytes,
+    ReplayData,
+    MaxReplayBytes
+  )
   result.validate()
 
 proc saveReplay*(path: string, data: ReplayData) =

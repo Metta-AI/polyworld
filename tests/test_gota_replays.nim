@@ -62,23 +62,6 @@ doAssert decoded.actions[2].first == 70
 doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
-echo "Testing old combat replays keep their version when saved again"
-for version in [
-  TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
-  PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion,
-  PresetGameVersion
-]:
-  var historical = recorder.data
-  historical.header.gameVersion = version
-  historical.header.setup.gridTiles = 128
-  historical.config.mapPreset.mapSize = 128
-  let saved = historical.encodeReplay()
-  doAssert saved.replayFileHeader().gameVersion == version
-  let restored = decodeReplay(saved)
-  doAssert restored.header.gameVersion == version
-  doAssert restored.actions == historical.actions
-  doAssert restored.hashes == historical.hashes
-
 echo "Testing every spell slot and manual control round trip"
 block:
   let spells = initReplayRecorder(setup)
@@ -92,13 +75,6 @@ block:
   spells.recordHash(456)
   let restored = decodeReplay(spells.data.encodeReplay())
   doAssert restored.actions == spells.data.actions
-  var historical = spells.data
-  historical.header.gameVersion = CombatGameVersion
-  try:
-    discard historical.encodeReplay()
-    doAssert false, "old combat rules must reject new spell commands"
-  except ReplayError:
-    discard
 
 echo "Testing exact-tick action playback"
 let player = initReplayPlayer(decoded)
@@ -140,15 +116,15 @@ doAssert replayBytes.find("bestDistance = 2147483647") < 0
 removeFile(path)
 
 echo "Testing replay validation"
-for version in [21, 27, 28]:
+for version in 0'u16 ..< ReplayGameVersion:
   var unsupported = encoded
-  unsupported[ReplayMagic.len + 2] = char(version)
-  unsupported[ReplayMagic.len + 3] = char(0)
+  unsupported[ReplayMagic.len + 2] = char(version and 0xff)
+  unsupported[ReplayMagic.len + 3] = char(version shr 8)
   try:
     discard decodeReplay(unsupported)
     doAssert false, "an unsupported simulation must require its old viewer"
   except ReplayError as error:
-    doAssert error.msg.contains("unsupported replay game version")
+    doAssert error.msg.contains("expected " & $ReplayGameVersion)
 
 try:
   discard decodeReplayFile(
