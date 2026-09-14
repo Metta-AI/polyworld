@@ -142,6 +142,9 @@ proc browserAssets*(): seq[Asset] =
   result.add terrainAssets(
     GotaTreeStyle, GeneratedTerrain, PaintedRocks, WebTerrainAssets, ArenaTextures
   )
+  for asset in result.mitems:
+    if asset.source == "terrain/handpainted_trees/fir.png":
+      asset = imageAsset(asset.source, 512)
   result.add propAssets(TowerPack, TowerProps, textureSize = 256)
   for i, pack in ArenaDecorPacks:
     result.add propAssets(pack, ArenaDecorNodes[i], textureSize = 256)

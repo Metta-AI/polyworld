@@ -5,7 +5,7 @@ import
 type
   AssetError* = object of CatchableError
   AssetKind* = enum
-    FileAsset, ImageDirectory, ModelAsset, TerrainAsset
+    FileAsset, ImageAsset, ImageDirectory, ModelAsset, TerrainAsset
   Asset* = object
     kind*: AssetKind
     source*, output*, manifest*: string
@@ -62,6 +62,13 @@ proc assetName*(path: string): string =
 proc fileAsset*(path: string): Asset =
   ## Declares one unmodified asset path.
   Asset(kind: FileAsset, source: path.assetName, output: path.assetName)
+
+proc imageAsset*(path: string, size: int): Asset =
+  ## Declares a browser image capped at the given maximum dimension.
+  doAssert size > 0
+  Asset(
+    kind: ImageAsset, source: path.assetName, output: path.assetName, size: size
+  )
 
 proc modelAsset*(
   path: string,

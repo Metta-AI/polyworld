@@ -639,6 +639,15 @@ proc packAssets*(
       case asset.kind
       of FileAsset:
         packer.copyAsset(asset.source, asset.output)
+      of ImageAsset:
+        let
+          image = decodeImage(packer.sourceFile(asset.source))
+          scale = min(1.0, asset.size.float / max(image.width, image.height).float)
+          resized = image.resize(
+            max(1, int(image.width.float * scale)),
+            max(1, int(image.height.float * scale))
+          )
+        packer.save(asset.output, compressPng(resized.encodePng()))
       of ImageDirectory:
         for name in imageFiles(source, asset.source):
           packer.copyAsset(name, name)

@@ -65,6 +65,90 @@
           "type": "integer",
           "minimum": 1,
           "default": 240
+        },
+        "map_preset": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "seed": {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647,
+              "default": 54
+            },
+            "high_size": {
+              "type": "number",
+              "minimum": 450,
+              "maximum": 570,
+              "default": 511
+            },
+            "castle_size": {
+              "type": "number",
+              "minimum": 210,
+              "maximum": 500,
+              "default": 295
+            },
+            "road_width": {
+              "type": "number",
+              "minimum": 26,
+              "maximum": 62,
+              "default": 62
+            },
+            "road_wobble": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 80,
+              "default": 73
+            },
+            "lake_width": {
+              "type": "number",
+              "minimum": 42,
+              "maximum": 120,
+              "default": 80
+            },
+            "lake_wobble": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 80,
+              "default": 30
+            },
+            "camp_radius": {
+              "type": "number",
+              "minimum": 20,
+              "maximum": 40,
+              "default": 36
+            },
+            "stem_length": {
+              "type": "number",
+              "minimum": 30,
+              "maximum": 80,
+              "default": 50
+            },
+            "jungle_roads": {
+              "type": "integer",
+              "minimum": 18,
+              "maximum": 50,
+              "default": 32,
+              "multipleOf": 2
+            },
+            "camp_scatter": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60,
+              "default": 35
+            },
+            "lake_crossings": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6,
+              "default": 4,
+              "multipleOf": 2
+            },
+            "camps_touch_roads": {
+              "type": "boolean",
+              "default": true
+            }
+          }
         }
       }
     },
@@ -185,7 +269,22 @@
         ],
         "seed": 2026,
         "max_ticks": 28800,
-        "spawn_interval_ticks": 240
+        "spawn_interval_ticks": 240,
+        "map_preset": {
+          "seed": 54,
+          "high_size": 511,
+          "castle_size": 295,
+          "road_width": 62,
+          "road_wobble": 73,
+          "lake_width": 80,
+          "lake_wobble": 30,
+          "camp_radius": 36,
+          "stem_length": 50,
+          "jungle_roads": 32,
+          "camp_scatter": 35,
+          "lake_crossings": 4,
+          "camps_touch_roads": true
+        }
       },
       "description": "Full-length deterministic competition match."
     }

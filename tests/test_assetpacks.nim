@@ -89,6 +89,28 @@ block:
     discard compressPng(original[0 ..< 20])
   )
 
+echo "Testing browser image size limits and unchanged originals"
+block:
+  let
+    directory = createTempDir("polyworld-images-", "")
+    source = directory / "source"
+    output = directory / "output"
+    image = newImage(32, 16)
+  defer:
+    removeDir(directory)
+  createDir(source)
+  image.fill(rgbx(64, 64, 64, 128))
+  let original = image.encodePng()
+  writeFile(source / "tree.png", original)
+  discard packAssets(@[imageAsset("tree.png", 8)], source, output)
+  let packed = readImage(output / "stage/tree.png")
+  doAssert packed.width == 8 and packed.height == 4
+  doAssert packed.data[0] == image.data[0]
+  doAssert readFile(source / "tree.png") == original
+  discard packAssets(@[imageAsset("tree.png", 64)], source, output)
+  let larger = readImage(output / "stage/tree.png")
+  doAssert larger.width == image.width and larger.height == image.height
+
 echo "Testing independent BC3 terrain channels"
 block:
   let
