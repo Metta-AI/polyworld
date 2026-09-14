@@ -31,7 +31,6 @@ type
     world*: World
     metrics*: MatchMetrics
     history*: MetricHistory
-    legacyStats*: bool
     dungeon*: Dungeon
     log*: seq[string]
     recorder*: ReplayRecorder
@@ -820,14 +819,13 @@ proc inMelee*(a, b: TileRef): bool =
     dz = abs(int32(a.z) - int32(b.z))
   dx <= 1 and dz <= 1 and dx + dz > 0
 
-proc hashWorld*(world: World, includeStats = true): uint64 =
-  ## Hashes authoritative fields, with the previous format for old tapes.
+proc hashWorld*(world: World): uint64 =
+  ## Hashes all authoritative world fields, including statistics.
   var hash = HashySeed
   for name, value in fieldPairs(world[]):
     when name != "stats":
       hash.addHashy(value)
-  if includeStats:
-    hash.addHashy(world.stats)
+  hash.addHashy(world.stats)
   uint64(hash)
 
 ## Spawning
@@ -1756,7 +1754,7 @@ proc partyGold*(game: Game): int32 =
 
 proc stateHash*(game: Game): uint64 =
   ## The replay digest. `World` has nothing to skip.
-  hashWorld(game.world, not game.legacyStats)
+  hashWorld(game.world)
 
 proc scores*(world: World): seq[int] =
   ## Awards shared wins to surviving returners with the most banked gold.

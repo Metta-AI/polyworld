@@ -74,7 +74,7 @@ rendering and full replay hashes, seeking, speed, iframe resizing, readiness,
 and visible errors. It supports a host Chrome executable or container Chromium for
 ARM and x86 coverage. `tools/replay_probe.html` captures the Softmax iframe protocol.
 
-CTA replay game version 15 adds authoritative per-hero banked gold and return flags.
+CTA stores authoritative per-hero banked gold and return flags.
 They are cloned, restored and hashed with the world. Surviving returned heroes tied
 for the most banked gold receive 1; every other hero receives 0. The other games also
 emit binary scores in zero-based platform slot order. Platform Elo remains the

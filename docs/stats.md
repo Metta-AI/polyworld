@@ -50,15 +50,14 @@ control returns the overlay to the displayed simulation tick. This does
 not alter playback, speed, or looping preferences.
 
 Combat counters and assist attribution belong to simulation state. They
-are cloned with checkpoints and included in the new simulation hashes.
+are cloned with checkpoints and included in simulation hashes.
 Only CPU samples and the final CPU average are stored in
 `ReplayData.metrics`. Each sample stores one 32-bit integer per player.
 APM, gameplay counters, and charts are reconstructed during resimulation.
 `loadReplay(path)` returns the entire replay without an output parameter or
-separate trailer. Older action-only recordings remain playable using their
-original hash calculation. They show reconstructed APM and a dash for
-unavailable CPU. Older embedded CPU/APM recordings retain their CPU samples
-and discard their attempted-command APM.
+separate trailer. Each client accepts only its exact gameplay version.
+Older recordings use the matching archived client stored on the server.
+The current client does not migrate replay payloads or emulate older rules.
 
 History begins at tick zero and samples once per simulation second, plus
 the final or saved tick. At 4,096 samples it coarsens the history while

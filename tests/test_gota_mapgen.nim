@@ -12,10 +12,6 @@ doAssert editorMaps.defaultConfig().roadWidth == 52.7'f
 doAssert editorMaps.defaultConfig().campRadius == 36
 doAssert editorMaps.defaultConfig().jungleRoads == 32
 doAssert editorMaps.defaultConfig().campsTouchRoads
-doAssert gameMaps.generateMap(54, InitialArena).hash == 1257703624'u64,
-  "Version 24 recordings must retain their original map."
-doAssert gameMaps.generateMap(54, CryptArena).hash == 3673208403'u64,
-  "Version 25 recordings must retain their original map."
 let
   preview = editorMaps.generateMap(editorMaps.defaultConfig())
   tiles = editorTiles.buildTiles(preview)
@@ -23,7 +19,6 @@ let
 doAssert map.resolution == 116
 for layer in layers:
   doAssert layer.width == 116 and layer.depth == 116
-doAssert not map.legacy
 doAssert map.layout.camps.len == 14
 doAssert map.layout.barracks.len == 12
 doAssert map.seed == 54

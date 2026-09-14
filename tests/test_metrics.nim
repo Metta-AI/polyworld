@@ -132,29 +132,6 @@ block:
   metrics.finishTick(49)
   doAssert metrics.read(0, 49).commands == 49
 
-echo "Testing old CPU/APM recordings discard their attempted-command APM"
-block:
-  let previous = LegacyReplayMetrics(
-    tickRate: 24,
-    interval: 24,
-    frames: @[
-      LegacyTelemetryFrame(tick: 0, rows: @[
-        LegacyTelemetryRow(cpu: -1, apm: 0)
-      ]),
-      LegacyTelemetryFrame(tick: 24, rows: @[
-        LegacyTelemetryRow(cpu: 25, apm: 900)
-      ])
-    ],
-    final: @[LegacyTelemetryRow(cpu: 20, apm: 800)]
-  )
-  let decoded = previous.toFlatty().fromFlatty(LegacyReplayMetrics).cpuMetrics()
-  decoded.validate(1, 24, 24)
-  doAssert decoded.frames[^1].rows[0].cpu == 25
-  doAssert decoded.final[0].cpu == 20
-  var row = MetricRow(hasApm: true)
-  row.values[ApmMetric] = 60
-  doAssert row.withTelemetry(decoded, 0, 24).values[ApmMetric] == 60
-
 echo "Testing long histories retain bounded, ordered samples"
 block:
   let metrics = newMetrics(1, 1)

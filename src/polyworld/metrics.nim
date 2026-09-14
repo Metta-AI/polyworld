@@ -28,15 +28,6 @@ type
     tickRate*, interval*: int32
     frames*: seq[TelemetryFrame]
     final*: seq[TelemetryRow]
-  LegacyTelemetryRow* = object
-    cpu*, apm*: int32
-  LegacyTelemetryFrame* = object
-    tick*: int32
-    rows*: seq[LegacyTelemetryRow]
-  LegacyReplayMetrics* = object
-    tickRate*, interval*: int32
-    frames*: seq[LegacyTelemetryFrame]
-    final*: seq[LegacyTelemetryRow]
   MetricBucket = object
     second: int32
     instructions, budget, commands: int64
@@ -279,18 +270,6 @@ proc replayMetrics*(history: MetricHistory): ReplayMetrics =
   let last = history.frames[^1]
   for row in last.rows:
     result.final.add row.finalRow(last.tick, history.tickRate).telemetryRow()
-
-proc cpuMetrics*(legacy: LegacyReplayMetrics): ReplayMetrics =
-  ## Reads CPU from older recordings and discards their attempted-command APM.
-  result.tickRate = legacy.tickRate
-  result.interval = legacy.interval
-  for frame in legacy.frames:
-    var sample = TelemetryFrame(tick: frame.tick)
-    for row in frame.rows:
-      sample.rows.add TelemetryRow(cpu: row.cpu)
-    result.frames.add sample
-  for row in legacy.final:
-    result.final.add TelemetryRow(cpu: row.cpu)
 
 proc validate*(metrics: ReplayMetrics, players: int, tickRate: int32,
     lastTick: int) =

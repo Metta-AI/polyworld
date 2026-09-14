@@ -26,7 +26,6 @@ type
     edges*: array[Direction, Edge]
   TileGrid* = object
     resolution*: int
-    rasterTolerance: float32
     cells*: seq[Tile]
   MapPalette* = object
     low*, high*, castle*, keep*, spawn*, lake*: ColorRGBX
@@ -250,10 +249,10 @@ proc stamp(
     if intersections < 2:
       continue
     let
-      start = max(0, ceil(left - 0.5'f - grid.rasterTolerance).int)
+      start = max(0, ceil(left - 0.5'f - 0.0001'f).int)
       finish = min(
         grid.resolution,
-        ceil(right - 0.5'f + grid.rasterTolerance).int
+        ceil(right - 0.5'f + 0.0001'f).int
       )
       row = y * grid.resolution
     for x in start ..< finish:
@@ -332,13 +331,11 @@ proc plantForest(grid: var TileGrid, map: MapData) {.raises: [].} =
             lengthSq(delta) < radius * radius:
               grid.cells[index].shade = shade
 
-proc buildTiles*(map: MapData, legacyRaster = false): TileGrid =
+proc buildTiles*(map: MapData): TileGrid =
   ## Generates the terrain tile grid with exact rotational symmetry.
   let resolution = map.config.mapSize
   doAssert resolution > 0 and resolution mod 2 == 0
   result.resolution = resolution
-  # Close rounding cracks along shared triangle edges in newly saved maps.
-  result.rasterTolerance = (if legacyRaster: 0'f else: 0.0001'f)
   result.cells = newSeq[Tile](resolution * resolution)
   for tile in result.cells.mitems:
     tile.surface = TreeSurface
