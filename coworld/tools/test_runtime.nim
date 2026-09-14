@@ -52,7 +52,9 @@ proc checkHttp(port: Port, path: string) =
     "GET " & path & " HTTP/1.1\r\nHost: 127.0.0.1:" & $port &
     "\r\nConnection: close\r\n\r\n"
   )
-  doAssert socket.readHeaders().startsWith("HTTP/1.1 200 "), path
+  let headers = socket.readHeaders()
+  doAssert headers.splitLines()[0].splitWhitespace()[0 .. 1] ==
+    @["HTTP/1.1", "200"], path & ": " & headers
 
 proc readFrame(socket: Socket): tuple[opcode: int, payload: string] =
   ## Reads the short, unmasked frames used by the status and Pong contract.
@@ -77,7 +79,8 @@ proc checkWebSocket(port: Port) =
     "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
   )
   let headers = socket.readHeaders()
-  doAssert headers.startsWith("HTTP/1.1 101 ")
+  doAssert headers.splitLines()[0].splitWhitespace()[0 .. 1] ==
+    @["HTTP/1.1", "101"], headers
   doAssert headers.contains("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
   let status = socket.readFrame()
   doAssert status.opcode == 1, "expected one text status message"
@@ -203,6 +206,12 @@ proc episode(
     doAssert output["scores"].len == count
     for score in output["scores"]:
       doAssert score.getInt() in {0, 1}
+    if game == "gota":
+      doAssert output["total_xp"].len == count
+      for xp in output["total_xp"]:
+        doAssert xp.getInt() >= 0
+    else:
+      doAssert not output.hasKey("total_xp")
     let replay = readFile(directory / "replay")
     doAssert replay.len > 0
     var previous = -1
@@ -234,8 +243,8 @@ for (game, count) in Games:
     scripts.add "PRINT \"PRIVATE-" & $slot & "\"\nEND\n"
   episode(game, count, scripts)
   episode(game, count, newSeq[string](count))
-  for script in scripts.mitems:
-    script = "END\n"
+  for slot in 0 ..< scripts.len:
+    scripts[slot] = "END\n"
   scripts[0] = "THIS IS NOT BASIC\n"
   episode(game, count, scripts, failure = true)
   scripts[0] = "WHILE 1\nWEND\n"

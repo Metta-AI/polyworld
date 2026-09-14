@@ -443,6 +443,11 @@ block:
   doAssert world.scores() == @[1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
   world.winner = BlueTeam
   doAssert world.scores() == @[0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
+  for slot, hero in world.heroes:
+    hero.totalXp = 1000 + slot
+    hero.xp = slot
+  doAssert world.totalXp() ==
+    @[1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]
 
 echo "Testing rejected hero commands do not contribute to APM"
 block:
