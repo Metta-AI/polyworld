@@ -3296,3 +3296,8 @@ proc scores*(world: World): seq[int] =
     for slot, hero in world.heroes:
       if hero.team == world.winner:
         result[slot] = 1
+
+proc totalXp*(world: World): seq[int] =
+  ## Returns lifetime hero XP in platform seat order.
+  for hero in world.heroes:
+    result.add hero.totalXp

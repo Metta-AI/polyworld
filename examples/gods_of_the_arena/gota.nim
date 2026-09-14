@@ -11,7 +11,7 @@ when defined(headless):
       ticks: run.world.tick,
       seed: options.seed,
       outcome: (if run.world.gameOver: $run.world.winner else: "time_limit")
-    ))
+    ), run.world.totalXp())
 else:
   import graphics
   runGraphics()
