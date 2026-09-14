@@ -20,4 +20,7 @@ createDir(Destination)
 compile(@["js", "-o:" & Destination / "report.js", Sources / "report.nim"])
 compile(@["check", Sources / "tournament.nim"])
 compile(@["c", "-o:" & Destination / "tournament", Sources / "tournament.nim"])
+compile(@["check", Sources / "inspect_players.nim"])
+compile(@["c", "-d:release", "-o:" & Destination / "inspect_players",
+  Sources / "inspect_players.nim"])
 echo "Runner: ", Destination / "tournament"

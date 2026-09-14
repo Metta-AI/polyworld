@@ -12,16 +12,21 @@ const
   Schema* = 1
   Formats* = ["mixed", "mono"]
   SourceDirectory* = currentSourcePath().parentDir
+  PlayerMetrics* = ["gold", "banked_gold", "level", "kills", "deaths",
+    "assists", "tower_kills", "last_hits"]
 
 type
   TournamentError* = object of CatchableError
   Values* = array[3, float64]
   Client* = object
     request*: proc(verb, path: string, body: JsonNode): JsonNode {.closure.}
+    download*: proc(url: string): string {.closure.}
   Controls* = object
     concurrency*: int
     pollMilliseconds*: int
     retryFailed*: bool
+    siteRoot*: string
+    statsWorker*: string
     fault*: proc(point: string) {.closure.}
 
 var stopping* {.volatile.}: bool
@@ -257,6 +262,104 @@ proc addMovement(rows, previous: JsonNode) =
     if earlier != nil and earlier.kind != JNull and row["rank"].kind != JNull:
       row["movement"] = %(earlier.getInt - row["rank"].getInt)
 
+proc objectiveCounts*(xp, gold, kills: int): array[2, int] =
+  ## Recovers tower and footman finishing blows from GotA's exact kill rewards.
+  let
+    remainingXp = xp - 150 * kills
+    remainingGold = gold - 100 * kills
+  require(remainingXp >= 0 and remainingGold >= 0 and
+    remainingXp mod 25 == 0 and remainingGold mod 15 == 0,
+    "Replay rewards cannot account for its kill totals")
+  let
+    towers = remainingGold div 15 - remainingXp div 25
+    lastHits = remainingXp div 25 - 4 * towers
+  require(towers >= 0 and lastHits >= 0,
+    "Replay rewards produce invalid objective totals")
+  [towers, lastHits]
+
+proc validatePlayerStats*(stats, raw, game, run: JsonNode) =
+  ## Requires verified replay seats to agree with saved original game results.
+  require(stats{"verified"}.getBool and
+    stats{"hash_mismatches"}.getInt(-1) == 0,
+    "Player statistics require a verified replay")
+  require(stats{"ticks"} == raw["ticks"] and
+    stats{"outcome"} == raw["outcome"], "Replay result differs from saved game")
+  require(stats{"heroes"} != nil and stats["heroes"].len == 10,
+    "Player statistics require ten heroes")
+  for slot, hero in stats["heroes"].elems:
+    require(hero{"slot"}.getInt(-1) == slot and
+      hero{"policy_version_id"} == run["roster"][game["seats"][slot].getInt]["id"],
+      "Replay policy seats differ from the frozen schedule")
+    require(hero{"xp"} == raw["total_xp"][slot] and
+      hero{"win"}.getInt(-1) == raw["scores"][slot].getInt,
+      "Replay hero result differs from saved game")
+    for field in PlayerMetrics:
+      require(hero{field} != nil and hero[field].kind == JInt and
+        hero[field].getInt >= 0, "Invalid player statistic: " & field)
+
+proc playerRows*(run: JsonNode, records: seq[JsonNode]): JsonNode =
+  ## Combines formats with one appearance per policy and hero-averaged mono stats.
+  result = newJArray()
+  for policy in run["roster"]:
+    let row = policy.copy()
+    for field in ["games", "wins", "losses", "timeouts", "mixed", "mono",
+        "stats_games"]:
+      row[field] = %0
+    for field in ["xp", "minutes"]:
+      row[field] = %0.0
+    for field in PlayerMetrics:
+      row[field] = %0.0
+    result.add(row)
+  for i, game in run["schedule"].elems:
+    let record = records[i]
+    if record["state"].getStr != "completed":
+      continue
+    let
+      raw = record["result"]
+      stats = record{"player_stats"}
+    validateResult(raw, game, run)
+    if stats != nil:
+      validatePlayerStats(stats, raw, game, run)
+    var seats: Table[int, seq[int]]
+    for slot, policy in game["seats"].elems:
+      seats.mgetOrPut(policy.getInt, @[]).add(slot)
+    for policy, slots in seats:
+      let
+        row = result[policy]
+        outcome = if raw["outcome"].getStr == "time_limit": "timeouts"
+          elif raw["scores"][slots[0]].getInt == 1: "wins" else: "losses"
+      for field in ["games", game["format"].getStr, outcome]:
+        row[field] = %(row[field].getInt + 1)
+      row["minutes"] = %(row["minutes"].getFloat +
+        raw["ticks"].getInt.float64 / 1440)
+      if stats != nil:
+        row["stats_games"] = %(row["stats_games"].getInt + 1)
+      for slot in slots:
+        row["xp"] = %(row["xp"].getFloat +
+          raw["total_xp"][slot].getFloat / slots.len.float64)
+        if stats != nil:
+          for field in PlayerMetrics:
+            row[field] = %(row[field].getFloat +
+              stats["heroes"][slot][field].getFloat / slots.len.float64)
+  for row in result:
+    let
+      games = row["games"].getInt
+      sampled = row["stats_games"].getInt
+      deaths = row["deaths"].getFloat
+    row["win_rate"] = if games > 0:
+      %(100.0 * row["wins"].getInt.float64 / games.float64) else: newJNull()
+    row["kda"] = if sampled > 0:
+      %((row["kills"].getFloat + row["assists"].getFloat) / max(1.0, deaths))
+      else: newJNull()
+    for field in ["xp", "minutes"]:
+      row["avg_" & field] = if games > 0:
+        %(row[field].getFloat / games.float64) else: newJNull()
+    for field in PlayerMetrics:
+      row["avg_" & field] = if sampled > 0:
+        %(row[field].getFloat / sampled.float64) else: newJNull()
+      if sampled == 0:
+        row[field] = newJNull()
+
 proc summarize*(run: JsonNode, records: seq[JsonNode],
     status: string, error = ""): JsonNode =
   ## Recomputes deterministic standings from each format's completed prefix.
@@ -344,7 +447,8 @@ proc summarize*(run: JsonNode, records: seq[JsonNode],
       states["submitted"] + states["submitting"],
     "running": states["running"], "failed": states["failed"],
     "roster": run["roster"], "release": run["release"],
-    "settings": run["settings"], "panels": panels, "matches": matches}
+    "settings": run["settings"], "panels": panels, "matches": matches,
+    "players": playerRows(run, records)}
 
 proc loadRecords*(directory: string, run: JsonNode): seq[JsonNode] =
   ## Loads authoritative game records and ignores abandoned temporary files.

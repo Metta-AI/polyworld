@@ -29,6 +29,26 @@ the final report. Refresh the page manually to see new results. The page works
 offline and can be moved to another folder.
 Assets come from the sibling `polyworld_data` checkout, or `POLYWORLD_DATA`.
 
+The report uses the same header and stylesheet as the published GotA standings.
+When the sibling `polyworld-buff` checkout exists, every report update also writes
+`polyworld-buff/GOTA/standings/index.html` and copies its fonts and icons into
+`GOTA/assets/`. This includes results, pauses, failures, restarts, and completion.
+The existing `GOTA/site.css` supplies the exact current site styling and is
+embedded in the local HTML so that file still works offline.
+
+Use `--site PATH` for another checkout, or `--no-site` for local output only.
+These are operational options and may change on resume. Without a site checkout,
+the local report uses the bundled copy of the same stylesheet.
+
+Refresh the existing run and the public checkout without running more games:
+
+```sh
+tmp/gota/tools/tournament --run top10-100-20260914 --report-only
+```
+
+Commit and push the generated changes in `polyworld-buff` to publish them through
+GitHub Pages. The runner updates local files; it does not commit or push them.
+
 Press Ctrl+C to pause. The current response and file replacement finish, then the
 runner writes the paused report. Already submitted games continue remotely.
 Restarting reconciles their results before scheduling new games. Keep one runner
@@ -68,6 +88,39 @@ conservative recovery works without a backend deployment, but fully automatic
 recovery in that last ambiguous case still requires server-side deduplication.
 
 ## Scoring and stability
+
+The player statistics table combines both formats, with one appearance per
+policy per completed game. Mono games average all five heroes before being
+combined with mixed games. Wins, losses and timeouts are separate counts.
+XP is lifetime earned XP without the ladder's time penalty. Gold is earned gold,
+excluding starting gold; unspent gold is the final balance. Levels, kills,
+deaths, assists, tower kills and footman last hits are per-appearance averages.
+KDA is the sum of hero-averaged kills and assists divided by
+`max(1, sum of hero-averaged deaths)` over games with verified replay stats.
+
+The build also creates `tmp/gota/tools/inspect_players`. After each completed
+game, the runner downloads its replay and verifies every replay hash before
+saving per-seat statistics in the game record. `replays/` caches the source
+replays, episode metadata and derived counters. Incomplete collection is visible
+through each player's Stats games count. Missing data shows a dash, not zero.
+The same table is exported to `exports/players.csv`.
+
+Collect missing statistics for a saved run without scheduling games:
+
+```sh
+tmp/gota/tools/tournament --run comparison --report-only --collect-stats
+```
+
+The inspector must be compiled against the game source matching the replay's
+release. Use `--stats-worker PATH` for a preserved older build. A mismatched
+inspector reports an error and leaves the game result intact. Plain
+`--report-only` is offline and rebuilds from the saved counters.
+
+For replay versions 26 through 29, the inspector recovers tower and footman
+finishing blows from exact reward accounting after subtracting hero kills.
+Footmen award 25 XP and 15 gold, towers 100 XP and 75 gold, and heroes 150 XP
+and 100 gold. Both remaining totals must give nonnegative integer kill counts.
+This accounting needs review when a later replay version changes rewards.
 
 Win/loss is average binary team victory, with no MMR adjustment. Score is lifetime
 XP minus 100 per simulated minute, including fractional minutes and negative

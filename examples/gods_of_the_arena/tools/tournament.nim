@@ -1,5 +1,5 @@
 import std/[json, os, sequtils, strutils, sysrand]
-import tournaments, reports, runners, softmax
+import tournaments, reports, runners, softmax, sites, collections
 
 proc stop() {.noconv.} =
   ## Lets the current save or response finish before pausing the runner.
@@ -21,6 +21,11 @@ proc main(): int =
   --concurrency N     Concurrent remote requests (default 4)
   --retry-failed      Add replacement attempts for failed scheduled games
   --report-only       Rebuild saved reports without network requests
+  --collect-stats     Collect missing replay stats, including with --report-only
+  --stats-worker PATH Replay inspector built for the run's game release
+  --site PATH         Update PATH/GOTA/standings/index.html as results arrive
+                      Defaults to the sibling polyworld-buff checkout if present
+  --no-site           Write only the run's local files
   --server URL        API server (default existing Softmax environment)
 
 Press Ctrl+C to pause. Repeat --run NAME to resume."""
@@ -29,6 +34,18 @@ Press Ctrl+C to pause. Repeat --run NAME to resume."""
     directory = OutputRoot / arguments["run"].getStr
     dataRoot = getEnv("POLYWORLD_DATA", Root.parentDir / "polyworld_data")
     path = directory / "run.json"
+    siteRoot = if arguments["no_site"].getBool: ""
+      elif arguments.hasKey("site"): absolutePath(arguments["site"].getStr)
+      elif dirExists(DefaultSite): DefaultSite else: ""
+    controls = Controls(
+      concurrency: arguments["concurrency"].getInt,
+      pollMilliseconds: 10000,
+      retryFailed: arguments["retry_failed"].getBool,
+      siteRoot: siteRoot,
+      statsWorker: arguments{"stats_worker"}.getStr(
+        Root / "tmp/gota/tools/inspect_players")
+    )
+  validateSite(siteRoot)
   require(not symlinkExists(directory), "Run directories cannot be symlinks")
   var run: JsonNode
   if fileExists(path):
@@ -66,12 +83,31 @@ Press Ctrl+C to pause. Repeat --run NAME to resume."""
     records = loadRecords(directory, run)
     complete = records.allIt(it["state"].getStr == "completed")
   publish(directory, run, records, if complete: "completed" else: "paused",
-    dataRoot)
+    dataRoot, controls = controls)
   echo "Report: ", directory / "report.html"
-  if arguments["report_only"].getBool or complete:
-    return 0
+  if siteRoot.len > 0:
+    echo "Site: ", siteRoot / "GOTA/standings/index.html"
+  if (not arguments["report_only"].getBool or
+    arguments["collect_stats"].getBool) and records.anyIt(
+      it["state"].getStr == "completed" and not it.hasKey("player_stats")):
+      let client = connect(run["server"].getStr)
+      try:
+        for i, game in run["schedule"].elems:
+          if stopping:
+            break
+          if records[i]["state"].getStr == "completed" and
+            not records[i].hasKey("player_stats"):
+              collectStats(client.transport(), directory, run, game,
+                records[i], controls)
+              publish(directory, run, records,
+                if complete: "completed" else: "paused", dataRoot,
+                controls = controls)
+      finally:
+        client.close()
   if stopping:
     return 130
+  if arguments["report_only"].getBool or complete:
+    return 0
   let client = connect(run["server"].getStr)
   try:
     result = execute(
@@ -79,15 +115,11 @@ Press Ctrl+C to pause. Repeat --run NAME to resume."""
       directory,
       run,
       dataRoot,
-      Controls(
-        concurrency: arguments["concurrency"].getInt,
-        pollMilliseconds: 10000,
-        retryFailed: arguments["retry_failed"].getBool
-      )
+      controls
     )
   except CatchableError as error:
     publish(directory, run, loadRecords(directory, run), "paused", dataRoot,
-      error.msg)
+      error.msg, controls)
     raise
   finally:
     client.close()
