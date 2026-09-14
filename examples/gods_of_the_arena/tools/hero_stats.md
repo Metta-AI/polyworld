@@ -13,6 +13,17 @@ nim c -d:headless -o:tmp/gota/hero_stats \
 tmp/gota/hero_stats --hours 24 --jobs 4
 ```
 
+When the sibling `polyworld-buff` checkout is present, the same command also
+updates `polyworld-buff/GOTA/heros/index.html` and its `hero_assets/` folder.
+The website's `GOTA/site.css` and `tools/layouts.nim` supply the exact shared
+styling and navigation. The local report receives that styling too, with
+the stylesheet copied beside its fonts and images. No server is needed.
+Commit and push the website checkout to publish the refreshed page.
+
+Use `--site /path/to/polyworld-buff` or set `POLYWORLD_BUFF` for another
+checkout location. Use `--no-site` to generate only local reports. If no
+sibling checkout is available, the tool generates the standalone template.
+
 Use a named directory to resume downloads and reuse verified results:
 
 ```sh
@@ -40,6 +51,9 @@ nim r -o:tmp/gota/hero_report \
   tmp/gota/hero-stats/balance-check
 ```
 
+This command also updates the website when its checkout is present. It
+accepts `--site CHECKOUT` and `--no-site`, just like the full analyzer.
+
 To update the page in this tools folder, pass its output filename:
 
 ```sh
@@ -51,13 +65,16 @@ nim r -o:tmp/gota/hero_report \
 
 Open the generated `hero_stats.html` directly in a browser. Keep its adjacent
 `hero_assets/` folder with it when copying or publishing it to GitHub Pages.
-All links are relative, so the report also works under a project subdirectory.
+Asset paths are relative, so the report works under a project subdirectory.
+Local reports link to the published game guide and standings.
 No server is required to view it locally. Hero data is embedded in the HTML
 to avoid local-file restrictions on fetching JSON. Fonts, portraits, and
 icons are ordinary files in `hero_assets/`.
 
 Edit `hero_stats_template.html` to change the layout, then regenerate the
 report. The template is source for the generator, not the page to open.
+Shared site styling comes from `polyworld-buff/GOTA/site.css` when the
+website checkout is selected.
 
 Outputs include:
 
