@@ -63,7 +63,10 @@ doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
 echo "Testing old combat replays keep their version when saved again"
-for version in [TelemetryGameVersion, CombatGameVersion]:
+for version in [
+  TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
+  PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion
+]:
   var historical = recorder.data
   historical.header.gameVersion = version
   let saved = historical.encodeReplay()

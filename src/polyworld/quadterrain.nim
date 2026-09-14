@@ -2235,6 +2235,41 @@ proc scatterGrass*(
     )
     inc placed
 
+proc plantRocks*(
+    pack: PropPack,
+    names: openArray[string],
+    kind: uint32,
+    randomSeed: int,
+    height = 1.6'f
+) =
+  ## Places a stable boulder on every tile of the requested blocker kind.
+  if pack == nil or names.len == 0 or layers.len == 0:
+    return
+  let ground = layers[0]
+  for z in 0 ..< ground.depth:
+    for x in 0 ..< ground.width:
+      let tile = ground.tiles[z * ground.width + x]
+      if not tile.exists or tile.kind != kind:
+        continue
+      var rng = initRand(
+        x.int64 * 73_856_093 + z.int64 * 19_349_663 +
+          randomSeed.int64 * 83_492_791 + 1
+      )
+      let
+        model = rng.rand(names.high)
+        size = height * (0.8'f + rng.rand(0.4).float32)
+        tops = tile.tops.unpack()
+      pack.placeProp(
+        names[model],
+        vec3(
+          (ground.originX + x).float32 - HalfGrid + 0.5'f,
+          (tops[1] + tops[2]) / 2 - size * 0.2'f,
+          (ground.originZ + z).float32 - HalfGrid + 0.5'f
+        ),
+        rotation = rng.rand(2 * PI).float32,
+        scale = size
+      )
+
 proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
   ## Scatters decorative boulders with scaled size and burial depth.
   rockPlacements.setLen(0)
@@ -2561,8 +2596,8 @@ proc bakeTexturedPlacement(placement: PropPlacement) =
   if textureArray == 0:
     return
   var found = -1
-  for i, batch in texturedBatches:
-    if batch.textureArray == textureArray:
+  for i in 0 ..< texturedBatches.len:
+    if texturedBatches[i].textureArray == textureArray:
       found = i
       break
   if found < 0:
@@ -3865,7 +3900,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   if treeMesh.len > 0:
     drawTexturedMesh(
       treeVertexArray, treeTextureArray, treeMesh.len div 9, mvp)
-  for batch in texturedBatches:
+  for batch in texturedBatches.mitems:
     if batch.mesh.len > 0:
       drawTexturedBatch(batch, mvp)
   glUseProgram(0)
@@ -3933,7 +3968,7 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) =
     glBindTexture(GL_TEXTURE_2D_ARRAY, treeTextureArray)
     glBindVertexArray(treeDepthVertexArray)
     glDrawArrays(GL_TRIANGLES, 0, (treeMesh.len div 9).GLsizei)
-  for batch in texturedBatches:
+  for batch in texturedBatches.mitems:
     if batch.mesh.len == 0:
       continue
     bindSunCutoutDepth(sunDepthPassMvp(), TreeAlphaCutoff)

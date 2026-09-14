@@ -1,12 +1,14 @@
 ## Gods of the Arena map generation.
 ##
-## Builds the packed terrain and its walkability from an explicit seed using
-## only integers. Writes `pathing.layers` once and returns a `MapData`. The
-## simulation never writes terrain. Graphics may sample `surfaceHeight` and
-## must not write simulation state.
+## New matches use the editor's saved preset, packed into integer terrain.
+## The earlier generator is retained for recorded games through version 23.
+## The simulation reads the resulting terrain without modifying it.
 
 import
-  polyworld/[fixed, hashes, noises, pathing, profiles, rngs]
+  polyworld/[fixed, hashes, noises, pathing, profiles, rngs],
+  arenas
+
+export arenas
 
 const
   FordCenters = [(107, 21), (21, 107)]
@@ -148,6 +150,10 @@ const
 type MapData* = object
   seed*: int32
   hash*: uint64
+  legacy*: bool
+  preset*: MapConfig
+  layout*: ArenaLayout
+  minimap*: seq[uint32]
 
 proc triangleWave(value, period: int): int32 =
   ## Returns a deterministic signed triangle wave in fixed integer units.
@@ -186,7 +192,7 @@ proc mapFingerprint(): uint64 =
 
 var battleMapHash*: uint64
 
-proc generateMap*(seed: int32): MapData {.measure.} =
+proc generateLegacyMap*(seed: int32): MapData {.measure.} =
   ## Builds the authored arena skeleton, then varies only natural detail.
   ## Gameplay geometry remains point-symmetric for every seed.
   var
@@ -1042,5 +1048,60 @@ proc generateMap*(seed: int32): MapData {.measure.} =
   layers = @[groundLayer, redFort, blueFort, water]
   computeWalkable()
   result.seed = seed
+  result.legacy = true
   result.hash = mapFingerprint()
   battleMapHash = result.hash
+
+var
+  savedArenas: array[ArenaEdition, ArenaData]
+  savedPresets: array[ArenaEdition, MapConfig]
+  arenaReady: array[ArenaEdition, bool]
+
+proc generateMap*(
+    seed: int32, preset = defaultConfig(), edition = CryptArena
+): MapData {.measure.} =
+  ## Generates configured terrain with a bounded cache and separate match seed.
+  if not arenaReady[edition] or savedPresets[edition] != preset:
+    savedArenas[edition] = buildArena(preset, edition)
+    savedPresets[edition] = preset
+    arenaReady[edition] = true
+  let savedArena = savedArenas[edition]
+  installImmutableLayers(savedArena.layers)
+  var hash = uint32(mapFingerprint())
+  for points in [savedArena.layout.forts, savedArena.layout.spawns]:
+    for point in points:
+      hash.addHashy(point.x)
+      hash.addHashy(point.z)
+  for point in savedArena.layout.camps:
+    hash.addHashy(point.x)
+    hash.addHashy(point.z)
+  for lane in savedArena.layout.towers:
+    for team in lane:
+      for site in team:
+        hash.addHashy(site.position.x)
+        hash.addHashy(site.position.z)
+        hash.addHashy(site.facing.x)
+        hash.addHashy(site.facing.z)
+  for site in savedArena.layout.barracks:
+    hash.addHashy(site.position.x)
+    hash.addHashy(site.position.z)
+    hash.addHashy(site.spawn.x)
+    hash.addHashy(site.spawn.z)
+    hash.addHashy(site.lane)
+    hash.addHashy(site.team)
+  for lane in savedArena.layout.lanes:
+    for point in lane:
+      hash.addHashy(point.x)
+      hash.addHashy(point.z)
+  result = MapData(
+    seed: seed,
+    preset: preset,
+    hash: uint64(hash),
+    layout: savedArena.layout,
+    minimap: savedArena.minimap
+  )
+  battleMapHash = result.hash
+
+proc generateMap*(seed: int32, edition: ArenaEdition): MapData =
+  ## Loads historical controls for recordings without a stored map preset.
+  generateMap(seed, historicalPreset(edition), edition)

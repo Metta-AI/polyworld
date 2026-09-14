@@ -17,6 +17,8 @@ import
 when defined(coworld):
   import polyworld/coworld
 
+var matchConfig = GotaConfig(seed: ArenaSeed)
+
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
   echo "Gods of the Arena"
@@ -30,7 +32,8 @@ proc usage() =
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
   echo "  --minutes NUMBER        Duration in minutes (default 20)."
   echo "  --ticks NUMBER          Duration in ticks (default 28800)."
-  echo "  --seed NUMBER           Live game map seed."
+  echo "  --seed NUMBER           Match seed, independent of mapPreset.seed."
+  echo "  --config PATH           JSON match settings, including mapPreset."
   echo "  --spawn-interval NUMBER Seconds between waves."
   echo "  --play=false            Start the graphical transport paused."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
@@ -41,23 +44,31 @@ proc usage() =
 
 proc parseGameOptions(): GameOptions =
   ## Parses runtime game, bot, replay, and simulation configuration.
+  let arguments = commandLineParams()
+  var index = 0
+  while index < arguments.len:
+    if arguments[index] == "--config":
+      matchConfig = loadConfig(arguments.argumentValue(index, "--config"))
+    inc index
   result = GameOptions(
-    seed: 2026,
-    seconds: DefaultMinutes * 60,
-    maximumTicks: DefaultDurationTicks,
-    spawnIntervalTicks: 10 * TickRate.int32,
+    seed: matchConfig.seed,
+    seconds: matchConfig.maxTicks div TickRate,
+    maximumTicks: matchConfig.maxTicks,
+    spawnIntervalTicks: matchConfig.spawnIntervalTicks,
+    playerSlot: matchConfig.playerSlot,
     speed: 1,
     windowWidth: 1920,
     windowHeight: 1080
   )
-  let arguments = commandLineParams()
-  var index = 0
+  index = 0
   while index < arguments.len:
     let argument = arguments[index]
     if result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
+      of "--config":
+        discard arguments.argumentValue(index, "--config")
       of "--spawn-interval":
         var seconds: float64
         try:
@@ -88,7 +99,10 @@ proc parseGameOptions(): GameOptions =
 
 var options* =
   when defined(coworld):
-    coworldOptions(10)
+    block:
+      let hosted = coworldOptions(10)
+      matchConfig = parseConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
+      hosted
   else:
     parseGameOptions()
 
@@ -107,7 +121,20 @@ block:
     options.maximumTicks = int32(replayData.hashes.len)
   var gameMap: MapData
   profileBlock "map":
-    gameMap = generateMap(mapSeed)
+    gameMap =
+      if replayMode and
+        replayData.header.gameVersion <= PreviousMapGameVersion:
+          generateLegacyMap(mapSeed)
+      elif replayMode and
+        replayData.header.gameVersion == InitialArenaGameVersion:
+          generateMap(mapSeed, InitialArena)
+      elif replayMode and
+        replayData.header.gameVersion == CryptArenaGameVersion:
+          generateMap(mapSeed, CryptArena)
+      elif replayMode:
+        generateMap(mapSeed, replayData.config.mapPreset)
+      else:
+        generateMap(mapSeed, matchConfig.mapPreset)
   run = newGame(
     gameMap,
     if replayMode:
@@ -125,13 +152,18 @@ block:
   else:
     loadBots(run, options.botGroups, options.playerSlot)
     run.recorder = initReplayRecorder(
-      currentSetup(run, uint32(options.maximumTicks))
+      currentSetup(run, uint32(options.maximumTicks)), gameMap.preset
     )
     run.recorder.data.config =
       when defined(coworld):
-        coworld.config
+        coworld.config.withMapPreset(gameMap.preset)
       else:
-        localGameConfig(options, HeroClassCount)
+        block:
+          var config = localGameConfig(options, HeroClassCount)
+          if matchConfig.players.len > 0:
+            config.players = matchConfig.players
+          config.withMapPreset(gameMap.preset)
+    run.recorder.data.config.validateConfig(HeroClassCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc advanceGame*() =
@@ -198,7 +230,9 @@ proc startReplayRecording*(maximumTicks: uint32) =
   ## Starts the in-memory action tape for a live match.
   var config = run.config
   config.maxTicks = int32(maximumTicks)
-  run.recorder = initReplayRecorder(currentSetup(run, maximumTicks))
+  run.recorder = initReplayRecorder(
+    currentSetup(run, maximumTicks), config.mapPreset
+  )
   run.recorder.data.config = config
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 

@@ -1,4 +1,4 @@
-## Checks terrain geometry and its real BASIC host interface.
+## Checks legacy replay terrain and its real BASIC host interface.
 
 import
   std/[os, tempfiles],
@@ -11,7 +11,7 @@ proc terrain(field: TerrainField, x, y: int, layer = GroundLayer): int32 =
 
 echo "Testing grass, forests, rivers, walls, and gates on the static map"
 for seed in [1988'i32, 2026'i32]:
-  discard generateMap(seed)
+  discard generateLegacyMap(seed)
   var seen: set[TerrainKind]
   for y in 0 ..< GridTiles:
     for x in 0 ..< GridTiles:
@@ -128,7 +128,7 @@ proc checkBasicTerrain() =
   let
     directory = createTempDir("gota-terrain-", "")
     path = directory / "terrain.bas"
-    game = newGame(generateMap(1988), 240, 10, false, ReplayData())
+    game = newGame(generateLegacyMap(1988), 240, 10, false, ReplayData())
   defer:
     removeDir(directory)
   writeFile(path, """
