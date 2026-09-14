@@ -1,4 +1,4 @@
-import std/[dom, strutils]
+import std/[dom, math, strutils]
 
 proc readSaved(key: string): string =
   ## Reads optional session state without preventing offline rendering.
@@ -33,8 +33,8 @@ for element in document.querySelectorAll("details"):
     save(prefix & $detail.id, $detail.openDetails()))
 
 proc saveScroll(event: Event) =
-  ## Saves position only after restoring the initial viewport.
-  save(prefix & "scroll", $window.pageYOffset)
+  ## Saves a whole-pixel position after restoring the initial viewport.
+  save(prefix & "scroll", $int(floor(window.pageYOffset.float64)))
 
 discard window.setTimeout(proc() =
   ## Restores scroll after the page layout and expanded details exist.
