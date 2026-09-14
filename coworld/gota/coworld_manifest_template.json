@@ -70,6 +70,13 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "map_size": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 256,
+              "multipleOf": 2,
+              "default": 116
+            },
             "seed": {
               "type": "integer",
               "minimum": -2147483648,
@@ -92,7 +99,7 @@
               "type": "number",
               "minimum": 26,
               "maximum": 62,
-              "default": 62
+              "default": 52.7
             },
             "road_wobble": {
               "type": "number",
@@ -281,10 +288,11 @@
         "max_ticks": 28800,
         "spawn_interval_ticks": 240,
         "map_preset": {
+          "map_size": 116,
           "seed": 54,
           "high_size": 511,
           "castle_size": 295,
-          "road_width": 62,
+          "road_width": 52.7,
           "road_wobble": 73,
           "lake_width": 80,
           "lake_wobble": 30,

@@ -7,8 +7,10 @@ export configs
 
 const
   MapSize* = 1000.0'f
-  MapResolution* = 128
-  RampLength* = MapSize / MapResolution.float32 * 5
+  MapResolution* = DefaultMapSize
+  # Preserve layout distances and sampling for existing replay presets.
+  ReferenceResolution = 128
+  RampLength* = MapSize / ReferenceResolution.float32 * 5
   LowColor* = rgbx(139, 198, 106, 255)
   HighColor* = rgbx(193, 208, 144, 255)
   CastleColor* = rgbx(169, 166, 145, 255)
@@ -25,7 +27,7 @@ const
   TrailWidth* = 20.0'f
   StemWidth* = 16.0'f
   CampPadding* = 5.0'f
-  CampForest* = MapSize / MapResolution.float32 * 1.5'f
+  CampForest* = MapSize / ReferenceResolution.float32 * 1.5'f
   CampSeparation = CampPadding * 2 + CampForest + 2
   BarrackRadius* = 12.0'f
   CreepSpeed* = 42.0'f
@@ -391,13 +393,15 @@ proc intersection(
 
 proc initRamp(
   approaches, edge: array[2, Vec2],
-  width: float32
+  width: float32,
+  resolution: int
 ): Ramp {.raises: [].} =
   ## Limits the slope to five tiles while retaining level road approaches.
   let
     center = (approaches[0] + approaches[1]) / 2
     delta = approaches[1] - approaches[0]
-    half = normalize(delta) * min(length(delta), RampLength) / 2
+    limit = min(RampLength, MapSize / resolution.float32 * 5)
+    half = normalize(delta) * min(length(delta), limit) / 2
   Ramp(
     points: [center - half, center + half],
     approaches: approaches,
@@ -458,7 +462,8 @@ proc rampRoad(
           initRamp(
             [hit.point - normal * half, hit.point + normal * half],
             edge,
-            width
+            width,
+            map.config.mapSize
           )
         ))
   var
@@ -551,7 +556,8 @@ proc stemRoad(
       let ramp = initRamp(
         [hit.point - normal * half, hit.point + normal * half],
         edge,
-        StemWidth
+        StemWidth,
+        map.config.mapSize
       )
       if not map.levelClearing(ramp.approaches[0], StemWidth / 2 + 4) or
         not map.levelClearing(ramp.approaches[1], StemWidth / 2 + 4) or
@@ -693,7 +699,8 @@ proc placeTrails(map: var MapData): bool {.raises: [].} =
       let ramp = initRamp(
         [center - normal * half, center + normal * half],
         edge,
-        TrailWidth
+        TrailWidth,
+        map.config.mapSize
       )
       if not grid.available(ramp.approaches[0]) or
         not grid.available(ramp.approaches[1]) or
@@ -932,56 +939,64 @@ proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
     sites: array[6, seq[Site]]
     chosen: array[6, Site]
     order: array[6, int]
-  for lane in 0 ..< 3:
-    if lane == 1:
-      for i in countdown(map.roads[lane].high, 0):
-        roads[lane].add(map.roads[lane][i])
-    else:
-      roads[lane] = map.roads[lane]
-    let road = roads[lane]
-    var gate = 1
-    while gate < road.high and map.castles[0].contains(road[gate]):
-      gate.inc
-    let
-      outward = normalize(road[gate] - road[gate - 1])
-      normal = vec2(-outward.y, outward.x)
-    for flank in 0 ..< 2:
-      let side = (if flank == 0: -1'f else: 1'f)
-      for depth in 0 ..< 15:
-        let center = road.nearest(
-          road[gate] - outward * (24 + depth * 6).float32
-        )
-        for extra in 0 ..< 6:
-          let candidate = center + normal * side * (
-            map.config.roadWidth / 2 + BarrackRadius + 3 + extra.float32 * 4
+  proc gather(map: MapData, extraSteps, depthSteps: int) {.raises: [].} =
+    ## Searches more gate shoulders only when the original sites cannot fit.
+    for road in roads.mitems:
+      road.setLen(0)
+    for candidates in sites.mitems:
+      candidates.setLen(0)
+    for lane in 0 ..< 3:
+      if lane == 1:
+        for i in countdown(map.roads[lane].high, 0):
+          roads[lane].add(map.roads[lane][i])
+      else:
+        roads[lane] = map.roads[lane]
+      let road = roads[lane]
+      var gate = 1
+      while gate < road.high and map.castles[0].contains(road[gate]):
+        gate.inc
+      let
+        outward = normalize(road[gate] - road[gate - 1])
+        normal = vec2(-outward.y, outward.x)
+      for flank in 0 ..< 2:
+        let side = (if flank == 0: -1'f else: 1'f)
+        for depth in 0 ..< depthSteps:
+          let center = road.nearest(
+            road[gate] - outward * (24 + depth * 6).float32
           )
-          var valid = true
-          for i in 0 ..< 12:
-            let
-              angle = i.float32 * PI.float32 / 6
-              sample = candidate + vec2(cos(angle), sin(angle)) *
-                (BarrackRadius + 3)
-            if not map.castles[0].contains(sample):
+          for extra in 0 ..< extraSteps:
+            let candidate = center + normal * side * (
+              map.config.roadWidth / 2 + BarrackRadius + 3 + extra.float32 * 4
+            )
+            var valid = true
+            for i in 0 ..< 12:
+              let
+                angle = i.float32 * PI.float32 / 6
+                sample = candidate + vec2(cos(angle), sin(angle)) *
+                  (BarrackRadius + 3)
+              if not map.castles[0].contains(sample):
+                valid = false
+            for walls in [map.keepWalls[0], map.spawnWalls[0]]:
+              for wall in walls:
+                if length(wall.points.nearest(candidate) - candidate) <
+                  wall.width / 2 + BarrackRadius + 2:
+                    valid = false
+            if length(candidate - map.forts[0]) < BarrackRadius + 30:
               valid = false
-          for walls in [map.keepWalls[0], map.spawnWalls[0]]:
-            for wall in walls:
-              if length(wall.points.nearest(candidate) - candidate) <
-                wall.width / 2 + BarrackRadius + 2:
-                  valid = false
-          if length(candidate - map.forts[0]) < BarrackRadius + 30:
-            valid = false
-          for tower in map.towers:
-            if length(candidate - tower.position) < BarrackRadius + 18:
-              valid = false
-          if valid:
-            sites[lane * 2 + flank].add(Site(position: candidate, join: center))
-  # Fit the most constrained flanks first to keep the six footprints separate.
-  for i in 0 ..< order.len:
-    order[i] = i
-  for i in 0 ..< order.len:
-    for j in i + 1 ..< order.len:
-      if sites[order[j]].len < sites[order[i]].len:
-        swap(order[i], order[j])
+            for tower in map.towers:
+              if length(candidate - tower.position) < BarrackRadius + 18:
+                valid = false
+            if valid:
+              sites[lane * 2 + flank].add(Site(
+                position: candidate, join: center
+              ))
+    # Fit the most constrained flanks first to keep the six footprints separate.
+    for i in 0 ..< order.len:
+      order[i] = i
+    for i in 0 ..< order.len:
+      for j in i + 1 ..< order.len:
+        if sites[order[j]].len < sites[order[i]].len:
+          swap(order[i], order[j])
   var attempts = 0
   proc fit(depth: int): bool {.raises: [].} =
     ## Searches the small set of gate sites with bounded backtracking.
@@ -1002,7 +1017,13 @@ proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
         if fit(depth + 1):
           return true
     false
-  if not fit(0):
+  gather(map, 6, 15)
+  var fitted = fit(0)
+  if not fitted:
+    attempts = 0
+    gather(map, 12, 30)
+    fitted = fit(0)
+  if not fitted:
     raise newException(
       MapgenError,
       "Could not fit barracks inside the gates for seed " & $map.config.seed
@@ -1274,7 +1295,7 @@ proc generateMap*(config: MapConfig): MapData {.raises: [MapgenError].} =
         continue
       if not result.levelClearing(
         candidate, config.campRadius + CampPadding +
-          MapSize / MapResolution.float32
+          MapSize / config.mapSize.float32
       ):
         continue
       let camp = result.campAt(candidate, i == anchors.high)

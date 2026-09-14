@@ -158,6 +158,8 @@ proc testRecording() =
       var previous: ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
       previous.header = partial.header
       previous.header.gameVersion = MetricsGameVersion
+      when defined(recordGota):
+        previous.header.setup.gridTiles = 128
       previous.config = partial.config.gameConfig()
       previous.actions = partial.actions
       previous.hashes = partial.hashes
@@ -177,6 +179,9 @@ proc testRecording() =
       var expected = partial
       when defined(recordGota):
         expected.header.gameVersion = TelemetryGameVersion
+        expected.header.setup.gridTiles = 128
+        expected.config.mapPreset.mapSize = 128
+        expected.config.mapPreset.roadWidth = 62
       doAssert decodeReplay(encodeReplay(converted)) == expected
 
   echo "Testing divergent replays exit with failure"

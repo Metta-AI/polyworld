@@ -19,8 +19,8 @@ const
   PreviousMapGameVersion* = 23'u16
   InitialArenaGameVersion* = 24'u16
   CryptArenaGameVersion* = 25'u16
-  ReplayGameVersion* = 26'u16
-  ReplayGridTiles* = 128'u16
+  PresetGameVersion* = 26'u16
+  ReplayGameVersion* = 27'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -35,6 +35,20 @@ const
   MaxReplayHeroes* = 256
 
 type
+  StoredMapConfig = object
+    seed: int
+    lakeCrossings: int
+    jungleRoads: int
+    highSize: float32
+    castleSize: float32
+    roadWidth: float32
+    roadWobble: float32
+    lakeWidth: float32
+    lakeWobble: float32
+    campRadius: float32
+    campScatter: float32
+    stemLength: float32
+    campsTouchRoads: bool
   ReplayHero* = object
     id*: int32
     team*: uint8
@@ -62,9 +76,55 @@ type
   LegacyReplayData = ActionTape[Setup, ReplayAction]
   PreviousReplayData = ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
   HistoricalReplayData = ActionTape[Setup, ReplayAction, ReplayMetrics]
+  StoredReplayData = ActionTape[
+    Setup, ReplayAction, ReplayMetrics, MatchConfig[StoredMapConfig]
+  ]
   ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics, GotaConfig]
   ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics, GotaConfig]
   ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics, GotaConfig]
+
+proc storedPreset(preset: MapConfig): StoredMapConfig {.raises: [].} =
+  ## Preserves the version 26 binary layout when an older replay is saved.
+  StoredMapConfig(
+    seed: preset.seed,
+    lakeCrossings: preset.lakeCrossings,
+    jungleRoads: preset.jungleRoads,
+    highSize: preset.highSize,
+    castleSize: preset.castleSize,
+    roadWidth: preset.roadWidth,
+    roadWobble: preset.roadWobble,
+    lakeWidth: preset.lakeWidth,
+    lakeWobble: preset.lakeWobble,
+    campRadius: preset.campRadius,
+    campScatter: preset.campScatter,
+    stemLength: preset.stemLength,
+    campsTouchRoads: preset.campsTouchRoads
+  )
+
+proc restorePreset(preset: StoredMapConfig): MapConfig {.raises: [].} =
+  ## Restores the implicit 128 tile size of version 26 map presets.
+  MapConfig(
+    mapSize: 128,
+    seed: preset.seed,
+    lakeCrossings: preset.lakeCrossings,
+    jungleRoads: preset.jungleRoads,
+    highSize: preset.highSize,
+    castleSize: preset.castleSize,
+    roadWidth: preset.roadWidth,
+    roadWobble: preset.roadWobble,
+    lakeWidth: preset.lakeWidth,
+    lakeWobble: preset.lakeWobble,
+    campRadius: preset.campRadius,
+    campScatter: preset.campScatter,
+    stemLength: preset.stemLength,
+    campsTouchRoads: preset.campsTouchRoads
+  )
+
+proc historicalConfig(): MapConfig {.raises: [].} =
+  ## Restores omitted map controls for recordings before configurable maps.
+  result = defaultConfig()
+  result.mapSize = 128
+  result.roadWidth = 62
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Gods of the Arena replay error.
@@ -86,6 +146,7 @@ proc initReplayData*(
     spawnIntervalTicks: int32(setup.spawnIntervalTicks),
     mapPreset: preset
   )
+  result.config.mapPreset.mapSize = setup.gridTiles.int
 
 proc initReplayRecorder*(
     setup: Setup, preset = defaultConfig()
@@ -202,7 +263,7 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, actor IDs, and action ordering.
   data.config.validateConfig(HeroClassCount)
-  if data.header.gameVersion == ReplayGameVersion:
+  if data.header.gameVersion >= PresetGameVersion:
     try:
       data.config.mapPreset.validate()
     except MapgenError as error:
@@ -221,13 +282,18 @@ proc validate*(data: ReplayData) =
     LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
     TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
     PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion,
-    ReplayGameVersion
+    PresetGameVersion, ReplayGameVersion
   }:
     fail("unsupported replay game version")
   let setup = data.header.setup
   if setup.tickRate != uint16(TickRate):
     fail("replay setup has an unsupported tick rate")
-  if setup.gridTiles != ReplayGridTiles:
+  let mapSize =
+    if data.header.gameVersion >= PresetGameVersion:
+      data.config.mapPreset.mapSize
+    else:
+      128
+  if setup.gridTiles.int != mapSize:
     fail("replay setup has an unsupported map size")
   if setup.mapHash == 0:
     fail("replay setup has no deterministic map fingerprint")
@@ -305,6 +371,21 @@ proc encodeReplay*(data: ReplayData): string =
       legacy,
       MaxReplayBytes
     )
+  if data.header.gameVersion == PresetGameVersion:
+    if data.config.mapPreset.mapSize != 128:
+      fail("version 26 replays require a 128 tile map")
+    let stored = StoredReplayData(
+      header: data.header,
+      config: data.config.gameConfig().withMapPreset(
+        storedPreset(data.config.mapPreset)
+      ),
+      actions: data.actions,
+      hashes: data.hashes,
+      metrics: data.metrics
+    )
+    return encodeReplayFile(
+      ReplayGame, PresetGameVersion, stored, MaxReplayBytes
+    )
   if data.header.gameVersion == ReplayGameVersion:
     return encodeReplayFile(
       ReplayGame, ReplayGameVersion, data, MaxReplayBytes
@@ -334,12 +415,27 @@ proc decodeReplay*(bytes: string): ReplayData =
     LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
     TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
     PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion,
-    ReplayGameVersion
+    PresetGameVersion, ReplayGameVersion
   }:
     fail("unsupported replay game version")
   if version == ReplayGameVersion:
     result = decodeReplayFile(
       ReplayGame, version, bytes, ReplayData, MaxReplayBytes
+    )
+  elif version == PresetGameVersion:
+    let stored = decodeReplayFile(
+      ReplayGame, version, bytes, StoredReplayData, MaxReplayBytes
+    )
+    if stored.header.setup.gridTiles != 128:
+      fail("version 26 replays require a 128 tile map")
+    result = ReplayData(
+      header: stored.header,
+      config: stored.config.gameConfig().withMapPreset(
+        restorePreset(stored.config.mapPreset)
+      ),
+      actions: stored.actions,
+      hashes: stored.hashes,
+      metrics: stored.metrics
     )
   elif version in {
     TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
@@ -354,7 +450,7 @@ proc decodeReplay*(bytes: string): ReplayData =
     )
     result = ReplayData(
       header: historical.header,
-      config: historical.config.withMapPreset(defaultConfig()),
+      config: historical.config.withMapPreset(historicalConfig()),
       actions: historical.actions,
       hashes: historical.hashes,
       metrics: historical.metrics
@@ -369,7 +465,7 @@ proc decodeReplay*(bytes: string): ReplayData =
     )
     result = ReplayData(
       header: previous.header,
-      config: previous.config.withMapPreset(defaultConfig()),
+      config: previous.config.withMapPreset(historicalConfig()),
       actions: previous.actions,
       hashes: previous.hashes,
       metrics: previous.metrics.cpuMetrics()
@@ -384,7 +480,7 @@ proc decodeReplay*(bytes: string): ReplayData =
     )
     result = ReplayData(
       header: legacy.header,
-      config: legacy.config.withMapPreset(defaultConfig()),
+      config: legacy.config.withMapPreset(historicalConfig()),
       actions: legacy.actions,
       hashes: legacy.hashes
     )

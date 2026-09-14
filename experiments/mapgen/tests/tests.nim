@@ -128,7 +128,7 @@ proc verifyAccess(map: MapData) =
         cliffs.inc
         doAssert not grid.canStep(i mod TileCount, i div TileCount, direction)
   doAssert ramps > 0 and cliffs > 0
-  doAssert forest > 3000
+  doAssert forest * 128 * 128 > 3000 * grid.cells.len
 
 proc verifyBarracks(map: MapData) =
   ## Checks paired gate flanks and passable creep routes into each lane.
@@ -503,7 +503,7 @@ block:
   let
     map = generateMap(defaultConfig())
     grid = buildTiles(map)
-  doAssert grid.cells.len == 128 * 128
+  doAssert grid.cells.len == TileCount * TileCount
   for i, tile in grid.cells:
     let other = grid.cells[grid.cells.high - i]
     doAssert tile.terrain == other.terrain
@@ -513,8 +513,9 @@ block:
   doAssert grid.tileAt(vec2(MapSize / 2)).terrain == LakeGround
   doAssert grid.tileAt(vec2(MapSize / 2)).height == 0
   doAssert grid.tileAt(vec2(10, 10)).height == 2
-  doAssert grid.tileAt(vec2(MapSize - 10, 10)).terrain == SpawnGround
-  doAssert grid.tileAt(vec2(MapSize - 10, 10)).height == 3
+  let spawn = vec2(MapSize - TileSize * 1.5'f, TileSize * 1.5'f)
+  doAssert grid.tileAt(spawn).terrain == SpawnGround
+  doAssert grid.tileAt(spawn).height == 3
   doAssert grid.tileAt(map.forts[0]).side == Southwest
   doAssert grid.tileAt(map.forts[1]).side == Northeast
   for terrain in Terrain:
