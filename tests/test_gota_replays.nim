@@ -140,13 +140,13 @@ doAssert replayBytes.find("bestDistance = 2147483647") < 0
 removeFile(path)
 
 echo "Testing replay validation"
-block:
-  var previousArena = encoded
-  previousArena[ReplayMagic.len + 2] = char(21)
-  previousArena[ReplayMagic.len + 3] = char(0)
+for version in [21, 27]:
+  var unsupported = encoded
+  unsupported[ReplayMagic.len + 2] = char(version)
+  unsupported[ReplayMagic.len + 3] = char(0)
   try:
-    discard decodeReplay(previousArena)
-    doAssert false, "the previous arena must require its original viewer"
+    discard decodeReplay(unsupported)
+    doAssert false, "an unsupported simulation must require its old viewer"
   except ReplayError as error:
     doAssert error.msg.contains("unsupported replay game version")
 

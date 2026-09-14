@@ -23,35 +23,43 @@ proc checkPanels(parent: GameUiPanel, children: openArray[GameUiPanel]) =
 
 proc checkHud(
     layout: GameUiLayout,
+    panels: openArray[GameUiPanel]
+) =
+  ## Checks that game plates and transport fit at the chosen HUD scale.
+  doAssert layout.size.x >= TransportMinWidth
+  doAssert layoutFits(layout, panels, 48), $layout.size
+
+proc checkHud(
+    layout: GameUiLayout,
     regions: openArray[tuple[region: GameUiRegion, size: Vec2]]
 ) =
   ## Checks the actual game plates and transport at the shared HUD scale.
   var panels: seq[GameUiPanel]
   for (region, size) in regions:
     panels.add layout.panel(region, size)
-  doAssert layout.size.x >= TransportMinWidth
-  doAssert layoutFits(layout, panels, 48), $layout.size
+  checkHud(layout, panels)
 
 echo "Testing all game HUDs at shared scale breakpoints"
 for size in [
   vec2(480, 270), vec2(959, 539), vec2(960, 540), vec2(1024, 576),
   vec2(1280, 720), vec2(1919, 1079), vec2(1920, 1080),
-  vec2(2560, 1440), vec2(3839, 2159), vec2(3840, 2160),
+  vec2(2560, 1440), vec2(3071, 1728), vec2(3072, 1727),
+  vec2(3072, 1728), vec2(3839, 2159), vec2(3840, 2160),
   vec2(7680, 4320), vec2(1080, 1920), vec2(3440, 1440)
 ]:
   let layout = initGameUiLayout(size / gameUiScale(size), TransportHeight)
   let shop = gota.shopPanels(layout.size)
   checkPanels(shop.panel, [shop.heading, shop.catalog, shop.footer])
   checkPanels(shop.catalog, shop.cards)
-  doAssert shop.cards[0].size.x >= 320
-  doAssert shop.cards[0].size.y >= 160
+  doAssert shop.cards[0].size.x >= (if shop.compact: 280 else: 320)
+  doAssert shop.cards[0].size.y >= (if shop.compact: 140 else: 160)
   checkHud(layout, [
-    (GameUiRegion.TopLeft, gota.PanelScore),
-    (GameUiRegion.TopCenter, gota.PanelHeroes),
-    (GameUiRegion.TopRight, gota.PanelClock),
-    (GameUiRegion.BottomLeft, gota.PanelMinimap),
-    (GameUiRegion.BottomCenter, gota.PanelDetails),
-    (GameUiRegion.BottomRight, gota.PanelInventory)
+    gota.scorePanel(layout),
+    layout.panel(GameUiRegion.TopCenter, gota.PanelHeroes),
+    layout.panel(GameUiRegion.TopRight, gota.PanelClock),
+    layout.panel(GameUiRegion.BottomLeft, gota.PanelMinimap),
+    layout.panel(GameUiRegion.BottomCenter, gota.PanelDetails),
+    layout.panel(GameUiRegion.BottomRight, gota.PanelInventory)
   ])
   checkHud(layout, [
     (GameUiRegion.TopLeft, lvd.PanelScore),

@@ -2491,7 +2491,7 @@ proc tryCombatAbilities(
     hero: Hero,
     targetFootman, targetHero, targetTower, fortIndex: int
 ) =
-  ## Fires the passive, then the strongest ready combat ability.
+  ## Fires the passive, then the strongest ready strike or support ability.
   if not world.legacyAbilities and hero.manualSpells:
     return
   discard tryCastAbility(
@@ -2503,9 +2503,6 @@ proc tryCombatAbilities(
     targetTower,
     fortIndex
   )
-  if targetFootman < 0 and targetHero < 0 and
-      targetTower < 0 and fortIndex < 0:
-    return
   if tryCastAbility(
       world,
       hero,
