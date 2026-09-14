@@ -1,6 +1,6 @@
 import
   std/[json, os, osproc, posix, sequtils, sets, strutils, tables],
-  tournaments, reports, runners, softmax
+  tournaments, reports, runners, softmax, sites, collections
 
 const
   DataRoot = Root.parentDir / "polyworld_data"
@@ -36,6 +36,18 @@ proc completed(run: JsonNode): seq[JsonNode] =
   for game in run["schedule"]:
     result.add %*{"id": game["id"], "state": "completed", "attempts": [],
       "result": resultFor(game)}
+
+proc statsFor(run, game, raw: JsonNode): JsonNode =
+  ## Builds verified seat counters with distinct values for mono averaging.
+  result = %*{"verified": true, "hash_mismatches": 0, "ticks": raw["ticks"],
+    "outcome": raw["outcome"], "heroes": []}
+  for slot, policy in game["seats"].elems:
+    result["heroes"].add %*{"slot": slot,
+      "policy_version_id": run["roster"][policy.getInt]["id"],
+      "xp": raw["total_xp"][slot], "win": raw["scores"][slot],
+      "gold": slot * 50 + 100, "banked_gold": slot * 5,
+      "level": slot + 1, "kills": slot + 1, "deaths": slot,
+      "assists": 10, "tower_kills": 1, "last_hits": slot * 2}
 
 proc fresh(name: string): string =
   ## Resets only the bounded fixture output owned by this test suite.
@@ -102,7 +114,8 @@ proc fakeClient(directory: string, pauseAfterAccept = false): Client =
 
 proc assertEquivalent(first, second: JsonNode) =
   ## Compares final values and checkpoint histories independently of timestamps.
-  for field in ["target", "completed", "included", "panels", "roster"]:
+  for field in ["target", "completed", "included", "panels", "roster",
+      "players"]:
     doAssert first[field] == second[field], "Mismatch in " & field
 
 proc stop() {.noconv.} =
@@ -360,6 +373,151 @@ block:
   doAssert html.count("<article class=\"panel ladder\"") == 6
   doAssert "setInterval" notin html
   doAssert "data-status=\"completed\"" in html
+  doAssert "<style id=\"gota-site-style\">" in html
+  doAssert "class=\"site-header wrap\"" in html
+  doAssert "aria-current=\"page\">Player standings" in html
+  doAssert "Match history" notin html
+  doAssert "id=matches" notin html
+  doAssert html.count("id=player-stats") == 1
+  for label in ["Avg gold", "Avg XP", "Avg level", "Avg kills", "Avg deaths",
+      "Avg assists", "KDA ratio", "Avg tower kills", "Avg last hits"]:
+    doAssert label in html
+
+echo "Checking player outcomes, objective counts, coverage and mono averages"
+block:
+  doAssert objectiveCounts(0, 0, 0) == [0, 0]
+  doAssert objectiveCounts(675, 450, 3) == [1, 5]
+  var rejected = false
+  try:
+    discard objectiveCounts(10, 0, 0)
+  except TournamentError:
+    rejected = true
+  doAssert rejected
+  let sample = fixture(3)
+  sample["schedule"][0]["seats"] = %toSeq(0 ..< 10)
+  sample["schedule"][1]["seats"] = %(@[0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+  sample["schedule"][2]["seats"] = %toSeq(0 ..< 10)
+  var records = completed(sample)
+  records[2]["result"] = resultFor(sample["schedule"][2], "time_limit")
+  for i in 0 ..< 2:
+    records[i]["player_stats"] = statsFor(sample, sample["schedule"][i],
+      records[i]["result"])
+  let rows = playerRows(sample, records)
+  doAssert rows[0]["games"].getInt == 3
+  doAssert rows[0]["wins"].getInt == 2
+  doAssert rows[0]["losses"].getInt == 0
+  doAssert rows[0]["timeouts"].getInt == 1
+  doAssert rows[0]["stats_games"].getInt == 2
+  doAssert rows[0]["avg_gold"].getFloat == 150
+  doAssert rows[0]["avg_kills"].getFloat == 2
+  doAssert rows[0]["avg_deaths"].getFloat == 1
+  doAssert rows[0]["avg_assists"].getFloat == 10
+  doAssert rows[0]["avg_level"].getFloat == 2
+  doAssert rows[0]["kda"].getFloat == 12
+  doAssert abs(rows[0]["avg_xp"].getFloat - 302.0 / 3) < 0.000001
+  doAssert rows[1]["losses"].getInt == 1
+  doAssert rows[2]["kda"].getFloat == 6.5
+  doAssert playerRows(sample, records) == rows
+  records[0].delete("player_stats")
+  doAssert playerRows(sample, records)[2]["avg_gold"].kind == JNull
+  for mutation in ["xp", "slot", "policy_version_id", "gold"]:
+    let invalid = statsFor(sample, sample["schedule"][1], records[1]["result"])
+    invalid["heroes"][0][mutation] = newJNull()
+    var rejected = false
+    try:
+      validatePlayerStats(invalid, records[1]["result"], sample["schedule"][1],
+        sample)
+    except TournamentError:
+      rejected = true
+    doAssert rejected
+
+echo "Checking resumable replay-stat collection without repeated ingestion"
+block:
+  let
+    directory = fresh("player-stats")
+    sample = fixture(1, "mixed")
+    game = sample["schedule"][0]
+    record = completed(sample)[0]
+    output = directory / "replays/000001-stats.json"
+    stats = statsFor(sample, game, record["result"])
+  record["attempts"].add %*{"request_id": "xreq_test", "episode_id": "ereq_test"}
+  saveJson(output, stats)
+  var
+    requests, downloads: int
+    client: Client
+  client.request = proc(verb, path: string, body: JsonNode): JsonNode =
+    ## Returns only the existing completed episode, never a new game.
+    doAssert verb == "GET"
+    inc requests
+    %*{"episodes": [{"id": "ereq_test", "coworld_id": sample["release"]["id"],
+      "game_config": {"seed": game["seed"]},
+      "replay_url": (if requests == 1: "" else:
+        "https://example.com/replay")}]}
+  client.download = proc(url: string): string =
+    ## Records a single public replay download.
+    inc downloads
+    "saved replay bytes"
+  let controls = Controls(statsWorker: findExe("true"))
+  stopping = false
+  collectStats(client, directory, sample, game, record, controls)
+  doAssert record.hasKey("stats_error")
+  doAssert not record.hasKey("player_stats")
+  for i in 0 ..< 2:
+    collectStats(client, directory, sample, game, record, controls)
+  doAssert requests == 2 and downloads == 1
+  doAssert not record.hasKey("stats_error")
+  doAssert record["player_stats"] == stats
+  doAssert record["result"] == resultFor(game)
+  doAssert record["attempts"].len == 1
+  doAssert readJson(directory / "games/000001.json")["player_stats"] == stats
+
+echo "Checking matching local and site reports with atomic replacement"
+block:
+  let
+    directory = fresh("site-export")
+    siteRoot = directory / "polyworld-buff"
+    destination = siteRoot / "GOTA/standings/index.html"
+    css = readFile(SourceDirectory / "standings.css") &
+      "\n.site-header { color: #abcdef; }\n"
+  createDir(siteRoot / "GOTA")
+  writeFile(siteRoot / "GOTA/index.html", "Existing game guide")
+  writeFile(siteRoot / "GOTA/site.css", css)
+  for status in ["running", "paused", "failed", "completed"]:
+    publish(directory, run, completed(run), status, DataRoot,
+      controls = Controls(siteRoot: siteRoot))
+    let
+      local = readFile(directory / "report.html")
+      page = readFile(destination)
+    doAssert css in local
+    doAssert "href=\"../site.css\"" in page
+    doAssert "gota-site-style" notin page
+    doAssert "href=\"../heros/\"" in page
+    doAssert "data-status=\"" & status & "\"" in page
+    doAssert "base64," notin page
+    doAssert "setInterval" notin page
+    doAssert page.count("class=ladder-stability") == 6
+    doAssert readFile(siteRoot / "GOTA/index.html") == "Existing game guide"
+    doAssert readFile(siteRoot / "GOTA/site.css") == css
+  for (_, path) in Assets:
+    doAssert readFile(siteRoot / "GOTA/assets" / path) ==
+      readFile(DataRoot / path)
+  let previous = readFile(destination)
+  var rejected = false
+  try:
+    publish(directory, run, completed(run), "paused", DataRoot,
+      controls = Controls(siteRoot: siteRoot, fault: proc(point: string) =
+        ## Simulates interruption just before the public HTML is replaced.
+        if point == "replace:index.html":
+          raise newException(TournamentError, "Interrupted site replacement")))
+  except TournamentError:
+    rejected = true
+  doAssert rejected
+  doAssert readFile(destination) == previous
+  let arguments = parseArguments(@["--run", "fixture", "--site", siteRoot])
+  doAssert arguments["site"].getStr == siteRoot
+  doAssert not arguments["settings"].hasKey("site")
+  validateResume(run, arguments)
+  doAssert parseArguments(@["--run", "fixture", "--no-site"])["no_site"].getBool
 block:
   let credentials = %*{"tokens": {"server": "user"}, "player_sessions": {
     "server": {"active": "p", "cache": {"p": {"token": "player",
@@ -369,7 +527,8 @@ block:
     %"2000-01-01T00:00:00+00:00"
   doAssert tokenFromCredentials(credentials, "server") == "user"
 for options in [@["--run", "../escape"], @["--run", "x", "--games", "0"],
-    @["--run", "x", "--format", "unknown"], @["--run", "x", "--top", "101"]]:
+    @["--run", "x", "--format", "unknown"], @["--run", "x", "--top", "101"],
+    @["--run", "x", "--site", "site", "--no-site"]]:
   var rejected = false
   try:
     discard parseArguments(options)

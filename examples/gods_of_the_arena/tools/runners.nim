@@ -1,5 +1,5 @@
 import std/[json, os, sequtils, strutils]
-import tournaments, reports
+import tournaments, reports, collections
 
 proc execute*(client: Client, directory: string, run: JsonNode,
     dataRoot: string, controls: Controls): int =
@@ -29,6 +29,7 @@ proc execute*(client: Client, directory: string, run: JsonNode,
           else:
             recoverRequest(client, attempt)
         receive(client, directory, run, game, record, detail, controls)
+        collectStats(client, directory, run, game, record, controls, detail)
         publish(
           directory,
           run,
@@ -41,10 +42,12 @@ proc execute*(client: Client, directory: string, run: JsonNode,
         break
       if records.anyIt(it["state"].getStr == "failed"):
         publish(directory, run, records, "failed", dataRoot,
-          "A game failed. Inspect its details, then use --retry-failed.")
+          "A game failed. Inspect its details, then use --retry-failed.",
+          controls)
         return 1
       if records.allIt(it["state"].getStr == "completed"):
-        publish(directory, run, records, "completed", dataRoot)
+        publish(directory, run, records, "completed", dataRoot,
+          controls = controls)
         return 0
       var active = records.countIt(it["state"].getStr notin
         ["planned", "completed", "failed"])
@@ -68,6 +71,7 @@ proc execute*(client: Client, directory: string, run: JsonNode,
         if controls.fault != nil:
           controls.fault("remote-acceptance")
         receive(client, directory, run, game, record, detail, controls)
+        collectStats(client, directory, run, game, record, controls, detail)
         publish(
           directory,
           run,
@@ -85,30 +89,33 @@ proc execute*(client: Client, directory: string, run: JsonNode,
         let delay = min(100, controls.pollMilliseconds - elapsed)
         sleep(delay)
         elapsed += delay
-    publish(directory, run, loadRecords(directory, run), "paused", dataRoot)
+    publish(directory, run, loadRecords(directory, run), "paused", dataRoot,
+      controls = controls)
     result = 130
   except CatchableError as error:
     publish(directory, run, loadRecords(directory, run), "paused", dataRoot,
-      error.msg)
+      error.msg, controls)
     raise
 
 proc parseArguments*(arguments: seq[string]): JsonNode =
   ## Distinguishes explicit frozen settings from operational resume options.
   result = %*{"run": "", "concurrency": 4, "retry_failed": false,
-    "report_only": false, "help": false, "settings": {}}
+    "report_only": false, "collect_stats": false, "no_site": false,
+    "help": false, "settings": {}}
   var i = 0
   while i < arguments.len:
     let parts = arguments[i].split('=', maxsplit = 1)
     let name = parts[0]
     if name in ["--help", "-h"]:
       result["help"] = %true
-    elif name in ["--retry-failed", "--report-only"]:
+    elif name in ["--retry-failed", "--report-only", "--no-site",
+        "--collect-stats"]:
       require(parts.len == 1, name & " does not take a value")
       result[name[2 .. ^1].replace('-', '_')] = %true
     else:
       require(name in ["--run", "--games", "--top", "--format", "--seed",
         "--check-every", "--league", "--division", "--concurrency",
-        "--server"], "Unknown option: " & name)
+        "--server", "--site", "--stats-worker"], "Unknown option: " & name)
       var value: string
       if parts.len == 2:
         value = parts[1]
@@ -128,13 +135,15 @@ proc parseArguments*(arguments: seq[string]): JsonNode =
           require(parsed.getInt > 0, name & " must be positive")
         if field == "top":
           require(parsed.getInt <= 100, "--top cannot exceed 100")
-      if field in ["run", "server", "concurrency"]:
+      if field in ["run", "server", "concurrency", "site", "stats_worker"]:
         result[field] = parsed
       else:
         result["settings"][field] = parsed
     inc i
   if result["help"].getBool:
     return
+  require(not (result["no_site"].getBool and result.hasKey("site")),
+    "Use either --site or --no-site")
   let name = result["run"].getStr
   require(name.len in 1 .. 80 and name[0] in Letters + Digits,
     "--run requires a name beginning with a letter or digit")
