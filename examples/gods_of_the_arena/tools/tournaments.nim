@@ -305,8 +305,9 @@ proc playerRows*(run: JsonNode, records: seq[JsonNode]): JsonNode =
     for field in ["games", "wins", "losses", "timeouts", "mixed", "mono",
         "stats_games"]:
       row[field] = %0
-    for field in ["xp", "minutes"]:
+    for field in ["xp", "minutes", "stats_minutes"]:
       row[field] = %0.0
+    row["max_level"] = newJNull()
     for field in PlayerMetrics:
       row[field] = %0.0
     result.add(row)
@@ -334,10 +335,14 @@ proc playerRows*(run: JsonNode, records: seq[JsonNode]): JsonNode =
         raw["ticks"].getInt.float64 / 1440)
       if stats != nil:
         row["stats_games"] = %(row["stats_games"].getInt + 1)
+        row["stats_minutes"] = %(row["stats_minutes"].getFloat +
+          raw["ticks"].getInt.float64 / 1440)
       for slot in slots:
         row["xp"] = %(row["xp"].getFloat +
           raw["total_xp"][slot].getFloat / slots.len.float64)
         if stats != nil:
+          row["max_level"] = %max(row["max_level"].getInt,
+            stats["heroes"][slot]["level"].getInt)
           for field in PlayerMetrics:
             row[field] = %(row[field].getFloat +
               stats["heroes"][slot][field].getFloat / slots.len.float64)
@@ -350,6 +355,12 @@ proc playerRows*(run: JsonNode, records: seq[JsonNode]): JsonNode =
       %(100.0 * row["wins"].getInt.float64 / games.float64) else: newJNull()
     row["kda"] = if sampled > 0:
       %((row["kills"].getFloat + row["assists"].getFloat) / max(1.0, deaths))
+      else: newJNull()
+    row["gpm"] = if row["stats_minutes"].getFloat > 0:
+      %(row["gold"].getFloat / row["stats_minutes"].getFloat)
+      else: newJNull()
+    row["xpm"] = if row["minutes"].getFloat > 0:
+      %(row["xp"].getFloat / row["minutes"].getFloat)
       else: newJNull()
     for field in ["xp", "minutes"]:
       row["avg_" & field] = if games > 0:
