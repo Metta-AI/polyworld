@@ -3,7 +3,9 @@
 import
   std/os,
   polyworld/[tapes, metrics],
-  content
+  content, presets
+
+export presets
 
 const
   ReplayGame* = "gods_of_the_arena"
@@ -13,7 +15,11 @@ const
   MetricsGameVersion* = 18'u16
   TelemetryGameVersion* = 19'u16
   CombatGameVersion* = 20'u16
-  ReplayGameVersion* = 22'u16
+  ArenaGameVersion* = 22'u16
+  PreviousMapGameVersion* = 23'u16
+  InitialArenaGameVersion* = 24'u16
+  CryptArenaGameVersion* = 25'u16
+  ReplayGameVersion* = 26'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
@@ -55,31 +61,37 @@ type
   ReplayHeader* = TapeHeader[Setup]
   LegacyReplayData = ActionTape[Setup, ReplayAction]
   PreviousReplayData = ActionTape[Setup, ReplayAction, LegacyReplayMetrics]
-  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics]
-  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics]
-  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics]
+  HistoricalReplayData = ActionTape[Setup, ReplayAction, ReplayMetrics]
+  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics, GotaConfig]
+  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics, GotaConfig]
+  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics, GotaConfig]
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Gods of the Arena replay error.
   raise newException(ReplayError, message)
 
-proc initReplayData*(setup: Setup): ReplayData =
+proc initReplayData*(
+    setup: Setup, preset = defaultConfig()
+): ReplayData =
   ## Creates a replay containing the match setup, config, and action tape.
   result.header = initActionTape[Setup, ReplayAction](
     setup,
     ReplayFormatVersion,
     ReplayGameVersion
   ).header
-  result.config = GameConfig(
+  result.config = GotaConfig(
     seed: setup.mapSeed,
     maxTicks: int32(setup.maximumTicks),
     players: unnamedPlayers(HeroClassCount),
-    spawnIntervalTicks: int32(setup.spawnIntervalTicks)
+    spawnIntervalTicks: int32(setup.spawnIntervalTicks),
+    mapPreset: preset
   )
 
-proc initReplayRecorder*(setup: Setup): ReplayRecorder =
+proc initReplayRecorder*(
+    setup: Setup, preset = defaultConfig()
+): ReplayRecorder =
   ## Creates an in-memory recorder owning the complete replay data.
-  ReplayRecorder(data: initReplayData(setup))
+  ReplayRecorder(data: initReplayData(setup, preset))
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one bot action in deterministic tick order.
@@ -190,6 +202,11 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, actor IDs, and action ordering.
   data.config.validateConfig(HeroClassCount)
+  if data.header.gameVersion == ReplayGameVersion:
+    try:
+      data.config.mapPreset.validate()
+    except MapgenError as error:
+      fail(error.msg)
   if data.config.seed != data.header.setup.mapSeed or
     data.config.maxTicks != int32(data.header.setup.maximumTicks):
       fail("replay configuration does not match its simulation setup")
@@ -202,7 +219,9 @@ proc validate*(data: ReplayData) =
   )
   if data.header.gameVersion notin {
     LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
-    TelemetryGameVersion, CombatGameVersion, ReplayGameVersion
+    TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
+    PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion,
+    ReplayGameVersion
   }:
     fail("unsupported replay game version")
   let setup = data.header.setup
@@ -276,7 +295,7 @@ proc encodeReplay*(data: ReplayData): string =
       fail("old replay versions cannot store CPU telemetry")
     let legacy = LegacyReplayData(
       header: data.header,
-      config: data.config,
+      config: data.config.gameConfig(),
       actions: data.actions,
       hashes: data.hashes
     )
@@ -286,7 +305,17 @@ proc encodeReplay*(data: ReplayData): string =
       legacy,
       MaxReplayBytes
     )
-  var current = data
+  if data.header.gameVersion == ReplayGameVersion:
+    return encodeReplayFile(
+      ReplayGame, ReplayGameVersion, data, MaxReplayBytes
+    )
+  var current = HistoricalReplayData(
+    header: data.header,
+    config: data.config.gameConfig(),
+    actions: data.actions,
+    hashes: data.hashes,
+    metrics: data.metrics
+  )
   if current.header.gameVersion == MetricsGameVersion:
     current.header.gameVersion = TelemetryGameVersion
   encodeReplayFile(
@@ -303,16 +332,32 @@ proc decodeReplay*(bytes: string): ReplayData =
   let version = bytes.replayFileHeader().gameVersion
   if version notin {
     LegacyGameVersion, ActionGameVersion, MetricsGameVersion,
-    TelemetryGameVersion, CombatGameVersion, ReplayGameVersion
+    TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
+    PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion,
+    ReplayGameVersion
   }:
     fail("unsupported replay game version")
-  if version in {TelemetryGameVersion, CombatGameVersion, ReplayGameVersion}:
+  if version == ReplayGameVersion:
     result = decodeReplayFile(
+      ReplayGame, version, bytes, ReplayData, MaxReplayBytes
+    )
+  elif version in {
+    TelemetryGameVersion, CombatGameVersion, ArenaGameVersion,
+    PreviousMapGameVersion, InitialArenaGameVersion, CryptArenaGameVersion
+  }:
+    let historical = decodeReplayFile(
       ReplayGame,
       version,
       bytes,
-      ReplayData,
+      HistoricalReplayData,
       MaxReplayBytes
+    )
+    result = ReplayData(
+      header: historical.header,
+      config: historical.config.withMapPreset(defaultConfig()),
+      actions: historical.actions,
+      hashes: historical.hashes,
+      metrics: historical.metrics
     )
   elif version == MetricsGameVersion:
     let previous = decodeReplayFile(
@@ -324,7 +369,7 @@ proc decodeReplay*(bytes: string): ReplayData =
     )
     result = ReplayData(
       header: previous.header,
-      config: previous.config,
+      config: previous.config.withMapPreset(defaultConfig()),
       actions: previous.actions,
       hashes: previous.hashes,
       metrics: previous.metrics.cpuMetrics()
@@ -339,7 +384,7 @@ proc decodeReplay*(bytes: string): ReplayData =
     )
     result = ReplayData(
       header: legacy.header,
-      config: legacy.config,
+      config: legacy.config.withMapPreset(defaultConfig()),
       actions: legacy.actions,
       hashes: legacy.hashes
     )

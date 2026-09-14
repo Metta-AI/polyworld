@@ -6,8 +6,7 @@
 ##     --bot:examples/gods_of_the_arena/players/base.bas:10
 
 import
-  polyworld/metrics,
-  polyworld/tapes,
+  polyworld/[metrics, pathing, tapes],
   ../examples/gods_of_the_arena/[content, controls, maps, game, sim, replays]
 
 template hashNow(): uint64 =
@@ -421,7 +420,12 @@ block:
       tileZ = int(mapCoordinate(footman.position.z))
       ring = max(abs(tileX - RedFortTile), abs(tileZ - RedFortTile))
     moved = dx * dx + dz * dz >= int64(2 * WorldScale) * int64(2 * WorldScale)
-    outside = ring > FortWallRadius
+    if run.map.legacy:
+      outside = ring > FortWallRadius
+    else:
+      let kind = layers[GroundLayer].tiles[tileZ * GridTiles + tileX].kind
+      outside = kind < ArenaKindBase or
+        (kind - ArenaKindBase) mod ArenaKindStride notin 2'u32 .. 4'u32
     break
   doAssert found, "the tracked footman disappeared"
   doAssert moved, "the tracked footman did not leave its spawn tile"

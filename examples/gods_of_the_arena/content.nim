@@ -764,6 +764,13 @@ proc heroMovePerTick*(class: HeroClass, level: int): int32 =
   let spec = class.heroSpec
   spec.baseMovePerTick + int32(level - 1) * spec.movePerLevel
 
+proc heroAttackCasting*(class: HeroClass): CastKind =
+  ## Classifies basic attacks as melee or ranged, including magic bolts.
+  if class.heroSpec.attackStyle == MeleeAttack:
+    MeleeCast
+  else:
+    ProjectileCast
+
 proc heroAttackRange*(class: HeroClass): int32 =
   ## Returns class basic-attack range in integer world units.
   class.heroSpec.attackRange

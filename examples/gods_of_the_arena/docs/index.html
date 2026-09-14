@@ -333,11 +333,6 @@
       font-weight: 700;
     }
     .bonus { font-size: 13px; color: #d7dbe4; margin: 0; }
-    footer {
-      padding: 28px 0 48px;
-      color: var(--muted);
-      font-size: 13px;
-    }
     @media (max-width: 980px) {
       .facts, .split, .shop, .stats { grid-template-columns: 1fr 1fr; }
       .abilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -366,8 +361,6 @@
     .charge-pips span.empty { background: #182131; }
     .spell-table { width: 100%; border-collapse: collapse; }
     .spell-table th, .spell-table td { text-align: left; padding: 10px; border-bottom: 1px solid #354458; }
-    .spell-table code { white-space: nowrap; }
-    #terrain pre { overflow-x: auto; padding: 16px; background: var(--well); border-radius: 8px; }
     @media (max-width: 850px) { .spell-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -379,11 +372,10 @@
     <div class="wrap top-inner">
       <nav>
         <a href="#arena">Arena</a>
-        <a href="#casting">Casting</a>
-        <a href="#controls">Controls</a>
-        <a href="#terrain">Terrain API</a>
         <a href="#heroes">Heroes</a>
         <a href="#shop">Shop</a>
+        <a href="#casting">Casting</a>
+        <a href="#controls">Controls</a>
       </nav>
     </div>
   </header>
@@ -391,7 +383,7 @@
   <main class="wrap">
     <p class="lede">
       Two gods sit in opposite-corner forts. Three broad lanes, a shallow
-      river with three shallow crossings and a deep woodland ring stand between them.
+      lake, connected camp clearings, and dense forests stand between them.
       Ten heroes, footmen, and towers fight until one god falls.
     </p>
 
@@ -409,10 +401,17 @@
       <div class="split">
         <div>
           <p>
-            Gods of the Arena is a deterministic 5v5 lane battler. Red brings
+            Gods of the Arena is a 5v5 lane battler. Red brings
             the living roster. Blue brings the undead warband. Each side
-            starts with five heroes, three barracks, six lane towers, and a
+            starts with five heroes, six barracks, nine towers, and a
             fort that holds the god.
+          </p>
+          <p>
+            The 128 by 128 arena uses the map editor's saved seed 54 preset.
+            Blue starts in the southwest and Red in the northeast. Roads
+            carve the forest and cross cliffs at short ramps. Each fort has
+            three exits, two barracks per exit, and a separate walled spawn.
+            Match seeds control gameplay randomness without changing this layout.
           </p>
           <p>
             Footmen spawn two per lane every ten seconds and march until they
@@ -432,96 +431,15 @@
           <div class="chip"><img src="../../../../polyworld_data/icons/fort.png" alt=""><div><b>Gods</b><div class="muted">400 HP, exposed after a lane falls</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/kills.png" alt=""><div><b>Hero bounty</b><div class="muted">150 XP and 100 gold</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>Level curve</b><div class="muted">100 XP, then +75 each level</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">24 ticks a second, 20 minute match</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">20 minute match</div></div></div>
         </div>
       </div>
-    </section>
-
-    <section id="casting" class="panel">
-      <p class="kicker">ACTIONS AND SPELLS</p>
-      <h2>Aim, cast, impact, recharge</h2>
-      <div class="spell-grid">
-        <article class="spell-rule"><h3>One target</h3><p>Melee strikes need close range. Projectiles travel to one target. Neither becomes an area attack just because its effect looks wide. In player mode, aim at an object to target it, or aim at empty ground to swing or shoot into space.</p></article>
-        <article class="spell-rule"><h3>An area on the map</h3><p>Circles, lines, sectors and other footprints affect every eligible occupant when the effect lands. The area locks when cast. Moving into it before impact can get you hit; moving out can avoid it. Enemy damage, allied healing and structure protection still apply.</p></article>
-        <article class="spell-rule"><h3>A visible warning</h3><p>Cast delay is the time from releasing an area spell until it takes effect. The full footprint remains on the map during that delay, then flashes at impact. AI, human players and replays use the same warnings and timing. Playback speed scales the simulation and its spell effects together.</p></article>
-      </div>
-      <p><strong>Mana</strong> is paid when a cast is accepted. Basic attacks cost zero mana, as does Molten Fist. Other spells have their own mana costs. Invalid casts do not spend mana or charges; a valid shot into empty space does.</p>
-      <div class="spell-grid">
-        <article class="spell-rule"><h3>Charges</h3><p>The number of casts held in reserve. You need at least one charge. Each hero starts with a full set; a respawn restores the set.</p></article>
-        <article class="spell-rule"><h3>Cast cooldown</h3><p>The minimum time between uses of the same action, even if charges remain. It is separate from the effect's cast delay and from its recharge timer.</p></article>
-        <article class="spell-rule"><h3>Recharge cooldown</h3><p>Charges refill one at a time. The timer starts with the first spent charge. Spending another does not restart it. When a charge returns, the next missing charge starts its own full recharge.</p></article>
-      </div>
-      <div class="charge-demo" aria-label="Interactive charge timing example">
-        <h3>Try it: 3 charges · 2s cooldown · 12s recharge</h3>
-        <p>Cast at 0, 2 and 4 seconds. Charges return at 12, 24 and 36 seconds if you stop casting.</p>
-        <div class="charge-pips" id="charge-pips" aria-hidden="true"></div>
-        <output id="charge-status" aria-live="polite"></output>
-        <button id="charge-cast" type="button">Cast</button>
-        <button id="charge-step" type="button">Advance 2 seconds</button>
-        <button id="charge-wait" type="button">Advance 10 seconds</button>
-        <button id="charge-reset" type="button">Reset</button>
-      </div>
-      <p><strong>Refill resources:</strong> Ironroot Ration costs 30 gold and heals 40 HP; Vitality Elixir costs 50 gold and heals 90 HP; Mana Potion costs 45 gold and restores 60 mana. Buy them in the <a href="#shop">shop</a>. Healing cannot revive a hero at zero HP.</p>
-    </section>
-    <section id="controls" class="panel">
-      <p class="kicker">PLAYER AND AI CASTING</p>
-      <h2>Use the same actions from the keyboard or BASIC</h2>
-      <p>Run with <code>--player</code>, or <code>--player:N</code> to choose a hero. Your four abilities are manual: the AI does not spend your spell charges. Q/W/E/R cast immediately at your current valid target. Self actions always fire on key press and affect you. Melee actions also fire immediately: they strike a nearby target, or swing toward the pointer when there is none. For other abilities with no valid target, the key selects the ability and right-click casts at an object or the ground. Escape cancels the selection. With no ability selected, right-click moves or attacks. Click SHOP in the inventory, or press B, to open the full-screen item shop; click an item to buy it. Purchases apply on the next simulation tick. Space pauses or resumes the battle, including while shopping. The HUD shows remaining charges and the wait until an empty action can be used again. A blue bar tracks progress toward the next charge.</p>
-      <table class="spell-table"><thead><tr><th>Input</th><th>Action</th></tr></thead><tbody>
-        <tr><td>Q / W / E / R</td><td>Ability slots 0 / 1 / 2 / 3. Self and melee actions fire immediately; other actions use your current target or select right-click aiming.</td></tr>
-        <tr><td>F / G</td><td>Use inventory slots 0 / 1, including health and mana potions.</td></tr>
-        <tr><td>O</td><td>Toggle character outlines behind scenery. Enabled by default; hidden portions are outlined without revealing enemies in fog of war.</td></tr>
-        <tr><td><code>castTarget(slot, objectId)</code></td><td>Attempt an object-targeted cast; use your own ID for self actions.</td></tr>
-        <tr><td><code>castPoint(slot, mapX, mapY)</code></td><td>Attempt a map cast. Empty-ground strikes and shots are valid. An aim beyond range is shortened to maximum range.</td></tr>
-        <tr><td><code>abilityCharges(slot)</code></td><td>Read the remaining charges.</td></tr>
-        <tr><td><code>abilityCooldown(slot)</code></td><td>Read remaining cast-cooldown ticks.</td></tr>
-        <tr><td><code>abilityRecharge(slot)</code></td><td>Read ticks until the next charge returns.</td></tr>
-      </tbody></table>
-      <p>Slots are zero-based and there are 24 simulation ticks per second. Cast calls return 1 on acceptance or 0 on rejection. Existing AI policies retain automatic ability use, with the same charges, footprints, delays and visible map telegraphs.</p>
-    </section>
-
-    <section id="terrain" class="panel">
-      <p class="kicker">BASIC MAP QUERIES</p>
-      <h2>Read the terrain before choosing a destination</h2>
-      <p>BASIC can read the complete static map from the start, including terrain outside your team's vision. Enemy heroes, creeps, towers, and forts still follow fog of war in the object queries. Terrain reads do not move your hero, spend resources, or change the simulation.</p>
-      <p>Use the same global tile coordinates as <code>selfX</code>, <code>selfY</code>, and <code>walkTo(x, y)</code>: 0 through 127 on both axes. Read-only values <code>mapWidth</code> and <code>mapHeight</code> are 128; <code>mapLayers</code> is 4. The two-argument calls query <code>selfLayer</code>, the hero's current navigation layer. The <code>At</code> versions take an explicit third argument and keep using global coordinates.</p>
-      <table class="spell-table"><thead><tr><th>Current layer / explicit layer</th><th>Result</th></tr></thead><tbody>
-        <tr><td><code>terrainKind(x, y)</code><br><code>terrainKindAt(x, y, layer)</code></td><td>One of the named terrain kinds below. Lane shoulders and paved courts report <code>TerrainRoad</code>; hill meadows report <code>TerrainGrass</code>; quarries and rocky outcrops report <code>TerrainRock</code>; wet banks report <code>TerrainMarsh</code>. Fort walls, ramps, and ramparts share <code>TerrainWall</code>. Ground blocked by solid fort construction also reports <code>TerrainWall</code>; an open gateway remains a road.</td></tr>
-        <tr><td><code>terrainWalkable(x, y)</code><br><code>terrainWalkableAt(x, y, layer)</code></td><td>1 if the tile's surface is walkable, otherwise 0. This tests static terrain, not unit occupancy or whether a route from the hero exists. <code>walkTo()</code> still finds the route.</td></tr>
-        <tr><td><code>terrainHeight(x, y)</code><br><code>terrainHeightAt(x, y, layer)</code></td><td>The chosen layer's surface height at the tile center, in eighths of a tile. Heights may be negative and are rounded to the nearest integer, with ties away from zero. This is the floor height, not the height of an obstacle blocking it.</td></tr>
-        <tr><td><code>terrainWaterDepth(x, y)</code><br><code>terrainWaterDepthAt(x, y, layer)</code></td><td>Water above that surface at the tile center, in eighths of a tile. Positive depth rounds up; 0 means the center is dry. A water-layer query returns the water column above its solid bed. A raised surface above the water returns 0.</td></tr>
-      </tbody></table>
-      <p>Invalid coordinates, invalid layers, and absent tiles return 0 for every query. Check <code>terrainKind() &lt;&gt; TerrainNone</code> to distinguish an existing surface at height zero from a missing surface. A query stays on its chosen layer even when that layer has no tile there.</p>
-      <table class="spell-table"><thead><tr><th>Read-only kind constant</th><th>Value</th><th>Read-only layer constant</th><th>Value</th></tr></thead><tbody>
-        <tr><td><code>TerrainNone</code></td><td>0</td><td><code>GroundLayer</code></td><td>0</td></tr>
-        <tr><td><code>TerrainGrass</code></td><td>1</td><td><code>RedFortLayer</code></td><td>1</td></tr>
-        <tr><td><code>TerrainRoad</code></td><td>2</td><td><code>BlueFortLayer</code></td><td>2</td></tr>
-        <tr><td><code>TerrainRock</code></td><td>3</td><td><code>WaterLayer</code></td><td>3</td></tr>
-        <tr><td><code>TerrainTrees</code></td><td>4</td><td colspan="2" rowspan="4">Units wade on <code>GroundLayer</code>, where the riverbed reports <code>TerrainMarsh</code> and positive water depth. <code>WaterLayer</code> describes the water surface itself and is never walkable.</td></tr>
-        <tr><td><code>TerrainMarsh</code></td><td>5</td></tr>
-        <tr><td><code>TerrainWall</code></td><td>6</td></tr>
-        <tr><td><code>TerrainWater</code></td><td>7</td></tr>
-      </tbody></table>
-      <p>A wall can block its ground tile while its rampart is walkable above. Query <code>GroundLayer</code> to inspect the ground and <code>RedFortLayer</code> or <code>BlueFortLayer</code> to inspect the construction above it.</p>
-      <pre><code>' Try the neighboring tile only when its center is dry and walkable.
-x = selfX + 1
-y = selfY
-if terrainWalkable(x, y) then
-  if terrainWaterDepth(x, y) = 0 then
-    walkTo(x, y)
-  end if
-end if
-
-' Inspect the riverbed even while standing on a rampart.
-riverKind = terrainKindAt(64, 64, GroundLayer)
-riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
-      <p>Each terrain call costs 32 work units. The usual per-decision instruction and work limits still apply, so spread a full-map scan across decisions.</p>
     </section>
 
     <section id="heroes">
       <p class="kicker">THE ROSTER</p>
       <h2>Heroes and ability kits</h2>
-      <p class="lede">Each ability shows what it affects beside its artwork. Footprints describe the hit area; visual effects describe its appearance. Arc and cone effects share a sector footprint. Area warnings stay on the map until impact for both AI and player casts.</p>
+      <p class="lede">Each ability shows what it affects beside its artwork. Footprints describe the hit area; visual effects describe its appearance. Arc and cone effects share a sector footprint. Every area spell leaves a warning on the map until impact.</p>
       <p>
         Every hero enters with Q, W, E, and R ready at <b>level 1</b>. There is
         no skill-point tree. Stats climb through level 20. Cooldowns and ranges
@@ -543,7 +461,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>330 → 1470</b><span class="muted">HP +60/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>110 → 262</b><span class="muted">MANA +8/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 120</b><span class="muted">DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 120</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.17</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.32 → 2.78</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.00</b><span class="muted">ATTACKS / S</span></div></div>
@@ -672,7 +590,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>210 → 932</b><span class="muted">HP +38/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>110 → 262</b><span class="muted">MANA +8/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 139</b><span class="muted">DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 139</b><span class="muted">BASIC DAMAGE +6/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.76 → 3.44</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.33</b><span class="muted">ATTACKS / S</span></div></div>
@@ -801,7 +719,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>190 → 760</b><span class="muted">HP +30/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>180 → 465</b><span class="muted">MANA +15/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>38 → 190</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>38 → 190</b><span class="muted">BASIC DAMAGE +8/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.48 → 3.01</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
@@ -929,7 +847,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>250 → 1162</b><span class="muted">HP +48/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>170 → 436</b><span class="muted">MANA +14/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>22 → 98</b><span class="muted">DAMAGE +4/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>22 → 98</b><span class="muted">BASIC DAMAGE +4/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>4.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.56 → 3.09</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.92</b><span class="muted">ATTACKS / S</span></div></div>
@@ -1059,7 +977,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>220 → 904</b><span class="muted">HP +36/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>90 → 223</b><span class="muted">MANA +7/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>32 → 165</b><span class="muted">DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>32 → 165</b><span class="muted">BASIC DAMAGE +7/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.25</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>3.04 → 3.95</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.50</b><span class="muted">ATTACKS / S</span></div></div>
@@ -1186,7 +1104,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>350 → 1528</b><span class="muted">HP +62/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>90 → 242</b><span class="muted">MANA +8/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>30 → 144</b><span class="muted">DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>30 → 144</b><span class="muted">BASIC DAMAGE +6/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.27</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.28 → 2.74</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
@@ -1315,7 +1233,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>230 → 1028</b><span class="muted">HP +42/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>80 → 194</b><span class="muted">MANA +6/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>43 → 195</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>43 → 195</b><span class="muted">BASIC DAMAGE +8/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>6.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.40 → 2.86</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.67</b><span class="muted">ATTACKS / S</span></div></div>
@@ -1445,7 +1363,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>185 → 717</b><span class="muted">HP +28/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>210 → 533</b><span class="muted">MANA +17/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>36 → 188</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>36 → 188</b><span class="muted">BASIC DAMAGE +8/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.40 → 2.86</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.75</b><span class="muted">ATTACKS / S</span></div></div>
@@ -1575,7 +1493,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>240 → 1114</b><span class="muted">HP +46/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>190 → 494</b><span class="muted">MANA +16/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>26 → 121</b><span class="muted">DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>26 → 121</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>4.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.48 → 3.01</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
@@ -1704,7 +1622,7 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>300 → 1345</b><span class="muted">HP +55/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>40 → 116</b><span class="muted">MANA +4/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>35 → 168</b><span class="muted">DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>35 → 168</b><span class="muted">BASIC DAMAGE +7/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.33</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.72 → 3.40</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.20</b><span class="muted">ATTACKS / S</span></div></div>
@@ -2037,11 +1955,45 @@ riverDepth = terrainWaterDepthAt(64, 64, GroundLayer)</code></pre>
       </div>
     </section>
 
-    <footer>
-      Numbers come from <code>examples/gods_of_the_arena/content.nim</code> and
-      <code>sim.nim</code>. Icons load from the sibling <code>polyworld_data</code>
-      folder. Clone it next to this repo and open this file from docs.
-    </footer>
+    <section id="casting" class="panel">
+      <p class="kicker">ACTIONS AND SPELLS</p>
+      <h2>Aim, cast, impact, recharge</h2>
+      <p><strong>Basic attack + four abilities:</strong> Every hero has a separate single-target basic attack: a melee strike or a ranged shot, including magic bolts. Basic attacks cost no mana, use no spell charges, and repeat at the hero's attack speed. Their damage grows every level: base damage + (level − 1) × damage per level, plus equipment bonuses. Q/W/E/R are four additional abilities with their own cooldowns and charges.</p>
+      <div class="spell-grid">
+        <article class="spell-rule"><h3>One target</h3><p>Melee strikes need close range. Projectiles travel to one target. Neither becomes an area attack just because its effect looks wide. In player mode, aim at an object to target it, or aim at empty ground to swing or shoot into space.</p></article>
+        <article class="spell-rule"><h3>An area on the map</h3><p>Circles, lines, sectors and other footprints affect every eligible occupant when the effect lands. The area locks when cast. Moving into it before impact can get you hit; moving out can avoid it. Enemy damage, allied healing and structure protection still apply.</p></article>
+        <article class="spell-rule"><h3>A visible warning</h3><p>Cast delay is the time from releasing an area spell until it takes effect. The full footprint remains on the map during that delay, then flashes at impact. Every cast uses the same warnings and timing. Changing playback speed speeds up or slows down the battle and spell effects together.</p></article>
+      </div>
+      <p><strong>Mana</strong> is paid when a cast is accepted. Basic attacks cost zero mana, as does Molten Fist. Other spells have their own mana costs. Invalid casts do not spend mana or charges; a valid shot into empty space does.</p>
+      <div class="spell-grid">
+        <article class="spell-rule"><h3>Charges</h3><p>The number of casts held in reserve. You need at least one charge. Each hero starts with a full set; a respawn restores the set.</p></article>
+        <article class="spell-rule"><h3>Cast cooldown</h3><p>The minimum time between uses of the same action, even if charges remain. It is separate from the effect's cast delay and from its recharge timer.</p></article>
+        <article class="spell-rule"><h3>Recharge cooldown</h3><p>Charges refill one at a time. The timer starts with the first spent charge. Spending another does not restart it. When a charge returns, the next missing charge starts its own full recharge.</p></article>
+      </div>
+      <div class="charge-demo" aria-label="Interactive charge timing example">
+        <h3>Try it: 3 charges · 2s cooldown · 12s recharge</h3>
+        <p>Cast at 0, 2 and 4 seconds. Charges return at 12, 24 and 36 seconds if you stop casting.</p>
+        <div class="charge-pips" id="charge-pips" aria-hidden="true"></div>
+        <output id="charge-status" aria-live="polite"></output>
+        <button id="charge-cast" type="button">Cast</button>
+        <button id="charge-step" type="button">Advance 2 seconds</button>
+        <button id="charge-wait" type="button">Advance 10 seconds</button>
+        <button id="charge-reset" type="button">Reset</button>
+      </div>
+      <p><strong>Refill resources:</strong> Ironroot Ration costs 30 gold and heals 40 HP; Vitality Elixir costs 50 gold and heals 90 HP; Mana Potion costs 45 gold and restores 60 mana. Buy them in the <a href="#shop">shop</a>. Healing cannot revive a hero at zero HP.</p>
+    </section>
+    <section id="controls" class="panel">
+      <p class="kicker">PLAYER CONTROLS</p>
+      <h2>Control your hero</h2>
+      <p>Idle heroes automatically attack the closest visible enemy creep nearby. Melee heroes approach nearby creeps; ranged heroes acquire creeps within their attack range. Select an enemy or right-click it to make it take priority. Both melee and ranged heroes move toward that target until they reach their own basic-attack range, then stop and attack repeatedly. When the target dies or is lost in fog, they return to nearby creeps. A ground move order cancels the attack and takes priority over automatic acquisition. These rules also apply with zero mana or all four abilities on cooldown.</p>
+      <p>You control your four extra abilities; they only cast when you use them. Q/W/E/R cast immediately at your current valid target. Self actions always fire on key press and affect you. Melee actions also fire immediately: they strike a nearby target, or swing toward the pointer when there is none. For other abilities with no valid target, the key selects the ability and right-click casts at an object or the ground. Escape cancels the selection. With no ability selected, right-click moves or attacks. Click SHOP in the inventory, or press B, to open the full-screen item shop; click an item to buy it. Space pauses or resumes the battle, including while shopping. The HUD shows remaining charges and the wait until an empty action can be used again. A blue bar tracks progress toward the next charge.</p>
+      <table class="spell-table"><thead><tr><th>Input</th><th>Action</th></tr></thead><tbody>
+        <tr><td>Q / W / E / R</td><td>Your four extra abilities. Self and melee actions fire immediately; other actions use your current target or select right-click aiming.</td></tr>
+        <tr><td>F / G</td><td>Use the first two inventory items, including health and mana potions.</td></tr>
+        <tr><td>O</td><td>Toggle character outlines behind scenery. Enabled by default; hidden portions are outlined without revealing enemies in fog of war.</td></tr>
+      </tbody></table>
+    </section>
+
   </main>
 
   <script>

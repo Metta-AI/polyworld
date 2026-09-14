@@ -1,4 +1,4 @@
-## Gods of the Arena map: dense woods must leave all three lanes open.
+## Legacy replay maps retain their authored woods, forts, and lane geometry.
 
 import
   polyworld/pathing,
@@ -17,8 +17,8 @@ proc checkLane(stops: openArray[LaneStop]) =
 proc checkForest(seed: int32) =
   ## Checks repeatable forest chunks and open roads across map seeds.
   let
-    first = generateMap(seed)
-    second = generateMap(seed)
+    first = generateLegacyMap(seed)
+    second = generateLegacyMap(seed)
     ground = layers[GroundLayer]
   doAssert first.hash == second.hash, "the same seed changed its forest"
   doAssert layers.len == 4, "the arena needs ground, two forts, and water"
@@ -147,7 +147,7 @@ block:
 
 echo "Testing climbable landmark hills and dry negative quarries"
 block:
-  discard generateMap(2026)
+  discard generateLegacyMap(2026)
   let ground = layers[GroundLayer]
   for i, site in LandmarkHillSites:
     let tile = ground.tiles[site[1] * GridTiles + site[0]]
@@ -183,7 +183,7 @@ block:
 
 echo "Testing three distinct fort entrances and spaced barracks"
 block:
-  discard generateMap(2026)
+  discard generateLegacyMap(2026)
   let ground = layers[GroundLayer]
   proc inGate(team, lane, x, z: int): bool =
     if team == 0:
@@ -258,7 +258,7 @@ block:
 
 echo "Testing rocky hill outcrops remain point-symmetric"
 block:
-  discard generateMap(2026)
+  discard generateLegacyMap(2026)
   let ground = layers[GroundLayer]
   var outcropTiles = 0
   for z in 0 ..< GridTiles:
@@ -275,7 +275,7 @@ block:
 
 echo "Testing every lane wades through a continuous shallow river"
 block:
-  discard generateMap(2026)
+  discard generateLegacyMap(2026)
   var tiles: seq[PathTile]
   for i in 0 ..< LaneRoutes[1].len - 1:
     let
@@ -310,7 +310,7 @@ block:
 
 echo "Testing distinct fort materials and flat wall tops"
 block:
-  discard generateMap(1988)
+  discard generateLegacyMap(1988)
   for (layerIndex, kind) in [(RedFortLayer, RedFortKind),
       (BlueFortLayer, BlueFortKind)]:
     let
