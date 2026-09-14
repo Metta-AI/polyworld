@@ -77,7 +77,7 @@ block:
   doAssert CobbleSurface.float32 in connected.blends[0 ..< 16]
   doAssert DirtSurface.float32 in connected.blends[16 ..< 32]
 
-echo "Testing extra construction materials keep their texture without stamps"
+echo "Testing custom materials receive details without seeding stamps"
 block:
   let layer = flatLayer(3, 1)
   for i in 0 ..< 3:
@@ -88,16 +88,45 @@ block:
       [layer],
       materials,
       12,
+      textureSize = 8,
       chance = 1,
       materialCount = SurfaceNames.len + 2
     )
   doAssert map.layers[0].materials == @materials[1 .. 3]
   doAssert map.placements == 1
-  doAssert map.layers[0].ranges[0].y == 1
-  doAssert map.layers[0].ranges[1].y == 0
-  doAssert map.layers[0].ranges[2].y == 0
+  for range in map.layers[0].ranges:
+    doAssert range.y == 1,
+      "Natural details must continue across connected custom materials."
+    let first = range.x.int * 8
+    doAssert map.brushes[first ..< first + 8] == map.brushes[0 ..< 8],
+      "Both sides of the material border must share the same brush."
   doAssert SurfaceNames.len.float32 in map.blends
   doAssert (SurfaceNames.len + 1).float32 in map.blends
+  layer.tiles[1].tops = [8'i16, 8, 8, 8]
+  let cliff = buildTerrainMap(
+    [layer],
+    materials,
+    12,
+    textureSize = 8,
+    chance = 1,
+    materialCount = SurfaceNames.len + 2
+  )
+  doAssert cliff.placements == 1
+  doAssert cliff.layers[0].ranges[1].y == 0
+  doAssert cliff.layers[0].ranges[2].y == 0,
+    "Stamps must not jump across a disconnected height."
+  layer.tiles[1].exists = false
+  let gap = buildTerrainMap(
+    [layer],
+    materials,
+    12,
+    textureSize = 8,
+    chance = 1,
+    materialCount = SurfaceNames.len + 2
+  )
+  doAssert gap.layers[0].ranges[1].y == 0
+  doAssert gap.layers[0].ranges[2].y == 0,
+    "Stamps must not jump across missing terrain."
   expectTerrainError:
     discard buildTerrainMap([layer], materials, 12)
   expectTerrainError:
