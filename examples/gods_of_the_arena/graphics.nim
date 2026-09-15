@@ -24,12 +24,12 @@ const
   DefaultCameraDistance = 17.0'f / 1.2'f
   AtlasPath = TmpRoot & "/gota.atlas.png"
   MossyStoneSurface = SurfaceNames.len
+  CourtyardSurface = MossyStoneSurface + 1
   CryptRockSurface = SurfaceNames.len + FortTextures.len
   CryptRubbleSurface = CryptRockSurface + 1
-  CryptRoadSurface = CryptRockSurface + 2
-  CryptTrailSurface = CryptRockSurface + 3
-  CryptFortSurface = CryptRockSurface + 4
-  CryptSpawnSurface = CryptRockSurface + 5
+  CryptFortSurface = CryptRockSurface + 2
+  CryptRoadSurface = CryptRockSurface + 3
+  CryptSpawnSurface = CryptRockSurface + 4
   # Match crypt-rock-1's mean RGB while preserving the rock texture detail.
   CryptRockTint = vec3(0.993051'f, 0.760436'f, 0.854697'f)
 
@@ -144,12 +144,13 @@ proc runGraphics*() =
       GotaTreeStyle, GeneratedTerrain, PaintedRocks, ArenaTextures,
       settings = GotaTerrainAssets
     )
+    terrainUnboostedMaterial = CourtyardSurface.float32
     let landscape = buildLandscape(
       layers[GroundLayer],
       run.map.mainRoads,
       run.map.preset.seed,
       CryptRoadSurface,
-      CryptTrailSurface
+      CryptRoadSurface
     )
     groundRelief = landscape.relief
     groundMaterialOverrides = landscape.materials
@@ -180,11 +181,11 @@ proc runGraphics*() =
     terrainHeightBlend = 1.0'f
     for side in 0 .. 1:
       let surfaces = [
-        [GrassSurface, OliveSurface, GravelSurface, CobbleSurface,
+        [GrassSurface, OliveSurface, CourtyardSurface, CourtyardSurface,
           MossyStoneSurface, DirtSurface, DirtSurface, GravelSurface],
         [CryptRockSurface, CryptRubbleSurface, CryptFortSurface,
           CryptFortSurface, CryptSpawnSurface, CryptRoadSurface,
-          CryptTrailSurface, CryptTrailSurface]
+          CryptRoadSurface, CryptRoadSurface]
       ]
       for i, surface in surfaces[side]:
         setTileMaterial(

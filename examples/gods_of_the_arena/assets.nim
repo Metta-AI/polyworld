@@ -4,10 +4,10 @@ import
 
 const
   LogoPath* = DataRoot & "/themes/gota/gota_logo.png"
-  FortTextures* = ["mossy-building-stone-1", "dry-stacked-stone-1"]
+  FortTextures* = ["mossy-building-stone-1", "courtyard-stone-1"]
   CryptTextures* = [
-    "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-stone-2",
-    "crypt-grate-1", "crypt-grate-2"
+    "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-flagstone-1",
+    "crypt-grate-2"
   ]
   ArenaTextures* = @FortTextures & @CryptTextures
   GotaBoulderNames* = ["rock_small_02a", "rock_small_03a"]
