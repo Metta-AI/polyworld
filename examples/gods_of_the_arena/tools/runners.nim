@@ -16,6 +16,8 @@ proc execute*(client: Client, directory: string, run: JsonNode,
           saveRecord(directory, record, controls)
     publish(directory, run, records, "running", dataRoot, controls = controls)
     while not stopping:
+      # Completed replay counters may arrive from separate workers.
+      records = loadRecords(directory, run)
       for i, game in run["schedule"].elems:
         if stopping:
           break
