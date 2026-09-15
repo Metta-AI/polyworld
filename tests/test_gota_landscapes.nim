@@ -29,8 +29,9 @@ for i, tile in ground.tiles:
       "Relief must retain rotational symmetry."
     minimum = min(minimum, offset)
     maximum = max(maximum, offset)
-    if category notin [GrassTile, TreeTile, RockTile]:
-      doAssert offset == 0, "Roads, ramps, water, and buildings stay level."
+    if category notin [GrassTile, TreeTile, RockTile] and
+      tile.kind notin ArenaWallKinds:
+        doAssert offset == 0, "Roads, ramps, water, and buildings stay level."
     if abs(offset) > 0.01'f:
       inc displaced
   if x + 1 < ground.width:

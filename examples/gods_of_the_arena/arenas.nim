@@ -12,8 +12,8 @@ const
   ArenaKindBase* = 16'u32
   ArenaKindStride* = 8'u32
   ArenaRockKind* = ArenaKindBase + ArenaKindStride * 2
+  ArenaWallKinds* = [6'u32, 7'u32]
   ArenaHeightStep = 4'i32
-  ArenaWallHeight = 18'i16
   ArenaWaterDepth* = 3'i16
 
 type
@@ -21,12 +21,17 @@ type
   ArenaSite* = object
     position*, facing*, spawn*: PathPoint
     lane*, team*: int
+  ArenaWall* = object
+    points*: array[2, PathPoint]
+    team*: int
   ArenaLayout* = object
     lanes*: array[3, seq[ArenaStop]]
     towers*: array[3, array[2, array[3, ArenaSite]]]
     barracks*: seq[ArenaSite]
     forts*, spawns*: array[2, PathPoint]
     camps*: seq[PathPoint]
+    walls*: seq[ArenaWall]
+      ## Visual wall centerlines, including the existing gate openings.
   ArenaData* = object
     layers*: seq[QuadLayer]
     layout*: ArenaLayout
@@ -135,6 +140,14 @@ proc makeLayout(
     ))
   for camp in map.camps:
     result.camps.add(arenaPoint(camp.position, resolution))
+  for walls in [map.keepWalls, map.spawnWalls]:
+    for team, runs in walls:
+      for wall in runs:
+        result.walls.add(ArenaWall(
+          points: [arenaPoint(wall.points[0], resolution),
+            arenaPoint(wall.points[1], resolution)],
+          team: 1 - team
+        ))
 
 proc elevation(tile: grids.Tile): int32 {.raises: [].} =
   ## Converts the editor's terrain levels into compact game height steps.
@@ -153,7 +166,7 @@ proc material(tile: grids.Tile): uint32 {.raises: [].} =
   if tile.surface == grids.TreeSurface:
     return TreeTile
   if tile.surface == grids.WallSurface:
-    return (if tile.side == layouts.Northeast: 6'u32 else: 7'u32)
+    return ArenaWallKinds[1 - tile.side.ord]
   if tile.terrain == grids.LakeGround:
     return MarshTile
   let base = ArenaKindBase + tile.side.ord.uint32 * ArenaKindStride
@@ -164,6 +177,13 @@ proc material(tile: grids.Tile): uint32 {.raises: [].} =
   if tile.surface == grids.TrailSurface:
     return base + 6
   base + uint32(tile.terrain.ord)
+
+proc joinedGround(
+    first, last: grids.Tile, direction: grids.Direction
+): bool {.raises: [].} =
+  ## Blends wall footprints into adjoining ground while retaining other cliffs.
+  first.edges[direction] != grids.CliffEdge or
+    first.surface == grids.WallSurface or last.surface == grids.WallSurface
 
 proc buildArena*(config: MapConfig): ArenaData =
   ## Converts the saved editor preset into immutable packed game terrain.
@@ -235,12 +255,14 @@ proc buildArena*(config: MapConfig): ArenaData =
               first.float32 + (last - first).float32 * fraction
             ))
           break
-      if x < resolution - 1 and tile.edges[grids.East] != grids.CliffEdge:
-        join(corner + 1, corner + 4)
-        join(corner + 3, corner + 6)
-      if y < resolution - 1 and tile.edges[grids.South] != grids.CliffEdge:
-        join(corner + 2, corner + resolution * 4)
-        join(corner + 3, corner + resolution * 4 + 1)
+      if x < resolution - 1 and
+        joinedGround(tile, grid.cells[index + 1], grids.East):
+          join(corner + 1, corner + 4)
+          join(corner + 3, corner + 6)
+      if y < resolution - 1 and
+        joinedGround(tile, grid.cells[index + resolution], grids.South):
+          join(corner + 2, corner + resolution * 4)
+          join(corner + 3, corner + resolution * 4 + 1)
   for i, value in values:
     let group = root(i)
     sums[group] += value
@@ -282,21 +304,15 @@ proc buildArena*(config: MapConfig): ArenaData =
       tile.side == layouts.Northeast:
         packed.kind = ArenaRockKind
     packed.impassable = not tile.passable
-    packed.connectedEast = tile.edges[grids.East] != grids.CliffEdge
-    packed.connectedSouth = tile.edges[grids.South] != grids.CliffEdge
+    packed.connectedEast = index mod resolution < resolution - 1 and
+      joinedGround(tile, grid.cells[index + 1], grids.East)
+    packed.connectedSouth = index div resolution < resolution - 1 and
+      joinedGround(tile, grid.cells[index + resolution], grids.South)
     for i in 0 .. 3:
       let group = root(index * 4 + i)
       packed.tops[i] = heights[group]
     result.layers[0].tiles[index] = packed
-    if tile.surface == grids.WallSurface:
-      var wall = packed
-      wall.bottoms = packed.tops
-      # Keep wall tops level above the castle, including beside gate ramps.
-      for height in wall.tops.mitems:
-        height = ArenaHeightStep.int16 * 4 + ArenaWallHeight
-      let layer = (if tile.side == layouts.Northeast: 1 else: 2)
-      result.layers[layer].tiles[index] = wall
-    elif tile.terrain == grids.LakeGround:
+    if tile.terrain == grids.LakeGround:
       var water = pathing.Tile(flags: TileExists, bottoms: packed.tops)
       for i in 0 .. 3:
         water.tops[i] = -ArenaHeightStep.int16 * 2'i16 + ArenaWaterDepth

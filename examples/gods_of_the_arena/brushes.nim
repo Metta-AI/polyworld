@@ -3,13 +3,11 @@ import
   polyworld/pathing,
   arenas
 
-const
-  BrushReplacementPercent = 20
-  DarkTreeBrightness = 0.6'f
+const BrushReplacementPercent = 20
 
 type BrushMix* = object
   trees*: seq[float32]
-  lightRocks*, darkRocks*: seq[bool]
+  lightRocks*, darkRocks*, darkTrees*: seq[bool]
 
 proc mixBrush*(ground: QuadLayer, seed: int): BrushMix =
   ## Swaps twenty percent of paired brush tiles without changing game terrain.
@@ -17,6 +15,7 @@ proc mixBrush*(ground: QuadLayer, seed: int): BrushMix =
   result.trees = newSeq[float32](count)
   result.lightRocks = newSeq[bool](count)
   result.darkRocks = newSeq[bool](count)
+  result.darkTrees = newSeq[bool](count)
   var pairs: seq[int]
   for i, tile in ground.tiles:
     if not tile.exists or not tile.impassable:
@@ -41,4 +40,4 @@ proc mixBrush*(ground: QuadLayer, seed: int): BrushMix =
     result.trees[light] = 0
     result.lightRocks[light] = true
     result.darkRocks[dark] = false
-    result.trees[dark] = DarkTreeBrightness
+    result.darkTrees[dark] = true

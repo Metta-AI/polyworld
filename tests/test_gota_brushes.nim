@@ -15,24 +15,24 @@ var
   lightCount, darkCount, lightRocks, darkTrees: int
 for i, tile in ground.tiles:
   let props = int(brush.trees[i] > 0) + int(brush.lightRocks[i]) +
-    int(brush.darkRocks[i])
+    int(brush.darkRocks[i]) + int(brush.darkTrees[i])
   if tile.exists and tile.impassable and
     (tile.kind == TreeTile or tile.kind == ArenaRockKind):
       doAssert props == 1, "Each brush tile needs exactly one visible blocker."
       if tile.kind == TreeTile:
         inc lightCount
         lightRocks += int(brush.lightRocks[i])
-        doAssert not brush.darkRocks[i]
+        doAssert not brush.darkRocks[i] and not brush.darkTrees[i]
         doAssert brush.trees[i] in [0'f, 1'f]
         doAssert brush.lightRocks[i] ==
-          (brush.trees[ground.tiles.high - i] > 0),
+          brush.darkTrees[ground.tiles.high - i],
           "Brush replacements must be rotationally paired."
       else:
         inc darkCount
-        darkTrees += int(brush.trees[i] > 0)
+        darkTrees += int(brush.darkTrees[i])
         doAssert not brush.lightRocks[i]
-        if brush.trees[i] > 0:
-          doAssert brush.trees[i] < 1, "Dark trees must have a darker tint."
+        doAssert brush.trees[i] == 0,
+          "Dark brush uses authored tree models instead of light-side trees."
   else:
     doAssert props == 0, "Brush must not appear on roads or clearings."
 doAssert lightCount > 0 and darkCount == lightCount

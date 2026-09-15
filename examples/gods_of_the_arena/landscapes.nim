@@ -17,7 +17,8 @@ proc buildLandscape*(
   result.materials.setLen(ground.tiles.len)
   for i, tile in ground.tiles:
     result.materials[i] = -1
-    natural[i] = arenaKind(tile.kind) in [GrassTile, TreeTile, RockTile]
+    natural[i] = arenaKind(tile.kind) in [GrassTile, TreeTile, RockTile] or
+      tile.kind in ArenaWallKinds
     if tile.kind >= ArenaKindBase + ArenaKindStride and
       tile.kind < ArenaRockKind:
         let kind = (tile.kind - ArenaKindBase) mod ArenaKindStride

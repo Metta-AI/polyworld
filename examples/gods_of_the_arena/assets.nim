@@ -11,11 +11,15 @@ const
   ]
   ArenaTextures* = @FortTextures & @CryptTextures
   GotaBoulderNames* = ["rock_small_02a", "rock_small_03a"]
-  TowerPack* = DataRoot & "/terrain/tower_defense_kit.glb"
-  TowerProps* = [
-    "tower_square_small1", "tower_square_tall1", "tower_square_tall2",
-    "building2", "magiccrystal1"
+  FortModelRoot = DataRoot & "/terrain/blender_forts/models/"
+  FortFactions = ["dark", "light"]
+  FortModelNames* = [
+    "tower_level1", "tower_level2", "tower_level3", "barracks", "pillar", "wall"
   ]
+  DarkTreeNames* = ["tree_1", "tree_2", "tree_3", "tree_4"]
+  FortTextureSize* =
+    when defined(emscripten): 512
+    else: 1024
   ArenaDecorPacks* = [
     DataRoot & "/terrain/toon_enchanted_meadow/props.glb",
     DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
@@ -131,10 +135,20 @@ const
     ]
   ]
 
+proc fortModelPaths*(team: int): seq[string] =
+  ## Returns complete fort assets in red/dark and blue/light team order.
+  for name in FortModelNames:
+    result.add FortModelRoot & FortFactions[team] & "/" & name & ".glb"
+
 proc arenaDecorPaths*(): seq[string] =
   ## Uses whole packs natively and independently packed nodes in browsers.
   for i, pack in ArenaDecorPacks:
     result.add propPaths(pack, ArenaDecorNodes[i])
+
+proc darkTreePaths*(): seq[string] =
+  ## Returns the four authored dead-tree models for dark-side brush.
+  for name in DarkTreeNames:
+    result.add FortModelRoot & "dark/" & name & ".glb"
 
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
@@ -145,7 +159,11 @@ proc browserAssets*(): seq[Asset] =
   for asset in result.mitems:
     if asset.source == "terrain/handpainted_trees/fir.png":
       asset = imageAsset(asset.source, 512)
-  result.add propAssets(TowerPack, TowerProps, textureSize = 256)
+  for team in 0 ..< FortFactions.len:
+    for path in fortModelPaths(team):
+      result.add modelAsset(path, textureSize = 512)
+  for path in darkTreePaths():
+    result.add modelAsset(path, textureSize = 512)
   for i, pack in ArenaDecorPacks:
     result.add propAssets(pack, ArenaDecorNodes[i], textureSize = 256)
   var parts: seq[string]
