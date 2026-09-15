@@ -260,6 +260,15 @@ proc runGraphics*() =
     GateTowerScale = 6.0'f
     BarracksScale = 1.65'f
 
+  const
+    # The undead asset is authored with a narrower body than the human asset.
+    # Keep the normalized height while giving Dire the same readable footprint.
+    FootmanSizeFactors: array[Team, float32] = [1.0'f32, 1.15'f32]
+
+  proc footmanSizeFactor(team: Team): float32 =
+    ## Matches the apparent body size of both lane-creep models.
+    FootmanSizeFactors[team]
+
   proc towerPropName(tier: TowerTier): string =
     ## Returns the matching fort model for one tower tier.
     case tier
@@ -765,7 +774,8 @@ proc runGraphics*() =
           clip,
           holdClipTime(
             model, clip, footman.animTicks, footman.state == Dying
-          )
+          ),
+          footmanSizeFactor(footman.team)
         )
       )
     for tower in run.world.towers:
@@ -1103,7 +1113,8 @@ proc runGraphics*() =
           footmanRenderClips[footman.team][footman.animClip],
           footman.animTicks,
           footman.state == Dying
-        )
+        ),
+        sizeFactor = footmanSizeFactor(footman.team)
       )
       finishCharacters(scene)
       return
