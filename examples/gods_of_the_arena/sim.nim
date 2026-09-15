@@ -985,6 +985,26 @@ proc currentWaypointLayer(footman: Footman): int32 =
   else:
     route[index]
 
+proc resumePath(footman: var Footman) =
+  ## Skips waypoints that a detour already carried the footman past.
+  let route = laneWorldPaths[footman.lane]
+  if route.len == 0 or footman.waypointIndex >= route.len:
+    return
+  var
+    nearest = footman.waypointIndex
+    nearestDistance = distanceSquared(
+      footman.position, footman.waypointAt(nearest)
+    )
+  for index in footman.waypointIndex + 1 ..< route.len:
+    let distance = distanceSquared(footman.position, footman.waypointAt(index))
+    if distance < nearestDistance:
+      nearest = index
+      nearestDistance = distance
+  footman.waypointIndex = nearest
+  while footman.waypointIndex < route.len and
+      within(footman.position, footman.currentWaypoint, 21_000):
+    inc footman.waypointIndex
+
 proc liveHeroSetup(total: int): seq[ReplayHero] =
   ## Assigns the ten live bot slots evenly across both teams.
   let redCount = (total + 1) div 2
@@ -1784,11 +1804,16 @@ proc updateFootman(world: World, footman: var Footman) =
       footman.animTicks = max(footman.swingTicks, 0)
     return
 
-  # March down the lane.
+  # March down the lane. A fight can move a footman well past the waypoint
+  # it was following, so resume at the closest waypoint ahead instead of
+  # walking back to the stale waypoint from before the detour.
+  let wasFighting = footman.state == Fighting
   footman.state = Marching
   footman.swingTicks = -1
   footman.animClip = runClip
   inc footman.animTicks
+  if wasFighting:
+    footman.resumePath()
   if footman.waypointIndex < laneWorldPaths[footman.lane].len:
     let
       waypoint = footman.currentWaypoint
