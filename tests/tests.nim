@@ -24,6 +24,7 @@ import
   test_gota_brushes,
   test_gota_buybacks,
   test_gota_cameras,
+  test_gota_cast,
   test_gota_content,
   test_gota_creeps,
   test_gota_decisions,

@@ -43,6 +43,7 @@ proc usage() =
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
   echo "  --windowSize WxH        Graphical window, such as 1024x576."
   echo "  --vsync:off             Unlock the frame rate (default on)."
+  echo "  --cast MODE             quick, normal, or assisted."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 
@@ -95,6 +96,16 @@ proc parseGameOptions(): GameOptions =
         ))
         if result.spawnIntervalTicks <= 0:
           fail("--spawn-interval must be positive")
+      of "--cast":
+        case arguments.argumentValue(index, "--cast").toLowerAscii
+        of "quick", "quickcast":
+          castMode = QuickCast
+        of "normal":
+          castMode = NormalCast
+        of "assisted", "assist":
+          castMode = AssistedCast
+        else:
+          fail("--cast must be quick, normal, or assisted")
       of "--help", "-h":
         usage()
         quit(0)
