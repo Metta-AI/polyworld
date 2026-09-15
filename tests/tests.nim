@@ -25,6 +25,7 @@ import
   test_gota_brushes,
   test_gota_content,
   test_gota_landscapes,
+  test_gota_lanes,
   test_gota_mapgen,
   test_gota_presets,
   test_gota_replays,
