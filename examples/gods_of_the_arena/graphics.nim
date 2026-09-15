@@ -263,7 +263,11 @@ proc runGraphics*() =
   const
     # The undead asset is authored with a narrower body than the human asset.
     # Keep the normalized height while giving Dire the same readable footprint.
-    FootmanSizeFactors: array[Team, float32] = [1.0'f32, 1.15'f32]
+    FootmanSizeIncrease = 1.1'f32
+    FootmanSizeFactors: array[Team, float32] = [
+      1.0'f32 * FootmanSizeIncrease,
+      1.15'f32 * FootmanSizeIncrease
+    ]
 
   proc footmanSizeFactor(team: Team): float32 =
     ## Matches the apparent body size of both lane-creep models.
@@ -1926,7 +1930,9 @@ proc runGraphics*() =
               unitRenderFacing(footman.id, footman.facing),
               clip,
               holdClipTime(
-                model, clip, footman.animTicks, footman.state == Dying))
+                model, clip, footman.animTicks, footman.state == Dying),
+              sizeFactor = footmanSizeFactor(footman.team)
+            )
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
               continue
