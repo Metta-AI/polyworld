@@ -2921,17 +2921,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           world.footmen[i].navLayer
         )
 
-    for footman in world.footmen.mitems:
-      if footman.state == Dying:
-        continue
-      for tower in world.towers:
-        separateTowerBody(footman.body, tower, footman.navLayer)
-
     for i in 0 ..< world.heroes.len:
       if world.heroes[i].state == Dying:
         continue
-      for tower in world.towers:
-        separateTowerBody(world.heroes[i].body, tower, world.heroes[i].navLayer)
       for j in i + 1 ..< world.heroes.len:
         if world.heroes[j].state == Dying:
           continue
@@ -2952,6 +2944,19 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           world.footmen[j].body,
           world.heroes[i].navLayer
         )
+
+    # Resolve tower footprints last so unit separation cannot push a hero or
+    # creep back through a tower after it has been cleared.
+    for footman in world.footmen.mitems:
+      if footman.state == Dying:
+        continue
+      for tower in world.towers:
+        separateTowerBody(footman.body, tower, footman.navLayer)
+    for hero in world.heroes.mitems:
+      if hero.state == Dying:
+        continue
+      for tower in world.towers:
+        separateTowerBody(hero.body, tower, hero.navLayer)
 
   profileBlock "applyBody":
     for footman in world.footmen.mitems:
