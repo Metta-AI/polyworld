@@ -341,6 +341,7 @@ const
   FootmanMovePerTick* = 5_500'i32
   FootmanBodyRadius = 0.22'fx
   HeroBodyRadius = 0.28'fx
+  TowerBodyRadii: array[TowerTier, Fixed] = [0.42'fx, 0.55'fx, 0.70'fx]
   BodyTurnRate = 0.35'fx
   FootmanSightRadius* = 5 * WorldScale
   FootmanTowerSightRadius = 7 * WorldScale
@@ -2678,6 +2679,26 @@ proc separateBodies(first, second: var Body, layer: int32) =
     return
   separatePair(first, second, tilesWalkable)
 
+proc separateTowerBody(body: var Body, tower: Tower, layer: int32) =
+  ## Pushes a mobile unit out of a living tower footprint.
+  if tower.hp <= 0:
+    return
+  if bindNavLayer(tower.position) != layer:
+    return
+  let
+    towerPos = toPlanar(tower.position)
+    offset = body.pos - towerPos
+    distance = length(offset)
+    needed = body.radius + TowerBodyRadii[tower.tier]
+  if distance == FixedZero or distance >= needed:
+    return
+  let oldPosition = body.pos
+  body.pos += normalize(offset) * (needed - distance)
+  gotaWalkLayer = int(layer)
+  gotaWalkDestLayer = gotaWalkLayer
+  gotaWalkOrigin = oldPosition
+  clampWalkable(body.pos, oldPosition, tilesWalkable)
+
 proc addHashy(hash: var uint32, value: WorldPoint) =
   ## Mixes one authoritative integer world position.
   hash.addHashy(value.x)
@@ -2923,6 +2944,19 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           world.footmen[j].body,
           world.heroes[i].navLayer
         )
+
+    # Resolve tower footprints last so unit separation cannot push a hero or
+    # creep back through a tower after it has been cleared.
+    for footman in world.footmen.mitems:
+      if footman.state == Dying:
+        continue
+      for tower in world.towers:
+        separateTowerBody(footman.body, tower, footman.navLayer)
+    for hero in world.heroes.mitems:
+      if hero.state == Dying:
+        continue
+      for tower in world.towers:
+        separateTowerBody(hero.body, tower, hero.navLayer)
 
   profileBlock "applyBody":
     for footman in world.footmen.mitems:
