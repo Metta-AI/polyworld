@@ -12,7 +12,7 @@ const
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 36'u16
+  ReplayGameVersion* = 37'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -21,6 +21,7 @@ const
   ActionCastTarget* = 6'u8
   ActionCastPoint* = 10'u8
   ActionManualSpells* = 14'u8
+  ActionStop* = 15'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -92,6 +93,7 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionBuyItem and
       action.kind != ActionUseItem and
       action.kind != ActionAttackMove and
+      action.kind != ActionStop and
       action.kind notin ActionCastTarget .. ActionManualSpells:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
@@ -247,6 +249,7 @@ proc validate*(data: ReplayData) =
         action.kind != ActionBuyItem and
         action.kind != ActionUseItem and
         action.kind != ActionAttackMove and
+        action.kind != ActionStop and
         action.kind notin ActionCastTarget .. ActionManualSpells:
       fail("replay action kind is invalid")
     var knownHero = false
