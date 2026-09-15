@@ -31,6 +31,7 @@ import
   test_gota_drafts,
   test_gota_gods,
   test_gota_host,
+  test_gota_human,
   test_gota_landscapes,
   test_gota_lanes,
   test_gota_lighting,
