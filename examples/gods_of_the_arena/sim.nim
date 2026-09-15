@@ -70,6 +70,7 @@ type
     lane*: int
     position*: WorldPoint
     facing*: Heading
+    velocity*: Heading
     body*: Body
     hp*: int32
     state*: FootmanState
@@ -96,6 +97,7 @@ type
     position*: WorldPoint
     spawnPosition*: WorldPoint
     facing*: Heading
+    velocity*: Heading
     body*: Body
     hp*: int32
     maxHp*: int32
@@ -114,6 +116,7 @@ type
     swingClip*: int
     swingTicks*: int32
     damageLanded*: bool
+    attacksLanded*: int32
     animClip*: int
     animTicks*: int32
     deathTicks*: int32
@@ -162,6 +165,11 @@ type
     hp*: int32
     maxHp*: int32
     alive*: bool
+    level*, mana*: int32
+    inventory*: array[InventorySlots, Item]
+    itemCounts*: array[InventorySlots, int32]
+    facing*, velocity*: Heading
+    targetId*: int32
 
   NavTile* = object
     layer*: int
@@ -696,6 +704,19 @@ proc heroAttackTicks*(world: World, hero: Hero): int32 =
   ## Returns the hero class's current basic-attack cadence.
   heroAttackTicks(hero.class)
 
+proc heroAttackCooldown*(world: World, hero: Hero): int32 =
+  ## Returns ticks until the next basic hit, assuming uninterrupted range.
+  if hero.hp <= 0 or hero.state == Dying:
+    return 0
+  let
+    duration = world.heroAttackTicks(hero)
+    windup = duration * 45 div 100
+  if hero.swingTicks < 0:
+    return windup
+  if not hero.damageLanded:
+    return max(0, windup - hero.swingTicks)
+  max(0, duration - hero.swingTicks) + windup
+
 proc heroMoveSpeed*(hero: Hero): int32 =
   ## Returns movement distance including held equipment.
   heroMovePerTick(hero.class, hero.level) +
@@ -891,12 +912,14 @@ proc applyBody(hero: Hero) =
 proc place*(footman: var Footman, at: WorldPoint) =
   ## Teleports a footman and keeps its body on the same plane.
   footman.position = at
+  footman.velocity = Heading()
   footman.body.pos = toPlanar(at)
   footman.navLayer = bindNavLayer(at)
 
 proc place*(hero: Hero, at: WorldPoint) =
   ## Teleports a hero and keeps its body on the same plane.
   hero.position = at
+  hero.velocity = Heading()
   hero.body.pos = toPlanar(at)
   hero.navLayer = bindNavLayer(at)
 
@@ -1197,7 +1220,9 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
       position: tower.position,
       hp: tower.hp,
       maxHp: tower.maxHp,
-      alive: towerExposed(world, tower)
+      alive: towerExposed(world, tower),
+      facing: tower.facing,
+      targetId: (if tower.hp > 0: tower.targetId else: 0)
     )
     return true
   let heroIndex = towerIndex - world.towers.len
@@ -1211,7 +1236,16 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
       position: hero.position,
       hp: hero.hp,
       maxHp: hero.maxHp,
-      alive: hero.state != Dying and hero.hp > 0
+      alive: hero.state != Dying and hero.hp > 0,
+      level: int32(hero.level),
+      mana: hero.mana,
+      inventory: hero.inventory,
+      itemCounts: hero.itemCounts,
+      facing: hero.facing,
+      velocity: hero.velocity,
+      targetId:
+        if hero.hp > 0 and hero.state != Dying: hero.attackObjectId
+        else: 0
     )
     return true
   let footmanIndex = heroIndex - world.heroes.len
@@ -1225,7 +1259,16 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
       position: footman.position,
       hp: footman.hp,
       maxHp: FootmanHp,
-      alive: footman.state != Dying and footman.hp > 0
+      alive: footman.state != Dying and footman.hp > 0,
+      facing: footman.facing,
+      velocity: footman.velocity,
+      targetId:
+        if footman.hp <= 0 or footman.state == Dying: 0
+        elif footman.targetId != 0: footman.targetId
+        elif footman.targetHeroId != 0: footman.targetHeroId
+        elif footman.targetTowerId != 0: footman.targetTowerId
+        elif footman.attackingFort: world.forts[enemyFort(footman.team)].id
+        else: 0
     )
     return true
   false
@@ -1663,6 +1706,7 @@ proc updateTower*(world: World, tower: var Tower) =
 
 proc updateFootman(world: World, footman: var Footman) =
   ## Advances one footman's movement, target selection, combat, and animation.
+  footman.velocity = Heading()
   if footman.state == Dying:
     inc footman.deathTicks
     footman.animClip = deathClip
@@ -1673,6 +1717,13 @@ proc updateFootman(world: World, footman: var Footman) =
     footman.state = Dying
     footman.deathTicks = 0
     return
+
+  let start = footman.position
+  defer:
+    footman.velocity = heading(
+      footman.position.x - start.x,
+      footman.position.z - start.z
+    )
 
   # Acquire: keep a live target while it stays in extended range, otherwise
   # take the nearest visible enemy; with none, batter the fort when close.
@@ -1829,6 +1880,7 @@ proc updateFootman(world: World, footman: var Footman) =
 proc respawn(hero: Hero) =
   ## Restores a fallen hero at its original barracks spawn.
   hero.place(hero.spawnPosition)
+  hero.applyBody()
   hero.hp = hero.maxHp
   hero.mana = hero.maxMana
   hero.state = Marching
@@ -2499,6 +2551,7 @@ proc acquireRadius(world: World, hero: Hero): int32 =
 
 proc updateHero(world: World, hero: Hero) =
   ## Applies scripted navigation, combat, rewards, death, and respawn.
+  hero.velocity = Heading()
   if hero.state == Dying:
     inc hero.deathTicks
     hero.animClip = heroDeathClip
@@ -2518,6 +2571,13 @@ proc updateHero(world: World, hero: Hero) =
     hero.attackMoving = false
     hero.hasMoveTarget = false
     return
+
+  let start = hero.position
+  defer:
+    hero.velocity = heading(
+      hero.position.x - start.x,
+      hero.position.z - start.z
+    )
 
   hero.targetFootmanId = 0
   hero.targetHeroId = 0
@@ -2674,10 +2734,13 @@ proc updateHero(world: World, hero: Hero) =
       if not hero.damageLanded and
           hero.swingTicks >= duration * 45 div 100:
         hero.damageLanded = true
+        let damage = hero.heroAttackDamage
+        if damage > 0:
+          inc hero.attacksLanded
         applyHeroHit(
           world,
           hero,
-          hero.heroAttackDamage,
+          damage,
           targetFootman,
           targetHero,
           targetTower,
@@ -2783,6 +2846,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.position)
     hash.addHashy(hero.spawnPosition)
     hash.addHashy(hero.facing)
+    hash.addHashy(hero.velocity)
     hash.addHashy(hero.body)
     hash.addHashy(hero.hp)
     hash.addHashy(hero.maxHp)
@@ -2801,6 +2865,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.swingClip)
     hash.addHashy(hero.swingTicks)
     hash.addHashy(hero.damageLanded)
+    hash.addHashy(hero.attacksLanded)
     hash.addHashy(hero.animClip)
     hash.addHashy(hero.animTicks)
     hash.addHashy(hero.deathTicks)
@@ -2831,6 +2896,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.lane)
     hash.addHashy(footman.position)
     hash.addHashy(footman.facing)
+    hash.addHashy(footman.velocity)
     hash.addHashy(footman.body)
     hash.addHashy(footman.hp)
     hash.addHashy(footman.state.ord)
@@ -2987,10 +3053,18 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 
   profileBlock "applyBody":
     for footman in world.footmen.mitems:
+      let before = footman.position
       applyBody(footman)
+      if footman.state != Dying:
+        footman.velocity.x += footman.position.x - before.x
+        footman.velocity.z += footman.position.z - before.z
       settleOnLayer(footman.position, footman.navLayer)
     for hero in world.heroes:
+      let before = hero.position
       applyBody(hero)
+      if hero.state != Dying:
+        hero.velocity.x += hero.position.x - before.x
+        hero.velocity.z += hero.position.z - before.z
       settleOnLayer(hero.position, hero.navLayer)
 
   for fort in world.forts.mitems:
