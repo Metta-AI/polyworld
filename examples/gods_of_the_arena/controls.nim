@@ -40,6 +40,12 @@ var
   armedAbility* = -1'i32
   shopOpen* = false
   castMode* = QuickCast
+  menuSlot* = 2'i32
+  followPlayer* = true
+  focusPlayerRequested* = false
+  practiceMode* = false
+  setupOpen*, startRequested*, restartRequested*: bool
+  historyOpen* = false
   feedbackText*: string
   feedbackError*: bool
   feedbackTime*: float64
@@ -55,6 +61,14 @@ proc cancelPlayerAim*() =
 proc resetPlayerCommands*() =
   pending.setLen(0)
   cancelPlayerAim()
+
+proc resetHumanMatch*() =
+  resetPlayerCommands()
+  shopOpen = false
+  historyOpen = false
+  followPlayer = true
+  focusPlayerRequested = true
+  feedbackText = ""
 
 proc queueStop*(heroId: int32) =
   ## Cancels the hero's current path and attack.
