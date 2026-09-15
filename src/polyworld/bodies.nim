@@ -116,14 +116,21 @@ proc steer*(
     walkable
   )
 
+proc needsSeparation*(a, b: Body): bool {.inline.} =
+  ## Rejects non-overlapping and coincident circles without a square root.
+  let
+    need = int64(int32(a.radius + b.radius))
+    squared = lengthSquared(b.pos - a.pos)
+  need > 0 and squared > 0 and squared < need * need
+
 proc separatePair*(a, b: var Body, walkable: Walkable) =
   ## Pushes two overlapping circles apart and clamps both to walkable ground.
+  if not needsSeparation(a, b):
+    return
   let
     offset = b.pos - a.pos
     dist = length(offset)
     need = a.radius + b.radius
-  if dist == FixedZero or dist >= need:
-    return
   let
     oldA = a.pos
     oldB = b.pos
