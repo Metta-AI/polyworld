@@ -9,6 +9,7 @@ import
 
 type
   PlayerCommandKind = enum
+    CommandStop
     CommandWalk
     CommandAttack
     CommandAttackMove
@@ -34,6 +35,10 @@ var
   purchaseReceipt*: PurchaseReceipt
   armedAbility* = -1'i32
   shopOpen* = false
+
+proc queueStop*(heroId: int32) =
+  ## Cancels the hero's current path and attack.
+  pending.add PlayerCommand(kind: CommandStop, heroId: heroId)
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
   ## Queues one walk command for the human hero.
@@ -135,6 +140,10 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     return
   let tick = uint32(game.world.tick)
   case command.kind
+  of CommandStop:
+    game.recorder.record ReplayAction(
+      tick: tick, heroId: command.heroId, kind: ActionStop
+    )
   of CommandWalk:
     game.recorder.recordWalkTo(
       tick, command.heroId, command.first, command.second
@@ -159,6 +168,8 @@ proc recordCommand(game: Game, command: PlayerCommand) =
 proc applyCommand(game: Game, command: PlayerCommand): bool =
   ## Applies one queued command through the bot validators.
   case command.kind
+  of CommandStop:
+    applyStop(game.world, command.heroId)
   of CommandWalk:
     applyWalkTo(
       game.world, command.heroId, command.first, command.second
