@@ -82,7 +82,7 @@ proc preset*(index: int, seed = 42): TreeSettings =
     density: 1, packing: 1.3, ringSpacing: 1, ringOffset: 0.65,
     irregularity: 0.14,
     leafSize: 1.5, leafWidth: 1.5, droop: 0.65, curl: 0.18,
-    leafJitter: 0.2, colorVariation: 0.16, barkTexture: 1,
+    leafJitter: 0.2, colorVariation: 0, barkTexture: 1,
     separateLeaves: true,
     barkDensity: 0.65,
     barkColor: vec3(0.64, 0.35, 0.14),
@@ -93,7 +93,6 @@ proc preset*(index: int, seed = 42): TreeSettings =
     result.leafColor = vec3(1, 0.32, 0.045)
     result.leafTile = LobedLeaves
     result.crownRadius = 2.8
-    result.colorVariation = 0.25
   of 2:
     result.height = 3.4
     result.trunkRadius = 0.2

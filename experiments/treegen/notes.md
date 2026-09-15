@@ -65,9 +65,8 @@ outlines of the visible leaf textures, allowing transparent corners to
 overlap. Cards shift slightly up or down to avoid cutting through each
 other. A card is omitted if it cannot fit within the allowed displacement
 and stem clearance. The crown cap stays fixed. Its exclusion area follows
-the visible cap
-texture, allowing surrounding leaves into its transparent border while
-keeping them beneath its opaque area.
+the visible cap texture, allowing surrounding leaves into its transparent
+border while keeping them beneath its opaque area.
 This also applies to exported trees and does not run physics each frame.
 The default presets retain about 100 cards on average with separation enabled.
 Very crowded settings can omit more cards rather than reintroduce crossings.
@@ -77,12 +76,15 @@ After replacing the foliage atlas, regenerate them with
 `python3 experiments/treegen/tools/gen_trims.py` (requires Pillow).
 The source PNG is read unchanged.
 
-The supplied v6 foliage atlas is copied unchanged into `assets`.
+The supplied v8 foliage atlas is copied unchanged into `assets`.
 Its first row contains four top-down cap textures. Evergreens use the first
 tile, and broadleaf trees choose one of the other three from their seed.
 The middle two rows contain eight broadleaf trims, and the bottom row
 contains four downward-pointing evergreen sprays.
-Leaf transparency and white shading are preserved.
+Leaf transparency and painted detail are preserved, including the subtle
+darkening at each branch attachment and the brighter leaf tips. Presets use
+zero Shade variation so whole leaf cards receive the same brightness factor.
+The Shade variation slider remains available for deliberate variation.
 
 Bark uses the separate, supplied tileable `assets/bark.png` texture.
 Its luminance is neutralized in memory so the Bark RGB controls set its color.
