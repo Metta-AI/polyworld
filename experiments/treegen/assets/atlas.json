@@ -1,5 +1,4 @@
 {
-  "source": "/Users/me/p/output/imagegen/tree-foliage-atlas-v5/tree-foliage-atlas.png",
   "size": [
     2048,
     2048
@@ -12,56 +11,157 @@
     512,
     512
   ],
-  "layout": "Four grayscale top-down tree caps replace the bark row. The pine cap uses seven foliage-covered branches extending from a single central attachment point. The following three caps are distinct radial broadleaf tufts.",
-  "processing": "Generated with built-in image_gen, including a pine geometry guide assembled from the original evergreen sprays. Removed pink locally, neutralized grayscale, and matched the existing brightness ramp. Lower three atlas rows copied exactly from v5.",
-  "caps": [
+  "generation": "Regenerated with built-in image_gen using detailed v6 as the edit reference.",
+  "appearance": "White base-material foliage with painted veins, planes, creases and overlap shading. Caps have detailed white foliage. Branch roots have a gray tint which fades toward detailed white tips. No left-to-right whole-tile darkening.",
+  "processing": "Pink background removed locally, foliage made strictly neutral grayscale, and output resized to 2048. No foreground contrast flattening or white-fill remapping applied.",
+  "nativeGeneratedSize": [
+    1254,
+    1254
+  ],
+  "tiles": [
     {
+      "row": 1,
       "column": 1,
-      "name": "pine-cap",
-      "meanOpaqueGray": 229.98,
-      "boundsWithinCell": [
-        43,
-        40,
-        469,
-        472
-      ],
-      "centerAlpha": 255
+      "opaqueGrayMean": 226.08,
+      "opaqueGrayStandardDeviation": 25.55,
+      "uniqueGrayValues": 127,
+      "rootMeanGray": null,
+      "tipMeanGray": null
     },
     {
+      "row": 1,
       "column": 2,
-      "name": "rounded-cap",
-      "meanOpaqueGray": 204.0,
-      "boundsWithinCell": [
-        51,
-        40,
-        460,
-        472
-      ],
-      "centerAlpha": 255
+      "opaqueGrayMean": 229.11,
+      "opaqueGrayStandardDeviation": 24.6,
+      "uniqueGrayValues": 155,
+      "rootMeanGray": null,
+      "tipMeanGray": null
     },
     {
+      "row": 1,
       "column": 3,
-      "name": "broadleaf-cap",
-      "meanOpaqueGray": 155.99,
-      "boundsWithinCell": [
-        50,
-        40,
-        462,
-        472
-      ],
-      "centerAlpha": 255
+      "opaqueGrayMean": 217.72,
+      "opaqueGrayStandardDeviation": 31.64,
+      "uniqueGrayValues": 184,
+      "rootMeanGray": null,
+      "tipMeanGray": null
     },
     {
+      "row": 1,
       "column": 4,
-      "name": "oak-cap",
-      "meanOpaqueGray": 136.0,
-      "boundsWithinCell": [
-        44,
-        40,
-        468,
-        472
-      ],
-      "centerAlpha": 255
+      "opaqueGrayMean": 217.25,
+      "opaqueGrayStandardDeviation": 29.45,
+      "uniqueGrayValues": 163,
+      "rootMeanGray": null,
+      "tipMeanGray": null
+    },
+    {
+      "row": 2,
+      "column": 1,
+      "opaqueGrayMean": 223.72,
+      "opaqueGrayStandardDeviation": 28.04,
+      "uniqueGrayValues": 185,
+      "rootMeanGray": 210.17,
+      "tipMeanGray": 249.38
+    },
+    {
+      "row": 2,
+      "column": 2,
+      "opaqueGrayMean": 219.72,
+      "opaqueGrayStandardDeviation": 27.41,
+      "uniqueGrayValues": 184,
+      "rootMeanGray": 204.17,
+      "tipMeanGray": 246.41
+    },
+    {
+      "row": 2,
+      "column": 3,
+      "opaqueGrayMean": 209.69,
+      "opaqueGrayStandardDeviation": 35.5,
+      "uniqueGrayValues": 183,
+      "rootMeanGray": 176.46,
+      "tipMeanGray": 247.51
+    },
+    {
+      "row": 2,
+      "column": 4,
+      "opaqueGrayMean": 204.76,
+      "opaqueGrayStandardDeviation": 32.89,
+      "uniqueGrayValues": 191,
+      "rootMeanGray": 177.7,
+      "tipMeanGray": 242.91
+    },
+    {
+      "row": 3,
+      "column": 1,
+      "opaqueGrayMean": 222.96,
+      "opaqueGrayStandardDeviation": 28.76,
+      "uniqueGrayValues": 188,
+      "rootMeanGray": 206.44,
+      "tipMeanGray": 246.21
+    },
+    {
+      "row": 3,
+      "column": 2,
+      "opaqueGrayMean": 218.47,
+      "opaqueGrayStandardDeviation": 28.56,
+      "uniqueGrayValues": 183,
+      "rootMeanGray": 219.56,
+      "tipMeanGray": 243.65
+    },
+    {
+      "row": 3,
+      "column": 3,
+      "opaqueGrayMean": 215.61,
+      "opaqueGrayStandardDeviation": 34.58,
+      "uniqueGrayValues": 197,
+      "rootMeanGray": 191.36,
+      "tipMeanGray": 245.59
+    },
+    {
+      "row": 3,
+      "column": 4,
+      "opaqueGrayMean": 208.52,
+      "opaqueGrayStandardDeviation": 32.69,
+      "uniqueGrayValues": 204,
+      "rootMeanGray": 179.11,
+      "tipMeanGray": 244.92
+    },
+    {
+      "row": 4,
+      "column": 1,
+      "opaqueGrayMean": 221.43,
+      "opaqueGrayStandardDeviation": 33.33,
+      "uniqueGrayValues": 173,
+      "rootMeanGray": 179.91,
+      "tipMeanGray": 248.16
+    },
+    {
+      "row": 4,
+      "column": 2,
+      "opaqueGrayMean": 217.75,
+      "opaqueGrayStandardDeviation": 34.47,
+      "uniqueGrayValues": 181,
+      "rootMeanGray": 186.45,
+      "tipMeanGray": 249.34
+    },
+    {
+      "row": 4,
+      "column": 3,
+      "opaqueGrayMean": 210.81,
+      "opaqueGrayStandardDeviation": 35.31,
+      "uniqueGrayValues": 172,
+      "rootMeanGray": 172.54,
+      "tipMeanGray": 245.74
+    },
+    {
+      "row": 4,
+      "column": 4,
+      "opaqueGrayMean": 207.06,
+      "opaqueGrayStandardDeviation": 34.32,
+      "uniqueGrayValues": 182,
+      "rootMeanGray": 167.58,
+      "tipMeanGray": 239.64
     }
   ]
 }
