@@ -14,8 +14,8 @@ const
   RedFortLayer* = 1
   BlueFortLayer* = 2
   WaterLayer* = 3
-  RedFortKind* = 6'u32
-  BlueFortKind* = 7'u32
+  RedFortKind* = ArenaWallKinds[0]
+  BlueFortKind* = ArenaWallKinds[1]
 
 type MapData* = object
   seed*: int32

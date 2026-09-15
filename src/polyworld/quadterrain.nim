@@ -7,7 +7,7 @@
 ## (prop models load from ../polyworld_data/terrain/).
 
 import
-  std/[random, strformat, strutils, tables],
+  std/[os, random, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, pixie/internal, shady, vmath,
   assets, common, pathing, shadows, terrainblends, terrainmaps, terrainreliefs,
   terrainsurfaces, textures, toon
@@ -1043,7 +1043,8 @@ proc atlasLayer(images: var seq[Image], image: Image): float32 =
 
 proc collectPropModels(
     node: gltf.Node, parent: Mat4, models: var seq[PropModel],
-    skipPrefix = "", only: seq[string] = @[], images: ptr seq[Image] = nil
+    skipPrefix = "", only: seq[string] = @[], images: ptr seq[Image] = nil,
+    centerModels = true
 ) =
   ## Flattens renderable glTF nodes into normalized colored triangle models.
   ## With `only` given, nodes not named in it are skipped. With `images`
@@ -1135,7 +1136,11 @@ proc collectPropModels(
           facet = vec3(0, 1, 0)
         for i in t .. t + 2:
           let
-            point = points[i] - vec3(center.x, low.y, center.z)
+            point =
+              if centerModels:
+                points[i] - vec3(center.x, low.y, center.z)
+              else:
+                points[i]
             normal =
               if sourceNormals[i].length > 0.5: sourceNormals[i]
               else: facet
@@ -1153,7 +1158,31 @@ proc collectPropModels(
           model.uvs.add uvs[i].z
       models.add model
   for child in node.nodes:
-    collectPropModels(child, world, models, skipPrefix, only, images)
+    collectPropModels(
+      child, world, models, skipPrefix, only, images, centerModels)
+
+proc mergePropModels(models: seq[PropModel], name: string): PropModel =
+  ## Centers a complete asset once, preserving offsets between its meshes.
+  result = PropModel(name: name)
+  var
+    low = vec3(float32.high)
+    high = vec3(float32.low)
+  for model in models:
+    result.vertices.add model.vertices
+    result.uvs.add model.uvs
+    for i in countup(0, model.vertices.len - 9, 9):
+      let point = vec3(
+        model.vertices[i], model.vertices[i + 1], model.vertices[i + 2])
+      low = min(low, point)
+      high = max(high, point)
+  if result.vertices.len == 0:
+    raise newException(QuadTerrainError, "No prop meshes in asset: " & name)
+  let center = vec3((low.x + high.x) / 2, low.y, (low.z + high.z) / 2)
+  result.height = max(high.y - low.y, 0.001'f)
+  for i in countup(0, result.vertices.len - 9, 9):
+    result.vertices[i] -= center.x
+    result.vertices[i + 1] -= center.y
+    result.vertices[i + 2] -= center.z
 
 proc scalePack(models: var seq[PropModel], targetTallest: float32) =
   ## Scales a whole pack by one factor (tallest model becomes targetTallest
@@ -1371,19 +1400,24 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
 proc loadPropPack*(
     paths: openArray[string], unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false,
-    textureSize = 0
+    textureSize = 0, mergeNodes = false
 ): PropPack =
   ## Loads named glTF props, scaled to unit height unless disabled.
-  ## Brightness adjusts baked colors; textured keeps material images.
-  ## RepeatTexture tiles those images beyond their UV edges.
-  ## TextureSize optionally caps the square atlas resolution. Textured packs
-  ## require a current GL context.
+  ## MergeNodes joins each file into one prop named after its file stem.
+  ## Textured keeps material images and requires a current GL context.
+  ## TextureSize caps atlas resolution; repeatTexture allows tiled UVs.
   result = PropPack()
   var images: seq[Image]
   for path in paths:
+    var models: seq[PropModel]
     collectPropModels(
-      readGltfFile(path).root, mat4(), result.models, only = only,
-      images = if textured: images.addr else: nil)
+      readGltfFile(path).root, mat4(), models, only = only,
+      images = if textured: images.addr else: nil,
+      centerModels = not mergeNodes)
+    if mergeNodes:
+      result.models.add mergePropModels(models, path.splitFile.name)
+    else:
+      result.models.add models
   if textured and images.len > 0:
     var size = 1
     for image in images:
@@ -1414,15 +1448,31 @@ proc loadPropPack*(
 proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false,
-    textureSize = 0
+    textureSize = 0, mergeNodes = false
 ): PropPack =
   ## Loads an original single-file prop pack through the shared collector.
   loadPropPack(
-    @[path], unitHeight, brightness, only, textured, repeatTexture, textureSize)
+    @[path], unitHeight, brightness, only, textured, repeatTexture,
+    textureSize, mergeNodes)
 
 proc hasProp*(pack: PropPack, name: string): bool =
   ## Returns whether a pack contains a model with the requested node name.
   pack != nil and name in pack.names
+
+proc propSize*(pack: PropPack, name: string): Vec3 =
+  ## Measures one loaded prop after normalization, before placement scaling.
+  if not pack.hasProp(name):
+    raise newException(QuadTerrainError, "Unknown prop model: " & name)
+  let model = pack.models[pack.names[name]]
+  var
+    low = vec3(float32.high)
+    high = vec3(float32.low)
+  for i in countup(0, model.vertices.len - 9, 9):
+    let point = vec3(
+      model.vertices[i], model.vertices[i + 1], model.vertices[i + 2])
+    low = min(low, point)
+    high = max(high, point)
+  high - low
 
 proc pickProp*(
     pack: PropPack,
