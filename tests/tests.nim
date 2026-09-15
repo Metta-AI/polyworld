@@ -26,6 +26,7 @@ import
   test_gota_cast,
   test_gota_content,
   test_gota_host,
+  test_gota_human,
   test_gota_landscapes,
   test_gota_lanes,
   test_gota_mapgen,
