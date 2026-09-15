@@ -1,34 +1,29 @@
 import
-  std/[math, sequtils],
+  std/sequtils,
   polyworld/pathing,
   ../examples/gods_of_the_arena/[content, maps, replays, sim]
 
-echo "Testing lane segments clear tower collision footprints"
+echo "Testing tower tiles block terrain paths across map sizes"
 for size in [64, 96, 100, 116, 128, 192, 256]:
   var preset = defaultConfig()
   preset.mapSize = size
   let game = newGame(generateMap(2026, preset), 240, 0, false, ReplayData())
+  for tower in game.world.towers:
+    let
+      x = int(mapCoordinate(tower.position.x))
+      z = int(mapCoordinate(tower.position.z))
+    doAssert layers[GroundLayer].tiles[z * size + x].impassable
+    doAssert not isWalkable(GroundLayer, x, z)
   for lane in 0 .. 2:
-    let route = lanePathPoints[lane]
-    for i in 1 ..< route.len:
-      let
-        a = route[i - 1]
-        b = route[i]
-        ax = a.x.float64 / PathUnitsPerTile.float64
-        az = a.z.float64 / PathUnitsPerTile.float64
-        dx = (b.x - a.x).float64 / PathUnitsPerTile.float64
-        dz = (b.z - a.z).float64 / PathUnitsPerTile.float64
-      for tower in game.world.towers:
-        let
-          tx = tower.position.x.float64 / WorldScale.float64
-          tz = tower.position.z.float64 / WorldScale.float64
-          t = clamp(((tx - ax) * dx + (tz - az) * dz) /
-            (dx * dx + dz * dz), 0.0, 1.0)
-          distance = hypot(ax + t * dx - tx, az + t * dz - tz)
-          clearance = 0.22 + [0.42, 0.55, 0.70][tower.tier.ord]
-        doAssert distance >= clearance,
-          "lane " & $lane & " segment " & $i & " crosses tower " &
-          $tower.id & " at distance " & $distance
+    var previous: PathTile
+    for i, point in lanePathPoints[lane]:
+      let tile = PathTile(layer: GroundLayer,
+        x: (point.x + int32(size div 2) * PathUnitsPerTile) div PathUnitsPerTile,
+        z: (point.z + int32(size div 2) * PathUnitsPerTile) div PathUnitsPerTile)
+      doAssert isWalkable(int(tile.layer), int(tile.x), int(tile.z))
+      if i > 0:
+        doAssert lineClear(previous, tile)
+      previous = tile
 
 echo "Testing both teams march past their towers in every lane"
 for team in Team:

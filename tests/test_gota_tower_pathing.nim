@@ -2,8 +2,8 @@ import
   polyworld/[bodies, fixed, pathing],
   ../examples/gods_of_the_arena/[content, maps, replays, sim]
 
-proc fixture(towerIndex = 0): Game =
-  ## Isolates movement around a real outer tower on the default map.
+proc fixture(towerIndex: int): Game =
+  ## Isolates movement around one real tower on the default map.
   result = newGame(generateMap(2026), 100_000, 10, false, ReplayData())
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
@@ -25,6 +25,13 @@ proc fixture(towerIndex = 0): Game =
   start.x -= 2 * WorldScale
   hero.place(start)
 
+proc finishWalk(game: Game) =
+  ## Gives a walk command twenty seconds to complete.
+  for tick in 0 ..< TickRate * 20:
+    game.tickWorld(nil)
+    if not game.world.heroes[0].hasMoveTarget:
+      break
+
 echo "Testing a hero walk command into a living tower finishes beside it"
 for towerIndex in 0 ..< 18:
   let
@@ -33,10 +40,7 @@ for towerIndex in 0 ..< 18:
     tower = game.world.towers[towerIndex]
   doAssert game.world.applyWalkTo(hero.id,
     mapCoordinate(tower.position.x), mapCoordinate(tower.position.z))
-  for tick in 0 ..< TickRate * 20:
-    game.tickWorld(nil)
-    if not hero.hasMoveTarget:
-      break
+  game.finishWalk()
   doAssert not hero.hasMoveTarget,
     "hero stuck walking into tower " & $towerIndex
 
@@ -54,10 +58,7 @@ for towerIndex in 0 ..< 18:
   doAssert game.world.applyWalkTo(hero.id,
     mapCoordinate(finish.x), mapCoordinate(finish.z))
   let goal = hero.movePath[^1]
-  for tick in 0 ..< TickRate * 20:
-    game.tickWorld(nil)
-    if not hero.hasMoveTarget:
-      break
+  game.finishWalk()
   doAssert not hero.hasMoveTarget and within(hero.position, goal, 21_000),
     "hero failed to pass tower " & $towerIndex
 
@@ -127,10 +128,7 @@ for towerIndex in 0 ..< 18:
     if within(game.world.footmen[0].position, finish, FootmanMeleeRange):
       break
   doAssert within(game.world.footmen[0].position, finish, FootmanMeleeRange),
-    "creep stuck chasing through friendly tower " & $towerIndex &
-      " pos " & $game.world.footmen[0].position & " target " & $finish &
-      " state " & $game.world.footmen[0].state & " targetId " &
-      $game.world.footmen[0].targetHeroId
+    "creep stuck chasing through friendly tower " & $towerIndex
 
 echo "Testing creeps rejoin a lane from the opposite side of a tower"
 var rejoinCases = 0
@@ -186,20 +184,34 @@ for towerIndex in 0 ..< 18:
     "creep failed to rejoin its lane around tower " & $towerIndex
 doAssert rejoinCases >= 6
 
-echo "Testing destroyed towers release hero destinations"
+echo "Testing destroyed towers release their tiles and rewind restores them"
 block:
   let
     game = fixture(2)
     hero = game.world.heroes[0]
     tower = game.world.towers[2]
-  game.world.towers[2].hp = 0
+    snapshot = game.world.clone()
+  game.world.towers[2].hp = 1
+  hero.team = BlueTeam
+  doAssert game.world.applyAttackTarget(hero.id, tower.id)
+  for tick in 0 ..< TickRate * 20:
+    game.tickWorld(nil)
+    if game.world.towers[2].hp <= 0:
+      break
+  doAssert game.world.towers[2].hp <= 0
+  doAssert isWalkable(GroundLayer, int(mapCoordinate(tower.position.x)),
+    int(mapCoordinate(tower.position.z)))
   doAssert game.world.applyWalkTo(hero.id,
     mapCoordinate(tower.position.x), mapCoordinate(tower.position.z))
   let goal = hero.movePath[^1]
+  doAssert isWalkable(GroundLayer, int(mapCoordinate(tower.position.x)),
+    int(mapCoordinate(tower.position.z)))
   doAssert mapCoordinate(goal.x) == mapCoordinate(tower.position.x)
   doAssert mapCoordinate(goal.z) == mapCoordinate(tower.position.z)
-  for tick in 0 ..< TickRate * 20:
-    game.tickWorld(nil)
-    if not hero.hasMoveTarget:
-      break
+  game.finishWalk()
   doAssert not hero.hasMoveTarget and within(hero.position, goal, 21_000)
+  game.world.restore(snapshot)
+  doAssert not isWalkable(GroundLayer, int(mapCoordinate(tower.position.x)),
+    int(mapCoordinate(tower.position.z)))
+  doAssert generateMap(2026).hash == game.map.hash,
+    "tower destruction changed the cached map terrain"

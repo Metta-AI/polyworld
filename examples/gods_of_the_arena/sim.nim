@@ -318,6 +318,22 @@ proc fixedSurfaceHeightNear(
     referenceY: int32
 ): int32
 
+proc updateTowerTiles(world: World) =
+  ## Makes living towers blocked terrain and clears destroyed tower tiles.
+  var changed = false
+  let ground = layers[GroundLayer]
+  for tower in world.towers:
+    let
+      x = floorWorldTile(tower.position.x) + GridTiles div 2 - ground.originX
+      z = floorWorldTile(tower.position.z) + GridTiles div 2 - ground.originZ
+      index = z * ground.width + x
+      blocked = tower.hp > 0
+    if ground.tiles[index].impassable != blocked:
+      ground.tiles[index].impassable = blocked
+      changed = true
+  if changed:
+    computeWalkable()
+
 proc initTowers(world: World, map: MapData) =
   ## Creates towers at the courts selected by this map's layout.
   for lane in 0 .. 2:
@@ -349,7 +365,6 @@ const
   FootmanMovePerTick* = 5_500'i32
   FootmanBodyRadius = 0.22'fx
   HeroBodyRadius = 0.28'fx
-  TowerBodyRadii: array[TowerTier, Fixed] = [0.42'fx, 0.55'fx, 0.70'fx]
   BodyTurnRate = 0.35'fx
   FootmanSightRadius* = 5 * WorldScale
   FootmanTowerSightRadius = 7 * WorldScale
@@ -414,6 +429,7 @@ proc restore*(w: World, snapshot: World) =
   w[] = snapshot[]
   w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
+  w.updateTowerTiles()
 
 proc buildSightTerrain(): tuple[
     terrainHeights,
@@ -938,12 +954,7 @@ proc snapFacing(body: var Body, facing: var Heading, offset: WorldPoint) =
     tilesToWorld(dir.y, WorldScale)
   )
 
-proc towerDetour(
-    world: World, position, direction: WorldPoint, layer: int32, radius: Fixed
-): WorldPoint
-
 proc tryMove(
-    world: World,
     footman: var Footman,
     direction: WorldPoint,
     destLayer = -1'i32
@@ -953,10 +964,27 @@ proc tryMove(
   gotaWalkOrigin = footman.body.pos
   gotaWalkDestLayer =
     if destLayer < 0: gotaWalkLayer else: int(destLayer)
+  var offset = direction
+  var first, last: NavTile
+  if navTileAt(footman.position, first) and
+      navTileAt(footman.position + direction, last):
+    let
+      a = PathTile(layer: int32(first.layer), x: int32(first.x), z: int32(first.z))
+      b = PathTile(layer: int32(last.layer), x: int32(last.x), z: int32(last.z))
+    if not lineClear(a, b):
+      # Chases and lane rejoins use the same terrain paths as lane marching.
+      let route = findTilePath(
+        first.layer, first.x, first.z, last.layer, last.x, last.z
+      )
+      if route.len < 2:
+        return
+      let step = route[1]
+      offset = worldPoint(pathPoint(int(step.layer), int(step.x), int(step.z))) -
+        footman.position
+      gotaWalkDestLayer = int(step.layer)
   steer(
     footman.body,
-    toPlanar(towerDetour(world, footman.position, direction,
-      footman.navLayer, FootmanBodyRadius)),
+    toPlanar(offset),
     worldToTiles(FootmanMovePerTick, WorldScale),
     BodyTurnRate,
     tilesWalkable
@@ -966,7 +994,7 @@ proc tryMove(
   settleOnLayer(footman.position, footman.navLayer)
   footman.surfaceHint = footman.position.y
 
-proc tryMove(world: World, hero: Hero, direction: WorldPoint, destLayer = -1'i32) =
+proc tryMove(hero: Hero, direction: WorldPoint, destLayer = -1'i32) =
   ## Turns and walks a hero at its level-scaled tile-space speed.
   gotaWalkLayer = int(hero.navLayer)
   gotaWalkOrigin = hero.body.pos
@@ -974,8 +1002,7 @@ proc tryMove(world: World, hero: Hero, direction: WorldPoint, destLayer = -1'i32
     if destLayer < 0: gotaWalkLayer else: int(destLayer)
   steer(
     hero.body,
-    toPlanar(towerDetour(world, hero.position, direction,
-      hero.navLayer, HeroBodyRadius)),
+    toPlanar(direction),
     worldToTiles(hero.heroMoveSpeed, WorldScale),
     BodyTurnRate,
     tilesWalkable
@@ -1375,92 +1402,11 @@ proc navTileAt(position: WorldPoint, value: var NavTile): bool =
       bestHeight = height
       result = true
 
-type TowerObstacle = object
-  position: WorldPoint
-  layer: int32
-  radius: int32
-
-var towerObstacles: seq[TowerObstacle]
-
-proc prepareTowerNavigation(
-    world: World, radius: Fixed,
-    first = WorldPoint(), last = WorldPoint(), bounded = false
-) =
-  ## Builds query scratch from living towers, including this mover's radius.
-  towerObstacles.setLen(0)
-  for tower in world.towers:
-    if tower.hp > 0:
-      let clearance = tilesToWorld(
-        TowerBodyRadii[tower.tier] + radius, WorldScale
-      )
-      if bounded and (
-          tower.position.x + clearance < min(first.x, last.x) or
-          tower.position.x - clearance > max(first.x, last.x) or
-          tower.position.z + clearance < min(first.z, last.z) or
-          tower.position.z - clearance > max(first.z, last.z)):
-        continue
-      towerObstacles.add TowerObstacle(
-        position: tower.position,
-        layer: bindNavLayer(tower.position),
-        radius: clearance
-      )
-
-proc towerTileOpen(layer, x, z: int): bool =
-  ## Reserves whole tiles so path edges and early turns also clear towers.
-  if not isWalkable(layer, x, z):
-    return false
-  let center = worldPoint(pathPoint(layer, x, z))
-  for obstacle in towerObstacles:
-    if obstacle.layer != layer:
-      continue
-    let
-      dx = max(0'i64,
-        abs(int64(center.x) - obstacle.position.x) - WorldScale div 2)
-      dz = max(0'i64,
-        abs(int64(center.z) - obstacle.position.z) - WorldScale div 2)
-    if dx * dx + dz * dz <= int64(obstacle.radius) * obstacle.radius:
-      return false
-  true
-
-proc towerSegmentClear(
-    first, last: WorldPoint, layer: int32, approachTower = false
-): bool =
-  ## Tests the actual segment, including starts displaced from tile centers.
-  if towerObstacles.len == 0:
-    return true
-  let
-    dx = int64(last.x) - first.x
-    dz = int64(last.z) - first.z
-    distance = integerSqrt(dx * dx + dz * dz)
-  for obstacle in towerObstacles:
-    if obstacle.layer != layer:
-      continue
-    let
-      ox = int64(obstacle.position.x) - first.x
-      oz = int64(obstacle.position.z) - first.z
-      radiusSquared = int64(obstacle.radius) * obstacle.radius
-      projection = ox * dx + oz * dz
-    if approachTower and within(last, obstacle.position, obstacle.radius):
-      # Attacking a tower must still close to siege range at its boundary.
-      continue
-    if ox * ox + oz * oz < radiusSquared and projection <= 0:
-      # Separation or a teleport can start a body inside the footprint.
-      continue
-    let
-      along = if distance == 0: 0'i64
-        else: clamp(projection div distance, 0'i64, distance)
-      nearX = if distance == 0: ox else: ox - dx * along div distance
-      nearZ = if distance == 0: oz else: oz - dz * along div distance
-    if nearX * nearX + nearZ * nearZ <= radiusSquared:
-      return false
-  true
-
 proc nearestNavTile(
     mapX,
     mapY: int,
     referenceY: int32,
-    value: var NavTile,
-    avoidTowers = false
+    value: var NavTile
 ): bool =
   ## Finds the closest walkable tile to a script map coordinate.
   var bestScore = int64.high
@@ -1480,8 +1426,6 @@ proc nearestNavTile(
           z = worldZ + mapOrigin() - layer.originZ
         if not isWalkable(layerIndex, x, z):
           continue
-        if avoidTowers and not towerTileOpen(layerIndex, x, z):
-          continue
         let
           centerY = worldPoint(pathPoint(layerIndex, x, z)).y
           planar = int64(dx * dx + dz * dz)
@@ -1492,91 +1436,7 @@ proc nearestNavTile(
           bestScore = score
           result = true
 
-proc clearNavigationStart(position: WorldPoint, value: var NavTile): bool =
-  ## Escapes partially occupied cells without aiming at a blocked tile center.
-  if not navTileAt(position, value):
-    return false
-  if towerTileOpen(value.layer, value.x, value.z):
-    return true
-  let
-    origin = value
-    start = PathTile(layer: int32(origin.layer),
-      x: int32(origin.x), z: int32(origin.z))
-  var best = int64.high
-  for z in origin.z - 3 .. origin.z + 3:
-    for x in origin.x - 3 .. origin.x + 3:
-      if not towerTileOpen(origin.layer, x, z):
-        continue
-      let
-        point = worldPoint(pathPoint(origin.layer, x, z))
-        distance = distanceSquared(position, point)
-        tile = PathTile(layer: int32(origin.layer), x: int32(x), z: int32(z))
-      if distance < best and lineClear(start, tile) and
-          towerSegmentClear(position, point, int32(origin.layer)):
-        best = distance
-        value = NavTile(layer: origin.layer, x: x, z: z)
-  best != int64.high
-
-proc towerDetour(
-    world: World, position, direction: WorldPoint, layer: int32, radius: Fixed
-): WorldPoint =
-  ## Routes a blocked chase or lane rejoin around living tower footprints.
-  let finish = position + direction
-  prepareTowerNavigation(world, radius, position, finish, bounded = true)
-  if towerSegmentClear(position, finish, layer, approachTower = true):
-    return direction
-  prepareTowerNavigation(world, radius)
-  var startTile, finishTile: NavTile
-  if not clearNavigationStart(position, startTile) or not nearestNavTile(
-      int(mapCoordinate(finish.x)), int(mapCoordinate(finish.z)),
-      finish.y, finishTile, avoidTowers = true):
-    return
-  let route = findTilePath(PathQuery(
-    startLayer: startTile.layer, startX: startTile.x, startZ: startTile.z,
-    finishLayer: finishTile.layer, finishX: finishTile.x, finishZ: finishTile.z,
-    walkable: towerTileOpen
-  )).tiles
-  var origin: NavTile
-  discard navTileAt(position, origin)
-  let start = PathTile(layer: int32(origin.layer),
-    x: int32(origin.x), z: int32(origin.z))
-  for i in countdown(route.high, 0):
-    let
-      tile = route[i]
-      point = worldPoint(pathPoint(int(tile.layer), int(tile.x), int(tile.z)))
-    if tile.layer == layer and not within(position, point, 5_000) and
-        lineClear(start, tile) and towerSegmentClear(position, point, layer):
-      return point - position
-
-proc smoothTowerPath(tiles: seq[PathTile]): seq[PathTile] =
-  ## Keeps A* detours when terrain-only string pulling would cross a tower.
-  result = smoothPathTiles(tiles)
-  for i in 1 ..< result.len:
-    let
-      a = result[i - 1]
-      b = result[i]
-    if a.layer == b.layer and not towerSegmentClear(
-        worldPoint(pathPoint(int(a.layer), int(a.x), int(a.z))),
-        worldPoint(pathPoint(int(b.layer), int(b.x), int(b.z))), a.layer):
-      return tiles
-
-proc clearApproach(world: World, hero: Hero, target: WorldPoint): bool =
-  ## Allows the final exact-position approach after routing around obstacles.
-  prepareTowerNavigation(world, HeroBodyRadius, hero.position, target,
-    bounded = true)
-  if not towerSegmentClear(hero.position, target, hero.navLayer,
-      approachTower = true):
-    return false
-  var first, last: NavTile
-  if not navTileAt(hero.position, first) or not navTileAt(target, last):
-    return false
-  lineClear(
-    PathTile(layer: int32(first.layer), x: int32(first.x), z: int32(first.z)),
-    PathTile(layer: int32(last.layer), x: int32(last.x), z: int32(last.z))
-  )
-
 proc setHeroDestination(
-    world: World,
     hero: Hero,
     mapX,
     mapY: int,
@@ -1587,14 +1447,16 @@ proc setHeroDestination(
     targetX = clamp(mapX, 0, mapTiles() - 1)
     targetY = clamp(mapY, 0, mapTiles() - 1)
   if hero.hasMoveTarget and hero.moveTileX == targetX and
-      hero.moveTileY == targetY and hero.movePathIndex < hero.movePath.len:
+      hero.moveTileY == targetY and hero.movePathIndex < hero.movePath.len and
+      (not isWalkable(GroundLayer, targetX, targetY) or
+        (int(mapCoordinate(hero.movePath[^1].x)) == targetX and
+         int(mapCoordinate(hero.movePath[^1].z)) == targetY)):
     return true
   var
     startTile: NavTile
     finishTile: NavTile
-  prepareTowerNavigation(world, HeroBodyRadius)
-  if not clearNavigationStart(hero.position, startTile) or
-      not nearestNavTile(targetX, targetY, referenceY, finishTile, avoidTowers = true):
+  if not navTileAt(hero.position, startTile) or
+      not nearestNavTile(targetX, targetY, referenceY, finishTile):
     return false
   discard fillTilePath(PathQuery(
     startLayer: startTile.layer,
@@ -1602,12 +1464,11 @@ proc setHeroDestination(
     startZ: startTile.z,
     finishLayer: finishTile.layer,
     finishX: finishTile.x,
-    finishZ: finishTile.z,
-    walkable: towerTileOpen
+    finishZ: finishTile.z
   ), heroPathTiles)
   if heroPathTiles.len == 0:
     return false
-  let pulled = smoothTowerPath(heroPathTiles)
+  let pulled = smoothPathTiles(heroPathTiles)
   hero.movePath.setLen(pulled.len)
   hero.movePathLayers.setLen(pulled.len)
   for i, tile in pulled:
@@ -1618,9 +1479,6 @@ proc setHeroDestination(
     ))
     hero.movePathLayers[i] = tile.layer
   hero.movePathIndex = 0
-  if hero.movePath.len > 1 and not towerSegmentClear(
-      hero.position, hero.movePath[0], hero.navLayer):
-    hero.movePathIndex = 1
   hero.moveTileX = targetX
   hero.moveTileY = targetY
   hero.hasMoveTarget = true
@@ -1633,7 +1491,7 @@ proc stopHeroPath(hero: Hero) =
   hero.movePathLayers.setLen(0)
   hero.movePathIndex = 0
 
-proc followHeroPath(world: World, hero: Hero): bool =
+proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
   while hero.movePathIndex < hero.movePath.len:
     let waypoint = hero.movePath[hero.movePathIndex]
@@ -1647,7 +1505,7 @@ proc followHeroPath(world: World, hero: Hero): bool =
           hero.movePathLayers[hero.movePathIndex]
         else:
           hero.navLayer
-      world.tryMove(hero, offset, destLayer)
+      hero.tryMove(offset, destLayer)
       return true
     inc hero.movePathIndex
   hero.hasMoveTarget = false
@@ -1658,6 +1516,7 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
+  world.updateTowerTiles()
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = false
   world.heroes[index].targetFootmanId = 0
@@ -1665,7 +1524,7 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
   world.heroes[index].targetTowerId = 0
   world.heroes[index].attackingFort = false
   setHeroDestination(
-    world, world.heroes[index],
+    world.heroes[index],
     int(mapX),
     int(mapY),
     world.heroes[index].position.y
@@ -1676,6 +1535,7 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
+  world.updateTowerTiles()
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = true
   world.heroes[index].targetFootmanId = 0
@@ -1683,7 +1543,7 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
   world.heroes[index].targetTowerId = 0
   world.heroes[index].attackingFort = false
   setHeroDestination(
-    world, world.heroes[index],
+    world.heroes[index],
     int(mapX),
     int(mapY),
     world.heroes[index].position.y
@@ -2006,7 +1866,7 @@ proc updateFootman(world: World, footman: var Footman) =
       footman.swingTicks = -1
       footman.animClip = runClip
       inc footman.animTicks
-      world.tryMove(footman, offset)
+      footman.tryMove(offset)
     else:
       snapFacing(footman.body, footman.facing, offset)
       if footman.swingTicks < 0:
@@ -2051,10 +1911,10 @@ proc updateFootman(world: World, footman: var Footman) =
     if within(footman.position, waypoint, 21_000):
       inc footman.waypointIndex
     else:
-      world.tryMove(footman, offset, footman.currentWaypointLayer)
+      footman.tryMove(offset, footman.currentWaypointLayer)
   else:
     let fort = world.forts[enemyFort(footman.team)]
-    world.tryMove(footman, fort.center - footman.position)
+    footman.tryMove(fort.center - footman.position)
 
 proc respawn(hero: Hero) =
   ## Restores a fallen hero at its original barracks spawn.
@@ -2897,12 +2757,13 @@ proc updateHero(world: World, hero: Hero) =
       let
         targetX = int(mapCoordinate(targetPosition.x))
         targetY = int(mapCoordinate(targetPosition.z))
-      discard world.setHeroDestination(
-        hero, targetX, targetY, targetPosition.y
+      discard hero.setHeroDestination(
+        targetX,
+        targetY,
+        targetPosition.y
       )
-      if world.clearApproach(hero, targetPosition) or
-          not world.followHeroPath(hero):
-        world.tryMove(hero, offset)
+      if not hero.followHeroPath():
+        hero.tryMove(offset)
     else:
       snapFacing(hero.body, hero.facing, offset)
       if hero.swingTicks < 0:
@@ -2930,7 +2791,7 @@ proc updateHero(world: World, hero: Hero) =
       hero.animTicks = max(hero.swingTicks, 0)
     return
 
-  let moving = world.followHeroPath(hero)
+  let moving = hero.followHeroPath()
   hero.state = Marching
   hero.swingTicks = -1
   hero.animClip = if moving: heroRunClip else: heroIdleClip
@@ -2946,26 +2807,6 @@ proc separateBodies(first, second: var Body, layer: int32) =
   if not tilesWalkable(second.pos):
     return
   separatePair(first, second, tilesWalkable)
-
-proc separateTowerBody(body: var Body, tower: Tower, layer: int32) =
-  ## Pushes a mobile unit out of a living tower footprint.
-  if tower.hp <= 0:
-    return
-  if bindNavLayer(tower.position) != layer:
-    return
-  let
-    towerPos = toPlanar(tower.position)
-    offset = body.pos - towerPos
-    distance = length(offset)
-    needed = body.radius + TowerBodyRadii[tower.tier]
-  if distance == FixedZero or distance >= needed:
-    return
-  let oldPosition = body.pos
-  body.pos += normalize(offset) * (needed - distance)
-  gotaWalkLayer = int(layer)
-  gotaWalkDestLayer = gotaWalkLayer
-  gotaWalkOrigin = oldPosition
-  clampWalkable(body.pos, oldPosition, tilesWalkable)
 
 proc addHashy(hash: var uint32, value: WorldPoint) =
   ## Mixes one authoritative integer world position.
@@ -3127,6 +2968,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   if game.replayMode and
       world.tick >= game.replayData.hashes.len:
     return
+  world.updateTowerTiles()
 
   dec world.spawnTimerTicks
   if world.spawnTimerTicks <= 0:
@@ -3216,19 +3058,6 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           world.heroes[i].navLayer
         )
 
-    # Resolve tower footprints last so unit separation cannot push a hero or
-    # creep back through a tower after it has been cleared.
-    for footman in world.footmen.mitems:
-      if footman.state == Dying:
-        continue
-      for tower in world.towers:
-        separateTowerBody(footman.body, tower, footman.navLayer)
-    for hero in world.heroes.mitems:
-      if hero.state == Dying:
-        continue
-      for tower in world.towers:
-        separateTowerBody(hero.body, tower, hero.navLayer)
-
   profileBlock "applyBody":
     for footman in world.footmen.mitems:
       let before = footman.position
@@ -3262,6 +3091,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           if hero.team == world.winner: heroIdleClip else: heroDeathClip
         hero.animTicks = 0
 
+  world.updateTowerTiles()
   let hash = stateHash(game)
   if game.historyPlayback:
     checkReplayHash(game, hash)
@@ -3272,22 +3102,16 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     except ReplayError as error:
       game.recordingError = error.msg
 
-var laneWalkable: seq[seq[bool]]
-
-proc laneTileOpen(layer, x, z: int): bool =
-  ## Applies tower clearance only to lane planning, leaving terrain unchanged.
-  isWalkable(layer, x, z) and laneWalkable[layer][z * layers[layer].width + x]
-
 proc laneStop(stop: ArenaStop): ArenaStop =
   ## Moves a control point inside a tower to the nearest clear terrain tile.
-  if laneTileOpen(stop.layer, stop.x, stop.z):
+  if isWalkable(stop.layer, stop.x, stop.z):
     return stop
   result = stop
   var best = int64.high
   let layer = layers[stop.layer]
   for z in 0 ..< layer.depth:
     for x in 0 ..< layer.width:
-      if not laneTileOpen(stop.layer, x, z):
+      if not isWalkable(stop.layer, x, z):
         continue
       let distance = int64(x - stop.x) * int64(x - stop.x) +
         int64(z - stop.z) * int64(z - stop.z)
@@ -3296,33 +3120,8 @@ proc laneStop(stop: ArenaStop): ArenaStop =
         result = (stop.layer, x, z)
   doAssert best != int64.high, "lane control point has no clear terrain"
 
-proc initLanePaths(map: MapData, world: World) =
+proc initLanePaths(map: MapData) =
   ## Builds shared lane polylines on the generated map.
-  laneWalkable = newSeq[seq[bool]](layers.len)
-  for layerIndex, layer in layers:
-    laneWalkable[layerIndex] = newSeq[bool](layer.width * layer.depth)
-    for open in laneWalkable[layerIndex].mitems:
-      open = true
-  for tower in world.towers:
-    let
-      layerIndex = int(bindNavLayer(tower.position))
-      layer = layers[layerIndex]
-      radius = tilesToWorld(
-        TowerBodyRadii[tower.tier] + FootmanBodyRadius, WorldScale
-      )
-    # Exclude every tile touched by the expanded footprint. This keeps
-    # connecting segments and early turns between waypoints clear too.
-    for z in 0 ..< layer.depth:
-      for x in 0 ..< layer.width:
-        let
-          center = worldPoint(pathPoint(layerIndex, x, z))
-          dx = max(0'i64,
-            abs(int64(center.x) - tower.position.x) - WorldScale div 2)
-          dz = max(0'i64,
-            abs(int64(center.z) - tower.position.z) - WorldScale div 2)
-        if dx * dx + dz * dz <= int64(radius) * radius:
-          laneWalkable[layerIndex][z * layer.width + x] = false
-  defer: laneWalkable.setLen(0)
   for lane in 0 .. 2:
     let route = map.layout.lanes[lane]
     lanePathPoints[lane].setLen(0)
@@ -3331,11 +3130,7 @@ proc initLanePaths(map: MapData, world: World) =
       let
         a = laneStop(route[i])
         b = laneStop(route[i + 1])
-        segment = findTilePath(PathQuery(
-          startLayer: a.layer, startX: a.x, startZ: a.z,
-          finishLayer: b.layer, finishX: b.x, finishZ: b.z,
-          walkable: laneTileOpen
-        )).tiles
+        segment = findTilePath(a.layer, a.x, a.z, b.layer, b.x, b.z)
       doAssert segment.len > 0,
         &"lane {lane} seed {map.seed}: no path {a} -> {b}; " &
         &"walkable {isWalkable(a.layer, a.x, a.z)} -> " &
@@ -3384,7 +3179,15 @@ proc newGame*(
   world.spawnIntervalTicks = spawnInterval
   world.rng = initRng(map.seed)
   initTowers(world, map)
-  initLanePaths(map, world)
+  # Keep each match's destructible tower tiles out of the cached map terrain.
+  var matchLayers = newSeq[QuadLayer](layers.len)
+  for i, layer in layers:
+    matchLayers[i] = layer
+  matchLayers[GroundLayer] = QuadLayer()
+  matchLayers[GroundLayer][] = layers[GroundLayer][]
+  installImmutableLayers(matchLayers)
+  world.updateTowerTiles()
+  initLanePaths(map)
   for team in Team:
     var point = worldPoint(map.layout.spawns[team.ord])
     point.y = fixedSurfaceHeight(point)
