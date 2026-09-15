@@ -412,7 +412,7 @@ const
     ),
     AbilitySpec(
       name: "Sanguine Chalice", icon: "sanguine_chalice",
-      kind: Heal, cooldownTicks: 192, heal: 28
+      kind: Heal, cooldownTicks: 192, heal: 30
     ),
     AbilitySpec(
       name: "Afterlight Sickle", icon: "afterlight_sickle",
@@ -471,7 +471,7 @@ const
     ),
     AbilitySpec(
       name: "Aether Siphon", icon: "aether_siphon",
-      kind: Restore, cooldownTicks: 168, restore: 22
+      kind: Restore, cooldownTicks: 168, restore: 24
     ),
     AbilitySpec(
       name: "Moth Hex", icon: "moth_hex",
