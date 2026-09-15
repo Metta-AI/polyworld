@@ -2422,6 +2422,18 @@ proc bakePlacements(
       models[placement.model], placement.position,
       placement.rotation, placement.scale, writeIndex)
 
+proc terrainTileColor*(layerIndex, tileIndex: int): Vec3 =
+  ## Reads a baked tile's average texture color and authored tint.
+  let
+    tile = layers[layerIndex].tiles[tileIndex]
+    style = tileMaterialTable[tile.kind.int]
+    material =
+      if generatedTerrain:
+        generatedMap.layers[layerIndex].materials[tileIndex]
+      else:
+        style.topMaterial.int
+  terrainAverageColors[material] * style.top
+
 proc terrainColorAt(position: Vec3): Vec3 =
   ## Blends texture averages at a grass root using the terrain's neighborhoods.
   let
