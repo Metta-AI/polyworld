@@ -29,7 +29,9 @@ var
   slopedWallCount = 0
 for y in 0 ..< Size:
   for x in 0 ..< Size:
-    let tile = tiles.cells[y * Size + x]
+    let
+      tile = tiles.cells[y * Size + x]
+      ground = layers[0].tiles[y * Size + x]
     doAssert isWalkable(0, x, y) == tile.passable,
       "Walkability differs from the editor at " & $(x, y)
     doAssert terrainValue(x.int32, y.int32, 0, TerrainWalkableField) ==
@@ -44,16 +46,31 @@ for y in 0 ..< Size:
           else:
             gameMaps.BlueFortLayer
         wall = layers[layer].tiles[y * Size + x]
-        ground = layers[0].tiles[y * Size + x]
       inc wallCount
-      doAssert wall.exists and wall.impassable
-      doAssert wall.bottoms == ground.tops,
-        "Walls must reach the ground beside ramps."
-      # Castle ground is 16 eighths high, with 18 eighths of wall above it.
-      doAssert wall.tops == [34'i16, 34, 34, 34],
-        "Wall tops must stay level across gate ramps."
+      doAssert not wall.exists, "Raised wall foundations must not be generated."
+      doAssert ground.impassable and not isWalkable(0, x, y)
+      doAssert not isWalkable(layer, x, y),
+        "Removing foundations must not create an upper walking surface."
+      doAssert terrainValue(x.int32, y.int32, 0, TerrainKindField) ==
+        TerrainWall.ord
+      for height in ground.tops:
+        doAssert height <= 16, "Wall footprints must use natural ground height."
       if ground.tops != [16'i16, 16, 16, 16]:
         inc slopedWallCount
+    if x + 1 < Size and (tile.surface == editorTiles.WallSurface or
+      tiles.cells[y * Size + x + 1].surface == editorTiles.WallSurface):
+        let next = layers[0].tiles[y * Size + x + 1]
+        doAssert ground.connectedEast
+        doAssert ground.tops[1] == next.tops[0] and
+          ground.tops[3] == next.tops[2],
+          "Wall footprints must join their eastern neighbor smoothly."
+    if y + 1 < Size and (tile.surface == editorTiles.WallSurface or
+      tiles.cells[(y + 1) * Size + x].surface == editorTiles.WallSurface):
+        let next = layers[0].tiles[(y + 1) * Size + x]
+        doAssert ground.connectedSouth
+        doAssert ground.tops[2] == next.tops[0] and
+          ground.tops[3] == next.tops[1],
+          "Wall footprints must join their southern neighbor smoothly."
     if tile.surface == editorTiles.TreeSurface:
       let expected =
         if tile.side == editorMaps.Northeast:

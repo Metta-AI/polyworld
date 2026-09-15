@@ -3,7 +3,7 @@
 import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, brushes, content, landscapes, sim, game, maps, replays, ui,
+  assets, brushes, content, landscapes, sim, game, maps, replays, ui, walls,
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
@@ -28,7 +28,6 @@ const
   CryptRubbleSurface = CryptRockSurface + 1
   CryptRoadSurface = CryptRockSurface + 2
   CryptTrailSurface = CryptRockSurface + 3
-  CryptWallSurface = CryptRockSurface + 3
   CryptFortSurface = CryptRockSurface + 4
   CryptSpawnSurface = CryptRockSurface + 5
   # Match crypt-rock-1's mean RGB while preserving the rock texture detail.
@@ -163,26 +162,19 @@ proc runGraphics*() =
       vec3(0.78'f32, 0.74'f32, 0.62'f32),
       1
     )
-    for i, kind in [RedFortKind, BlueFortKind]:
+    for i, kind in ArenaWallKinds:
       let material =
         if i == 0:
-          CryptWallSurface.float32
+          CryptRockSurface.float32
         else:
-          (SurfaceNames.len + i).float32
-      let
-        topTint =
-          if i == 0: vec3(1)
-          else: vec3(0.72'f32, 0.84'f32, 1.08'f32)
-        sideTint =
-          if i == 0: vec3(0.82'f32, 0.56'f32, 0.50'f32)
-          else: vec3(0.54'f32, 0.66'f32, 0.88'f32)
+          GrassSurface.float32
       setTileMaterial(
         kind.int,
         material,
         material,
-        topTint,
-        sideTint,
-        6
+        vec3(1),
+        vec3(0.8'f),
+        2
       )
     terrainBlendDepth = 0.65'f
     terrainHeightBlend = 1.0'f
@@ -263,20 +255,20 @@ proc runGraphics*() =
     damageTrails: DamageTrailTracker
 
   const
-    SmallTowerScale = 3.5'f32
-    TallTowerScale = 4.5'f32
-    GateTowerScale = 6.0'f32
-    BarracksScale = 1.65'f32
+    SmallTowerScale = 3.5'f
+    TallTowerScale = 4.5'f
+    GateTowerScale = 6.0'f
+    BarracksScale = 1.65'f
 
   proc towerPropName(tier: TowerTier): string =
-    ## Returns the terrain-kit model name for one tower tier.
+    ## Returns the matching fort model for one tower tier.
     case tier
     of OuterTower:
-      "tower_square_small1"
+      "tower_level1"
     of InnerTower:
-      "tower_square_tall1"
+      "tower_level2"
     of GateTower:
-      "tower_square_tall2"
+      "tower_level3"
 
   proc towerScale(tier: TowerTier): float32 =
     ## Returns the world scale for one tower tier.
@@ -288,45 +280,95 @@ proc runGraphics*() =
     of GateTower:
       GateTowerScale
 
-  proc structureTint(team: Team): Vec3 =
-    ## Warms red masonry and cools blue masonry for instant side readability.
-    if team == RedTeam:
-      vec3(1.16'f32, 0.58'f32, 0.52'f32)
-    else:
-      vec3(0.68'f32, 0.82'f32, 1.14'f32)
+  proc wallHeight(placement: WallPlacement, width: float32): float32 =
+    ## Embeds an upright wall model at the lowest ground under its footprint.
+    let
+      direction = vec2(cos(placement.rotation), sin(placement.rotation))
+      across = vec2(-direction.y, direction.x)
+      length =
+        if placement.part == WallPanel: placement.length
+        else: width
+      steps = max(1, ceil(length / 0.25'f).int)
+      edge = mapHalfSize() - 0.001'f
+    result = float32.high
+    for i in 0 .. steps:
+      for j in -1 .. 1:
+        let point = clamp(
+          placement.position +
+            direction * (length * (i.float32 / steps.float32 - 0.5'f)) +
+            across * (width / 2 * j.float32),
+          vec2(-edge),
+          vec2(edge)
+        )
+        result = min(result,
+          groundHeight(point.x, point.y) + groundOffset(point.x, point.y))
+    result -= 0.05'f
 
-  proc structureTint4(team: Team): Vec4 =
-    let tint = structureTint(team)
-    vec4(tint.x, tint.y, tint.z, 1)
-
-  proc placeStaticStructures(pack: PropPack) =
-    ## Places each map's barracks beside the gates that spawn its lane creeps.
+  proc placeStaticStructures(packs: array[Team, PropPack]) =
+    ## Places barracks beside gates and joined wall models on natural ground.
     for site in run.map.layout.barracks:
-      pack.placeProp(
-        "building2",
+      packs[Team(site.team)].placeProp(
+        "barracks",
         renderSite(site.position),
         arctan2(
           (site.facing.x - site.position.x).float32,
           (site.facing.z - site.position.z).float32
         ),
-        BarracksScale,
-        structureTint(Team(site.team))
+        BarracksScale
+      )
+    for placement in buildWalls(run.map.layout.walls):
+      let
+        pack = packs[Team(placement.team)]
+        name = if placement.part == WallPillar: "pillar" else: "wall"
+        size = pack.propSize(name)
+        modelScale =
+          if placement.part == WallPillar:
+            WallPillarWidth / size.x
+          else:
+            WallSectionLength / size.x
+        stretch =
+          if placement.part == WallPanel:
+            vec3(placement.length / WallSectionLength, 1, 1)
+          else:
+            vec3(1)
+      pack.placeProp(
+        name,
+        vec3(
+          placement.position.x,
+          wallHeight(placement, size.z * modelScale),
+          placement.position.y
+        ),
+        placement.rotation,
+        modelScale,
+        stretch = stretch
       )
   var
-    towerPack: PropPack
+    towerPacks: array[Team, PropPack]
     decorPack: PropPack
+  let brush = mixBrush(layers[GroundLayer], run.map.preset.seed)
   profileBlock "props":
-    towerPack = loadPropPack(propPaths(TowerPack, TowerProps))
-    for name in TowerProps:
-      doAssert towerPack.hasProp(name), "missing tower kit prop: " & name
-    towerPack.placeStaticStructures()
+    for team in Team:
+      towerPacks[team] = loadPropPack(
+        fortModelPaths(team.ord),
+        textured = true,
+        textureSize = FortTextureSize,
+        mergeNodes = true
+      )
+      for name in FortModelNames:
+        doAssert towerPacks[team].hasProp(name), "Missing fort model: " & name
+    towerPacks.placeStaticStructures()
     decorPack = loadPropPack(
       arenaDecorPaths(), textured = true, textureSize = GotaDecorTextureSize)
     for nodes in ArenaDecorNodes:
       for name in nodes:
         doAssert decorPack.hasProp(name), "missing arena decoration: " & name
     let
-      brush = mixBrush(layers[GroundLayer], run.map.preset.seed)
+      darkTreePack = loadPropPack(
+        darkTreePaths(),
+        textured = true,
+        textureSize = FortTextureSize,
+        mergeNodes = true
+      )
       boulders = loadPropPack(
         propPaths(PaintedRockPath, GotaBoulderNames),
         only = @GotaBoulderNames,
@@ -335,6 +377,15 @@ proc runGraphics*() =
         textureSize = GotaDecorTextureSize
       )
     treeTileBrightness = brush.trees
+    darkTreePack.plantRocks(
+      DarkTreeNames,
+      ArenaRockKind,
+      run.map.preset.seed,
+      height = treeHeight,
+      sizeRange = vec2(0.85'f, 1.3'f),
+      burial = 0.03'f,
+      mask = brush.darkTrees
+    )
     boulders.plantRocks(
       GotaBoulderNames,
       ArenaRockKind,
@@ -369,6 +420,8 @@ proc runGraphics*() =
         tint = vec3(69, 135, 161) / 255'f
       elif treeTileBrightness[i] > 0:
         tint = vec3(55, 83, 40) / 255'f * treeTileBrightness[i]
+      elif brush.darkTrees[i]:
+        tint = vec3(58, 35, 26) / 255'f
       elif tile.kind == ArenaRockKind:
         tint = terrainTileColor(GroundLayer, i) * 0.88'f
       elif tile.kind == TreeTile:
@@ -721,7 +774,7 @@ proc runGraphics*() =
       consider(
         tower.id,
         pickProp(
-          towerPack,
+          towerPacks[tower.team],
           towerPropName(tower.tier),
           origin,
           dir,
@@ -1072,7 +1125,7 @@ proc runGraphics*() =
     for tower in run.world.towers:
       if tower.hp <= 0 or tower.id != id:
         continue
-      towerPack.drawProp(
+      towerPacks[tower.team].drawProp(
         towerPropName(tower.tier),
         renderPoint(tower.position),
         renderFacing(tower.facing),
@@ -1913,7 +1966,7 @@ proc runGraphics*() =
           for tower in run.world.towers:
             if tower.hp <= 0:
               continue
-            towerPack.drawPropSunDepth(
+            towerPacks[tower.team].drawPropSunDepth(
               towerPropName(tower.tier),
               renderPoint(tower.position),
               renderFacing(tower.facing),
@@ -1932,13 +1985,12 @@ proc runGraphics*() =
         for tower in run.world.towers:
           if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
             continue
-          towerPack.drawProp(
+          towerPacks[tower.team].drawProp(
             towerPropName(tower.tier),
             renderPoint(tower.position),
             renderFacing(tower.facing),
             towerScale(tower.tier),
-            viewProjection,
-            structureTint4(tower.team)
+            viewProjection
           )
 
         if showOccludedCharacters:
