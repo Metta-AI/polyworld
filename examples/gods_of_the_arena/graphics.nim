@@ -362,6 +362,21 @@ proc runGraphics*() =
       )
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
+    for i, color in run.map.minimap.mpairs:
+      let tile = layers[GroundLayer].tiles[i]
+      var tint = terrainTileColor(GroundLayer, i) * 1.25'f
+      if layers[WaterLayer].tiles[i].exists:
+        tint = vec3(69, 135, 161) / 255'f
+      elif treeTileBrightness[i] > 0:
+        tint = vec3(55, 83, 40) / 255'f * treeTileBrightness[i]
+      elif tile.kind == ArenaRockKind:
+        tint = terrainTileColor(GroundLayer, i) * 0.88'f
+      elif tile.kind == TreeTile:
+        # Light-side replacement rocks retain their natural gray color.
+        tint = vec3(85, 85, 81) / 255'f
+      color = uint32(clamp(tint.x * 255, 0'f, 255'f)) shl 16 or
+        uint32(clamp(tint.y * 255, 0'f, 255'f)) shl 8 or
+        uint32(clamp(tint.z * 255, 0'f, 255'f))
   drawSplash(sk, window, splash.name)
 
   type God = object

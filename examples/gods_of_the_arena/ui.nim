@@ -447,6 +447,75 @@ proc minimapPosition(position: Vec3, panel: GameUiPanel): Vec2 =
     )
   area.origin + vec2(x * area.size.x, y * area.size.y)
 
+proc drawMinimapIcon(
+    sk: Silky,
+    name: string,
+    point: Vec2,
+    size: float32,
+    color: ColorRGBX,
+    selected = false
+) =
+  ## Draws a team glyph with a dark outline or a selection highlight.
+  let
+    outline = if selected: rgbx(255, 242, 187, 255)
+      else: rgbx(16, 19, 24, 255)
+    outlineSize = size + (if selected: 4.0'f else: 2.0'f)
+  sk.drawSprite(
+    name,
+    point - vec2(outlineSize / 2),
+    vec2(outlineSize),
+    outline
+  )
+  sk.drawSprite(name, point - vec2(size / 2), vec2(size), color)
+
+proc drawMinimapHero(
+    sk: Silky,
+    hero: Hero,
+    point: Vec2,
+    selected: bool
+) =
+  ## Points a map marker along the heading beneath an upright hero portrait.
+  const
+    MarkerSize = 48.0'f
+    MarkerCenter = vec2(0.5'f, 50.0'f / 128.0'f)
+    Corners = [vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1)]
+  let
+    entry = sk.atlas.entries["map_marker"]
+    uvOrigin = vec2(entry.x.float32, entry.y.float32)
+    uvSize = vec2(entry.width.float32, entry.height.float32)
+    markerColor = if selected: rgbx(255, 242, 187, 255) else: IconTint
+  var forward = vec2(hero.facing.x.float32, hero.facing.z.float32)
+  if lengthSq(forward) > 0:
+    forward = normalize(forward)
+  else:
+    forward = vec2(0, 1)
+  let right = vec2(forward.y, -forward.x)
+  var positions, uvs: array[4, Vec2]
+  for i, corner in Corners:
+    # The source marker points down, with its circular head above center.
+    let offset = (corner - MarkerCenter) * MarkerSize
+    positions[i] = point + right * offset.x + forward * offset.y
+    uvs[i] = uvOrigin + corner * uvSize
+  for indices in [[0, 1, 2], [0, 2, 3]]:
+    sk.drawTriangle(
+      [positions[indices[0]], positions[indices[1]], positions[indices[2]]],
+      [uvs[indices[0]], uvs[indices[1]], uvs[indices[2]]],
+      [markerColor, markerColor, markerColor]
+    )
+  sk.drawSprite(
+    WhiteTileKey,
+    point - vec2(10),
+    vec2(20),
+    teamHudColor(hero.team),
+    radius = 10
+  )
+  sk.drawSprite(
+    HeroPortraitKeys[hero.class],
+    point - vec2(8),
+    vec2(16),
+    radius = 8
+  )
+
 proc drawMinimapCamera(
     sk: Silky,
     window: Window,
@@ -769,59 +838,59 @@ proc drawUi*(
     vec2(4),
     rgbx(91, 119, 128, 255)
   )
-  template drawMinimapPip(
-      objectId: int32,
-      worldPosition: Vec3,
-      pipSize: float32,
-      pipColor: ColorRGBX
-  ) =
-    block:
-      let point = minimapPosition(worldPosition, minimapPanel)
-      if isPicked(objectId, selectedIds):
-        sk.drawRect(
-          point - vec2(pipSize * 0.5'f32 + 2),
-          vec2(pipSize + 4),
-          rgbx(255, 242, 187, 255)
-        )
-      sk.drawRect(
-        point - vec2(pipSize * 0.5'f32),
-        vec2(pipSize),
-        pipColor
+  sk.pushClipRect(rect(mapArea.origin, mapArea.size))
+  for site in run.map.layout.barracks:
+    let
+      team = Team(site.team)
+      position = WorldPoint(
+        x: site.position.x * (WorldScale div PathUnitsPerTile),
+        y: site.position.y * (WorldScale div PathUnitsPerTile),
+        z: site.position.z * (WorldScale div PathUnitsPerTile)
+      )
+    if visibleInView(viewMode, team, position):
+      sk.drawMinimapIcon(
+        "barracks",
+        minimapPosition(renderPoint(position), minimapPanel),
+        14.0'f,
+        teamHudColor(team)
       )
   for tower in run.world.towers:
     if tower.hp > 0 and
         visibleInView(viewMode, tower.team, tower.position):
-      drawMinimapPip(
-        tower.id,
-        renderPoint(tower.position),
-        5.0'f32,
-        teamHudColor(tower.team)
+      sk.drawMinimapIcon(
+        "tower",
+        minimapPosition(renderPoint(tower.position), minimapPanel),
+        16.0'f,
+        teamHudColor(tower.team),
+        isPicked(tower.id, selectedIds)
       )
   for fort in run.world.forts:
     if visibleInView(viewMode, fort.team, fort.center):
-      drawMinimapPip(
-        fort.id,
-        renderPoint(fort.center),
-        10.0'f32,
-        teamHudColor(fort.team)
+      sk.drawMinimapIcon(
+        WhiteTileKey,
+        minimapPosition(renderPoint(fort.center), minimapPanel),
+        10.0'f,
+        teamHudColor(fort.team),
+        isPicked(fort.id, selectedIds)
       )
   for footman in run.world.footmen:
     if footman.state != Dying and footman.hp > 0 and
         visibleInView(viewMode, footman.team, footman.position):
-      drawMinimapPip(
-        footman.id,
-        renderPoint(footman.position),
-        3.0'f32,
-        teamHudColor(footman.team)
+      sk.drawMinimapIcon(
+        "contact",
+        minimapPosition(renderPoint(footman.position), minimapPanel),
+        8.0'f,
+        teamHudColor(footman.team),
+        isPicked(footman.id, selectedIds)
       )
   for hero in run.world.heroes:
     if visibleInView(viewMode, hero.team, hero.position):
-      drawMinimapPip(
-        hero.id,
-        renderPoint(hero.position),
-        7.0'f32,
-        teamHudColor(hero.team)
+      sk.drawMinimapHero(
+        hero,
+        minimapPosition(renderPoint(hero.position), minimapPanel),
+        isPicked(hero.id, selectedIds)
       )
+  sk.popClipRect()
   sk.drawMinimapCamera(
     window,
     minimapPanel,
