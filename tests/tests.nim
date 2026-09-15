@@ -23,6 +23,7 @@ import
   test_gota_abilities,
   test_gota_attacks,
   test_gota_brushes,
+  test_gota_cast,
   test_gota_content,
   test_gota_host,
   test_gota_landscapes,
