@@ -35,6 +35,7 @@ import
   test_gota_spells,
   test_gota_terrains,
   test_gota_walls,
+  test_gota_tower_pathing,
   test_hashes,
   test_hlf_content,
   test_hlf_maps,
