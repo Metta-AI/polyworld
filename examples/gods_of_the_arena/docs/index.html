@@ -359,6 +359,10 @@
     .charge-pips { display: flex; gap: 8px; margin: 12px 0; }
     .charge-pips span { width: 28px; height: 28px; border: 2px solid #b3c5d7; border-radius: 50%; background: #caa965; }
     .charge-pips span.empty { background: #182131; }
+    .api-section h3 { margin-top: 24px; }
+    .api-table { overflow-wrap: anywhere; }
+    .api-table th:first-child, .api-table td:first-child { width: 38%; }
+    .api-table td { vertical-align: top; }
     .spell-table { width: 100%; border-collapse: collapse; }
     .spell-table th, .spell-table td { text-align: left; padding: 10px; border-bottom: 1px solid #354458; }
     @media (max-width: 850px) { .spell-grid { grid-template-columns: 1fr; } }
@@ -376,6 +380,7 @@
         <a href="#shop">Shop</a>
         <a href="#casting">Casting</a>
         <a href="#controls">Controls</a>
+        <a href="#basic">BASIC</a>
       </nav>
     </div>
   </header>
@@ -1992,6 +1997,56 @@
         <tr><td>F / G</td><td>Use the first two inventory items, including health and mana potions.</td></tr>
         <tr><td>O</td><td>Toggle character outlines behind scenery. Enabled by default; hidden portions are outlined without revealing enemies in fog of war.</td></tr>
       </tbody></table>
+    </section>
+
+    <section id="basic" class="panel api-section">
+      <p class="kicker">BASIC HOST</p>
+      <h2>BASIC observations</h2>
+      <p>Self data and visible objects are sampled for each decision and remain consistent during it, including after an action call. Spell queries read the pending casts, so a successful cast can append a spell during that decision. Object and spell indices are zero-based and may change next decision. Keep <code>objectId(i)</code> when tracking an object across decisions or calling <code>attackTarget</code>, rather than keeping its list index.</p>
+      <p>All values are integers. <code>worldScale = 60000</code> is the number of world units per tile, and <code>tickRate = 24</code> is the number of simulation ticks per second. <code>selfX</code>, <code>selfY</code>, <code>objectX(i)</code>, <code>objectY(i)</code>, <code>spellX(i)</code>, and <code>spellY(i)</code> use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.</p>
+      <h3>Your hero</h3>
+      <p>The existing <code>selfId</code>, <code>selfTeam</code>, <code>selfClass</code>, <code>selfX</code>, <code>selfY</code>, <code>selfHp</code>, <code>selfMaxHp</code>, <code>selfMana</code>, <code>selfMaxMana</code>, <code>selfGold</code>, <code>selfLevel</code>, <code>selfLayer</code>, and <code>worldTick</code> remain available. These additional read-only values describe the current hero:</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>selfMoveSpeed</code></td><td>Unblocked movement speed in world units per tick, including level and equipment bonuses.</td></tr>
+          <tr><td><code>selfAttackRange</code></td><td>Basic-attack range in world units, measured by planar Euclidean distance between centers. Towers allow at least 105000 units; forts use 255000 units.</td></tr>
+          <tr><td><code>selfAttackDamage</code></td><td>Current basic-attack damage, including level and equipment bonuses.</td></tr>
+          <tr><td><code>selfTarget</code></td><td>Current ordered or automatically acquired attack target's stable object ID, or zero for none.</td></tr>
+          <tr><td><code>selfAttackCooldown</code></td><td>Ticks until the next basic hit could land if the target stays in range. Includes remaining recovery and the next windup, or the remainder of a current windup. An idle hero reports a full windup. Excludes chasing and is separate from ability cooldowns. Movement can cancel a swing.</td></tr>
+          <tr><td><code>selfAttacksLanded</code></td><td>Lifetime count of successful basic hits, preserved across respawns. Spells do not increment it.</td></tr>
+        </tbody>
+      </table>
+      <h3>Visible objects</h3>
+      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. The existing ID, kind, team, class, position, HP, and alive queries still apply. New queries respect the same visibility filter:</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>objectLevel(i)</code></td><td>Hero level.</td></tr>
+          <tr><td><code>objectMana(i)</code></td><td>Hero's current mana.</td></tr>
+          <tr><td><code>objectItemId(i, slot)</code></td><td>Hero's held item ID, using the same IDs as <code>itemId</code> and <code>buyItem</code>. Zero means no item. Slots are 0 through 5.</td></tr>
+          <tr><td><code>objectItemCount(i, slot)</code></td><td>Stack count in that hero's inventory slot.</td></tr>
+          <tr><td><code>objectFacingX(i)</code>, <code>objectFacingY(i)</code></td><td>Normalized horizontal facing, scaled by <code>worldScale</code>. A unit facing positive X reports <code>(60000, 0)</code>.</td></tr>
+          <tr><td><code>objectTarget(i)</code></td><td>Current attack target's stable object ID, or zero if absent or not visible to your team.</td></tr>
+          <tr><td><code>objectVelX(i)</code>, <code>objectVelY(i)</code></td><td>Actual displacement over the last simulation tick in world units, including collision adjustments. Stationary objects report zero.</td></tr>
+        </tbody>
+      </table>
+      <p>These new object queries return zero for invalid indices or fields that do not apply to that object. Invalid inventory slots also return zero. Hero level, mana, and inventory queries return zero for non-heroes. An object's ID is not a valid substitute for its list index.</p>
+      <h3>Pending spells and warnings</h3>
+      <p>Loop over <code>0</code> through <code>spellCount() - 1</code>. This list contains unresolved casts from their start through impact, including projectiles and area warnings. Allied casts are observable; enemy casts require their aim position to be visible, matching the viewer's warning visibility. Completed effects are omitted.</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>spellAbility(i)</code></td><td>Ability enum ID from <code>content.nim</code>, beginning at zero. Invalid indices return -1.</td></tr>
+          <tr><td><code>spellCasterId(i)</code></td><td>Caster's stable object ID, or zero if the enemy caster is hidden.</td></tr>
+          <tr><td><code>spellX(i)</code>, <code>spellY(i)</code></td><td>Aim/impact position or area center in whole global tiles. This is not the projectile's interpolated flight position.</td></tr>
+          <tr><td><code>spellImpactTick(i)</code></td><td>Absolute simulation tick at impact. Subtract <code>worldTick</code> to obtain the remaining ticks.</td></tr>
+        </tbody>
+      </table>
+      <p>Other invalid spell queries return zero. Visibility of an enemy warning does not reveal its hidden caster's identity.</p>
+      <h3 id="terrain-api">Terrain API</h3>
+      <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect static terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Terrain remains observable through fog.</p>
+      <p>Read-only constants expose <code>mapWidth</code>, <code>mapHeight</code>, <code>mapLayers</code>, <code>GroundLayer</code>, <code>RedFortLayer</code>, <code>BlueFortLayer</code>, and <code>WaterLayer</code>. Terrain kinds are <code>TerrainNone</code>, <code>TerrainGrass</code>, <code>TerrainRoad</code>, <code>TerrainRock</code>, <code>TerrainTrees</code>, <code>TerrainMarsh</code>, <code>TerrainWall</code>, and <code>TerrainWater</code>.</p>
     </section>
 
   </main>

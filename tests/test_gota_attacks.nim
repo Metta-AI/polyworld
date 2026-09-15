@@ -86,6 +86,7 @@ for class in HeroClass:
       doAssert other.hp == hp
   doAssert hero.position.x > start.x, $class & " did not chase"
   doAssert other.hp == hp - hero.heroAttackDamage, $class
+  doAssert hero.attacksLanded == 1, $class
   doAssert within(hero.position, other.position, range + 100), $class
   let inRange = hero.position
   game.tickWorld(nil)
@@ -117,6 +118,7 @@ for class in HeroClass:
       if other.hp < 100_000:
         break
     doAssert other.hp == 100_000 - damage, $class & " level " & $level
+    doAssert hero.attacksLanded == 1
     doAssert hero.mana == 0 and game.world.casts.len == 0
     for slot in HeroAbilitySlot:
       doAssert hero.charges[slot] == 0
@@ -166,6 +168,7 @@ block:
   hero.charges[PrimaryAbility] = 1
   game.tickWorld(nil)
   doAssert other.hp <= 0
+  doAssert hero.attacksLanded == 0
   doAssert hero.attackObjectId == 0 and not hero.hasMoveTarget
   doAssert hero.movePath.len == 0
   game.addCreep(1000, 100_000)
@@ -178,5 +181,132 @@ for class in [VanguardKnight, Ranger, Arcanist]:
   discard game.enemyHero(60_000)
   game.tickWorld(nil)
   doAssert game.world.heroes[0].attackObjectId == 0
+
+echo "Testing attack cooldown predicts both windup and repeat hits"
+for class in HeroClass:
+  let
+    game = attackGame(class)
+    hero = game.world.heroes[0]
+    other = game.enemyHero(60_000)
+    duration = game.world.heroAttackTicks(hero)
+    windup = duration * 45 div 100
+  doAssert game.world.heroAttackCooldown(hero) == windup
+  doAssert game.world.applyAttackTarget(hero.id, other.id)
+  for tick in 1 .. duration + windup:
+    let remaining = game.world.heroAttackCooldown(hero)
+    game.tickWorld(nil)
+    let hits = if tick < windup: 0 elif tick < duration + windup: 1 else: 2
+    doAssert hero.attacksLanded == hits, $class & " tick " & $tick
+    doAssert other.hp == 100_000 - hits * hero.heroAttackDamage
+    if tick == windup or tick == duration + windup:
+      doAssert remaining == 1
+      doAssert game.world.heroAttackCooldown(hero) == duration
+    else:
+      doAssert game.world.heroAttackCooldown(hero) == remaining - 1
+
+echo "Testing walking cancels windup and reports actual movement"
+block:
+  let
+    game = attackGame(Ranger)
+    hero = game.world.heroes[0]
+    other = game.enemyHero(60_000)
+    windup = game.world.heroAttackTicks(hero) * 45 div 100
+  doAssert game.world.applyAttackTarget(hero.id, other.id)
+  game.tickWorld(nil)
+  doAssert game.world.heroAttackCooldown(hero) == windup - 1
+  doAssert game.world.applyWalkTo(
+    hero.id,
+    mapCoordinate(hero.position.x) - 3,
+    mapCoordinate(hero.position.z)
+  )
+  var moved = false
+  for tick in 0 ..< 10:
+    let start = hero.position
+    game.tickWorld(nil)
+    doAssert hero.velocity == heading(
+      hero.position.x - start.x,
+      hero.position.z - start.z
+    )
+    moved = moved or hero.velocity != Heading()
+    doAssert hero.attacksLanded == 0 and other.hp == 100_000
+    doAssert game.world.heroAttackCooldown(hero) == windup
+  doAssert moved
+  hero.place(hero.spawnPosition)
+  doAssert hero.velocity == Heading()
+
+echo "Testing collision displacement and creep motion are observable"
+block:
+  let
+    game = attackGame(Ranger)
+    hero = game.world.heroes[0]
+    ally = game.world.heroes[1]
+    start = hero.position
+  ally.state = Marching
+  ally.hp = ally.maxHp
+  var allyStart = start
+  allyStart.x += 10_000
+  ally.place(allyStart)
+  game.addCreep(1000, 100_000, RedTeam)
+  let creepStart = game.world.footmen[0].position
+  game.tickWorld(nil)
+  doAssert hero.velocity == heading(
+    hero.position.x - start.x,
+    hero.position.z - start.z
+  )
+  doAssert hero.velocity != Heading() or ally.velocity != Heading()
+  doAssert ally.velocity == heading(
+    ally.position.x - allyStart.x,
+    ally.position.z - allyStart.z
+  )
+  var
+    previous = creepStart
+    moved = false
+  for tick in 0 ..< 10:
+    let creep = game.world.footmen[0]
+    doAssert creep.velocity == heading(
+      creep.position.x - previous.x,
+      creep.position.z - previous.z
+    )
+    moved = moved or creep.velocity != Heading()
+    previous = creep.position
+    game.tickWorld(nil)
+  doAssert moved
+  game.world.footmen[0].place(creepStart)
+  doAssert game.world.footmen[0].velocity == Heading()
+
+echo "Testing attack counters survive respawn and motion state is hashed"
+block:
+  let
+    game = attackGame(Ranger)
+    hero = game.world.heroes[0]
+  discard game.enemyHero(60_000)
+  doAssert game.world.applyAttackTarget(hero.id, game.world.heroes[5].id)
+  for tick in 0 ..< game.world.heroAttackTicks(hero):
+    game.tickWorld(nil)
+  doAssert hero.attacksLanded == 1
+  hero.hp = 0
+  game.tickWorld(nil)
+  doAssert hero.velocity == Heading()
+  doAssert game.world.heroAttackCooldown(hero) == 0
+  hero.deathTicks = 100_000
+  game.tickWorld(nil)
+  doAssert hero.hp == hero.maxHp and hero.state != Dying
+  doAssert hero.attacksLanded == 1
+  doAssert hero.velocity == Heading()
+  let
+    snapshot = game.world.clone()
+    hash = game.stateHash()
+  inc hero.attacksLanded
+  doAssert game.stateHash() != hash
+  game.world.restore(snapshot)
+  doAssert game.stateHash() == hash
+  game.world.heroes[0].velocity = heading(10, -20)
+  doAssert game.stateHash() != hash
+  game.world.restore(snapshot)
+  doAssert game.stateHash() == hash
+  game.addCreep(1000, 100_000, RedTeam)
+  let creepHash = game.stateHash()
+  game.world.footmen[0].velocity = heading(-10, 20)
+  doAssert game.stateHash() != creepHash
 
 echo "GOTA basic attack tests passed"
