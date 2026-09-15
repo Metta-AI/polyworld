@@ -5,7 +5,7 @@
 ## replaying.
 
 import
-  std/[math, os, strformat, strutils, times],
+  std/[math, os, strformat, strutils],
   polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps,
@@ -13,6 +13,9 @@ import
   bots,
   controls,
   replays
+
+when defined(headless):
+  import std/times
 
 when defined(coworld):
   import polyworld/coworld
@@ -40,6 +43,7 @@ proc usage() =
   echo "  --windowSize WxH        Graphical window, such as 1024x576."
   echo "  --vsync:off             Unlock the frame rate (default on)."
   echo "  --cast MODE             quick, normal, or assisted."
+  echo "  --difficulty MODE       practice or standard (graphical play)."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 
@@ -97,12 +101,29 @@ proc parseGameOptions(): GameOptions =
           castMode = AssistedCast
         else:
           fail("--cast must be quick, normal, or assisted")
+      of "--difficulty":
+        case arguments.argumentValue(index, "--difficulty").toLowerAscii
+        of "practice":
+          practiceMode = true
+        of "standard":
+          practiceMode = false
+        else:
+          fail("--difficulty must be practice or standard")
       of "--help", "-h":
         usage()
         quit(0)
       else:
         fail("unknown argument: " & argument)
     inc index
+  when not defined(headless):
+    if result.replayPath.len == 0 and result.botGroups.len == 0 and
+        result.playerSlot == 0:
+      result.playerSlot = 2
+      result.botGroups.add BotGroup(path: "@baseline", count: 9)
+      result.pauseOnStart = true
+      setupOpen = true
+      practiceMode = true
+      menuSlot = 2
   result.validateGameOptions(
     HeroClassCount,
     "live games require exactly 10 bots"
@@ -117,7 +138,54 @@ var options* =
   else:
     parseGameOptions()
 
-var run*: Game
+var
+  run*: Game
+  liveMap: MapData
+
+proc applyPracticeSettings(game: Game) =
+  ## Slows the opposing team and turns off their automatic extra spells.
+  practiceEnemyTeam = -1
+  if options.playerSlot <= 0 or not practiceMode or game.replayMode:
+    return
+  let human = game.world.heroes[options.playerSlot - 1]
+  practiceEnemyTeam = (if human.team == RedTeam: BlueTeam else: RedTeam).ord
+  for hero in game.world.heroes:
+    if hero.team.ord == practiceEnemyTeam:
+      hero.manualSpells = true
+
+proc startLiveMatch() =
+  ## Rebuilds the live world, bots, and recorder on the current map.
+  resetHumanMatch()
+  run = newGame(
+    liveMap,
+    options.spawnIntervalTicks,
+    HeroClassCount,
+    false,
+    ReplayData()
+  )
+  loadBots(run, options.botGroups, options.playerSlot)
+  run.recorder = initReplayRecorder(
+    currentSetup(run, uint32(options.maximumTicks)), liveMap.preset
+  )
+  run.recorder.data.config =
+    when defined(coworld):
+      coworld.config.withMapPreset(liveMap.preset)
+    else:
+      block:
+        var config = localGameConfig(options, HeroClassCount)
+        if matchConfig.players.len > 0:
+          config.players = matchConfig.players
+        config.withMapPreset(liveMap.preset)
+  run.recorder.data.config.validateConfig(HeroClassCount)
+  run.replayPlayer = ReplayPlayer(data: run.recorder.data)
+  applyPracticeSettings(run)
+
+proc restartHumanGame*(slot: int32) =
+  ## Starts a new live match with the chosen 1-based human seat.
+  options.playerSlot = slot
+  menuSlot = slot
+  setupOpen = false
+  startLiveMatch()
 
 block:
   startGameProfile()
@@ -130,42 +198,24 @@ block:
       replayData = loadReplay(options.replayPath)
     mapSeed = replayData.config.seed
     options.maximumTicks = int32(replayData.hashes.len)
-  var gameMap: MapData
   profileBlock "map":
-    gameMap =
+    liveMap =
       if replayMode:
         generateMap(mapSeed, replayData.config.mapPreset)
       else:
         generateMap(mapSeed, matchConfig.mapPreset)
-  run = newGame(
-    gameMap,
-    if replayMode:
-      replayData.config.spawnIntervalTicks
-    else:
-      options.spawnIntervalTicks,
-    if replayMode: 0 else: HeroClassCount,
-    replayMode,
-    replayData
-  )
   if replayMode:
+    run = newGame(
+      liveMap,
+      replayData.config.spawnIntervalTicks,
+      0,
+      true,
+      replayData
+    )
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
   else:
-    loadBots(run, options.botGroups, options.playerSlot)
-    run.recorder = initReplayRecorder(
-      currentSetup(run, uint32(options.maximumTicks)), gameMap.preset
-    )
-    run.recorder.data.config =
-      when defined(coworld):
-        coworld.config.withMapPreset(gameMap.preset)
-      else:
-        block:
-          var config = localGameConfig(options, HeroClassCount)
-          if matchConfig.players.len > 0:
-            config.players = matchConfig.players
-          config.withMapPreset(gameMap.preset)
-    run.recorder.data.config.validateConfig(HeroClassCount)
-    run.replayPlayer = ReplayPlayer(data: run.recorder.data)
+    startLiveMatch()
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
