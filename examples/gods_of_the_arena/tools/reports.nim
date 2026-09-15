@@ -50,7 +50,9 @@ proc standings(panel, rows: JsonNode): string =
     result.add "<tr><td>" & number(row["rank"]) &
       (if row["tied"].getBool: "<span class=tie> =</span>" else: "") &
       "</td><td class=policy title=\"" & escape(row["id"].getStr) & "\">" &
-      escape(row["name"].getStr) & "<small>" &
+      escape(row["name"].getStr) &
+      "<small class=policy-version title=\"" &
+      escape(row["version"].getStr) & "\">" &
       escape(row["version"].getStr) & "</small></td><td>" &
       number(row["appearances"]) & "</td><td>" & value & "</td>" &
       "<td class=" & color & ">" & mark & "</td></tr>"
@@ -117,7 +119,9 @@ proc playersHtml(rows: JsonNode): string =
       "\"><th scope=row data-value=\"" & escape(row["name"].getStr) &
       "\" title=\"" & escape(row["id"].getStr) & "\">" &
       "<span class=stat-main>" & escape(row["name"].getStr) &
-      "</span><small class=stat-sub>" & escape(row["version"].getStr) &
+      "</span><small class=\"stat-sub policy-version\" title=\"" &
+      escape(row["version"].getStr) & "\">" &
+      escape(row["version"].getStr) &
       "</small></th>"
     result.add cell("games", "Games", number(row["games"]),
       number(row["mixed"]) & " / " & number(row["mono"]),
