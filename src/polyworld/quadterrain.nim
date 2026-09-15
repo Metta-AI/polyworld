@@ -133,6 +133,7 @@ var
   blendDepth: Uniform[float32]
   heightBlend: Uniform[float32]
   terrainTextures: Uniform[Sampler2dArray]
+  unboostedMaterial: Uniform[float32]
   generatedEnabled: Uniform[float32]
   heightBlendEnabled: Uniform[float32]
   splatsEnabled: Uniform[float32]
@@ -230,6 +231,13 @@ proc terrainVert(
   vertWeights = cornerWeight
   vertSplatRange = splatRange
 
+proc terrainSample(uv: Vec2, material, elevationGain: float32): Vec4 =
+  ## Preserves the selected material's authored color before surface blending.
+  result = texture(terrainTextures, vec3(uv, max(material, 0.0)))
+  if unboostedMaterial >= 0.0 and abs(material - unboostedMaterial) < 0.5:
+    result = vec4(
+      result.xyz / (elevationGain * EnvironmentExposure), result.w)
+
 proc terrainFrag(
     fragColor: var Vec4,
     worldPos: Vec3,
@@ -249,6 +257,7 @@ proc terrainFrag(
       0.0,
       1.0
     )
+    elevationGain = 0.75 + 0.5 * h
     absNormal = abs(vertNormal)
   var uv = vec2(worldPos.x, worldPos.z) * texScale
   if absNormal.y < 0.5:
@@ -267,22 +276,10 @@ proc terrainFrag(
     materials = blendFetch(floor(vertSplatRange.z + 0.5) + quadrant)
     spatial = radialWeights(centerUv)
   let
-    sample0 = texture(
-      terrainTextures,
-      vec3(uv.x, uv.y, max(materials.x, 0.0))
-    )
-    sample1 = texture(
-      terrainTextures,
-      vec3(uv.x, uv.y, max(materials.y, 0.0))
-    )
-    sample2 = texture(
-      terrainTextures,
-      vec3(uv.x, uv.y, max(materials.z, 0.0))
-    )
-    sample3 = texture(
-      terrainTextures,
-      vec3(uv.x, uv.y, max(materials.w, 0.0))
-    )
+    sample0 = terrainSample(uv, materials.x, elevationGain)
+    sample1 = terrainSample(uv, materials.y, elevationGain)
+    sample2 = terrainSample(uv, materials.z, elevationGain)
+    sample3 = terrainSample(uv, materials.w, elevationGain)
     blend0 = vertWeights.x + sample0.w * heightBlend
     blend1 = vertWeights.y + sample1.w * heightBlend
     blend2 = vertWeights.z + sample2.w * heightBlend
@@ -426,7 +423,7 @@ proc terrainFrag(
             lod)
         if curb.w >= 1.0 - cover:
           ground = curb.xyz
-  var color = ground * vertColor * (0.75 + 0.5 * h)
+  var color = ground * vertColor * elevationGain
   # Passability borders draw on upward faces only (walls sit exactly on
   # integer x/z, so the fract test would classify their every pixel as
   # border), and only while the edge display is toggled on. Each strip is
@@ -885,6 +882,7 @@ var
   heightScaleLocation, edgesEnabledLocation: GLint
   texScaleLocation, blendDepthLocation, heightBlendLocation: GLint
   terrainTexturesLocation, visibilityTexLocation: GLint
+  unboostedMaterialLocation: GLint
   groundMaskLocation, groundMaskEnabledLocation, groundLayersLocation: GLint
   groundRingLocation, groundRingShapeLocation: GLint
   visibilitySize = GridTiles
@@ -1790,6 +1788,8 @@ var
   borderWidth* = 0.05'f32 # width of the passability border strips
   terrainTextureScale* = 0.27'f
     ## Texture repeats per tile, with higher values making smaller patterns.
+  terrainUnboostedMaterial* = -1.0'f
+    ## Texture layer without elevation or exposure boosts; minus one disables.
   terrainBlendDepth* = 0.12'f32  # blend band width; smaller is more abrupt
   terrainHeightBlend* = 1.2'f32  # how strongly height maps steer the blend
   terrainHeightBlending* = true
@@ -2039,6 +2039,7 @@ proc rebuildTerrainData() =
 
 proc bindTerrainData() =
   ## Binds generated material controls and brush records for either draw path.
+  glUniform1f(unboostedMaterialLocation, terrainUnboostedMaterial)
   glUniform1f(generatedLocation, if generatedTerrain: 1 else: 0)
   glUniform1f(heightBlendEnabledLocation, if terrainHeightBlending: 1 else: 0)
   glUniform1f(splatsEnabledLocation, if terrainSplats: 1 else: 0)
@@ -3324,6 +3325,7 @@ proc initTerrain*(
   if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
     raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
   terrainMaterialSize = settings.size
+  terrainUnboostedMaterial = -1.0'f
   treeTileBrightness.setLen(0)
   groundRelief.setLen(0)
   groundMaterialOverrides.setLen(0)
@@ -3383,6 +3385,9 @@ proc initTerrain*(
   terrainTexturesLocation = glGetUniformLocation(
     terrainProgram,
     "terrainTextures"
+  )
+  unboostedMaterialLocation = glGetUniformLocation(
+    terrainProgram, "unboostedMaterial"
   )
   visibilityTexLocation = glGetUniformLocation(
     terrainProgram,
