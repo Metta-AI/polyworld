@@ -1,0 +1,67 @@
+{
+  "source": "/Users/me/p/output/imagegen/tree-foliage-atlas-v5/tree-foliage-atlas.png",
+  "size": [
+    2048,
+    2048
+  ],
+  "grid": [
+    4,
+    4
+  ],
+  "cellSize": [
+    512,
+    512
+  ],
+  "layout": "Four grayscale top-down tree caps replace the bark row. The pine cap uses seven foliage-covered branches extending from a single central attachment point. The following three caps are distinct radial broadleaf tufts.",
+  "processing": "Generated with built-in image_gen, including a pine geometry guide assembled from the original evergreen sprays. Removed pink locally, neutralized grayscale, and matched the existing brightness ramp. Lower three atlas rows copied exactly from v5.",
+  "caps": [
+    {
+      "column": 1,
+      "name": "pine-cap",
+      "meanOpaqueGray": 229.98,
+      "boundsWithinCell": [
+        43,
+        40,
+        469,
+        472
+      ],
+      "centerAlpha": 255
+    },
+    {
+      "column": 2,
+      "name": "rounded-cap",
+      "meanOpaqueGray": 204.0,
+      "boundsWithinCell": [
+        51,
+        40,
+        460,
+        472
+      ],
+      "centerAlpha": 255
+    },
+    {
+      "column": 3,
+      "name": "broadleaf-cap",
+      "meanOpaqueGray": 155.99,
+      "boundsWithinCell": [
+        50,
+        40,
+        462,
+        472
+      ],
+      "centerAlpha": 255
+    },
+    {
+      "column": 4,
+      "name": "oak-cap",
+      "meanOpaqueGray": 136.0,
+      "boundsWithinCell": [
+        44,
+        40,
+        468,
+        472
+      ],
+      "centerAlpha": 255
+    }
+  ]
+}
