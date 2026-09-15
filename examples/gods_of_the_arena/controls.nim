@@ -46,6 +46,10 @@ var
   practiceMode* = false
   setupOpen*, startRequested*, restartRequested*: bool
   historyOpen* = false
+  attackMoveArmed* = false
+  hudAbilityRequest* = -1'i32
+  pendingControlPreset*: string
+  pendingKeysPath*: string
   feedbackText*: string
   feedbackError*: bool
   feedbackTime*: float64
@@ -57,6 +61,8 @@ proc notifyPlayer*(text: string, error = false) =
 
 proc cancelPlayerAim*() =
   armedAbility = -1
+  attackMoveArmed = false
+  hudAbilityRequest = -1
 
 proc resetPlayerCommands*() =
   pending.setLen(0)
@@ -72,6 +78,7 @@ proc resetHumanMatch*() =
 
 proc queueStop*(heroId: int32) =
   ## Cancels the hero's current path and attack.
+  cancelPlayerAim()
   pending.add PlayerCommand(kind: CommandStop, heroId: heroId)
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
@@ -297,6 +304,9 @@ proc commandReason(world: World, command: PlayerCommand): string =
 
 proc flushPlayerCommands*(game: Game) =
   ## Drains the human queue on a decision tick.
+  if game.replayMode or game.historyPlayback or game.world.gameOver:
+    resetPlayerCommands()
+    return
   if pending.len == 0:
     return
   let commands = pending

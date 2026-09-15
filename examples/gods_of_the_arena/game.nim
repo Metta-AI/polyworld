@@ -44,6 +44,8 @@ proc usage() =
   echo "  --vsync:off             Unlock the frame rate (default on)."
   echo "  --cast MODE             quick, normal, or assisted."
   echo "  --difficulty MODE       practice or standard (graphical play)."
+  echo "  --controls PRESET       mouse, wasd, or mousekeys."
+  echo "  --keys PATH             Load custom play key bindings."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 
@@ -109,6 +111,15 @@ proc parseGameOptions(): GameOptions =
           practiceMode = false
         else:
           fail("--difficulty must be practice or standard")
+      of "--controls":
+        let preset = arguments.argumentValue(index, "--controls").toLowerAscii
+        case preset
+        of "mouse", "wasd", "mousekeys", "mousekey":
+          pendingControlPreset = preset
+        else:
+          fail("--controls must be mouse, wasd, or mousekeys")
+      of "--keys":
+        pendingKeysPath = arguments.argumentValue(index, "--keys")
       of "--help", "-h":
         usage()
         quit(0)
