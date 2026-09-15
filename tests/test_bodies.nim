@@ -1,4 +1,5 @@
 import
+  std/random,
   polyworld/[bodies, fixed]
 
 proc openGround(pos: FixedVec2): bool =
@@ -9,6 +10,45 @@ proc openGround(pos: FixedVec2): bool =
 proc blockedPastX(pos: FixedVec2): bool =
   ## Blocks anything at or past two tiles on x.
   pos.x < 2'fx
+
+proc referenceSeparatePair(a, b: var Body, walkable: Walkable) =
+  let
+    offset = b.pos - a.pos
+    dist = length(offset)
+    need = a.radius + b.radius
+  if dist == FixedZero or dist >= need:
+    return
+  let
+    oldA = a.pos
+    oldB = b.pos
+    push = normalize(offset) * ((need - dist) / 2)
+  a.pos -= push
+  b.pos += push
+  clampWalkable(a.pos, oldA, walkable)
+  clampWalkable(b.pos, oldB, walkable)
+
+echo "Testing squared-distance rejection preserves fixed-point separation"
+block:
+  var rng = initRand(42)
+  for ground in [openGround, blockedPastX]:
+    for sample in 0 ..< 20_000:
+      var
+        a = Body(
+          pos: fixedVec2(Fixed(rng.rand(-200_000 .. 200_000)), Fixed(rng.rand(-200_000 .. 200_000))),
+          radius: Fixed(rng.rand(1 .. 65_536)))
+        b = Body(
+          pos: fixedVec2(Fixed(rng.rand(-200_000 .. 200_000)), Fixed(rng.rand(-200_000 .. 200_000))),
+          radius: Fixed(rng.rand(1 .. 65_536)))
+      if sample mod 4 == 0:
+        b.pos = a.pos
+      elif sample mod 4 == 1:
+        b.pos = a.pos + fixedVec2(a.radius + b.radius + Fixed(rng.rand(-1 .. 1)), FixedZero)
+      var
+        expectedA = a
+        expectedB = b
+      referenceSeparatePair(expectedA, expectedB, ground)
+      separatePair(a, b, ground)
+      doAssert a == expectedA and b == expectedB
 
 echo "Testing world-integer tile conversion"
 block:

@@ -2697,6 +2697,8 @@ proc updateHero(world: World, hero: Hero) =
 
 proc separateBodies(first, second: var Body, layer: int32) =
   ## Pushes two living units apart while keeping both on this layer.
+  if not needsSeparation(first, second):
+    return
   gotaWalkLayer = int(layer)
   gotaWalkDestLayer = int(layer)
   gotaWalkOrigin = first.pos
