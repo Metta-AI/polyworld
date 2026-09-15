@@ -267,7 +267,7 @@ proc runGraphics*() =
     FootmanSizeIncrease = 1.1'f32
     FootmanSizeFactors: array[Team, float32] = [
       1.0'f32 * FootmanSizeIncrease,
-      1.15'f32 * FootmanSizeIncrease
+      1.265'f32 * FootmanSizeIncrease
     ]
 
   proc footmanSizeFactor(team: Team): float32 =
