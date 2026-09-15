@@ -10,6 +10,7 @@ import
 type
   PlayerCommandKind = enum
     CommandDraft
+    CommandStop
     CommandWalk
     CommandAttack
     CommandAttackMove
@@ -45,6 +46,10 @@ proc queueDraft*(heroId, classId: int32) =
   pending.add PlayerCommand(
     kind: CommandDraft, heroId: heroId, first: classId
   )
+
+proc queueStop*(heroId: int32) =
+  ## Cancels the hero's current path and attack.
+  pending.add PlayerCommand(kind: CommandStop, heroId: heroId)
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
   ## Queues one walk command for the human hero.
@@ -184,6 +189,10 @@ proc recordCommand(game: Game, command: PlayerCommand) =
       tick: tick, heroId: command.heroId, kind: ActionDraft,
       first: command.first
     )
+  of CommandStop:
+    game.recorder.record ReplayAction(
+      tick: tick, heroId: command.heroId, kind: ActionStop
+    )
   of CommandWalk:
     game.recorder.recordWalkTo(
       tick, command.heroId, command.first, command.second
@@ -218,6 +227,8 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
   case command.kind
   of CommandDraft:
     game.world.applyDraft(command.heroId, command.first)
+  of CommandStop:
+    applyStop(game.world, command.heroId)
   of CommandWalk:
     applyWalkTo(
       game.world, command.heroId, command.first, command.second
