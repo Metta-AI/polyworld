@@ -3020,17 +3020,70 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     except ReplayError as error:
       game.recordingError = error.msg
 
-proc initLanePaths(map: MapData) =
+var laneWalkable: seq[seq[bool]]
+
+proc laneTileOpen(layer, x, z: int): bool =
+  ## Applies tower clearance only to lane planning, leaving terrain unchanged.
+  isWalkable(layer, x, z) and laneWalkable[layer][z * layers[layer].width + x]
+
+proc laneStop(stop: ArenaStop): ArenaStop =
+  ## Moves a control point inside a tower to the nearest clear terrain tile.
+  if laneTileOpen(stop.layer, stop.x, stop.z):
+    return stop
+  result = stop
+  var best = int64.high
+  let layer = layers[stop.layer]
+  for z in 0 ..< layer.depth:
+    for x in 0 ..< layer.width:
+      if not laneTileOpen(stop.layer, x, z):
+        continue
+      let distance = int64(x - stop.x) * int64(x - stop.x) +
+        int64(z - stop.z) * int64(z - stop.z)
+      if distance < best:
+        best = distance
+        result = (stop.layer, x, z)
+  doAssert best != int64.high, "lane control point has no clear terrain"
+
+proc initLanePaths(map: MapData, world: World) =
   ## Builds shared lane polylines on the generated map.
+  laneWalkable = newSeq[seq[bool]](layers.len)
+  for layerIndex, layer in layers:
+    laneWalkable[layerIndex] = newSeq[bool](layer.width * layer.depth)
+    for open in laneWalkable[layerIndex].mitems:
+      open = true
+  for tower in world.towers:
+    let
+      layerIndex = int(bindNavLayer(tower.position))
+      layer = layers[layerIndex]
+      radius = tilesToWorld(
+        TowerBodyRadii[tower.tier] + FootmanBodyRadius, WorldScale
+      )
+    # Exclude every tile touched by the expanded footprint. This keeps
+    # connecting segments and early turns between waypoints clear too.
+    for z in 0 ..< layer.depth:
+      for x in 0 ..< layer.width:
+        let
+          center = worldPoint(pathPoint(layerIndex, x, z))
+          dx = max(0'i64,
+            abs(int64(center.x) - tower.position.x) - WorldScale div 2)
+          dz = max(0'i64,
+            abs(int64(center.z) - tower.position.z) - WorldScale div 2)
+        if dx * dx + dz * dz <= int64(radius) * radius:
+          laneWalkable[layerIndex][z * layer.width + x] = false
+  defer: laneWalkable.setLen(0)
   for lane in 0 .. 2:
     let route = map.layout.lanes[lane]
     lanePathPoints[lane].setLen(0)
     lanePathTiles[lane].setLen(0)
     for i in 0 ..< route.len - 1:
       let
-        a = route[i]
-        b = route[i + 1]
-        segment = findTilePath(a.layer, a.x, a.z, b.layer, b.x, b.z)
+        a = laneStop(route[i])
+        b = laneStop(route[i + 1])
+        segment = findTilePath(PathQuery(
+          startLayer: a.layer, startX: a.x, startZ: a.z,
+          finishLayer: b.layer, finishX: b.x, finishZ: b.z,
+          walkable: laneTileOpen
+        )).tiles
       doAssert segment.len > 0,
         &"lane {lane} seed {map.seed}: no path {a} -> {b}; " &
         &"walkable {isWalkable(a.layer, a.x, a.z)} -> " &
@@ -3078,8 +3131,8 @@ proc newGame*(
   let world = result.world
   world.spawnIntervalTicks = spawnInterval
   world.rng = initRng(map.seed)
-  initLanePaths(map)
   initTowers(world, map)
+  initLanePaths(map, world)
   for team in Team:
     var point = worldPoint(map.layout.spawns[team.ord])
     point.y = fixedSurfaceHeight(point)
