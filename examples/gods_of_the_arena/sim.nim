@@ -226,8 +226,8 @@ type
 const
   WorldScale* = 60_000'i32
   FirstTowerId = 10'i32
-  TowerHitPoints*: array[TowerTier, int32] = [1_200'i32, 2_400, 4_800]
-  TowerDamages*: array[TowerTier, int32] = [28'i32, 56, 112]
+  TowerHitPoints*: array[TowerTier, int32] = [900'i32, 1_200, 1_800]
+  TowerDamages*: array[TowerTier, int32] = [18'i32, 24, 30]
   TowerAttackRanges*: array[TowerTier, int32] = [
     300_000'i32,
     330_000,
