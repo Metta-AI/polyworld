@@ -207,8 +207,8 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   var
-    # Footmen and gods are the lane grunts of each faction: humans for red,
-    # undead for blue, so the teams read from their models alone.
+    # Footmen and nexus gods share faction models: undead for red/Dire,
+    # humans for blue/Radiant.
     footmanModels: array[Team, CharacterModel]
     footmanRenderClips: array[Team, array[6, int]]
     heroModels: array[HeroClass, CharacterModel]
@@ -262,12 +262,11 @@ proc runGraphics*() =
     BarracksScale = 1.65'f
 
   const
-    # The undead asset is authored with a narrower body than the human asset.
-    # Keep the normalized height while giving Dire the same readable footprint.
+    # Preserve the undead footprint adjustment and enlarge Radiant humans 10%.
     FootmanSizeIncrease = 1.1'f32
     FootmanSizeFactors: array[Team, float32] = [
-      1.0'f32 * FootmanSizeIncrease,
-      1.265'f32 * FootmanSizeIncrease
+      RedTeam: 1.15'f32 * FootmanSizeIncrease,
+      BlueTeam: 1.1'f32 * FootmanSizeIncrease
     ]
 
   proc footmanSizeFactor(team: Team): float32 =
