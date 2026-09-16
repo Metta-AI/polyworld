@@ -1,4 +1,5 @@
 ## Native decision batches. Puffer workers parallelize independent batch handles.
+## Lanes advance sequentially; this API creates no processes or worker threads.
 import std/strutils
 include bots
 

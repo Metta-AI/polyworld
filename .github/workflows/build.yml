@@ -30,7 +30,8 @@ jobs:
           nim r -d:mapProfileTracePath=tmp/map-profile-test.json -d:profileFrames=2
           tests/test_profiles.nim
       - run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
-      - run: nim r -d:headless --threads:on --mm:atomicArc tests/test_gota_batch.nim
+      - run: nim r -d:headless tests/test_basic_pause.nim
+      - run: nim r -d:headless tests/test_gota_training.nim
       - run: nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
       - run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
       - run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
