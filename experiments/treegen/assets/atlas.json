@@ -1,24 +1,28 @@
 {
   "size": [
-    2048,
-    2048
+    512,
+    512
   ],
   "grid": [
     4,
     4
   ],
   "cellSize": [
-    512,
-    512
+    128,
+    128
   ],
   "generation": "Regenerated with built-in image_gen using detailed v6 as the edit reference.",
   "appearance": "White base-material foliage with painted veins, planes, creases and overlap shading. Caps have detailed white foliage. Branch roots have a gray tint which fades toward detailed white tips. No left-to-right whole-tile darkening.",
-  "processing": "Pink background removed locally, foliage made strictly neutral grayscale, and output resized to 2048. No foreground contrast flattening or white-fill remapping applied.",
+  "processing": "Pink background removed locally, foliage made strictly neutral grayscale, and output resized to 2048. No foreground contrast flattening or white-fill remapping applied. Runtime asset downsampled to 512x512 with alpha-aware Lanczos filtering.",
   "nativeGeneratedSize": [
     1254,
     1254
   ],
-  "tiles": [
+  "sourceSize": [
+    2048,
+    2048
+  ],
+  "sourceTileStatistics": [
     {
       "row": 1,
       "column": 1,
