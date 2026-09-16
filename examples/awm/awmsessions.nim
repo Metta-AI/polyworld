@@ -1,16 +1,17 @@
 ## Shared browser/server session options, deterministic bots and snapshot codec.
 ## Card programs stay in the base set; the wire format contains stable card IDs.
-import std/[json, options, sets, strutils]
+import std/[json, sets, strutils]
 import awmsim
 export awmsim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 1
+  SnapshotSchemaVersion* = 5
 
 type
   SessionOptions* = object
     seed*: int64
+    seedGiven*: bool  ## --seed was passed; otherwise games may pick their own.
     playerClass*, opponentClass*: HeroClass
     human*: bool
     botPaths*: seq[string]
@@ -21,7 +22,7 @@ type
   BotAction* = object
     kind*: BotActionKind
     handIndex*: int
-    choice*: Choice
+    choices*: seq[Choice]  ## One per target of the card, in order.
 
   Snapshot* = object
     matchId*: string
@@ -78,6 +79,7 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
         result.seed = parseBiggestInt(value).int64
       except ValueError:
         raise newException(ValueError, "Invalid integer seed: " & value)
+      result.seedGiven = true
     of "--class": result.playerClass = parseHeroClass(value)
     of "--opponent": result.opponentClass = parseHeroClass(value)
     of "--bot":
@@ -88,45 +90,55 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
     else: discard
     inc index
 
+proc botPick(choices: seq[Choice], player: int, helps: bool): Choice =
+  ## A rule that helps its target goes on the bot's own minion. Others
+  ## prefer the enemy hero, then the first enemy minion. Either falls back
+  ## to no target, else nothing (Canceled).
+  let enemy = (player + 1) mod PlayerCount
+  if helps:
+    for choice in choices:
+      if choice.kind == CreatureChoice and choice.owner == player:
+        return choice
+  else:
+    for choice in choices:
+      if choice.kind == HeroChoice and choice.owner == enemy:
+        return choice
+    for choice in choices:
+      if choice.kind == CreatureChoice and choice.owner == enemy:
+        return choice
+  for choice in choices:
+    if choice.isNoTarget:
+      return choice
+  Canceled
+
 proc nextBotAction*(game: GameState, playsThisTurn = 0,
     maxPlaysPerTurn = 3): BotAction =
   ## The fixed hand order and target preferences make bots deterministic.
   ## An explicit budget also bounds future free cards and bouncing strategies.
-  result = BotAction(kind: EndTurnAction, handIndex: -1, choice: NoTarget)
+  result = BotAction(kind: EndTurnAction, handIndex: -1, choices: @[NoTarget])
   if playsThisTurn >= maxPlaysPerTurn:
     return
-  let enemy = (game.currentPlayer + 1) mod PlayerCount
   for handIndex, card in game.players[game.currentPlayer].hand:
     if not game.canPlay(handIndex):
       continue
-    var selected = NoTarget
+    var picks = @[NoTarget]
     if card.needsChoice():
-      let choices = game.availableChoices(handIndex)
-      selected = Canceled
-      # Prefer the enemy hero, then the first enemy minion, then no target.
-      for choice in choices:
-        if choice.kind == HeroChoice and choice.owner == enemy:
-          selected = choice
+      picks.setLen(0)
+      for step in 0 ..< card.targetCount():
+        let pick = botPick(game.availableChoices(handIndex, picks),
+          game.currentPlayer, card.helpsTarget(step))
+        if pick.isCanceled:
           break
-      if selected.isCanceled:
-        for choice in choices:
-          if choice.kind == CreatureChoice and choice.owner == enemy:
-            selected = choice
-            break
-      if selected.isCanceled:
-        for choice in choices:
-          if choice.isNoTarget:
-            selected = choice
-            break
-      if selected.isCanceled:
+        picks.add pick
+      if picks.len < card.targetCount():
         continue
     return BotAction(kind: PlayCardAction, handIndex: handIndex,
-      choice: selected)
+      choices: picks)
 
 proc applyBotAction*(game: var GameState, action: BotAction): bool =
   case action.kind
   of PlayCardAction:
-    game.playCard(action.handIndex, action.choice)
+    game.playCard(action.handIndex, action.choices)
   of EndTurnAction:
     game.finishTurn()
     true
@@ -154,12 +166,13 @@ proc stringValue(node: JsonNode, label: string): string =
   node.getStr()
 
 proc cardToJson(card: Card): JsonNode =
-  if card.class.isNone or card != card.class.get().classCard():
+  let id = card.cardId()
+  if card != baseCard(id):
     raise newException(ValueError, "Snapshot card is not a base-set card")
-  %card.class.get().classId()
+  %id
 
 proc cardFromJson(node: JsonNode): Card =
-  parseHeroClass(node.stringValue("card ID")).classCard()
+  baseCard(node.stringValue("card ID"))
 
 proc cardsToJson(cards: seq[Card]): JsonNode =
   result = newJArray()
@@ -194,6 +207,16 @@ proc choiceFromJson*(node: JsonNode): Choice =
       raise newException(ValueError, "Invalid snapshot creature owner")
     creatureChoice(owner, node.field("creatureId").integer("creature ID", 1))
 
+proc keywordsToJson(keywords: set[Keyword]): JsonNode =
+  result = newJArray()
+  for keyword in keywords:
+    result.add %($keyword)
+
+proc keywordsFromJson(node: JsonNode): set[Keyword] =
+  node.requireKind(JArray, "keywords")
+  for entry in node:
+    result.incl parseEnum[Keyword](entry.stringValue("keyword"))
+
 proc gameToJson*(game: GameState): JsonNode =
   var players = newJArray()
   for player in game.players:
@@ -202,6 +225,8 @@ proc gameToJson*(game: GameState): JsonNode =
       board.add %*{"id": minion.id, "owner": minion.owner,
         "card": cardToJson(minion.card),
         "currentToughness": minion.currentToughness,
+        "bonusPower": minion.bonusPower,
+        "lostKeywords": keywordsToJson(minion.lostKeywords),
         "canAttack": minion.canAttack,
         "hasAttacked": minion.hasAttacked}
     players.add %*{"heroClass": player.heroClass.classId(),
@@ -211,9 +236,13 @@ proc gameToJson*(game: GameState): JsonNode =
       "discardPile": cardsToJson(player.discardPile), "board": board}
   var visualEvents = newJArray()
   for event in game.visualEvents:
-    visualEvents.add %*{"kind": ord(event.kind),
+    var entry = %*{"kind": ord(event.kind),
       "target": choiceToJson(event.target), "boardIndex": event.boardIndex,
       "boardCount": event.boardCount}
+    if event.kind == DeathVfx:
+      entry["card"] = cardToJson(event.card)
+      entry["power"] = %event.power
+    visualEvents.add entry
   %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
     "visualEvents": visualEvents,
@@ -251,6 +280,10 @@ proc gameFromJson*(node: JsonNode): GameState =
         owner: entry.field("owner").integer("minion owner", 0, PlayerCount - 1),
         card: cardFromJson(entry.field("card")),
         currentToughness: entry.field("currentToughness").integer("toughness", 1),
+        bonusPower: if entry.hasKey("bonusPower"):
+          entry["bonusPower"].integer("power bonus") else: 0,
+        lostKeywords: if entry.hasKey("lostKeywords"):
+          keywordsFromJson(entry["lostKeywords"]) else: {},
         canAttack: if entry.hasKey("canAttack"): entry["canAttack"].getBool(true) else: true,
         hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false)
       if minion.owner != owner or minion.card.kind != Minion or
@@ -262,16 +295,22 @@ proc gameFromJson*(node: JsonNode): GameState =
   let visualEvents = node.field("visualEvents")
   visualEvents.requireKind(JArray, "visual events")
   for entry in visualEvents:
+    let kind = VfxKind(entry.field("kind").integer("visual event kind",
+      ord(LightningVfx), ord(high(VfxKind))))
     let event = VisualEvent(
-      kind: VfxKind(entry.field("kind").integer("visual event kind",
-        ord(LightningVfx), ord(high(VfxKind)))),
+      kind: kind,
       target: choiceFromJson(entry.field("target")),
       boardIndex: entry.field("boardIndex").integer("visual board index", 0),
-      boardCount: entry.field("boardCount").integer("visual board count", 0))
+      boardCount: entry.field("boardCount").integer("visual board count", 0),
+      card: if kind == DeathVfx: cardFromJson(entry.field("card")) else: Card(),
+      power: if kind == DeathVfx and entry.hasKey("power"):
+        entry["power"].integer("visual power", 0) else: 0)
     # Removed minions legitimately remain in VFX snapshots after a bounce.
     if event.target.kind notin {HeroChoice, CreatureChoice} or
         (event.target.kind == CreatureChoice and
-          event.boardIndex >= event.boardCount):
+          event.boardIndex >= event.boardCount) or
+        (kind == DeathVfx and (event.target.kind != CreatureChoice or
+          event.card.kind != Minion)):
       raise newException(ValueError, "Invalid snapshot visual event target")
     result.visualEvents.add event
   result.gameOver = if node.hasKey("gameOver"): node["gameOver"].getBool(false) else: false

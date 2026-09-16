@@ -80,28 +80,73 @@ proc initCardRenderer*(): CardRenderer =
       GL_FALSE, (9 * sizeof(float32)).GLsizei, cast[pointer](attribute.offset))
   glBindVertexArray(0)
 
-proc cardImageKey*(card: Card, currentToughness = -1): string =
+proc cardImageKey*(card: Card, showStats = true): string =
   # Include every visible value, so rule/stat changes cannot reuse stale faces.
   result = "card/" & $card.kind & "/" & $card.class & "/" & card.name &
     "/" & $card.energyCost & "/" & card.ruleText()
   if card.kind == Minion:
-    result.add "/" & $card.power & "/" & $card.toughness & "/" &
-      $(if currentToughness < 0: card.toughness else: currentToughness)
+    result.add "/" & $card.power & "/" & $card.toughness
+    if not showStats:
+      result.add "/bare"
 
-const CardBackKey* = "card/back"
+const
+  CardBackKey* = "card/back"
+  MaxBakedStat* = 40  ## Larger live stats show as this value.
+
+proc statImageKey*(value: int, ink: StatInk): string =
+  "stat/" & $ink & "/" & $clamp(value, 0, MaxBakedStat)
+
+proc lostKeywordsKey*(lost: set[Keyword]): string =
+  "lost/" & $lost
+
+iterator keywordSets(): set[Keyword] =
+  ## Every non-empty set of keywords.
+  for bits in 1 ..< (1 shl (ord(high(Keyword)) + 1)):
+    var keywords: set[Keyword]
+    for keyword in Keyword:
+      if (bits and (1 shl ord(keyword))) != 0:
+        keywords.incl keyword
+    yield keywords
 
 proc addBaseCardImages*(builder: AtlasBuilder) =
-  for heroClass in HeroClass:
-    let card = heroClass.classCard()
-    if not builder.addImage(card.cardImageKey(), card.renderCardFace()):
+  ## Bakes every face and stat number play can show, so the live atlas never
+  ## grows mid-game: silky's live builder can pack a new image over an
+  ## existing one (a damaged minion replaced the card back).
+  proc add(builder: AtlasBuilder, key: string, image: Image) =
+    if not builder.addImage(key, image):
       raise newException(IOError, "Card images do not fit the UI atlas")
-  if not builder.addImage(CardBackKey, renderCardBack()):
-    raise newException(IOError, "Card back does not fit the UI atlas")
+  for card in baseCards:
+    builder.add(card.cardImageKey(), card.renderCardFace())
+    if card.kind == Minion:
+      builder.add(card.cardImageKey(showStats = false),
+        card.renderCardFace(showStats = false))
+  for ink in StatInk:
+    for value in 0 .. MaxBakedStat:
+      builder.add(statImageKey(value, ink), renderStat(value, ink))
+  for lost in keywordSets():
+    builder.add(lostKeywordsKey(lost), renderLostKeywords(lost))
+  builder.add(CardBackKey, renderCardBack())
 
-proc ensureCardImage*(sk: Silky, card: Card, currentToughness = -1): string =
-  result = card.cardImageKey(currentToughness)
+proc bakedCardImage*(sk: Silky, card: Card, showStats = true): string =
+  ## Never packs at runtime (see addBaseCardImages). A face that was not baked
+  ## falls back to the printed face, then to the card back.
+  result = card.cardImageKey(showStats)
   if result notin sk.atlas.entries:
-    sk.addAtlasImage(result, card.renderCardFace(currentToughness))
+    result = card.cardImageKey()
+  if result notin sk.atlas.entries:
+    result = CardBackKey
+
+iterator overlayImages(card: Card, power, toughness: int,
+    lost: set[Keyword]): (Rect, string) =
+  ## Each live overlay's atlas image and where it goes on the face, in
+  ## pixels: both stats, and the type line when keywords were lost.
+  for (box, value, printed) in [(PowerBox, power, card.power),
+      (ToughnessBox, toughness, card.toughness)]:
+    yield (Rect(x: box.x - StatMargin, y: box.y - StatMargin,
+      w: box.w + StatMargin * 2, h: box.h + StatMargin * 2),
+      statImageKey(value, statInk(value, printed)))
+  if lost.len > 0:
+    yield (TypeLine, lostKeywordsKey(lost))
 
 proc clear*(renderer: var CardRenderer) =
   renderer.vertices.setLen(0)
@@ -122,6 +167,24 @@ proc addSurface*(renderer: var CardRenderer, sk: Silky,
     let p = corners[i]
     renderer.vertices.add [p.x, p.y, p.z, uvs[i].x, uvs[i].y,
       brightness, brightness, brightness, damageFlash]
+
+proc addMinionOverlays*(renderer: var CardRenderer, sk: Silky,
+    corners: array[4, Vec3], card: Card, power, toughness: int,
+    lost: set[Keyword] = {}, brightness = 1.0'f32, damageFlash = 0.0'f32) =
+  ## Draws live power, toughness and lost keywords over a stat-less face
+  ## with these corners, lifted just off it so they win the depth test.
+  let
+    across = corners[3] - corners[0]
+    down = corners[1] - corners[0]
+    lift = normalize(cross(down, across)) * 0.003'f32
+  proc at(x, y: float32): Vec3 =
+    corners[0] + across * (x / CardFaceWidth.float32) +
+      down * (y / CardFaceHeight.float32) + lift
+  for (area, key) in overlayImages(card, power, toughness, lost):
+    if key notin sk.atlas.entries: continue
+    renderer.addSurface(sk, [at(area.x, area.y), at(area.x, area.y + area.h),
+      at(area.x + area.w, area.y + area.h), at(area.x + area.w, area.y)],
+      key, brightness, damageFlash)
 
 proc draw*(renderer: var CardRenderer, sk: Silky, viewProjection: Mat4) =
   if renderer.vertices.len == 0: return
@@ -151,3 +214,12 @@ proc drawCardImage*(sk: Silky, imageKey: string, origin, size: Vec2) =
   let entry = sk.atlas.entries[imageKey]
   sk.drawQuad(origin, size, vec2(entry.x.float32, entry.y.float32),
     vec2(entry.width.float32, entry.height.float32), rgbx(255, 255, 255, 255))
+
+proc drawMinionOverlays*(sk: Silky, card: Card, power, toughness: int,
+    lost: set[Keyword], origin, size: Vec2) =
+  ## The 2D counterpart of addMinionOverlays, over a face at origin/size.
+  let scaleFactor = size / vec2(CardFaceWidth.float32, CardFaceHeight.float32)
+  for (area, key) in overlayImages(card, power, toughness, lost):
+    if key notin sk.atlas.entries: continue
+    sk.drawCardImage(key, origin + vec2(area.x, area.y) * scaleFactor,
+      vec2(area.w, area.h) * scaleFactor)

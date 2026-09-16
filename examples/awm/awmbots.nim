@@ -43,6 +43,11 @@ var
   playedHandIndex: int
   playedChoice: Choice
 
+proc stepChoices(handIndex, step: int): seq[Choice] =
+  ## Legal choices for a hand card's `step`th target. Targets don't depend on
+  ## earlier picks, so placeholders stand in for them.
+  activeGame[].availableChoices(handIndex, newSeq[Choice](max(0, step)))
+
 proc botLimits(): Limits =
   result = defaultLimits()
   result.maxSourceBytes = 256 * 1024
@@ -114,12 +119,45 @@ proc buildBotHost(playerId: int32): Host =
     choices[ci].owner.int32
   discard result.addFunction("choiceOwner", 2, choiceOwnerProc, 3)
 
+  # Multi-target queries. The choice queries above cover the first target.
+  let targetCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    let i = args[0].int
+    let hand = activeGame[].players[activePlayer].hand
+    if i < 0 or i >= hand.len: return 0
+    hand[i].targetCount().int32
+  discard result.addFunction("targetCount", 1, targetCountProc, 3)
+
+  let helpsTargetProc: HostProc = proc(args: openArray[int32]): int32 =
+    let i = args[0].int
+    let hand = activeGame[].players[activePlayer].hand
+    if i < 0 or i >= hand.len: return 0
+    if hand[i].helpsTarget(args[1].int): 1 else: 0
+  discard result.addFunction("helpsTarget", 2, helpsTargetProc, 3)
+
+  let targetChoiceCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    stepChoices(args[0].int, args[1].int).len.int32
+  discard result.addFunction("targetChoiceCount", 2, targetChoiceCountProc, 8)
+
+  let targetChoiceKindProc: HostProc = proc(args: openArray[int32]): int32 =
+    let choices = stepChoices(args[0].int, args[1].int)
+    let ci = args[2].int
+    if ci < 0 or ci >= choices.len: return 0
+    ord(choices[ci].kind).int32
+  discard result.addFunction("targetChoiceKind", 3, targetChoiceKindProc, 8)
+
+  let targetChoiceOwnerProc: HostProc = proc(args: openArray[int32]): int32 =
+    let choices = stepChoices(args[0].int, args[1].int)
+    let ci = args[2].int
+    if ci < 0 or ci >= choices.len: return -1
+    choices[ci].owner.int32
+  discard result.addFunction("targetChoiceOwner", 3, targetChoiceOwnerProc, 8)
+
   # Board queries — own minions
   let selfBoardPowerProc: HostProc = proc(args: openArray[int32]): int32 =
     let board = activeGame[].players[activePlayer].board
     let i = args[0].int
     if i < 0 or i >= board.len: return 0
-    board[i].card.power.int32
+    board[i].power.int32
   discard result.addFunction("selfBoardPower", 1, selfBoardPowerProc, 3)
 
   let selfBoardHpProc: HostProc = proc(args: openArray[int32]): int32 =
@@ -135,7 +173,7 @@ proc buildBotHost(playerId: int32): Host =
     let board = activeGame[].players[enemy].board
     let i = args[0].int
     if i < 0 or i >= board.len: return 0
-    board[i].card.power.int32
+    board[i].power.int32
   discard result.addFunction("enemyBoardPower", 1, enemyBoardPowerProc, 3)
 
   let enemyBoardHpProc: HostProc = proc(args: openArray[int32]): int32 =
@@ -176,6 +214,26 @@ proc buildBotHost(playerId: int32): Host =
     playedChoice = choices[ci]
     1
   discard result.addFunction("playCardChoice", 2, playCardChoiceProc, 100)
+
+  # Two-target cards (Duel): a choice index for each target, in order.
+  let playCardChoicesProc: HostProc = proc(args: openArray[int32]): int32 =
+    if actionPlayed: return 0
+    let i = args[0].int
+    if not activeGame[].canPlay(i): return 0
+    let hand = activeGame[].players[activePlayer].hand
+    if i < 0 or i >= hand.len or hand[i].targetCount() != 2: return 0
+    var picks: seq[Choice]
+    for step in 0 .. 1:
+      let choices = stepChoices(i, step)
+      let ci = args[step + 1].int
+      if ci < 0 or ci >= choices.len: return 0
+      picks.add choices[ci]
+    if not activeGame[].playCard(i, picks): return 0
+    actionPlayed = true
+    playedHandIndex = i
+    playedChoice = picks[0]
+    1
+  discard result.addFunction("playCardChoices", 3, playCardChoicesProc, 100)
 
 var dataIds: array[BotDataSlot, int32]
 

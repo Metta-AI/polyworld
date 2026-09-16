@@ -5,6 +5,7 @@ suite "session options":
   test "defaults":
     let options = parseSessionOptions([])
     check options.seed == DefaultSessionSeed
+    check not options.seedGiven
     check options.playerClass == Archer
     check options.opponentClass == Mage
     check options.human == false
@@ -13,6 +14,7 @@ suite "session options":
     let options = parseSessionOptions([
       "--seed", "-123", "--class", "warrior", "--opponent=MAGE"])
     check options.seed == -123
+    check options.seedGiven
     check options.playerClass == Warrior
     check options.opponentClass == Mage
 
@@ -41,7 +43,7 @@ suite "deterministic session bots":
     let action = game.nextBotAction()
     check action.kind == PlayCardAction
     check action.handIndex == 0
-    check action.choice == heroChoice(1 - player)
+    check action.choices == @[heroChoice(1 - player)]
     check game.applyBotAction(action)
     check game.players[player].life == StartingLife
     check game.players[1 - player].life < StartingLife
@@ -51,12 +53,12 @@ suite "deterministic session bots":
     let player = game.currentPlayer
     game.players[player].hand = @[Mage.classCard()]
     game.players[player].energy = 1
-    check game.nextBotAction().choice == NoTarget
+    check game.nextBotAction().choices == @[NoTarget]
     game.players[1 - player].board = @[MinionState(id: 1,
       owner: 1 - player, card: Warrior.classCard(), currentToughness: 2)]
     game.nextMinionId = 2
     let action = game.nextBotAction()
-    check action.choice == creatureChoice(1 - player, 1)
+    check action.choices == @[creatureChoice(1 - player, 1)]
     check game.applyBotAction(action)
     check game.players[1 - player].board.len == 0
     check game.players[player].board.len == 1
@@ -101,13 +103,18 @@ suite "global snapshots":
     game.players[0].hand = @[Archer.classCard(), Warrior.classCard(), Mage.classCard()]
     game.players[0].discardPile = @[Archer.classCard()]
     game.players[1].board = @[MinionState(id: 8, owner: 1,
-      card: Warrior.classCard(), currentToughness: 1)]
+      card: Warrior.classCard(), currentToughness: 1, bonusPower: 2,
+      lostKeywords: {Ranged})]
     game.nextMinionId = 9
     game.visualEvents = @[
       VisualEvent(kind: LightningVfx, target: heroChoice(1)),
       VisualEvent(kind: DamageFlashVfx, target: heroChoice(1)),
       VisualEvent(kind: BubbleVfx, target: creatureChoice(1, 7),
-        boardIndex: 1, boardCount: 2)]
+        boardIndex: 1, boardCount: 2),
+      VisualEvent(kind: SwordsIntoTheWindVfx, target: creatureChoice(1, 8),
+        boardIndex: 0, boardCount: 1),
+      VisualEvent(kind: DeathVfx, target: creatureChoice(1, 6),
+        boardIndex: 0, boardCount: 1, card: Warrior.classCard(), power: 4)]
     let original = Snapshot(matchId: "global-23", revision: 42, game: game)
     let encoded = snapshotToJson(original)
     let decoded = snapshotFromJson($encoded)
@@ -120,7 +127,25 @@ suite "global snapshots":
       check card.ruleText() == heroClass.classCard().ruleText()
       check card.needsChoice() == heroClass.classCard().needsChoice()
     check decoded.game.players[1].board[0].currentToughness == 1
+    check decoded.game.players[1].board[0].power == 5
+    check decoded.game.players[1].board[0].lostKeywords == {Ranged}
+    var unknownKeyword = encoded["game"].copy()
+    unknownKeyword["players"][1]["board"][0]["lostKeywords"] = %*["Flying"]
+    expect ValueError:
+      discard gameFromJson(unknownKeyword)
     check decoded.game.visualEvents == game.visualEvents
+
+  test "every base card has a unique ID and the Archer deck round trips":
+    for card in baseCards:
+      check baseCard(card.cardId()) == card
+      for other in baseCards:
+        if other != card:
+          check other.cardId() != card.cardId()
+    let game = newGame(Archer, Archer, 29)
+    let decoded = gameFromJson(gameToJson(game))
+    for player in 0 ..< PlayerCount:
+      check decoded.players[player].deck == game.players[player].deck
+      check decoded.players[player].hand == game.players[player].hand
 
   test "restored snapshot executes the same subsequent bot actions":
     var original = newGame(Mage, Archer, 31)
@@ -145,7 +170,7 @@ suite "global snapshots":
       missing.delete(key)
       expect ValueError:
         discard snapshotFromJson(missing)
-    for version in [0, 2]:
+    for version in [SnapshotSchemaVersion - 1, SnapshotSchemaVersion + 1]:
       var invalid = valid.copy()
       invalid["schemaVersion"] = %version
       expect ValueError:
@@ -173,11 +198,11 @@ suite "global snapshots":
     var invalidMinion = valid.copy()
     invalidMinion["nextMinionId"] = %2
     invalidMinion["players"][0]["board"] = %*[
-      {"id": 1, "owner": 1, "card": "warrior", "currentToughness": 2}]
+      {"id": 1, "owner": 1, "card": "bear-2", "currentToughness": 2}]
     expect ValueError:
       discard gameFromJson(invalidMinion)
     invalidMinion["players"][0]["board"][0]["owner"] = %0
-    invalidMinion["players"][0]["board"][0]["card"] = %"archer"
+    invalidMinion["players"][0]["board"][0]["card"] = %"bolt-1"
     expect ValueError:
       discard gameFromJson(invalidMinion)
 
@@ -193,6 +218,8 @@ suite "owned game snapshots":
   test "saved presentation state survives mutation and board reallocation":
     var game = newGame(Mage, Warrior, 7)
     game.currentPlayer = 0
+    let bouncer = Mage.classCard()
+    game.players[0].hand = @[bouncer, bouncer, bouncer, bouncer, bouncer]
     game.players[0].energy = 20
     game.players[0].totalEnergy = 20
     discard game.playCard(0, NoTarget)
@@ -204,3 +231,54 @@ suite "owned game snapshots":
     check $gameToJson(saved) == savedJson
     check saved.players[0].board.len == 1
     check game.players[0].board.len == 5
+
+import std/os
+import ../awmbots
+
+suite "bots and two-target cards":
+  proc duelGame(): (GameState, int) =
+    ## Duel in hand, a Bear on our side and a Sniper on theirs.
+    var game = newGame(Warrior, Archer, 641)
+    let me = game.currentPlayer
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: Warrior.classCard(), currentToughness: 2)]
+    game.players[1 - me].board = @[MinionState(id: 2, owner: 1 - me,
+      card: baseCard("sniper-2"), currentToughness: 1)]
+    game.nextMinionId = 3
+    game.players[me].hand = @[baseCard("duel-2")]
+    game.players[me].energy = 2
+    (game, me)
+
+  test "the built-in bot buffs its own minion and duels an enemy":
+    let (game, me) = duelGame()
+    let action = game.nextBotAction()
+    check action.kind == PlayCardAction
+    check action.choices == @[creatureChoice(me, 1), creatureChoice(1 - me, 2)]
+
+  test "the built-in bot skips Duel without an enemy minion":
+    var (game, me) = duelGame()
+    game.players[1 - me].board.setLen(0)
+    check game.nextBotAction().kind == EndTurnAction
+
+  test "the reference BASIC bot plays Duel with both targets":
+    var (game, me) = duelGame()
+    let vm = loadBot(readFile(currentSourcePath().parentDir.parentDir /
+      "players" / "base.bas"), me.int32)
+    check vm.runDecision(game) == BotPlayedCard
+    check game.players[me].hand.len == 0
+    check not game.minionLocation(2).found
+    check game.players[me].board[0].power == 4
+
+suite "summoned minions":
+  test "summoned minions round trip":
+    var game = newGame(Warrior, Mage, 743)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("commander-5")]
+    game.players[me].energy = 5
+    check game.playCard(0)
+    check game.players[me].board.len == 3
+    let decoded = gameFromJson(gameToJson(game))
+    check gameToJson(decoded) == gameToJson(game)
+    check decoded.players[me].board.len == 3
+    check decoded.players[me].board[2].card == baseCard("footsoldier-1")
+    check decoded.nextMinionId == game.nextMinionId

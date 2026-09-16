@@ -340,11 +340,17 @@ proc serve(options: ServerOptions) {.async.} =
           case actionType
           of "playCard":
             let handIndex = action["handIndex"].getInt()
-            let choice = if action.hasKey("choice"):
-              choiceFromJson(action["choice"])
+            # "choices" answers each of the card's targets in order;
+            # "choice" is the one-target form.
+            var choices: seq[Choice]
+            if action.hasKey("choices") and action["choices"].kind == JArray:
+              for entry in action["choices"]:
+                choices.add choiceFromJson(entry)
+            elif action.hasKey("choice"):
+              choices.add choiceFromJson(action["choice"])
             else:
-              Canceled
-            if match.game.playCard(handIndex, choice):
+              choices.add Canceled
+            if match.game.playCard(handIndex, choices):
               inc match.playsThisTurn
               inc match.revision
               broadcastState()

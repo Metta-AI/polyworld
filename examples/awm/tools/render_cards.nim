@@ -32,6 +32,6 @@ for i, heroClass in [Warrior, Mage, Archer]:
   sheet.draw(face, translate(vec2((60 + i * 660).float32, 163)))
 
 renderCardBack().writeFile(outputDir / "back.png")
-renderCardFace(Warrior.classCard(), 1).writeFile(outputDir / "bear-damaged.png")
+renderCardFace(Warrior.classCard(), currentToughness = 1).writeFile(outputDir / "bear-damaged.png")
 sheet.writeFile(outputDir / "cards.png")
 echo "Card previews: ", outputDir
