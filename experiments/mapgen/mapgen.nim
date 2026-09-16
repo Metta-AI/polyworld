@@ -337,7 +337,7 @@ proc drawCanvas(app: App) =
   sk.label("THE BATTLEGROUND", 304, 25, TextColor, "Small")
   sk.label(
     $app.tiles.resolution & " x " & $app.tiles.resolution &
-      " tiles   /   18 towers   /   14 camps   /   12 barracks",
+      " tiles   /   22 towers   /   14 camps   /   12 barracks",
     304,
     61,
     MutedColor

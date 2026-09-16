@@ -49,6 +49,7 @@ type
   Tower* = object
     position*: Vec2
     team*: Team
+    guardsGod*: bool
   Barrack* = object
     position*, spawn*: Vec2
     team*: Team
@@ -1249,6 +1250,16 @@ proc generateMap*(config: MapConfig): MapData {.raises: [MapgenError].} =
   ]:
     result.towers.add(Tower(position: position, team: Southwest))
     result.towers.add(Tower(position: position.opposite, team: Northeast))
+
+  # Two level-three guards flank each god and leave the center approach open.
+  for offset in [vec2(-16, -48), vec2(48, 16)]:
+    let position = result.forts[0] + offset
+    result.towers.add(Tower(
+      position: position, team: Southwest, guardsGod: true
+    ))
+    result.towers.add(Tower(
+      position: position.opposite, team: Northeast, guardsGod: true
+    ))
 
   result.placeBarracks()
 

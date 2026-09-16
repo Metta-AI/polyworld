@@ -47,6 +47,11 @@ const
     DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb",
     DataRoot & "/characters/mini_legion/human/footman.glb"
   ]
+  GodModels*: array[2, string] = [
+    DataRoot & "/characters/mini_legion/warband/warlock.glb",
+    DataRoot & "/characters/mini_legion/sentinel/druid.glb"
+  ]
+  GodTargetHeight* = 3.2'f
   HeroModelPath* = DataRoot & "/characters/modular_chars/character.glb"
   HeroTargetHeight* = 1.7'f
   HeroPortraitKeys*: array[HeroClass, string] = [
@@ -157,6 +162,8 @@ proc browserAssets*(): seq[Asset] =
         parts.add part
   result.add modelAsset(HeroModelPath, parts, textureSize = 512)
   for path in FootmanModels:
+    result.add modelAsset(path, textureSize = 512)
+  for path in GodModels:
     result.add modelAsset(path, textureSize = 512)
   for path in HeroPortraitPaths:
     result.add fileAsset(path)

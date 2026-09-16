@@ -95,12 +95,6 @@ proc addHudIcons(builder: AtlasBuilder) =
   ## Packs the theme logo into the atlas.
   builder.addThemeLogo(LogoPath)
 
-# Lane footmen and the gods per team: humans for red, undead for blue, so
-# the teams read from their models with no tinting. Heroes are outfits of
-# the same modular pack Call to Adventure uses. Blue wears the upper tank,
-# ranged, mage, support, and fighter looks. Red wears the lower ones.
-# Ranger, Crossbowman, and Arcanist drop or swap gear from their numbered
-# preset. Everyone else wears the preset as published.
 var
   window: Window
   sk: Silky
@@ -203,10 +197,10 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   var
-    # Footmen and nexus gods share faction models: undead for red/Dire,
-    # humans for blue/Radiant.
     footmanModels: array[Team, CharacterModel]
     footmanRenderClips: array[Team, array[6, int]]
+    godModels: array[Team, CharacterModel]
+    godRenderClips: array[Team, array[6, int]]
     heroModels: array[HeroClass, CharacterModel]
     heroRenderClips: array[5, int]
   profileBlock "models":
@@ -220,6 +214,16 @@ proc runGraphics*() =
         model.clipIndex("Victory"),
         model.clipIndex("Attack01"),
         model.clipIndex("Attack02")
+      ]
+      let god = loadCharacterModel(GodModels[ord(team)], GodTargetHeight)
+      godModels[team] = god
+      godRenderClips[team] = [
+        god.clipIndex("Run"),
+        god.clipIndex("Idle"),
+        god.clipIndex("Death"),
+        god.clipIndex("Victory"),
+        god.clipIndex("Attack01"),
+        god.clipIndex("Attack02")
       ]
     for class in HeroClass:
       heroModels[class] = loadModularCharacterModel(
@@ -402,22 +406,10 @@ proc runGraphics*() =
     facing: float32
     animTime: float32
 
-  var gods = [
-    God(team: RedTeam, facing: arctan2(1.0'f32, 1.0'f32)),
-    God(team: BlueTeam, facing: arctan2(-1.0'f32, -1.0'f32)),
-  ]
+  var gods = [God(team: RedTeam), God(team: BlueTeam)]
   for i, god in gods.mpairs:
-    let offset =
-      if god.team == RedTeam:
-        vec3(-3.5, 0, -3.5)
-      else:
-        vec3(3.5, 0, 3.5)
-    god.position = renderPoint(run.world.forts[i].center) + offset
-    god.position.y = surfaceHeightNear(
-      god.position.x,
-      god.position.z,
-      renderPoint(run.world.forts[i].center).y
-    )
+    god.position = renderPoint(run.world.forts[i].center)
+    god.facing = arctan2(-god.position.x, -god.position.z)
 
   proc godClip(god: God): int =
     ## Selects the god animation for the current game state.
@@ -644,6 +636,23 @@ proc runGraphics*() =
           showDamageTrail: true
         )]
       renderer.addResourceBars(anchor, TowerWorldBarWidth, bars)
+    for i, fort in run.world.forts:
+      if fort.hp <= 0 or not visibleInView(fort.team, fort.center):
+        continue
+      let
+        health = fort.hp.float32
+        maximum = FortHp.float32
+        delayed = damageTrails.delayedValue(fort.id, health, maximum, dt)
+        anchor = gods[i].position + vec3(0, GodTargetHeight + 0.45'f, 0)
+        bars = [WorldResourceBar(
+          value: health,
+          maximum: maximum,
+          delayedValue: delayed,
+          height: 0.16'f,
+          color: teamHudColor(fort.team),
+          showDamageTrail: true
+        )]
+      renderer.addResourceBars(anchor, TowerWorldBarWidth, bars)
     for footman in run.world.footmen:
       if footman.state == Dying or footman.hp <= 0 or
           not visibleInView(footman.team, footman.position):
@@ -754,8 +763,8 @@ proc runGraphics*() =
       if not visibleInView(god.team, run.world.forts[i].center):
         continue
       let
-        model = footmanModels[god.team]
-        clip = footmanRenderClips[god.team][god.godClip]
+        model = godModels[god.team]
+        clip = godRenderClips[god.team][god.godClip]
       var animTime = god.animTime
       if run.world.gameOver and god.team != run.world.winner:
         animTime = min(animTime, clipDuration(model, clip))
@@ -768,8 +777,7 @@ proc runGraphics*() =
           god.position,
           god.facing,
           clip,
-          animTime,
-          2.6
+          animTime
         )
       )
 
@@ -987,7 +995,7 @@ proc runGraphics*() =
         return SelectionTarget(
           found: true,
           position: god.position,
-          focusHeight: 1.3'f32
+          focusHeight: GodTargetHeight / 2
         )
 
   proc selectedTargetCount(): int =
@@ -1127,12 +1135,11 @@ proc runGraphics*() =
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
-        footmanModels[god.team],
+        godModels[god.team],
         god.position,
         god.facing,
-        footmanRenderClips[god.team][god.godClip],
-        god.animTime,
-        sizeFactor = 2.6
+        godRenderClips[god.team][god.godClip],
+        god.animTime
       )
       finishCharacters(scene)
       return
@@ -1235,7 +1242,8 @@ proc runGraphics*() =
     for i, fort in run.world.forts:
       subjects.add Subject(
         id: fort.id, owner: int32(fort.team), position: gods[i].position,
-        height: 2.5, radius: 4, visible: visibleInView(fort.team, fort.center),
+        height: GodTargetHeight, radius: 4,
+        visible: visibleInView(fort.team, fort.center),
         alive: fort.hp > 0, hp: fort.hp, maxHp: FortHp, complete: true,
         damageOnly: true, combatScore: 165
       )
@@ -1881,7 +1889,7 @@ proc runGraphics*() =
             god.animTime = min(
               god.animTime,
               clipDuration(
-                footmanModels[god.team], footmanRenderClips[god.team][deathClip])
+                godModels[god.team], godRenderClips[god.team][deathClip])
             )
 
       feedGotaActions()
@@ -1968,14 +1976,14 @@ proc runGraphics*() =
             if livingOnly and run.world.forts[god.team.ord].hp <= 0:
               continue
             let
-              model = footmanModels[god.team]
-              clip = footmanRenderClips[god.team][god.godClip]
+              model = godModels[god.team]
+              clip = godRenderClips[god.team][god.godClip]
             var animTime = god.animTime
             if run.world.gameOver and god.team != run.world.winner:
               animTime = min(animTime, clipDuration(model, clip))
             drawCharacter(
               scene, model, god.position, god.facing,
-              clip, animTime, sizeFactor = 2.6)
+              clip, animTime)
 
         sunDepthPasses(window.size):
           drawTerrainSunDepth()

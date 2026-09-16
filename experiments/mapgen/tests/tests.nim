@@ -311,7 +311,7 @@ proc verifyRamps(map: MapData) =
 proc verify(map: MapData) =
   ## Checks counts, paired geometry, camp access, and lane tower alignment.
   doAssert buildMesh(map).len > 1000
-  doAssert map.towers.len == 18
+  doAssert map.towers.len == 22
   doAssert map.camps.len == 14
   doAssert map.forts[0].opposite == map.forts[1]
   var
@@ -331,7 +331,7 @@ proc verify(map: MapData) =
           length(road.nearest(tower.position) - tower.position)
         )
       doAssert distance < 0.001
-  doAssert counts == [9, 9]
+  doAssert counts == [11, 11]
   for i, camp in map.camps:
     if i mod 2 == 0:
       let other = map.camps[i + 1]

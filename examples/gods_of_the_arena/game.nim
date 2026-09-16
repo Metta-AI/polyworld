@@ -257,7 +257,7 @@ when defined(headless):
     echo &"result: {outcome}"
     echo &"simulated: {simulated:.2f} s in {elapsed:.4f} s " &
       &"({speedup:.1f}x real time)"
-    echo &"forts: red {redFortHp} hp, blue {blueFortHp} hp"
+    echo &"gods: red {redFortHp} hp, blue {blueFortHp} hp"
     echo &"towers: red {teamTowerCount(RedTeam)}, " &
       &"blue {teamTowerCount(BlueTeam)}"
     echo &"hash: {run.stateHash().toHex(16)} map " &
