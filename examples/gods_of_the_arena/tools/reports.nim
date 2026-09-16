@@ -26,6 +26,10 @@ proc number(value: float64, places = 2): string =
     result.insert(",", position)
     position -= 3
 
+proc number(value: int): string =
+  ## Formats game counts and checkpoint values with the same grouping.
+  number(value.float64, 0)
+
 proc number(value: JsonNode, places = 2): string =
   ## Marks missing observations with an em dash.
   if value == nil or value.kind == JNull: "—"
@@ -58,7 +62,49 @@ proc standings(panel, rows: JsonNode): string =
       "<td class=" & color & ">" & mark & "</td></tr>"
   result.add "</tbody></table></div>"
 
-proc panelHtml(panel: JsonNode): string =
+proc stabilityChart(panel: JsonNode, interval: int): string =
+  ## Plots observed rank changes, excluding the first checkpoint's baseline.
+  var checkpoints: seq[JsonNode]
+  for checkpoint in panel["history"]:
+    if checkpoint["score"].kind != JNull:
+      checkpoints.add(checkpoint)
+  if checkpoints.len == 0:
+    return "<p class=\"note stability-empty\">Swap history starts after " &
+      number(interval * 2) & " games.</p>"
+  let
+    first = checkpoints[0]["games"].getInt
+    last = checkpoints[^1]["games"].getInt
+    maximum = max(1, panel["rows"].len).float64
+  var
+    points: seq[string]
+    markers = ""
+  for i, checkpoint in checkpoints:
+    let
+      games = checkpoint["games"].getInt
+      swaps = checkpoint["score"].getInt
+      x = if last == first: 180.0
+        else: 4.0 + 352.0 * (games - first).float64 / (last - first).float64
+      y = 44.0 - 40.0 * swaps.float64 / maximum
+      label = number(games) & " games: " & number(swaps) & " player swaps"
+      latest = i == checkpoints.high
+    points.add(number(x) & "," & number(y))
+    markers.add "<circle class=\"swap-point" &
+      (if latest and swaps == 0: " stable" else: "") & "\" cx=\"" &
+      number(x) & "\" cy=\"" & number(y) & "\" r=\"" &
+      (if latest: "3" else: "2") & "\" data-games=\"" & $games &
+      "\" data-swaps=\"" & $swaps & "\"><title>" & label &
+      "</title></circle>"
+  result = "<svg class=stability-chart viewBox=\"0 0 360 48\" " &
+    "role=img aria-label=\"Player swaps every " & $interval &
+    " games\"><title>Player swaps every " & $interval &
+    " games. Each point compares ranks with the previous checkpoint." &
+    "</title><path class=swap-baseline d=\"M4 44H356\"/>" &
+    "<polyline class=swap-line points=\"" & points.join(" ") & "\"/>" &
+    markers & "</svg><div class=stability-axis><span>Every " &
+    number(interval) & " games</span><span>" & number(first) &
+    (if last > first: "–" & number(last) else: "") & " games</span></div>"
+
+proc panelHtml(panel: JsonNode, interval: int): string =
   ## Renders standings with compact stability numbers below the ranking.
   let
     id = panel["id"].getStr
@@ -76,8 +122,9 @@ proc panelHtml(panel: JsonNode): string =
     "</span></div></div>"
   result.add standings(panel, panel["rows"])
   result.add "<p class=ladder-stability>Stability: " &
-    number(panel["stability"]["score"]) & " · Streak: " &
-    number(panel["stability"]["run"]) & "</p></article>"
+    number(panel["stability"]["score"]) & " player swaps · Streak: " &
+    number(panel["stability"]["run"].getInt * interval) & " games</p>" &
+    stabilityChart(panel, interval) & "</article>"
 
 proc playersHtml(rows: JsonNode): string =
   ## Groups each player's statistics into compact pairs without nested scrolling.
@@ -214,7 +261,7 @@ proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
       "</p></div><div class=ladders>"
     for panel in summary["panels"]:
       if panel["format"].getStr == kind:
-        body.add panelHtml(panel)
+        body.add panelHtml(panel, interval)
     body.add "</div></section>"
   body.add playersHtml(summary["players"])
   body.add "<footer>Game release " &
