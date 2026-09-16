@@ -32,6 +32,7 @@ jobs:
       - name: Check replay extractor
         shell: bash
         run: nim r examples/gods_of_the_arena/tools/replay_extractor.nim > /dev/null
+      - run: nim r -d:headless tests/test_gota_host_isolation.nim
       - run: >-
           nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2
           tests/test_profiles.nim
