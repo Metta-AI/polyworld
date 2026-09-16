@@ -117,19 +117,26 @@ proc rayBlocked(
     start = visionRayStart[rayIndex]
     count = int(visionRayCount[rayIndex])
     steps = int64(visionRaySteps[rayIndex])
+    deltaY = targetY - sourceY
+    halfSteps = steps div 2
   for i in 0 ..< count:
     let
       cell = visionRayOffsets[start + i]
       x = sourceX + int32(cell.ox)
       z = sourceZ + int32(cell.oz)
       index = z * width + x
-      rayHeight = sourceY + roundedDivision(
-        (targetY - sourceY) * int64(i + 1),
-        steps
-      )
       obstacleHeight = int64(terrainHeights[index]) +
         int64(blockerHeights[index])
-    if obstacleHeight >= rayHeight:
+      relativeHeight = obstacleHeight - sourceY
+      numerator = deltaY * int64(i + 1)
+    # Compare against the rounded ray height without division per ray cell.
+    # Negative heights round away from zero, so their boundary is inclusive.
+    if deltaY >= 0:
+      if relativeHeight >= 0 and
+          numerator + halfSteps < (relativeHeight + 1) * steps:
+        return true
+    elif relativeHeight >= 0 or
+        -numerator + halfSteps >= -relativeHeight * steps:
       return true
   false
 
