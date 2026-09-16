@@ -418,6 +418,38 @@ block:
       "towers", "last hits", "GPM / XPM"]:
     doAssert label in html
 
+echo "Checking stability units and checkpoint sparklines"
+block:
+  let
+    sample = fixture(81, "both", 5)
+    summary = summarize(sample, completed(sample), "completed")
+  for panel in summary["panels"]:
+    panel["stability"] = %*{"score": 0, "run": 3}
+    panel["history"] = %*[
+      {"games": 5, "score": nil}, {"games": 10, "score": 8},
+      {"games": 15, "score": 0}, {"games": 20, "score": 2},
+      {"games": 25, "score": 0}
+    ]
+  let html = render(summary, DataRoot)
+  doAssert html.count("Stability: 0 player swaps · Streak: 15 games") == 6
+  doAssert html.count("class=stability-chart") == 6
+  doAssert html.count("data-swaps=") == 24
+  doAssert "data-games=\"5\"" notin html
+  doAssert html.count("data-games=\"20\" data-swaps=\"2\"") == 6
+  doAssert html.count("points=\"4,12 121.33,44 238.67,36 356,44\"") == 6
+  doAssert html.count("Every 5 games") == 6
+  doAssert "10–25 games" in html
+  for panel in summary["panels"]:
+    panel["history"] = %*[{"games": 5, "score": nil}]
+  let baseline = render(summary, DataRoot)
+  doAssert baseline.count("Swap history starts after 10 games.") == 6
+  doAssert "<svg class=stability-chart" notin baseline
+  for panel in summary["panels"]:
+    panel["history"].add %*{"games": 10, "score": 0}
+  let single = render(summary, DataRoot)
+  doAssert single.count("points=\"180,44\"") == 6
+  doAssert single.count("data-swaps=") == 6
+
 echo "Checking player outcomes, objective counts, coverage and mono averages"
 block:
   doAssert objectiveCounts(0, 0, 0) == [0, 0]
