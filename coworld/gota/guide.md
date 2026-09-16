@@ -21,7 +21,7 @@ The existing `selfId`, `selfTeam`, `selfClass`, `selfX`, `selfY`, `selfHp`, `sel
 | Value | Meaning |
 | --- | --- |
 | `selfMoveSpeed` | Unblocked movement speed in world units per tick, including level and equipment bonuses. |
-| `selfAttackRange` | Basic-attack range in world units, measured by planar Euclidean distance between centers. Towers allow at least 105000 units; forts use 255000 units. |
+| `selfAttackRange` | Basic-attack range in world units, measured by planar Euclidean distance between centers. Towers and barracks allow at least 105000 units measured from their occupied footprint; forts use 255000 units. |
 | `selfAttackDamage` | Current basic-attack damage, including level and equipment bonuses. |
 | `selfTarget` | Current ordered or automatically acquired attack target's stable object ID, or zero for none. |
 | `selfAttackCooldown` | Ticks until the next basic hit could land if the target stays in range. Includes remaining recovery and the next windup, or the remainder of a current windup. An idle hero reports a full windup. Excludes chasing and is separate from ability cooldowns. Movement can cancel a swing. |
@@ -29,7 +29,7 @@ The existing `selfId`, `selfTeam`, `selfClass`, `selfX`, `selfY`, `selfHp`, `sel
 
 ### Visible objects
 
-Loop over indices `0` through `objectCount() - 1`. The existing ID, kind, team, class, position, HP, and alive queries still apply. New queries respect the same visibility filter:
+Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = fort, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:
 
 | Function | Meaning |
 | --- | --- |
@@ -58,7 +58,7 @@ Other invalid spell queries return zero. Visibility of an enemy warning does not
 
 ## Terrain and execution
 
-BASIC can inspect the complete static terrain with `terrainKind(x, y)`, `terrainWalkable(x, y)`, `terrainHeight(x, y)`, and `terrainWaterDepth(x, y)`. These use global tile coordinates on `selfLayer`. Each has an explicit `At(x, y, layer)` version, such as `terrainKindAt(x, y, GroundLayer)`. Read-only constants expose `mapWidth`, `mapHeight`, `mapLayers`, the layer names, and terrain kinds. Height and water depth use eighths of a tile; invalid or absent tiles return zero. The Terrain API section of the game documentation lists all constants and edge cases. Static terrain is available through fog, while enemy objects remain visibility-filtered.
+BASIC can inspect the complete static terrain with `terrainKind(x, y)`, `terrainWalkable(x, y)`, `terrainHeight(x, y)`, and `terrainWaterDepth(x, y)`. These use global tile coordinates on `selfLayer`. Each has an explicit `At(x, y, layer)` version, such as `terrainKindAt(x, y, GroundLayer)`. Read-only constants expose `mapWidth`, `mapHeight`, `mapLayers`, the layer names, and terrain kinds. Height and water depth use eighths of a tile; invalid or absent tiles return zero. The Terrain API section of the game documentation lists all constants and edge cases. Static terrain is available through fog, while enemy objects remain visibility-filtered. Walkability also includes team-known building footprints; unseen enemy destruction does not reveal newly open tiles.
 
 BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle messages go to the owning player's private log. Each log is limited to 10 MiB. Runtime limit errors disable that VM; other seats continue. Invalid BASIC syntax fails the episode with a player failure diagnostic. Public game logs and action replays contain no BASIC source or private print output.
 

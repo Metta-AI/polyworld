@@ -8,6 +8,8 @@ const
     ## Default match length in minutes.
   DefaultDurationTicks* = DefaultMinutes * 60 * SharedTickRate
     ## Twenty minutes at the shared tick rate.
+  DefaultSpawnIntervalTicks* = 20 * SharedTickRate
+    ## Twenty seconds between GotA creep waves.
 
 type
   PlayerConfig* = object
@@ -17,7 +19,7 @@ type
     players*: seq[PlayerConfig]
     seed*: int32 = 2026
     maxTicks*: int32 = DefaultDurationTicks
-    spawnIntervalTicks*: int32 = 240
+    spawnIntervalTicks*: int32 = DefaultSpawnIntervalTicks
     playerSlot*: int32
     dayCount*: int32
     when Preset isnot void:
