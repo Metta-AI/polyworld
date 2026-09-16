@@ -40,3 +40,66 @@ doAssert paused.hostCallPaused
 paused.reset()
 doAssert not paused.hostCallPaused
 echo "Paused host calls preserve arrays, order, metering, and reset semantics"
+
+block:
+  var runtime: Runtime
+  var nestedHost = initHost()
+  var calls: seq[int32]
+  discard nestedHost.addFunction("choose", 1, proc(values: openArray[int32]): int32 =
+    calls.add values[0]
+    runtime.pauseHostCall()
+    0'i32, 1)
+  let nested = compile("""
+sub inner(value)
+  local = choose(value)
+  total = local + value
+end sub
+sub outer(value)
+  inner(value + 2)
+end sub
+outer(5)
+choose(99)
+finished = 1
+""", nestedHost)
+  runtime = initRuntime(nested, nestedHost)
+  discard runtime.run()
+  doAssert calls == @[7'i32]
+  runtime.resumeHostCall(11)
+  discard runtime.run()
+  doAssert runtime.getGlobal("total") == 18
+  doAssert calls == @[7'i32, 99]
+  runtime.resumeHostCall(123)
+  discard runtime.run()
+  doAssert runtime.getGlobal("finished") == 1
+  runtime.restart()
+  discard runtime.run()
+  doAssert runtime.hostCallPaused
+  runtime.restart()
+  doAssert not runtime.hostCallPaused
+  discard runtime.run()
+  doAssert calls == @[7'i32, 99, 7, 7]
+
+block:
+  var runtime: Runtime
+  var budgetHost = initHost()
+  discard budgetHost.addFunction("choose", 0, proc(values: openArray[int32]): int32 =
+    runtime.pauseHostCall()
+    0'i32, 1)
+  let bounded = compile("value = choose()\nvalue = value + 1", budgetHost)
+  runtime = initRuntime(bounded, budgetHost)
+  discard runtime.run()
+  let work = runtime.workUsed
+  let instructions = runtime.instructionsUsed
+  for restrictWork in [true, false]:
+    var limits = defaultLimits()
+    if restrictWork:
+      limits.maxWorkUnits = work
+    else:
+      limits.maxInstructions = instructions
+    runtime = initRuntime(bounded, budgetHost, limits)
+    discard runtime.run()
+    doAssert runtime.hostCallPaused
+    runtime.resumeHostCall(10)
+    doAssertRaises(BasicError):
+      discard runtime.run()
+echo "Nested return registers, discarded results, restart, and budget exhaustion passed"
