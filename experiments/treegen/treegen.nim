@@ -139,6 +139,8 @@ proc selectPreset(app: var TreeApp, index: int) =
   let selected = (index + PresetNames.len) mod PresetNames.len
   app.presetName = PresetNames[selected]
   app.settings = preset(selected, app.settings.seed)
+  if app.settings.kind == Stump:
+    app.tab = Trunk
   app.rebuild()
   app.frameTree()
 
@@ -205,7 +207,10 @@ template control(caption: string, target: untyped, low, high: untyped) =
 proc trunkControls(app: var TreeApp, window: Window) =
   ## Exposes trunk proportions, polygon resolution, and the root flare.
   let sk = app.sk
-  control("Height", app.settings.height, 1.0'f, 16.0'f)
+  if app.settings.kind == Stump:
+    control("Cut height", app.settings.height, 0.3'f, 3.0'f)
+  else:
+    control("Height", app.settings.height, 1.0'f, 16.0'f)
   control("Trunk radius", app.settings.trunkRadius, 0.06'f, 1.4'f)
   control("Taper", app.settings.taper, 0.3'f, 3.0'f)
   control("Bend", app.settings.bend, 0.0'f, 1.5'f)
@@ -217,11 +222,16 @@ proc trunkControls(app: var TreeApp, window: Window) =
   control("Root thickness", app.settings.rootThickness, 0.1'f, 1.5'f)
   control("Root claw length", app.settings.rootClaw, 0.1'f, 0.6'f)
   control("Root claw angle", app.settings.rootAngle, 5.0'f, 65.0'f)
-  control("Clear stem", app.settings.stemClearance, 0.1'f, 3.0'f)
+  if app.settings.kind != Stump:
+    control("Clear stem", app.settings.stemClearance, 0.1'f, 3.0'f)
 
 proc branchControls(app: var TreeApp, window: Window) =
   ## Exposes branch layout, growth direction, and bounded fork depth.
   let sk = app.sk
+  if app.settings.kind == Stump:
+    text("Stumps keep the trunk and roots.")
+    text("Adjust Cut height in the Trunk tab.")
+    return
   text("Branch style")
   dropDown(app.settings.branchKind, [Spreading, Angular, Drooping])
   text("Branch arrangement")
@@ -239,8 +249,8 @@ proc branchControls(app: var TreeApp, window: Window) =
 proc canopyControls(app: var TreeApp, window: Window) =
   ## Exposes the cone or round envelope and its irregular radial rings.
   let sk = app.sk
-  if app.settings.kind == Leafless:
-    text("Leafless trees have no canopy.")
+  if app.settings.kind in {Leafless, Stump}:
+    text("This tree type has no canopy.")
     return
   control("Crown radius", app.settings.crownRadius, 0.3'f, 5.0'f)
   control("Crown height", app.settings.crownHeight, 0.5'f, 12.0'f)
@@ -263,8 +273,8 @@ proc canopyControls(app: var TreeApp, window: Window) =
 proc leafControls(app: var TreeApp, window: Window) =
   ## Exposes white atlas selection and the shape of each radial card.
   let sk = app.sk
-  if app.settings.kind == Leafless:
-    text("Leafless trees have no foliage.")
+  if app.settings.kind in {Leafless, Stump}:
+    text("This tree type has no foliage.")
     return
   if app.settings.kind == Broadleaf:
     text("Leaf trim")
@@ -324,7 +334,8 @@ proc drawUi(app: var TreeApp, window: Window) =
         text("TREEGEN  /  procedural tree lab")
         text($app.geometry.cards & " leaf cards   " &
           $((app.geometry.bark.indices.len +
-          app.geometry.foliage.indices.len) div 3) & " triangles")
+          app.geometry.foliage.indices.len +
+          app.geometry.cut.indices.len) div 3) & " triangles")
         text("Presets")
         block:
           let previous = app.presetName
@@ -343,9 +354,17 @@ proc drawUi(app: var TreeApp, window: Window) =
         group "tree family":
           box RowWidth, 32
           layout LeftToRight
+          let previous = app.settings.kind
           radioButton("Bare", app.settings.kind, Leafless)
           radioButton("Fir", app.settings.kind, Evergreen)
           radioButton("Round", app.settings.kind, Broadleaf)
+          radioButton("Stump", app.settings.kind, Stump)
+          if app.settings.kind != previous:
+            if app.settings.kind == Stump:
+              app.settings.height = min(app.settings.height, 1.0'f)
+              app.tab = Trunk
+            elif previous == Stump:
+              app.settings.height = max(app.settings.height, 1.0'f)
         text("Seed: " & $app.settings.seed)
         button "Randomize Seed":
           app.randomizeSeed()
@@ -482,6 +501,8 @@ proc main() =
     rng: initRand(),
     ground: groundNode(), showPanel: true, gallery: options.gallery,
     yaw: options.yaw, pitch: options.pitch, tab: Canopy)
+  if settings.kind == Stump:
+    app.tab = Trunk
   app.toon.highlightColor = color(1, 0.97, 0.87, 1)
   app.toon.shadowColor = color(0.38, 0.5, 0.53, 1)
   app.toon.rimColor = color(0.95, 1, 0.85, 0.12)
@@ -493,11 +514,13 @@ proc main() =
     let now = epochTime()
     app.handleInput(window, min(0.05'f, (now - lastTime).float32))
     lastTime = now
-    let galleryChanged = app.gallery != app.builtGallery
+    let
+      galleryChanged = app.gallery != app.builtGallery
+      kindChanged = app.settings.kind != app.built.kind
     if app.settings.geometryKey() != app.built.geometryKey() or
       app.settings.barkTexture != app.built.barkTexture or galleryChanged:
         app.rebuild()
-        if galleryChanged:
+        if galleryChanged or kindChanged:
           app.frameTree()
     app.materials.tint(app.settings)
     app.drawScene(window)
