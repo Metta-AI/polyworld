@@ -252,7 +252,7 @@ type
     recordingError*: string
     heroVms*: seq[HeroVm]
 
-var navigationWorld: World
+var navigationWorld {.threadvar.}: World
 
 const
   WorldScale* = 60_000'i32
