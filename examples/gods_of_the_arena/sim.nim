@@ -34,8 +34,6 @@ var
   laneWorldLayers: array[3, seq[int32]]
   visionBlockers: seq[int16]
   visionSources: seq[VisionSource]
-  visionSkipWorld: pointer
-  visionSkipKeys: seq[int32]
   visionSkipNow: seq[int32]
   heroPathPoints: seq[PathPoint]
   heroPathTiles: seq[PathTile]
@@ -226,6 +224,8 @@ type
     teamHeroDeaths*: array[2, int]
     teamVisible*: array[2, seq[uint8]]
     teamExplored*: array[2, seq[uint8]]
+    visionCache: array[2, VisionCache]
+    visionSkipKeys: seq[int32]
     scriptObjects: seq[WorldObject]
     scriptObjectCount: int
     scriptObjectsHeroId: int32
@@ -438,7 +438,6 @@ proc restore*(w: World, snapshot: World) =
   w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
   navigationWorld = w
-  visionSkipWorld = nil
 
 proc buildSightTerrain(): tuple[
     terrainHeights,
@@ -510,8 +509,7 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
       tile = sightTile(hero.position)
     dest.add hero.id
     dest.add int32(hero.team.ord)
-    dest.add int32(hero.state.ord)
-    dest.add hero.hp
+    dest.add int32(hero.state != Dying and hero.hp > 0)
     dest.add tile.x
     dest.add tile.z
   dest.add int32(world.footmen.len)
@@ -519,8 +517,7 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
     let tile = sightTile(footman.position)
     dest.add footman.id
     dest.add int32(footman.team.ord)
-    dest.add int32(footman.state.ord)
-    dest.add footman.hp
+    dest.add int32(footman.state != Dying and footman.hp > 0)
     dest.add tile.x
     dest.add tile.z
   dest.add int32(world.buildings.len)
@@ -528,7 +525,7 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
     let tile = sightTile(tower.position)
     dest.add tower.id
     dest.add int32(tower.team.ord)
-    dest.add tower.hp
+    dest.add int32(tower.hp > 0)
     dest.add tile.x
     dest.add tile.z
   dest.add int32(world.forts.len)
@@ -536,15 +533,14 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
     let tile = sightTile(fort.center)
     dest.add fort.id
     dest.add int32(fort.team.ord)
-    dest.add fort.hp
+    dest.add int32(fort.hp > 0)
     dest.add tile.x
     dest.add tile.z
 
 proc rebuildVision*(world: World) {.measure.} =
   ## Rebuilds both teams' limited, terrain-occluded visibility maps.
   world.fillVisionKeys(visionSkipNow)
-  if visionSkipWorld == cast[pointer](world) and
-      sameVisionKeys(visionSkipNow, visionSkipKeys):
+  if sameVisionKeys(visionSkipNow, world.visionSkipKeys):
     return
   visionBlockers.setLen(sightTerrain.blockerHeights.len)
   for i, value in sightTerrain.blockerHeights:
@@ -594,7 +590,8 @@ proc rebuildVision*(world: World) {.measure.} =
           radius: FortSightRadius,
           eyeHeight: 28
         )
-    revealVision(
+    revealVisionCached(
+      world.visionCache[team.ord],
       world.teamVisible[team.ord],
       mapTiles().int32,
       mapTiles().int32,
@@ -605,8 +602,7 @@ proc rebuildVision*(world: World) {.measure.} =
     for i, value in world.teamVisible[team.ord]:
       if value != 0:
         world.teamExplored[team.ord][i] = 255
-  copyVisionKeys(visionSkipKeys, visionSkipNow)
-  visionSkipWorld = cast[pointer](world)
+  copyVisionKeys(world.visionSkipKeys, visionSkipNow)
 
 proc visible*(world: World, team: Team, position: WorldPoint): bool =
   ## Returns whether a position is currently visible to one team.
@@ -3606,8 +3602,6 @@ proc newGame*(
   for slot, hero in world.heroes:
     world.stats.teams[slot] = hero.team.ord
   doAssert world.heroes.len == heroSetup.len, "every configured hero must spawn"
-  # A freed world's address can be reused with the same vision source keys.
-  visionSkipWorld = nil
   rebuildVision(world)
   world.updateKnownBuildings()
   world.heroTurnStart = seededHeroTurnStart(world)

@@ -4,6 +4,8 @@
 ## ray still uses the same integer lerp so visibility matches the live
 ## formula.
 
+import std/tables
+
 const
   MaxVisionRadius* = 16
     ## Largest sight radius the kernel stores. Forts use 14.
@@ -21,6 +23,10 @@ type
   VisionOffset* = object
     ## One tile in a precomputed sight circle, relative to the observer.
     dx*, dz*: int8
+  VisionCache* = object
+    width, height: int32
+    terrain, blockers: seq[int16]
+    sources: Table[VisionSource, seq[int32]]
 
 var
   visionRayOffsets: seq[VisionRayStep]
@@ -335,6 +341,43 @@ proc revealVision*(
         rayIndex
       ):
         visible[index] = 255
+
+proc revealVisionCached*(
+    cache: var VisionCache,
+    visible: var seq[uint8],
+    width, height: int32,
+    terrainHeights, blockerHeights: seq[int16],
+    sources: openArray[VisionSource]
+) =
+  ## Retains only the previous frame's source rays. Terrain or blocker changes
+  ## invalidate every entry, including height changes without moving a source.
+  if cache.width != width or cache.height != height or
+      cache.terrain != terrainHeights or cache.blockers != blockerHeights:
+    cache.sources.clear()
+    cache.width = width
+    cache.height = height
+    cache.terrain = terrainHeights
+    cache.blockers = blockerHeights
+  visible.setLen(int(width * height))
+  for value in visible.mitems:
+    value = 0
+  var nextSources: Table[VisionSource, seq[int32]]
+  for source in sources:
+    if nextSources.hasKey(source):
+      continue
+    if not cache.sources.hasKey(source):
+      var cells: seq[int32]
+      for z in max(0'i32, source.z - source.radius) .. min(height - 1, source.z + source.radius):
+        for x in max(0'i32, source.x - source.radius) .. min(width - 1, source.x + source.radius):
+          if source.radius > 0 and lineVisible(
+              width, height, terrainHeights, blockerHeights,
+              source.x, source.z, x, z, source.radius, source.eyeHeight):
+            cells.add z * width + x
+      cache.sources[source] = move(cells)
+    for index in cache.sources[source]:
+      visible[index] = 255
+    nextSources[source] = move(cache.sources[source])
+  cache.sources = move(nextSources)
 
 proc blurVisibility*(visible: openArray[uint8], width, height: int32): seq[uint8] =
   ## Softens only presentation edges with one deterministic box-blur pass.
