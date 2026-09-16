@@ -91,7 +91,8 @@ proc saveJson*(path: string, value: JsonNode, controls = Controls()) =
 proc defaults*(): JsonNode =
   ## Returns the frozen settings used when creating a new tournament.
   %*{"games": 0, "top": 10, "format": "both", "seed": 2026,
-    "check_every": 10, "league": DefaultLeague, "division": nil}
+    "check_every": 10, "league": DefaultLeague, "division": nil,
+    "xp_per_minute": 200}
 
 proc scheduleGames*(count, rosterSize: int, mode: string, seed: int): JsonNode =
   ## Samples balanced appearances, opponents, sides, and hero slots.
@@ -197,10 +198,18 @@ proc validateResult*(raw, game, run: JsonNode) =
       (outcome == "BlueTeam" and slot >= 5)
     require(value.getInt == ord(won), "Scores disagree with outcome")
 
-proc gameValues*(game, raw: JsonNode): Table[int, Values] =
-  ## Averages hero results into one policy appearance per game.
+proc gameValues*(game, raw, run: JsonNode): Table[int, Values] =
+  ## Averages hero results using the run's frozen time penalty.
   var counts: Table[int, int]
-  let penalty = 100.0 * raw["ticks"].getInt.float64 / 1440.0
+  let rate = run["settings"]{"xp_per_minute"}
+  require(
+    rate == nil or (rate.kind == JInt and rate.getInt >= 0),
+    "Invalid saved xp_per_minute: expected a nonnegative integer"
+  )
+  # Runs created before the rate was saved used 100 XP per minute.
+  let
+    xpPerMinute = if rate == nil: 100.0 else: rate.getInt.float64
+    penalty = xpPerMinute * raw["ticks"].getInt.float64 / 1440.0
   for slot, entry in game["seats"].elems:
     let
       policy = entry.getInt
@@ -405,7 +414,7 @@ proc summarize*(run: JsonNode, records: seq[JsonNode],
         continue
       let raw = records[i]["result"]
       validateResult(raw, game, run)
-      for policy, values in gameValues(game, raw):
+      for policy, values in gameValues(game, raw, run):
         inc counts[policy]
         for ladder in 0 ..< 3:
           totals[policy][ladder] += values[ladder]
