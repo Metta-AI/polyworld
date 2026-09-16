@@ -2412,6 +2412,7 @@ proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
 var
   vertexArray, vertexBuffer: GLuint
   mesh: seq[float32]
+  tileTopOffsets: seq[seq[int]]
   meshVertexCount = 0
   propVertexArray, propVertexBuffer: GLuint
   propMesh: seq[float32]   # x y z r g b nx ny nz; grass, boulders, props
@@ -3054,6 +3055,7 @@ proc emitLayer(
         n1 = cornerNormal(layer, faceNormals, x, z, 1)
         n2 = cornerNormal(layer, faceNormals, x, z, 2)
         n3 = cornerNormal(layer, faceNormals, x, z, 3)
+      tileTopOffsets[layerIndex][i] = mesh.len
       addTriangle(
         v00,
         v10,
@@ -3856,6 +3858,11 @@ proc bakeTerrain*(
   ## Nonzero per-layer blockers affect the overlay only. Omitted grids are open.
   ## Skip walkability rebuilding only after computing the final terrain edits.
   mesh.setLen(0)
+  tileTopOffsets.setLen(layers.len)
+  for i, layer in layers:
+    tileTopOffsets[i] = newSeq[int](layer.tiles.len)
+    for offset in tileTopOffsets[i].mitems:
+      offset = -1
   waterMesh.setLen(0)
   layerVertexRanges.setLen(0)
   doAssert groundRelief.len == 0 or
@@ -3889,6 +3896,27 @@ proc bakeTerrain*(
       mesh[0].addr,
       GL_DYNAMIC_DRAW
     )
+
+proc updateTerrainEdges*(walkable: PathWalkable) =
+  ## Refreshes debug edges from live navigation without rebuilding terrain.
+  glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer)
+  for layerIndex, offsets in tileTopOffsets:
+    let width = layers[layerIndex].width
+    for i, offset in offsets:
+      if offset < 0:
+        continue
+      let mask = float32(pathing.edgeMask(
+        layerIndex, i mod width, i div width, walkable = walkable))
+      if mesh[offset + 3] == mask:
+        continue
+      for vertex in 0 ..< 6:
+        mesh[offset + vertex * TerrainVertexSize + 3] = mask
+      glBufferSubData(
+        GL_ARRAY_BUFFER,
+        offset * sizeof(float32),
+        6 * TerrainVertexSize * sizeof(float32),
+        mesh[offset].addr
+      )
 
 proc drawTerrainRange*(
     viewProjection: Mat4,

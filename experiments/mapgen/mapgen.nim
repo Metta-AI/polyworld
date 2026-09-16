@@ -3,6 +3,8 @@ import
   bumpy, pixie, silky, vmath,
   maps, tiles
 
+from ../../examples/gods_of_the_arena/content import CreepsPerBarracks
+
 const
   ExperimentDir = currentSourcePath().parentDir
   DefaultAssetDir = ExperimentDir / "../../../polyworld_data"
@@ -372,13 +374,18 @@ proc drawCanvas(app: App) =
     )
     if app.creeps:
       for wave in 0 ..< 4:
-        for unit in 0 ..< 2:
-          let age = app.elapsed mod CreepInterval +
-            wave.float32 * CreepInterval - unit.float32 * 0.65'f
+        for unit in 0 ..< CreepsPerBarracks:
+          let age = app.elapsed mod CreepInterval + wave.float32 * CreepInterval
           if age < 0 or age > app.elapsed or
             age * CreepSpeed >= barrack.distance:
               continue
-          let point = barrack.route.along(age * CreepSpeed / barrack.distance)
+          let
+            center = barrack.route.along(age * CreepSpeed / barrack.distance)
+            ahead = barrack.route.along(min(
+              (age * CreepSpeed + 1) / barrack.distance, 1.0'f))
+            forward = normalize(ahead - center)
+            point = center + vec2(-forward.y, forward.x) *
+              float32(unit - CreepsPerBarracks div 2) * 6
           sk.circle(origin + point * factor, 4 * factor, KeepColor)
           sk.circle(
             origin + point * factor,
@@ -427,7 +434,7 @@ proc drawCanvas(app: App) =
             ["West", "South", "Middle"][barrack.lane]
           else:
             ["North", "East", "Middle"][barrack.lane]
-        caption = lane & " barracks  /  creep waves every " &
+        caption = lane & " barracks  /  3 creeps every " &
           $CreepInterval.int & " seconds"
   sk.label(caption, 304, sk.size.y - 25, MutedColor, "Small")
 
