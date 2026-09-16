@@ -6,7 +6,8 @@ proc main() =
   require(paramCount() == 3,
     "Usage: inspect_players REPLAY METADATA OUTPUT_JSON")
   let stats = inspectReplay(paramStr(1), readStats(paramStr(2)))
-  require(stats["replay_version"].getInt in 26 .. 33,
+  require(stats["replay_version"].getInt in 26 .. 33 or
+    stats["replay_version"].getInt == 40,
     "This replay version needs its reward accounting checked")
   for hero in stats["heroes"]:
     let counts = objectiveCounts(
