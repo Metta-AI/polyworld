@@ -84,9 +84,7 @@ const
     "draftTurnId"
   ]
 
-var
-  activeGame: Game
-  heroDataIds: array[HeroDataSlot, int32]
+var heroDataIds: array[HeroDataSlot, int32]
 
 proc bindHeroData(program: Program) =
   ## Resolves host data slots once so think ticks do not allocate names.
@@ -116,6 +114,7 @@ proc heroVmLimits(): Limits =
   result.maxPrintEvents = 128
 
 proc terrainProc(
+    game: Game,
     heroId: int32,
     field: TerrainField,
     explicitLayer: bool
@@ -127,29 +126,29 @@ proc terrainProc(
       if explicitLayer:
         arguments[2]
       else:
-        let index = heroIndex(activeGame.world, heroId)
+        let index = heroIndex(game.world, heroId)
         if index < 0:
           return 0
-        activeGame.world.heroes[index].navLayer
+        game.world.heroes[index].navLayer
     let value = terrainValue(arguments[0], arguments[1], layer, field)
     if field != TerrainWalkableField or value == 0:
       return value
-    let index = heroIndex(activeGame.world, heroId)
+    let index = heroIndex(game.world, heroId)
     if index < 0:
       return 0
     let floor = layers[int(layer)]
-    int32(activeGame.world.knownWalkable(
-      activeGame.world.heroes[index].team,
+    int32(game.world.knownWalkable(
+      game.world.heroes[index].team,
       int(layer),
       int(arguments[0]) + mapOrigin() - floor.originX,
       int(arguments[1]) + mapOrigin() - floor.originZ
     ))
 
-proc objectProc(heroId: int32, field: ObjectField): HostProc =
+proc objectProc(game: Game, heroId: int32, field: ObjectField): HostProc =
   ## Binds one field to the hero's visibility-filtered object snapshot.
   result = proc(arguments: openArray[int32]): int32 =
     ## Reads a visible object's field without exposing hidden targets.
-    let world = activeGame.world
+    let world = game.world
     var value: WorldObject
     if not world.worldObjectAt(heroId, int(arguments[0]), value):
       return 0
@@ -189,11 +188,11 @@ proc objectProc(heroId: int32, field: ObjectField): HostProc =
     of ObjectVelY:
       value.velocity.z
 
-proc spellProc(heroId: int32, field: SpellField): HostProc =
+proc spellProc(game: Game, heroId: int32, field: SpellField): HostProc =
   ## Binds one field to pending spells visible to the hero's team.
   result = proc(arguments: openArray[int32]): int32 =
     ## Reads an impact warning without revealing a hidden caster.
-    let world = activeGame.world
+    let world = game.world
     var value: SpellCast
     if not world.visibleSpellAt(heroId, int(arguments[0]), value):
       return if field == SpellAbility: -1 else: 0
@@ -209,15 +208,15 @@ proc spellProc(heroId: int32, field: SpellField): HostProc =
     of SpellImpactTick:
       value.impact
 
-proc abilityProc(heroId: int32, field: AbilityField): HostProc =
+proc abilityProc(game: Game, heroId: int32, field: AbilityField): HostProc =
   ## Binds live rank and effect observations to this hero's ability slots.
   result = proc(arguments: openArray[int32]): int32 =
     ## Returns zero for invalid slots without changing command feedback.
-    let index = activeGame.world.heroIndex(heroId)
+    let index = game.world.heroIndex(heroId)
     if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
       return 0
     let
-      hero = activeGame.world.heroes[index]
+      hero = game.world.heroes[index]
       slot = HeroAbilitySlot(arguments[0])
       rank = hero.abilityLevels[slot]
       spec = heroAbility(hero.class, slot).abilitySpec(rank)
@@ -226,14 +225,14 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityMaximum: slot.abilityMaxLevel
     of AbilityRequirement: slot.abilityRequiredLevel(rank + 1)
     of AbilityCanLevel:
-      int32(activeGame.world.phase != Drafting and
+      int32(game.world.phase != Drafting and
         hero.abilityLevelError(slot) == NoActionError)
     of AbilityDamage: spec.damage
     of AbilityHeal: spec.heal
     of AbilityRestore: spec.restore
     of AbilityManaCost: spec.manaCost
 
-proc initHeroHost(heroId: int32): Host =
+proc initHeroHost(game: Game, heroId: int32): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
   for error in ActionError:
@@ -260,25 +259,25 @@ proc initHeroHost(heroId: int32): Host =
   let draftHeroProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and validates the active player's hero choice.
     try:
-      activeGame.recorder.record ReplayAction(
-        tick: uint32(activeGame.world.tick), heroId: heroId,
+      game.recorder.record ReplayAction(
+        tick: uint32(game.world.tick), heroId: heroId,
         kind: ActionDraft, first: arguments[0]
       )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyDraft(heroId, arguments[0])
+    let accepted = game.world.applyDraft(heroId, arguments[0])
     if accepted:
-      activeGame.metrics.command(
-        activeGame.world.heroIndex(heroId), activeGame.world.tick
+      game.metrics.command(
+        game.world.heroIndex(heroId), game.world.tick
       )
     int32(accepted)
   let draftedClassProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads any player's public selection, including the opposing team.
-    activeGame.world.draftedClass(arguments[0])
+    game.world.draftedClass(arguments[0])
   let heroAvailableProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reports whether a valid class remains in the shared draft pool.
-    int32(activeGame.world.heroAvailable(arguments[0]))
+    int32(game.world.heroAvailable(arguments[0]))
   let heroRoleProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads the class role, or minus one for an invalid class.
     if arguments[0] < 0 or arguments[0] > HeroClass.high.ord:
@@ -288,21 +287,21 @@ proc initHeroHost(heroId: int32): Host =
       arguments: openArray[int32]
   ): int32 =
     ## Counts the public player roster in spawn order.
-    activeGame.world.heroes.len.int32
+    game.world.heroes.len.int32
   let draftPlayerIdProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads a player ID by spawn index, or zero outside the roster.
     let index = arguments[0]
-    if index < 0 or index >= activeGame.world.heroes.len:
+    if index < 0 or index >= game.world.heroes.len:
       return 0
-    activeGame.world.heroes[index].id
+    game.world.heroes[index].id
   let draftPlayerTeamProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     ## Reads a player's team by spawn index, or minus one when invalid.
     let index = arguments[0]
-    if index < 0 or index >= activeGame.world.heroes.len:
+    if index < 0 or index >= game.world.heroes.len:
       return -1
-    activeGame.world.heroes[index].team.ord.int32
+    game.world.heroes[index].team.ord.int32
   discard result.addFunction("draftHero", 1, draftHeroProc, 20)
   discard result.addFunction("draftedClass", 1, draftedClassProc, 16)
   discard result.addFunction("heroAvailable", 1, heroAvailableProc, 16)
@@ -314,12 +313,12 @@ proc initHeroHost(heroId: int32): Host =
   let objectCountProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
-    int32(worldObjectCount(activeGame.world, heroId))
+    int32(worldObjectCount(game.world, heroId))
   let objectIdProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
       value.id
     else:
       0
@@ -327,7 +326,7 @@ proc initHeroHost(heroId: int32): Host =
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
       value.kind
     else:
       0
@@ -335,7 +334,7 @@ proc initHeroHost(heroId: int32): Host =
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
       int32(value.team.ord)
     else:
       0
@@ -343,7 +342,7 @@ proc initHeroHost(heroId: int32): Host =
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
       value.class
     else:
       -1
@@ -351,23 +350,23 @@ proc initHeroHost(heroId: int32): Host =
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
-      mapCoordinate(value.position.x, activeGame.world.heroById(heroId).team)
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
+      mapCoordinate(value.position.x, game.world.heroById(heroId).team)
     else:
       0
   let objectYProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
-      mapCoordinate(value.position.z, activeGame.world.heroById(heroId).team)
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
+      mapCoordinate(value.position.z, game.world.heroById(heroId).team)
     else:
       0
   let objectHpProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     var value: WorldObject
-    if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
+    if worldObjectAt(game.world, heroId, int(arguments[0]), value):
       max(value.hp, 0'i32)
     else:
       0
@@ -376,7 +375,7 @@ proc initHeroHost(heroId: int32): Host =
   ): int32 =
     var value: WorldObject
     int32(
-      worldObjectAt(activeGame.world, heroId, int(arguments[0]), value) and
+      worldObjectAt(game.world, heroId, int(arguments[0]), value) and
         value.alive
     )
   let walkToProc: NumericHostProc = proc(
@@ -385,26 +384,26 @@ proc initHeroHost(heroId: int32): Host =
     let (x, y, offset) = splitTilePoint(fixedVec2(
       arguments[0].asFixed, arguments[1].asFixed))
     try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordWalkTo(
-          uint32(activeGame.world.tick),
+      if game.recorder != nil:
+        game.recorder.recordWalkTo(
+          uint32(game.world.tick),
           heroId,
           x,
           y,
           offset
         )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(
         BasicError,
         "replay recording failed: " & error.msg
       )
     let accepted = applyWalkTo(
-      activeGame.world, heroId, x, y, offset
+      game.world, heroId, x, y, offset
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let attackMoveProc: NumericHostProc = proc(
@@ -414,9 +413,9 @@ proc initHeroHost(heroId: int32): Host =
     let (x, y, offset) = splitTilePoint(fixedVec2(
       arguments[0].asFixed, arguments[1].asFixed))
     try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.record ReplayAction(
-          tick: uint32(activeGame.world.tick),
+      if game.recorder != nil:
+        game.recorder.record ReplayAction(
+          tick: uint32(game.world.tick),
           heroId: heroId,
           kind: ActionAttackMove,
           first: x,
@@ -424,133 +423,133 @@ proc initHeroHost(heroId: int32): Host =
           offset: offset
         )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyAttackMove(
+    let accepted = game.world.applyAttackMove(
       heroId, x, y, offset
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let attackTargetProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordAttackTarget(
-          uint32(activeGame.world.tick),
+      if game.recorder != nil:
+        game.recorder.recordAttackTarget(
+          uint32(game.world.tick),
           heroId,
           arguments[0]
         )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(
         BasicError,
         "replay recording failed: " & error.msg
       )
     let accepted = applyAttackTarget(
-      activeGame.world, heroId, arguments[0]
+      game.world, heroId, arguments[0]
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let itemIdProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
-    let index = heroIndex(activeGame.world, heroId)
+    let index = heroIndex(game.world, heroId)
     let slot = int(arguments[0])
     if index < 0 or slot < 0 or slot >= InventorySlots:
       return 0
-    int32(activeGame.world.heroes[index].inventory[slot].ord)
+    int32(game.world.heroes[index].inventory[slot].ord)
   let itemCountProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
-    let index = heroIndex(activeGame.world, heroId)
+    let index = heroIndex(game.world, heroId)
     let slot = int(arguments[0])
     if index < 0 or slot < 0 or slot >= InventorySlots:
       return 0
-    activeGame.world.heroes[index].itemCounts[slot]
+    game.world.heroes[index].itemCounts[slot]
   let itemCooldownProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     ## Returns live remaining ticks for this inventory slot.
-    let hero = activeGame.world.heroById(heroId)
-    hero.itemCooldown(int(arguments[0]), activeGame.world.tick)
+    let hero = game.world.heroById(heroId)
+    hero.itemCooldown(int(arguments[0]), game.world.tick)
   let canShopProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reports whether the hero may purchase items here.
-    int32(activeGame.world.phase != Drafting and
-      activeGame.world.heroById(heroId).canShop)
+    int32(game.world.phase != Drafting and
+      game.world.heroById(heroId).canShop)
   let inOwnSpawnProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reports whether the hero is receiving spawn-room recovery.
-    int32(activeGame.world.heroById(heroId).inOwnSpawn)
+    int32(game.world.heroById(heroId).inOwnSpawn)
   let buyItemProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordBuyItem(
-          uint32(activeGame.world.tick),
+      if game.recorder != nil:
+        game.recorder.recordBuyItem(
+          uint32(game.world.tick),
           heroId,
           arguments[0]
         )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(
         BasicError,
         "replay recording failed: " & error.msg
       )
     let accepted = applyBuyItem(
-      activeGame.world, heroId, arguments[0]
+      game.world, heroId, arguments[0]
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let buybackPriceProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads this hero's current buyback price from the shared rules.
-    activeGame.world.buybackPrice(heroId)
+    game.world.buybackPrice(heroId)
   let buybackProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and attempts a buyback using only this hero's gold.
     try:
-      activeGame.recorder.recordBuyback(
-        uint32(activeGame.world.tick), heroId
+      game.recorder.recordBuyback(
+        uint32(game.world.tick), heroId
       )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyBuyback(heroId)
+    let accepted = game.world.applyBuyback(heroId)
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let useItemProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
     try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordUseItem(
-          uint32(activeGame.world.tick),
+      if game.recorder != nil:
+        game.recorder.recordUseItem(
+          uint32(game.world.tick),
           heroId,
           arguments[0]
         )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(
         BasicError,
         "replay recording failed: " & error.msg
       )
     let accepted = applyUseItem(
-      activeGame.world, heroId, arguments[0]
+      game.world, heroId, arguments[0]
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
 
@@ -561,40 +560,40 @@ proc initHeroHost(heroId: int32): Host =
         arguments[1].asFixed, arguments[2].asFixed))
       slot = arguments[0].asInt
     try:
-      activeGame.recorder.recordUseItemAt(
-        uint32(activeGame.world.tick), heroId, slot, x, y, offset
+      game.recorder.recordUseItemAt(
+        uint32(game.world.tick), heroId, slot, x, y, offset
       )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyUseItemAt(heroId, slot, x, y, offset)
+    let accepted = game.world.applyUseItemAt(heroId, slot, x, y, offset)
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
 
   let levelAbilityProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and spends a point through the shared upgrade validator.
     try:
-      activeGame.recorder.recordLevelAbility(
-        uint32(activeGame.world.tick), heroId, arguments[0]
+      game.recorder.recordLevelAbility(
+        uint32(game.world.tick), heroId, arguments[0]
       )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyLevelAbility(heroId, arguments[0])
+    let accepted = game.world.applyLevelAbility(heroId, arguments[0])
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let abilityPointsProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads unspent points immediately, including after an upgrade.
-    let index = activeGame.world.heroIndex(heroId)
+    let index = game.world.heroIndex(heroId)
     if index < 0:
       return 0
-    activeGame.world.heroes[index].abilityPoints
+    game.world.heroes[index].abilityPoints
   discard result.addFunction("levelAbility", 1, levelAbilityProc, 20)
   discard result.addFunction("abilityPoints", 0, abilityPointsProc, 4)
   for (field, name) in [
@@ -607,22 +606,22 @@ proc initHeroHost(heroId: int32): Host =
     (AbilityRestore, "abilityRestore"),
     (AbilityManaCost, "abilityManaCost")
   ]:
-    discard result.addFunction(name, 1, abilityProc(heroId, field), 4)
+    discard result.addFunction(name, 1, abilityProc(game, heroId, field), 4)
 
   let castTargetProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and attempts an explicit object-targeted spell.
     let slot = arguments[0]
     try:
-      activeGame.recorder.recordCast(
-        uint32(activeGame.world.tick), heroId, slot, arguments[1], 0, false
+      game.recorder.recordCast(
+        uint32(game.world.tick), heroId, slot, arguments[1], 0, false
       )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyCastTarget(heroId, slot, arguments[1])
+    let accepted = game.world.applyCastTarget(heroId, slot, arguments[1])
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let castPointProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
@@ -631,8 +630,8 @@ proc initHeroHost(heroId: int32): Host =
       arguments[1].asFixed, arguments[2].asFixed))
     let slot = arguments[0].asInt
     try:
-      activeGame.recorder.recordCast(
-        uint32(activeGame.world.tick),
+      game.recorder.recordCast(
+        uint32(game.world.tick),
         heroId,
         slot,
         x,
@@ -641,39 +640,39 @@ proc initHeroHost(heroId: int32): Host =
         offset
       )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyCastPoint(
+    let accepted = game.world.applyCastPoint(
       heroId, slot, x, y, offset
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let abilityChargesProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads remaining charges for one of this hero's four ability slots.
-    let index = heroIndex(activeGame.world, heroId)
+    let index = heroIndex(game.world, heroId)
     if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
       return 0
-    activeGame.world.heroes[index].charges[HeroAbilitySlot(arguments[0])]
+    game.world.heroes[index].charges[HeroAbilitySlot(arguments[0])]
   let abilityCooldownProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads the ticks before this slot may cast again.
-    let index = heroIndex(activeGame.world, heroId)
+    let index = heroIndex(game.world, heroId)
     if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
       return 0
-    activeGame.world.heroes[index].cooldowns[HeroAbilitySlot(arguments[0])]
+    game.world.heroes[index].cooldowns[HeroAbilitySlot(arguments[0])]
   let abilityRechargeProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads ticks until this slot restores its next charge.
-    let index = heroIndex(activeGame.world, heroId)
+    let index = heroIndex(game.world, heroId)
     if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
       return 0
-    activeGame.world.heroes[index].recharges[HeroAbilitySlot(arguments[0])]
+    game.world.heroes[index].recharges[HeroAbilitySlot(arguments[0])]
   let lastActionErrorProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads only this hero's last submitted command error.
-    let index = activeGame.world.heroIndex(heroId)
+    let index = game.world.heroIndex(heroId)
     if index >= 0:
-      activeGame.world.heroes[index].lastActionError.ord.int32
+      game.world.heroes[index].lastActionError.ord.int32
     else:
       0'i32
   discard result.addFunction("lastActionError", 0, lastActionErrorProc, 4)
@@ -696,10 +695,10 @@ proc initHeroHost(heroId: int32): Host =
   ]:
     let arity =
       if field in {ObjectItemId, ObjectItemCount}: 2 else: 1
-    discard result.addFunction(name, arity, objectProc(heroId, field), 16)
+    discard result.addFunction(name, arity, objectProc(game, heroId, field), 16)
   let spellCountProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Counts warnings and projectiles visible to this hero's team.
-    int32(activeGame.world.visibleSpellCount(heroId))
+    int32(game.world.visibleSpellCount(heroId))
   discard result.addFunction("spellCount", 0, spellCountProc, 16)
   for (field, name) in [
     (SpellAbility, "spellAbility"),
@@ -708,7 +707,7 @@ proc initHeroHost(heroId: int32): Host =
     (SpellY, "spellY"),
     (SpellImpactTick, "spellImpactTick")
   ]:
-    discard result.addFunction(name, 1, spellProc(heroId, field), 16)
+    discard result.addFunction(name, 1, spellProc(game, heroId, field), 16)
 
   discard result.addFunction("objectCount", 0, objectCountProc, 2)
   discard result.addFunction("objectId", 1, objectIdProc, 4)
@@ -738,11 +737,13 @@ proc initHeroHost(heroId: int32): Host =
     (TerrainHeightField, "terrainHeight"),
     (TerrainWaterDepthField, "terrainWaterDepth")
   ]:
-    discard result.addFunction(name, 2, terrainProc(heroId, field, false), 32)
+    discard result.addFunction(
+      name, 2, terrainProc(game, heroId, field, false), 32
+    )
     discard result.addFunction(
       name & "At",
       3,
-      terrainProc(heroId, field, true),
+      terrainProc(game, heroId, field, true),
       32
     )
 
@@ -752,10 +753,9 @@ proc loadBots*(
     playerSlot = 0'i32
 ) =
   ## Loads bot files into every hero slot except the optional human slot.
-  activeGame = game
   let
     limits = heroVmLimits()
-    schema = initHeroHost(0)
+    schema = initHeroHost(game, 0)
     kinds = controllerKinds(game.world.heroes.len, playerSlot)
     sources = groups.expandBotSources(kinds)
   game.heroVms.setLen(game.world.heroes.len)
@@ -775,7 +775,7 @@ proc loadBots*(
     game.heroVms[i] = HeroVm(
       runtime: initRuntime(
         program,
-        initHeroHost(game.world.heroes[i].id),
+        initHeroHost(game, game.world.heroes[i].id),
         limits
       ),
       limits: limits,
@@ -864,7 +864,6 @@ proc runHeroScript(game: Game, index: int) =
 
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every VM in seeded cyclic order and advances the first slot.
-  activeGame = game
   if game.world.phase == Drafting:
     runHeroScript(game, game.world.heroIndex(game.world.draftHeroId()))
     return
