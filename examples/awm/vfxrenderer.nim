@@ -225,7 +225,16 @@ proc newVfx*(kind: VfxKind, target: Choice, position: Vec3, seed: int): ActiveVf
       of LightningVfx: 0.95'f32
       of BubbleVfx: 1.05'f32
       of DamageFlashVfx: 0.55'f32
-      of NoVfx: 0.0'f32)
+      of ArrowVfx: 0.75'f32
+      of ManyArrowsVfx: 1.1'f32
+      of SwordsIntoTheWindVfx: 1.15'f32
+      of MightyShieldsVfx: 1.1'f32
+      of SwordAndShieldVfx: 1.0'f32
+      of MeleeVfx: 1.0'f32
+      of SwordClashVfx: 0.9'f32
+      of SwordBreakVfx: 1.0'f32
+      of OozeSplatVfx: 1.0'f32
+      of NoVfx, DeathVfx: 0.0'f32)
 
 proc advance*(effects: var seq[ActiveVfx], dt: float32) =
   for effect in effects.mitems:
@@ -388,17 +397,436 @@ proc addBubble(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
     renderer.addBillboard(effect.position + offset, 0.07'f32 + pop * 0.045'f32,
       eye, vec4(0.5, 0.8, 1, appear * (1 - pop)), 3)
 
+proc addArrowShot(renderer: var VfxRenderer, target, start: Vec3,
+    age: float32, seed: int, eye: Vec3, lift = 1.1'f32, glow = 1.0'f32) =
+  ## One fletched arrow flies from `start`, sticks in `target`, then splinters.
+  const flight = 0.22'f32
+  let
+    t = min(1.0'f32, age / flight)
+    tip = mix(start, target, t) + vec3(0, lift * 4 * t * (1 - t), 0)
+    direction = normalize(target - start +
+      vec3(0, lift * 4 * (1 - 2 * t), 0))
+    impactAge = age - flight
+    fade = if impactAge < 0: 1.0'f32
+      else: clamp(1 - impactAge / 0.4'f32, 0.0'f32, 1.0'f32)
+    normal = cross(direction, eye - tip)
+  if fade > 0.002'f32 and length(normal) > 0.00001'f32:
+    let
+      side = normalize(normal)
+      tail = tip - direction * 1.05'f32
+      barb = tip - direction * 0.22'f32
+      ink = vec4(1.0, 0.72, 0.32, fade)
+    if impactAge < 0:
+      # A short streak behind the arrow sells its speed during flight.
+      let
+        t0 = max(0.0'f32, t - 0.45'f32)
+        trail = mix(start, target, t0) +
+          vec3(0, lift * 4 * t0 * (1 - t0), 0)
+      renderer.addLine(trail, tail, eye, 0.035, vec4(1.0, 0.85, 0.55, 0.22))
+    renderer.addGlowLine(tail, tip, eye, 0.016, ink)
+    renderer.addGlowLine(barb + side * 0.11'f32, tip, eye, 0.013, ink)
+    renderer.addGlowLine(barb - side * 0.11'f32, tip, eye, 0.013, ink)
+    for offset in [-0.1'f32, 0.1'f32]:
+      renderer.addGlowLine(tail + direction * 0.2'f32, tail + side * offset,
+        eye, 0.011, vec4(1.0, 0.9, 0.7, fade * 0.8'f32))
+  if impactAge < 0: return
+
+  renderer.addBillboard(target, 0.95, eye,
+    vec4(1.0, 0.62, 0.22, exp(-impactAge * 9) * 1.1'f32 * glow), 4)
+  # Splinters kick back toward the shooter, falling under a light gravity.
+  for i in 0 ..< 36:
+    let
+      delay = particleNoise(i, 42, seed) * 0.04'f32
+      elapsed = impactAge - delay
+      lifetime = 0.2'f32 + particleNoise(i, 43, seed) * 0.3'f32
+    if elapsed < 0 or elapsed >= lifetime: continue
+    let
+      angle = particleNoise(i, 44, seed) * 2 * PI.float32
+      scatter = vec3(cos(angle), particleNoise(i, 45, seed) * 1.4'f32, sin(angle))
+      speed = 1.8'f32 + particleNoise(i, 46, seed) * 3.2'f32
+      velocity = normalize(scatter - direction * 1.2'f32) * speed
+      tailTime = max(0.0'f32, elapsed - 0.02'f32)
+      head = target + velocity * elapsed +
+        vec3(0, -3.0'f32 * elapsed * elapsed, 0)
+      back = target + velocity * tailTime +
+        vec3(0, -3.0'f32 * tailTime * tailTime, 0)
+      sparkFade = clamp((lifetime - elapsed) / 0.15'f32, 0.0'f32, 1.0'f32)
+      ink = mix(vec3(0.95, 0.42, 0.12), vec3(1.0, 0.86, 0.5),
+        particleNoise(i, 47, seed))
+    renderer.addGlowLine(back, head, eye,
+      0.008'f32 + particleNoise(i, 48, seed) * 0.012'f32,
+      vec4(ink, sparkFade * 0.9'f32))
+
+proc addArrow(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A fletched arrow arcs in from the table side, sticks, then splinters.
+  let
+    seed = effect.seed
+    cameraRight = normalize(cross(vec3(0, 1, 0), normalize(eye - effect.position)))
+    inward = if dot(effect.position, cameraRight) > 0: -1.0'f32 else: 1.0'f32
+    start = effect.position +
+      cameraRight * inward * (4.5'f32 + particleNoise(0, 40, seed)) +
+      vec3(0, 1.4'f32 + particleNoise(0, 41, seed) * 0.6'f32, 0)
+  renderer.addArrowShot(effect.position, start, effect.elapsed, seed, eye)
+
+proc addArrowVolley(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A staggered volley drops steeply around the target from overhead.
+  const volley = 5
+  for i in 0 ..< volley:
+    let
+      delay = i.float32 * 0.07'f32 + particleNoise(i, 50, effect.seed) * 0.05'f32
+      age = effect.elapsed - delay
+    if age < 0: continue
+    let
+      angle = particleNoise(i, 51, effect.seed) * 2 * PI.float32
+      around = vec3(cos(angle), 0, sin(angle))
+      target = effect.position +
+        around * (0.2'f32 + particleNoise(i, 52, effect.seed) * 0.45'f32)
+      start = target + around * 1.1'f32 +
+        vec3(0, 5.0'f32 + particleNoise(i, 53, effect.seed), 0)
+    renderer.addArrowShot(target, start, age, effect.seed + i * 7919, eye,
+      lift = 0.25'f32, glow = 0.55'f32)
+
+proc addSword(renderer: var VfxRenderer, hilt, direction, eye: Vec3,
+    alpha: float32) =
+  ## A steel blade with a gold crossguard and grip, pointing along `direction`.
+  let normal = cross(direction, eye - hilt)
+  if alpha <= 0.002'f32 or length(normal) < 0.00001'f32: return
+  let
+    side = normalize(normal)
+    tip = hilt + direction * 0.95'f32
+    gold = vec4(1.0, 0.76, 0.3, alpha)
+  renderer.addGlowLine(hilt, tip, eye, 0.022, vec4(0.78, 0.88, 1.0, alpha))
+  renderer.addGlowLine(hilt - side * 0.17'f32, hilt + side * 0.17'f32, eye,
+    0.016, gold)
+  renderer.addGlowLine(hilt, hilt - direction * 0.24'f32, eye, 0.018, gold)
+  renderer.addBillboard(tip, 0.14, eye, vec4(0.9, 0.96, 1, alpha * 0.9'f32), 4)
+
+proc addSwordsIntoTheWind(renderer: var VfxRenderer, effect: ActiveVfx,
+    eye: Vec3) =
+  ## Three blades rise from the minion and spiral away on a gust, while a
+  ## warm flash marks the minion growing stronger.
+  const blades = 3
+  let
+    seed = effect.seed
+    age = effect.elapsed
+  renderer.addBillboard(effect.position, 1.35, eye,
+    vec4(1.0, 0.72, 0.28, exp(-age * 5) * 0.8'f32), 4)
+  # The gust: short helical streaks sweeping upward around the minion.
+  for i in 0 ..< 7:
+    let
+      delay = particleNoise(i, 60, seed) * 0.3'f32
+      lifetime = 0.45'f32 + particleNoise(i, 61, seed) * 0.25'f32
+      t = (age - delay) / lifetime
+    if t <= 0 or t >= 1: continue
+    let
+      start = particleNoise(i, 62, seed) * 2 * PI.float32
+      radius = 0.8'f32 + particleNoise(i, 63, seed) * 0.5'f32
+      alpha = sin(t * PI.float32) * 0.32'f32
+    var previous: Vec3
+    for step in 0 .. 8:
+      let
+        k = step.float32 / 8
+        sweep = t + k * 0.35'f32
+        angle = start + sweep * 3.2'f32
+        point = effect.position +
+          vec3(cos(angle) * radius, 0.2'f32 + sweep * 2.2'f32, sin(angle) * radius)
+      if step > 0:
+        renderer.addLine(previous, point, eye, 0.012'f32 * (0.4'f32 + k),
+          vec4(0.85, 0.93, 1.0, alpha * k))
+      previous = point
+  for i in 0 ..< blades:
+    let delay = i.float32 * 0.08'f32
+    if age < delay: continue
+    let
+      t = clamp((age - delay) / (effect.duration - 0.2'f32), 0.0'f32, 1.0'f32)
+      rise = t * t * (3 - 2 * t)
+      angle = i.float32 * 2 * PI.float32 / blades +
+        particleNoise(i, 64, seed) * 0.6'f32 + rise * 3.4'f32
+      around = vec3(cos(angle), 0, sin(angle))
+      tangent = vec3(-sin(angle), 0, cos(angle))
+      hilt = effect.position + around * (1.0'f32 - 0.4'f32 * rise) +
+        vec3(0, 0.15'f32 + rise * 2.8'f32, 0)
+      # Blades point up and lean into the gust's spin.
+      direction = normalize(vec3(0, 1, 0) + tangent * 0.45'f32 +
+        around * 0.15'f32)
+      appear = min(1.0'f32, (age - delay) / 0.12'f32)
+      fade = clamp((1 - t) / 0.35'f32, 0.0'f32, 1.0'f32)
+    renderer.addSword(hilt, direction, eye, appear * fade)
+
+proc facing(center, eye: Vec3): tuple[right, up: Vec3] =
+  ## Axes of a camera-facing plane at `center`.
+  let
+    forward = normalize(eye - center)
+    right = normalize(cross(vec3(0, 1, 0), forward))
+  (right, normalize(cross(forward, right)))
+
+proc addShield(renderer: var VfxRenderer, center, eye: Vec3, size: float32,
+    ink: Vec4) =
+  ## A camera-facing kite shield outline with a glowing boss.
+  let
+    axes = facing(center, eye)
+    outline = [vec2(-0.85, 0.75), vec2(0, 1), vec2(0.85, 0.75),
+      vec2(0.8, -0.15), vec2(0, -1), vec2(-0.8, -0.15)]
+  proc at(point: Vec2): Vec3 =
+    center + axes.right * (point.x * size) + axes.up * (point.y * size)
+  for i in 0 ..< outline.len:
+    renderer.addGlowLine(at(outline[i]), at(outline[(i + 1) mod outline.len]),
+      eye, 0.03'f32 * size, ink)
+  renderer.addBillboard(center + axes.up * (0.1'f32 * size), 0.2'f32 * size,
+    eye, vec4(ink.xyz, ink.w * 0.9'f32), 4)
+
+proc addMightyShields(renderer: var VfxRenderer, effect: ActiveVfx,
+    eye: Vec3) =
+  ## A shield descends onto the minion and flares; a blue ring spreads out
+  ## over the table as it lands.
+  let
+    age = effect.elapsed
+    t = age / effect.duration
+    settle = min(1.0'f32, age / 0.35'f32)
+    ease = 1 - (1 - settle) * (1 - settle)
+    fade = clamp((1 - t) / 0.35'f32, 0.0'f32, 1.0'f32)
+    # Small and low, so each shield reads as its own minion's.
+    center = effect.position + vec3(0, 0.9'f32 - 0.45'f32 * ease, 0)
+    flare = exp(-max(0.0'f32, age - 0.35'f32) * 7) * settle
+  renderer.addShield(center, eye, 0.3'f32 + 0.12'f32 * ease,
+    vec4(0.45, 0.75, 1.0, fade))
+  renderer.addBillboard(center, 0.8, eye, vec4(0.3, 0.6, 1.0, flare * 0.7'f32), 4)
+  let ringAge = age - 0.3'f32
+  if ringAge > 0:
+    let
+      radius = 0.6'f32 + ringAge * 2.2'f32
+      alpha = clamp(1 - ringAge / 0.6'f32, 0.0'f32, 1.0'f32) * 0.8'f32
+    for i in 0 ..< 48:
+      let
+        a = i.float32 * 2 * PI.float32 / 48
+        b = (i + 1).float32 * 2 * PI.float32 / 48
+      renderer.addGlowLine(
+        effect.position + vec3(cos(a), 0, sin(a)) * radius,
+        effect.position + vec3(cos(b), 0, sin(b)) * radius,
+        eye, 0.02, vec4(0.4, 0.7, 1.0, alpha))
+
+proc addSwordAndShield(renderer: var VfxRenderer, effect: ActiveVfx,
+    eye: Vec3) =
+  ## A sword crossed behind a shield rises over the minion, then fades.
+  let
+    age = effect.elapsed
+    t = age / effect.duration
+    alpha = min(1.0'f32, age / 0.15'f32) *
+      clamp((1 - t) / 0.35'f32, 0.0'f32, 1.0'f32)
+    # Kept low: from the player's seat, anything higher reads as belonging
+    # to the minion across the table.
+    center = effect.position + vec3(0, 0.45'f32 + (1 - exp(-age * 4)) * 0.4'f32, 0)
+    axes = facing(center, eye)
+    blade = normalize(axes.up + axes.right * 0.8'f32)
+  renderer.addBillboard(center, 1.2, eye,
+    vec4(1.0, 0.72, 0.3, exp(-age * 5) * 0.7'f32), 4)
+  renderer.addSword(center - blade * 0.55'f32, blade, eye, alpha)
+  renderer.addShield(center - axes.up * 0.05'f32, eye, 0.42,
+    vec4(1.0, 0.78, 0.35, alpha))
+
+proc addMelee(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## An arrow hangs over the minion, trembles, snaps in two, and its halves
+  ## tumble away: the minion is no longer a ranged fighter.
+  const snapAt = 0.3'f32
+  let
+    age = effect.elapsed
+    seed = effect.seed
+    center = effect.position + vec3(0, 0.7, 0)
+    axes = facing(center, eye)
+    fade = clamp((effect.duration - age) / 0.3'f32, 0.0'f32, 1.0'f32)
+    wood = vec4(1.0, 0.72, 0.32, min(1.0'f32, age / 0.12'f32) * fade)
+    fall = max(0.0'f32, age - snapAt)
+    tremble =
+      if age < snapAt: sin(age * 90) * 0.03'f32 * (age / snapAt) else: 0.0'f32
+  for side in [-1.0'f32, 1.0'f32]:
+    # Each half pivots down at the break and drops away from it.
+    let
+      angle = fall * 2.4'f32
+      outward = axes.right * (side * cos(angle)) - axes.up * sin(angle)
+      normal = axes.up * cos(angle) + axes.right * (side * sin(angle))
+      inner = center + axes.up * tremble + axes.right * (side * fall * 0.6'f32) -
+        axes.up * (2.6'f32 * fall * fall)
+      outer = inner + outward * 0.75'f32
+      back = outer - outward * 0.2'f32
+    renderer.addGlowLine(inner, outer, eye, 0.018, wood)
+    if side > 0:
+      renderer.addGlowLine(back + normal * 0.1'f32, outer, eye, 0.014, wood)
+      renderer.addGlowLine(back - normal * 0.1'f32, outer, eye, 0.014, wood)
+    else:
+      for offset in [-0.1'f32, 0.1'f32]:
+        renderer.addGlowLine(outer, back + normal * offset, eye, 0.011,
+          vec4(1.0, 0.9, 0.7, wood.w * 0.8'f32))
+  if age < snapAt: return
+  let snapAge = age - snapAt
+  renderer.addBillboard(center, 0.9, eye,
+    vec4(1.0, 0.3, 0.15, exp(-snapAge * 8) * 0.9'f32), 4)
+  for i in 0 ..< 16:
+    let lifetime = 0.2'f32 + particleNoise(i, 80, seed) * 0.25'f32
+    if snapAge >= lifetime: continue
+    let
+      angle = particleNoise(i, 81, seed) * 2 * PI.float32
+      velocity = normalize(vec3(cos(angle), particleNoise(i, 82, seed) * 1.2'f32,
+        sin(angle))) * (1.5'f32 + particleNoise(i, 83, seed) * 2.5'f32)
+      head = center + velocity * snapAge + vec3(0, -3.0'f32 * snapAge * snapAge, 0)
+      tail = center + velocity * max(0.0'f32, snapAge - 0.03'f32)
+      sparkFade = clamp((lifetime - snapAge) / 0.12'f32, 0.0'f32, 1.0'f32)
+    renderer.addGlowLine(tail, head, eye, 0.01, vec4(1.0, 0.6, 0.25, sparkFade))
+
+proc addSwordClash(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## Two blades swing in and cross over the minion; sparks burst on impact.
+  const strike = 0.22'f32
+  let
+    age = effect.elapsed
+    seed = effect.seed
+    center = effect.position + vec3(0, 1.1, 0)
+    axes = facing(center, eye)
+    swing = min(1.0'f32, age / strike)
+    ease = swing * swing
+    fade = clamp((effect.duration - age) / 0.3'f32, 0.0'f32, 1.0'f32)
+    recoil = if age > strike: min(0.12'f32, (age - strike) * 0.6'f32) else: 0.0'f32
+  for side in [-1.0'f32, 1.0'f32]:
+    # Each blade swings from upright and wide to leaning across the center.
+    let
+      angle = 0.2'f32 + ease * 0.55'f32
+      direction = normalize(axes.up * cos(angle) - axes.right * (side * sin(angle)))
+      hilt = center +
+        axes.right * (side * (1.2'f32 - 0.55'f32 * ease + recoil)) -
+        axes.up * 0.45'f32
+    renderer.addSword(hilt, direction, eye, fade)
+  if age < strike: return
+  let
+    impact = age - strike
+    spark = center + axes.up * 0.2'f32
+  renderer.addBillboard(spark, 1.0, eye,
+    vec4(1.0, 0.9, 0.6, exp(-impact * 9) * 1.2'f32), 4)
+  for i in 0 ..< 40:
+    let
+      elapsed = impact - particleNoise(i, 70, seed) * 0.03'f32
+      lifetime = 0.25'f32 + particleNoise(i, 71, seed) * 0.3'f32
+    if elapsed < 0 or elapsed >= lifetime: continue
+    let
+      angle = particleNoise(i, 72, seed) * 2 * PI.float32
+      velocity = normalize(vec3(cos(angle),
+        particleNoise(i, 73, seed) * 1.6'f32 - 0.2'f32, sin(angle))) *
+        (2.0'f32 + particleNoise(i, 74, seed) * 3.5'f32)
+      tailTime = max(0.0'f32, elapsed - 0.025'f32)
+      head = spark + velocity * elapsed + vec3(0, -3.0'f32 * elapsed * elapsed, 0)
+      tail = spark + velocity * tailTime + vec3(0, -3.0'f32 * tailTime * tailTime, 0)
+      sparkFade = clamp((lifetime - elapsed) / 0.15'f32, 0.0'f32, 1.0'f32)
+      ink = mix(vec3(1.0, 0.55, 0.15), vec3(1.0, 0.95, 0.7),
+        particleNoise(i, 75, seed))
+    renderer.addGlowLine(tail, head, eye, 0.01, vec4(ink, sparkFade))
+
+proc addSwordBreak(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A sword hangs point-down over the minion, trembles, cracks, and its
+  ## halves tumble apart: the minion hits less hard.
+  const snapAt = 0.3'f32
+  let
+    age = effect.elapsed
+    seed = effect.seed
+    center = effect.position + vec3(0, 0.7, 0)
+    axes = facing(center, eye)
+    alpha = min(1.0'f32, age / 0.12'f32) *
+      clamp((effect.duration - age) / 0.3'f32, 0.0'f32, 1.0'f32)
+    steel = vec4(0.78, 0.88, 1.0, alpha)
+    gold = vec4(1.0, 0.76, 0.3, alpha)
+    fall = max(0.0'f32, age - snapAt)
+    tremble =
+      if age < snapAt: sin(age * 90) * 0.03'f32 * (age / snapAt) else: 0.0'f32
+  for side in [-1.0'f32, 1.0'f32]:
+    # +1 is the hilt half above the crack, -1 the point half below it; they
+    # spin in opposite directions as they drop.
+    let
+      tilt = fall * 2.2'f32 * side
+      along = axes.up * (side * cos(tilt)) + axes.right * sin(tilt)
+      across = axes.right * cos(tilt) - axes.up * (side * sin(tilt))
+      pivot = center + axes.right * (tremble + side * fall * 0.5'f32) -
+        axes.up * (2.6'f32 * fall * fall)
+      outer = pivot + along * 0.5'f32
+    renderer.addGlowLine(pivot, outer, eye, 0.022, steel)
+    if side > 0:
+      renderer.addGlowLine(outer - across * 0.17'f32,
+        outer + across * 0.17'f32, eye, 0.016, gold)
+      renderer.addGlowLine(outer, outer + along * 0.24'f32, eye, 0.018, gold)
+  if age < snapAt: return
+  let snapAge = age - snapAt
+  renderer.addBillboard(center, 0.8, eye,
+    vec4(0.85, 0.92, 1.0, exp(-snapAge * 8) * 0.9'f32), 4)
+  for i in 0 ..< 18:
+    let lifetime = 0.2'f32 + particleNoise(i, 90, seed) * 0.25'f32
+    if snapAge >= lifetime: continue
+    let
+      angle = particleNoise(i, 91, seed) * 2 * PI.float32
+      velocity = normalize(vec3(cos(angle), particleNoise(i, 92, seed) * 1.2'f32,
+        sin(angle))) * (1.5'f32 + particleNoise(i, 93, seed) * 2.5'f32)
+      head = center + velocity * snapAge + vec3(0, -3.0'f32 * snapAge * snapAge, 0)
+      tail = center + velocity * max(0.0'f32, snapAge - 0.03'f32)
+      sparkFade = clamp((lifetime - snapAge) / 0.12'f32, 0.0'f32, 1.0'f32)
+    renderer.addGlowLine(tail, head, eye, 0.01, vec4(0.9, 0.95, 1.0, sparkFade))
+
+proc addOozeSplat(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A glob of ooze drops onto the minion and bursts into droplets and a
+  ## spreading green puddle.
+  const impact = 0.28'f32
+  let
+    age = effect.elapsed
+    seed = effect.seed
+  if age < impact:
+    let
+      t = age / impact
+      drop = effect.position + vec3(0, 3.2'f32 * (1 - t * t), 0)
+    renderer.addBillboard(drop, 0.45, eye, vec4(0.35, 1.0, 0.3, 0.9), 4)
+    renderer.addBillboard(drop, 0.2, eye, vec4(0.8, 1.0, 0.6, 1.0), 4)
+    return
+  let
+    splat = age - impact
+    fade = clamp((effect.duration - age) / 0.3'f32, 0.0'f32, 1.0'f32)
+    radius = 0.4'f32 + (1 - exp(-splat * 5)) * 1.1'f32
+  renderer.addBillboard(effect.position, 1.3, eye,
+    vec4(0.3, 0.95, 0.25, exp(-splat * 6) * 0.9'f32), 4)
+  for i in 0 ..< 40:
+    let
+      a = i.float32 * 2 * PI.float32 / 40
+      b = (i + 1).float32 * 2 * PI.float32 / 40
+    renderer.addGlowLine(
+      effect.position + vec3(cos(a), 0, sin(a)) * radius,
+      effect.position + vec3(cos(b), 0, sin(b)) * radius,
+      eye, 0.025, vec4(0.35, 0.95, 0.3, 0.6'f32 * fade))
+  for i in 0 ..< 24:
+    let lifetime = 0.35'f32 + particleNoise(i, 100, seed) * 0.35'f32
+    if splat >= lifetime: continue
+    let
+      angle = particleNoise(i, 101, seed) * 2 * PI.float32
+      speed = 1.2'f32 + particleNoise(i, 102, seed) * 2.0'f32
+      velocity = vec3(cos(angle) * speed,
+        2.0'f32 + particleNoise(i, 103, seed) * 2.5'f32, sin(angle) * speed)
+      droplet = effect.position + velocity * splat +
+        vec3(0, -6.0'f32 * splat * splat, 0)
+      alpha = clamp((lifetime - splat) / 0.15'f32, 0.0'f32, 1.0'f32)
+    renderer.addBillboard(droplet,
+      0.08'f32 + particleNoise(i, 104, seed) * 0.1'f32, eye,
+      vec4(0.4, 1.0, 0.35, alpha), 4)
+
 proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
     eye: Vec3) =
   for effect in effects:
     case effect.kind
     of LightningVfx: renderer.addLightning(effect, eye)
     of BubbleVfx: renderer.addBubble(effect, eye)
+    of ArrowVfx: renderer.addArrow(effect, eye)
+    of ManyArrowsVfx: renderer.addArrowVolley(effect, eye)
+    of SwordsIntoTheWindVfx: renderer.addSwordsIntoTheWind(effect, eye)
+    of MightyShieldsVfx: renderer.addMightyShields(effect, eye)
+    of SwordAndShieldVfx: renderer.addSwordAndShield(effect, eye)
+    of MeleeVfx: renderer.addMelee(effect, eye)
+    of SwordClashVfx: renderer.addSwordClash(effect, eye)
+    of SwordBreakVfx: renderer.addSwordBreak(effect, eye)
+    of OozeSplatVfx: renderer.addOozeSplat(effect, eye)
     of DamageFlashVfx:
       let t = effect.elapsed / effect.duration
       renderer.addBillboard(effect.position, 1.2'f32 + t * 0.8'f32, eye,
         vec4(1, 0.025, 0.05, (1 - t) * 0.38'f32), 4)
-    of NoVfx: discard
+    of NoVfx, DeathVfx: discard
 
 proc draw*(renderer: var VfxRenderer, viewProjection: Mat4,
     additive = true, depthTest = true) =
