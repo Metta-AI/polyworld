@@ -269,3 +269,34 @@ block:
   doAssert edgeMask(1, 0, 0, blockers) == 4
 
 echo "Pathing tests passed"
+
+var dynamicBlocked = true
+
+proc runtimeTileOpen(layer, x, z: int): bool =
+  ## Simulates a living building on otherwise walkable terrain.
+  isWalkable(layer, x, z) and not (dynamicBlocked and x == 2 and z == 2)
+
+echo "Testing runtime occupancy survives path smoothing and releases on death"
+block:
+  let floor = QuadLayer(width: 5, depth: 5, tiles: newSeq[Tile](25))
+  for tile in floor.tiles.mitems:
+    tile = openTile()
+  layers = @[floor]
+  computeWalkable()
+  let
+    first = PathTile(layer: 0, x: 0, z: 2)
+    last = PathTile(layer: 0, x: 4, z: 2)
+  doAssert lineClear(first, last)
+  doAssert not lineClear(first, last, runtimeTileOpen)
+  doAssert edgeMask(0, 2, 2, walkable = runtimeTileOpen) == 0
+  doAssert (edgeMask(0, 1, 2, walkable = runtimeTileOpen) and 1) == 0
+  let path = smoothPathTiles(findTilePath(PathQuery(
+    startX: 0, startZ: 2, finishX: 4, finishZ: 2,
+    walkable: runtimeTileOpen)).tiles, runtimeTileOpen)
+  doAssert path.len > 2
+  for i in 1 ..< path.len:
+    doAssert lineClear(path[i - 1], path[i], runtimeTileOpen)
+  dynamicBlocked = false
+  doAssert lineClear(first, last, runtimeTileOpen)
+  doAssert edgeMask(0, 2, 2, walkable = runtimeTileOpen) == 15
+  doAssert (edgeMask(0, 1, 2, walkable = runtimeTileOpen) and 1) == 1

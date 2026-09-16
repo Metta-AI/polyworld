@@ -12,7 +12,7 @@ proc spellGame(class: HeroClass): Game =
     hero.state = Dying
     hero.deathTicks = -100_000
     hero.hp = 0
-  for tower in result.world.towers.mitems:
+  for tower in result.world.buildings.mitems:
     tower.hp = 0
   let hero = result.world.heroes[0]
   hero.class = class
@@ -350,19 +350,19 @@ block:
     game = spellGame(Arcanist)
     hero = game.world.heroes[0]
   var inner = -1
-  for i, tower in game.world.towers.mpairs:
+  for i, tower in game.world.buildings.mpairs:
     if tower.team == BlueTeam and tower.lane == 0:
       tower.hp = tower.maxHp
       tower.attackTicks = 10000
       if tower.tier == InnerTower:
         inner = i
   doAssert inner >= 0
-  hero.place(game.world.towers[inner].position)
+  hero.place(game.world.buildings[inner].position)
   game.step()
-  let hp = game.world.towers[inner].hp
+  let hp = game.world.buildings[inner].hp
   doAssert game.ground(SecondaryAbility)
   game.step(int(MeteorStrike.abilitySpec.castTicks))
-  doAssert game.world.towers[inner].hp == hp
+  doAssert game.world.buildings[inner].hp == hp
 
 echo "Testing area healing affects living allies and includes the caster"
 block:

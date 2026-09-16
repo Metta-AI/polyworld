@@ -498,11 +498,14 @@ proc edgeLink*(layerIndex, x, z, direction: int): EdgeLink =
 
 proc edgeMask*(
     layerIndex, x, z: int,
-    blockers: openArray[seq[int32]] = []
+    blockers: openArray[seq[int32]] = [],
+    walkable: PathWalkable = nil
 ): uint8 =
   ## Returns open edge bits, east to north, including optional layer blockers.
   ## Nonzero blockers close both sides without changing cached terrain links.
   if not isWalkable(layerIndex, x, z):
+    return
+  if walkable != nil and not walkable(layerIndex, x, z):
     return
   if layerIndex < blockers.len and blockers[layerIndex].len > 0:
     doAssert blockers[layerIndex].len == layers[layerIndex].tiles.len
@@ -511,6 +514,8 @@ proc edgeMask*(
   for direction in 0 .. 3:
     let link = edgeLink(layerIndex, x, z, direction)
     if not link.open:
+      continue
+    if walkable != nil and not walkable(link.layer, link.x, link.z):
       continue
     if link.layer < blockers.len and blockers[link.layer].len > 0:
       doAssert blockers[link.layer].len == layers[link.layer].tiles.len
@@ -927,19 +932,25 @@ proc stepPathTile(
   else:
     (false, tile)
 
-proc lineClear*(a, b: PathTile): bool =
-  ## Returns whether a straight line of open edges joins two tiles.
-  ##
-  ## Amanatides-Woo in world tiles. Every axis step is one `edgeLink`
-  ## crossing, so a leg can take a ramp onto a bridge and will not cut a
-  ## blocked corner. When the line hits a tile corner both ways around it
-  ## must be open and meet on the same tile.
+proc lineClear*(
+    a, b: PathTile,
+    start, finish: tuple[x, z: int64],
+    unitsPerTile: int64,
+    walkable: PathWalkable = nil
+): bool =
+  ## Traces exact positions in global tile space through terrain and occupancy.
+  ## Layer changes follow edge links; exact corner crossings require both routes.
+  proc open(tile: PathTile): bool =
+    ## Applies the optional runtime occupancy filter.
+    walkable == nil or walkable(int(tile.layer), int(tile.x), int(tile.z))
+  if not open(a) or not open(b):
+    return false
   var node = a
   let
     tileA = worldPathTile(a)
     tileB = worldPathTile(b)
-    dx = tileB.x - tileA.x
-    dz = tileB.z - tileA.z
+    dx = finish.x - start.x
+    dz = finish.z - start.z
   if tileA == tileB:
     return a == b
   let
@@ -956,16 +967,20 @@ proc lineClear*(a, b: PathTile): bool =
   var
     tileX = tileA.x
     tileZ = tileA.z
-    ix = 0
-    iz = 0
+    nextX =
+      if stepX > 0: int64(tileX + 1) * unitsPerTile - start.x
+      else: start.x - int64(tileX) * unitsPerTile
+    nextZ =
+      if stepZ > 0: int64(tileZ + 1) * unitsPerTile - start.z
+      else: start.z - int64(tileZ) * unitsPerTile
     guard = 0
   while tileX != tileB.x or tileZ != tileB.z:
     inc guard
-    if guard > adx + adz:
+    if guard > abs(tileB.x - tileA.x) + abs(tileB.z - tileA.z):
       return false
     let
-      left = int64(1 + 2 * ix) * int64(adz)
-      right = int64(1 + 2 * iz) * int64(adx)
+      left = nextX * adz
+      right = nextZ * adx
       corner = stepX != 0 and stepZ != 0 and left == right
       takeX =
         if stepX == 0: false
@@ -989,30 +1004,47 @@ proc lineClear*(a, b: PathTile): bool =
         viaX.open and viaXZ.open and viaZ.open and viaZX.open
       ):
         return false
+      if not open(viaX.next) or not open(viaZ.next) or
+          not open(viaXZ.next) or not open(viaZX.next):
+        return false
       if viaXZ.next != viaZX.next:
         return false
       node = viaXZ.next
       tileX += stepX
       tileZ += stepZ
-      inc ix
-      inc iz
+      nextX += unitsPerTile
+      nextZ += unitsPerTile
     elif takeX:
       let crossing = stepPathTile(node, dirX)
-      if not crossing.open:
+      if not crossing.open or not open(crossing.next):
         return false
       node = crossing.next
       tileX += stepX
-      inc ix
+      nextX += unitsPerTile
     elif takeZ:
       let crossing = stepPathTile(node, dirZ)
-      if not crossing.open:
+      if not crossing.open or not open(crossing.next):
         return false
       node = crossing.next
       tileZ += stepZ
-      inc iz
+      nextZ += unitsPerTile
     else:
       return false
   node == b
+
+proc lineClear*(a, b: PathTile, walkable: PathWalkable = nil): bool =
+  ## Checks a center-to-center segment with the same exact edge traversal.
+  let
+    first = worldPathTile(a)
+    last = worldPathTile(b)
+  lineClear(
+    a,
+    b,
+    (int64(first.x) * 2 + 1, int64(first.z) * 2 + 1),
+    (int64(last.x) * 2 + 1, int64(last.z) * 2 + 1),
+    2,
+    walkable
+  )
 
 proc sameLayerSpan(tiles: seq[PathTile], first, last: int): bool =
   ## True when every tile from first to last shares one floor.
@@ -1022,7 +1054,9 @@ proc sameLayerSpan(tiles: seq[PathTile], first, last: int): bool =
       return false
   true
 
-proc smoothPathTiles*(tiles: seq[PathTile]): seq[PathTile] {.measure.} =
+proc smoothPathTiles*(
+    tiles: seq[PathTile], walkable: PathWalkable = nil
+): seq[PathTile] {.measure.} =
   ## String-pulls an A* tile path. Keeps a waypoint when the straight
   ## line from the previous kept tile to the one after it is blocked.
   ## A layer change is always kept, because walkers only treat the
@@ -1036,7 +1070,7 @@ proc smoothPathTiles*(tiles: seq[PathTile]): seq[PathTile] {.measure.} =
     for candidate in countdown(tiles.len - 1, anchor + 2):
       if not sameLayerSpan(tiles, anchor, candidate):
         continue
-      if lineClear(tiles[anchor], tiles[candidate]):
+      if lineClear(tiles[anchor], tiles[candidate], walkable):
         reach = candidate
         break
     result.add tiles[reach]

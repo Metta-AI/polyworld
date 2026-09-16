@@ -7,6 +7,7 @@ export fxshapes
 
 const
   InventorySlots* = 6
+  CreepsPerBarracks* = 3
   TickRate* = SharedTickRate
     ## Simulation ticks per second.
 

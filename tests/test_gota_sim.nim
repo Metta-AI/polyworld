@@ -128,68 +128,68 @@ block:
 echo "Testing towers expose outer, inner, then gate"
 block:
   var lane: array[TowerTier, int]
-  for i, tower in run.world.towers:
-    if tower.team == RedTeam and tower.lane == 0:
+  for i, tower in run.world.buildings:
+    if tower.kind == TowerBuilding and tower.team == RedTeam and tower.lane == 0:
       lane[tower.tier] = i
-      run.world.towers[i].hp = run.world.towers[i].maxHp
-  doAssert towerExposed(run.world, run.world.towers[lane[OuterTower]])
-  doAssert not towerExposed(run.world, run.world.towers[lane[InnerTower]])
-  doAssert not towerExposed(run.world, run.world.towers[lane[GateTower]])
-  run.world.towers[lane[OuterTower]].hp = 0
-  doAssert towerExposed(run.world, run.world.towers[lane[InnerTower]])
-  doAssert not towerExposed(run.world, run.world.towers[lane[GateTower]])
-  run.world.towers[lane[InnerTower]].hp = 0
-  doAssert towerExposed(run.world, run.world.towers[lane[GateTower]])
-  run.world.towers[lane[GateTower]].hp = 0
+      run.world.buildings[i].hp = run.world.buildings[i].maxHp
+  doAssert buildingExposed(run.world, run.world.buildings[lane[OuterTower]])
+  doAssert not buildingExposed(run.world, run.world.buildings[lane[InnerTower]])
+  doAssert not buildingExposed(run.world, run.world.buildings[lane[GateTower]])
+  run.world.buildings[lane[OuterTower]].hp = 0
+  doAssert buildingExposed(run.world, run.world.buildings[lane[InnerTower]])
+  doAssert not buildingExposed(run.world, run.world.buildings[lane[GateTower]])
+  run.world.buildings[lane[InnerTower]].hp = 0
+  doAssert buildingExposed(run.world, run.world.buildings[lane[GateTower]])
+  run.world.buildings[lane[GateTower]].hp = 0
   doAssert fortExposed(run.world, RedTeam)
 
 echo "Testing towers prefer footmen and attack once per period"
 block:
-  run.world.towers[0].hp = run.world.towers[0].maxHp
-  run.world.towers[0].targetId = 0
-  run.world.towers[0].attackTicks = 0
+  run.world.buildings[0].hp = run.world.buildings[0].maxHp
+  run.world.buildings[0].targetId = 0
+  run.world.buildings[0].attackTicks = 0
   var targetHero = -1
   for i in 0 ..< run.world.heroes.len:
     run.world.heroes[i].state = Dying
-    if targetHero < 0 and run.world.heroes[i].team != run.world.towers[0].team:
+    if targetHero < 0 and run.world.heroes[i].team != run.world.buildings[0].team:
       targetHero = i
   run.world.heroes[targetHero].state = Marching
-  run.world.heroes[targetHero].place(run.world.towers[0].position)
+  run.world.heroes[targetHero].place(run.world.buildings[0].position)
   run.world.heroes[targetHero].hp = run.world.heroes[targetHero].maxHp
   run.world.footmen = @[
     Footman(
       id: 50_000,
       team: run.world.heroes[targetHero].team,
-      lane: run.world.towers[0].lane,
-      position: run.world.towers[0].position,
+      lane: run.world.buildings[0].lane,
+      position: run.world.buildings[0].position,
       hp: FootmanHp,
       state: Marching
     )
   ]
-  updateTower(run.world, run.world.towers[0])
-  doAssert run.world.towers[0].targetId == run.world.footmen[0].id,
+  updateTower(run.world, run.world.buildings[0])
+  doAssert run.world.buildings[0].targetId == run.world.footmen[0].id,
     "a tower should protect heroes by targeting a footman first"
   for _ in 1 ..< TowerAttackTicks:
-    updateTower(run.world, run.world.towers[0])
+    updateTower(run.world, run.world.buildings[0])
   doAssert run.world.footmen[0].hp ==
-    FootmanHp - TowerDamages[run.world.towers[0].tier]
+    FootmanHp - TowerDamages[run.world.buildings[0].tier]
   run.world.footmen[0].hp = 0
   for _ in 0 ..< TowerAttackTicks:
-    updateTower(run.world, run.world.towers[0])
-  doAssert run.world.towers[0].targetId == run.world.heroes[targetHero].id
+    updateTower(run.world, run.world.buildings[0])
+  doAssert run.world.buildings[0].targetId == run.world.heroes[targetHero].id
   doAssert run.world.heroes[targetHero].hp ==
     run.world.heroes[targetHero].maxHp -
-      TowerDamages[run.world.towers[0].tier]
+      TowerDamages[run.world.buildings[0].tier]
 
 echo "Testing tower deaths update hero statistics"
 block:
   let snapshot = run.world.clone()
-  let victim = heroIndex(run.world, run.world.towers[0].targetId)
+  let victim = heroIndex(run.world, run.world.buildings[0].targetId)
   doAssert victim >= 0
   run.world.heroes[victim].hp = 1
   let deaths = run.world.stats.values[victim][LossesMetric]
   for _ in 0 ..< TowerAttackTicks:
-    updateTower(run.world, run.world.towers[0])
+    updateTower(run.world, run.world.buildings[0])
   doAssert run.world.stats.values[victim][LossesMetric] == deaths + 1
   doAssert snapshot.stats.values[victim][LossesMetric] == deaths
   run.world.restore(snapshot)
@@ -203,14 +203,14 @@ echo "Testing tower combat state reaches the simulation hash"
 block:
   let
     base = hashNow()
-    savedTarget = run.world.towers[0].targetId
-    savedTicks = run.world.towers[0].attackTicks
-  run.world.towers[0].targetId = run.world.towers[0].targetId + 1
+    savedTarget = run.world.buildings[0].targetId
+    savedTicks = run.world.buildings[0].attackTicks
+  run.world.buildings[0].targetId = run.world.buildings[0].targetId + 1
   doAssert hashNow() != base, "tower target is missing from stateHash"
-  run.world.towers[0].targetId = savedTarget
-  run.world.towers[0].attackTicks = run.world.towers[0].attackTicks + 1
+  run.world.buildings[0].targetId = savedTarget
+  run.world.buildings[0].attackTicks = run.world.buildings[0].attackTicks + 1
   doAssert hashNow() != base, "tower attack phase is missing from stateHash"
-  run.world.towers[0].attackTicks = savedTicks
+  run.world.buildings[0].attackTicks = savedTicks
   doAssert hashNow() == base
 
 echo "Testing the base bot attacks an exposed tower through attackTarget"
@@ -218,23 +218,23 @@ block:
   var attacker = -1
   for i in 0 ..< run.world.heroes.len:
     run.world.heroes[i].state = Dying
-    if attacker < 0 and run.world.heroes[i].team != run.world.towers[0].team:
+    if attacker < 0 and run.world.heroes[i].team != run.world.buildings[0].team:
       attacker = i
   run.world.heroes[attacker].state = Marching
   run.world.heroes[attacker].hp = run.world.heroes[attacker].maxHp
-  run.world.heroes[attacker].place(run.world.towers[0].position)
+  run.world.heroes[attacker].place(run.world.buildings[0].position)
   run.world.heroes[attacker].attackObjectId = 0
   run.world.heroes[attacker].hasMoveTarget = false
   run.heroVms[attacker].failed = false
-  run.world.towers[0].hp = run.world.towers[0].maxHp
-  run.world.towers[0].targetId = 0
-  run.world.towers[0].attackTicks = 0
+  run.world.buildings[0].hp = run.world.buildings[0].maxHp
+  run.world.buildings[0].targetId = 0
+  run.world.buildings[0].attackTicks = 0
   run.world.footmen.setLen(0)
   run.world.spawnTimerTicks = 1_000
   run.world.heroTurnTicks = 1
   for _ in 0 ..< 40:
     advanceGame()
-  doAssert run.world.towers[0].hp < run.world.towers[0].maxHp,
+  doAssert run.world.buildings[0].hp < run.world.buildings[0].maxHp,
     "the existing attackTarget API did not let the bot damage a tower"
 
 echo "Testing clone is an independent copy"
@@ -242,11 +242,11 @@ block:
   let
     snapshot = run.world.clone()
     before = hashNow()
-    savedHp = run.world.towers[0].hp
+    savedHp = run.world.buildings[0].hp
     alias = run.world
-  run.world.towers[0].hp = run.world.towers[0].hp - 1
+  run.world.buildings[0].hp = run.world.buildings[0].hp - 1
   doAssert hashNow() != before, "live world should diverge after a write"
-  doAssert snapshot.towers[0].hp == savedHp,
+  doAssert snapshot.buildings[0].hp == savedHp,
     "clone shared its towers seq with the original"
   run.world.restore(snapshot)
   doAssert hashNow() == before, "restore did not reproduce the snapshot"

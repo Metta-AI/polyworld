@@ -16,7 +16,7 @@ proc attackGame(class: HeroClass): Game =
     hero.hp = 0
     hero.state = Dying
     hero.deathTicks = -100_000
-  for tower in result.world.towers.mitems:
+  for tower in result.world.buildings.mitems:
     tower.hp = 0
   let hero = result.world.heroes[0]
   hero.class = class

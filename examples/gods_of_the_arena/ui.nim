@@ -45,6 +45,7 @@ type
   SelectedKind = enum
     SelectedHero,
     SelectedTower,
+    SelectedBarracks,
     SelectedMob,
     SelectedGod
 
@@ -97,7 +98,9 @@ proc currentLayout*(window: Window): GameUiLayout =
     TransportHeight
   )
 
-var statsState: StatsState
+var
+  statsState: StatsState
+  showCreepWaypoints* = false
 
 proc currentMetrics(slot: int, complete: bool): MetricRow =
   ## Combines authoritative totals with live or original replay telemetry.
@@ -218,8 +221,8 @@ proc callsign(name: string): string =
 
 proc remainingTowers(team: Team): int =
   ## Counts the towers still standing for one team.
-  for tower in run.world.towers:
-    if tower.team == team and tower.hp > 0:
+  for tower in run.world.buildings:
+    if tower.kind == TowerBuilding and tower.team == team and tower.hp > 0:
       inc result
 
 proc clockHour*(): float32 =
@@ -316,8 +319,10 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         attackSpeed: 1.0'f32,
         attackRange: meleeRange
       )
-  for tower in run.world.towers:
+  for tower in run.world.buildings:
     if tower.id == id:
+      if tower.hp <= 0:
+        return nil
       if not visibleInView(viewMode, tower.team, tower.position):
         return nil
       let
@@ -333,22 +338,23 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
           WorldScale.float32
       return SelectedUnit(
         id: tower.id,
-        kind: SelectedTower,
+        kind: (if tower.kind == BarracksBuilding: SelectedBarracks
+          else: SelectedTower),
         team: tower.team,
-        callsign: role,
-        classLabel: "TOWER",
+        callsign: (if tower.kind == BarracksBuilding: "BARRACKS" else: role),
+        classLabel: (if tower.kind == BarracksBuilding: "BARRACKS" else: "TOWER"),
         status:
           if tower.hp <= 0:
             "Destroyed"
-          elif towerExposed(run.world, tower):
+          elif buildingExposed(run.world, tower):
             "Exposed"
           else:
             "Protected",
         hp: max(tower.hp, 0'i32).float32,
         maxHp: tower.maxHp.float32,
         level: tower.tier.ord + 1,
-        damage: TowerDamages[tower.tier],
-        attackRange: attackRange
+        damage: (if tower.kind == TowerBuilding: TowerDamages[tower.tier] else: 0),
+        attackRange: (if tower.kind == TowerBuilding: attackRange else: 0)
       )
   for fort in run.world.forts:
     if fort.id == id:
@@ -839,26 +845,11 @@ proc drawUi*(
     rgbx(91, 119, 128, 255)
   )
   sk.pushClipRect(rect(mapArea.origin, mapArea.size))
-  for site in run.map.layout.barracks:
-    let
-      team = Team(site.team)
-      position = WorldPoint(
-        x: site.position.x * (WorldScale div PathUnitsPerTile),
-        y: site.position.y * (WorldScale div PathUnitsPerTile),
-        z: site.position.z * (WorldScale div PathUnitsPerTile)
-      )
-    if visibleInView(viewMode, team, position):
-      sk.drawMinimapIcon(
-        "barracks",
-        minimapPosition(renderPoint(position), minimapPanel),
-        14.0'f,
-        teamHudColor(team)
-      )
-  for tower in run.world.towers:
+  for tower in run.world.buildings:
     if tower.hp > 0 and
         visibleInView(viewMode, tower.team, tower.position):
       sk.drawMinimapIcon(
-        "tower",
+        (if tower.kind == BarracksBuilding: "barracks" else: "tower"),
         minimapPosition(renderPoint(tower.position), minimapPanel),
         16.0'f,
         teamHudColor(tower.team),
@@ -911,6 +902,8 @@ proc drawUi*(
         case selection.kind
         of SelectedTower:
           "tower"
+        of SelectedBarracks:
+          "barracks"
         of SelectedMob:
           "minion"
         of SelectedGod:
@@ -1197,7 +1190,15 @@ proc drawUi*(
     followSelection,
     addr statsState.toggled
   )
-  sk.drawDebugMenu(window)
+  let creep = footmanById(run.world, primaryId)
+  let waypointStatus =
+    if creep.id == 0:
+      "Select a pikeman to inspect its waypoints."
+    else:
+      $creep.waypointIndex & "/" & $creep.creepWaypoints().len &
+        " cleared - " & (if creep.state == Fighting: "Chasing / fighting"
+          elif creep.state == Dying: "Dying" else: "Marching")
+  sk.drawDebugMenu(window, addr showCreepWaypoints, waypointStatus)
   statsState.syncDirector(actionCam, table, window.tabHeld)
 
 proc drawStatsOverlay*(sk: Silky, window: Window) =

@@ -1,6 +1,7 @@
 import
   std/[math, random],
   chroma, vmath,
+  polyworld/configs as matchConfigs,
   configs, routes
 
 export configs
@@ -31,7 +32,8 @@ const
   CampSeparation = CampPadding * 2 + CampForest + 2
   BarrackRadius* = 12.0'f
   CreepSpeed* = 42.0'f
-  CreepInterval* = 8.0'f
+  CreepInterval* = matchConfigs.DefaultSpawnIntervalTicks.float32 /
+    matchConfigs.SharedTickRate.float32
   FortRoadWidth* = 30.0'f
   TrailColor* = rgbx(167, 167, 109, 255)
   RampColor* = rgbx(209, 181, 124, 255)
@@ -931,14 +933,14 @@ proc placeTrails(map: var MapData): bool {.raises: [].} =
   true
 
 proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
-  ## Fits two barracks inside every gate and connects their spawns to its lane.
+  ## Fits aligned pairs across each road with equal routes to a shared entry.
   type Site = object
     position, join: Vec2
   var
     roads: array[3, seq[Vec2]]
-    sites: array[6, seq[Site]]
-    chosen: array[6, Site]
-    order: array[6, int]
+    sites: array[3, seq[array[2, Site]]]
+    chosen: array[3, array[2, Site]]
+    order: array[3, int]
   proc gather(map: MapData, extraSteps, depthSteps: int) {.raises: [].} =
     ## Searches more gate shoulders only when the original sites cannot fit.
     for road in roads.mitems:
@@ -958,17 +960,19 @@ proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
       let
         outward = normalize(road[gate] - road[gate - 1])
         normal = vec2(-outward.y, outward.x)
-      for flank in 0 ..< 2:
-        let side = (if flank == 0: -1'f else: 1'f)
-        for depth in 0 ..< depthSteps:
-          let center = road.nearest(
-            road[gate] - outward * (24 + depth * 6).float32
-          )
-          for extra in 0 ..< extraSteps:
+      for depth in 0 ..< depthSteps:
+        let center = road.nearest(
+          road[gate] - outward * (24 + depth * 6).float32
+        )
+        for extra in 0 ..< extraSteps:
+          var
+            pair: array[2, Site]
+            valid = true
+          for flank in 0 ..< 2:
+            let side = (if flank == 0: -1'f else: 1'f)
             let candidate = center + normal * side * (
               map.config.roadWidth / 2 + BarrackRadius + 3 + extra.float32 * 4
             )
-            var valid = true
             for i in 0 ..< 12:
               let
                 angle = i.float32 * PI.float32 / 6
@@ -986,11 +990,10 @@ proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
             for tower in map.towers:
               if length(candidate - tower.position) < BarrackRadius + 18:
                 valid = false
-            if valid:
-              sites[lane * 2 + flank].add(Site(
-                position: candidate, join: center
-              ))
-    # Fit the most constrained flanks first to keep the six footprints separate.
+            pair[flank] = Site(position: candidate, join: center)
+          if valid:
+            sites[lane].add(pair)
+    # Fit whole pairs so neither barracks can drift along the road independently.
     for i in 0 ..< order.len:
       order[i] = i
     for i in 0 ..< order.len:
@@ -1003,17 +1006,18 @@ proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
     if depth == order.len:
       return true
     let index = order[depth]
-    for site in sites[index]:
+    for pair in sites[index]:
       attempts.inc
       if attempts > 100_000:
         return false
       var valid = true
       for i in 0 ..< depth:
-        if length(site.position - chosen[order[i]].position) <
-          BarrackRadius * 2 + 3:
-            valid = false
+        for site in pair:
+          for other in chosen[order[i]]:
+            if length(site.position - other.position) < BarrackRadius * 2 + 3:
+              valid = false
       if valid:
-        chosen[index] = site
+        chosen[index] = pair
         if fit(depth + 1):
           return true
     false
@@ -1028,9 +1032,10 @@ proc placeBarracks(map: var MapData) {.raises: [MapgenError].} =
       MapgenError,
       "Could not fit barracks inside the gates for seed " & $map.config.seed
     )
-  for i, site in chosen:
+  for i in 0 ..< 6:
     let
       lane = i div 2
+      site = chosen[lane][i mod 2]
       road = roads[lane]
       midpoint = road.along(0.5'f)
     var
