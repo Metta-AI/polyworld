@@ -86,15 +86,15 @@ block:
     else:
       -((-numerator + denominator div 2) div denominator)
   proc liveVisible(
-      terrain, occluders: seq[int16], dx, dz: int32
+      terrain, occluders: seq[int16], dx, dz: int32, eyeHeight: int16
   ): bool =
     ## Walks one ray with the original step formula.
     let steps = max(abs(dx), abs(dz))
     if steps <= 1:
       return true
     let
-      sourceY = 14'i64
-      targetY = 3'i64
+      sourceY = int64(terrain[8 * 17 + 8]) + int64(eyeHeight)
+      targetY = int64(terrain[(8 + dz) * 17 + 8 + dx]) + 3
     for step in 1'i32 ..< steps:
       let
         x = 8'i32 + int32(roundAway(int64(dx) * int64(step), int64(steps)))
@@ -110,15 +110,18 @@ block:
   var
     wideTerrain = newSeq[int16](17 * 17)
     wideBlockers = newSeq[int16](17 * 17)
-  wideBlockers[8 * 17 + 11] = 24
-  wideTerrain[8 * 17 + 6] = 20
-  for dz in -8'i32 .. 8'i32:
-    for dx in -8'i32 .. 8'i32:
-      if dx * dx + dz * dz > 64:
-        continue
-      let kernel = lineVisible(
-        17, 17, wideTerrain, wideBlockers,
-        8, 8, 8 + dx, 8 + dz, 8
-      )
-      doAssert kernel == liveVisible(wideTerrain, wideBlockers, dx, dz),
-        "kernel ray " & $dx & "," & $dz & " diverged"
+  for fixture in 0 ..< 64:
+    for index in 0 ..< wideTerrain.len:
+      wideTerrain[index] = int16((index * 17 + fixture * 31) mod 65 - 32)
+      wideBlockers[index] = int16((index * 7 + fixture * 11) mod 25)
+    for eyeHeight in [-32'i16, -1, 0, 1, 14, 32]:
+      for dz in -8'i32 .. 8'i32:
+        for dx in -8'i32 .. 8'i32:
+          if dx * dx + dz * dz > 64:
+            continue
+          let kernel = lineVisible(
+            17, 17, wideTerrain, wideBlockers,
+            8, 8, 8 + dx, 8 + dz, 8, eyeHeight
+          )
+          doAssert kernel == liveVisible(wideTerrain, wideBlockers, dx, dz, eyeHeight),
+            "kernel ray " & $dx & "," & $dz & " diverged"
