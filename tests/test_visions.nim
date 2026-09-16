@@ -1,5 +1,31 @@
 import polyworld/visions
 
+echo "Testing cached vision against full rebuilds across world changes"
+block:
+  var
+    cache: VisionCache
+    reference, cached: seq[uint8]
+    terrain = newSeq[int16](17 * 17)
+    blockers = newSeq[int16](17 * 17)
+  for frame in 0 ..< 128:
+    if frame mod 7 == 0:
+      blockers[(frame * 13) mod blockers.len] = int16(frame mod 32)
+    if frame mod 11 == 0:
+      terrain[(frame * 19) mod terrain.len] = int16(frame mod 41 - 20)
+    var sources = @[
+      VisionSource(x: 8, z: 8, radius: 8, eyeHeight: 14),
+      VisionSource(x: int32(frame mod 17), z: 5, radius: 6, eyeHeight: 12)
+    ]
+    if frame mod 3 == 0:
+      sources.add sources[0]
+    if frame mod 5 == 0:
+      sources.delete(0)
+    if frame mod 17 == 0:
+      sources.setLen(0)
+    revealVision(reference, 17, 17, terrain, blockers, sources)
+    revealVisionCached(cache, cached, 17, 17, terrain, blockers, sources)
+    doAssert cached == reference, "cached vision diverged at frame " & $frame
+
 const
   Width = 9'i32
   Height = 7'i32
