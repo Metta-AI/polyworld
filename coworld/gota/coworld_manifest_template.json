@@ -333,19 +333,19 @@
           "name": "Baseline 4"
         },
         {
-          "name": "Baseline 5"
+          "name": "Rusher 5"
         },
         {
-          "name": "Baseline 6"
+          "name": "Rusher 6"
         },
         {
-          "name": "Baseline 7"
+          "name": "Rusher 7"
         },
         {
-          "name": "Baseline 8"
+          "name": "Rusher 8"
         },
         {
-          "name": "Baseline 9"
+          "name": "Rusher 9"
         }
       ],
       "seed": 2026,
@@ -369,19 +369,19 @@
         "player_id": "baseline"
       },
       {
-        "player_id": "baseline"
+        "player_id": "rusher"
       },
       {
-        "player_id": "baseline"
+        "player_id": "rusher"
       },
       {
-        "player_id": "baseline"
+        "player_id": "rusher"
       },
       {
-        "player_id": "baseline"
+        "player_id": "rusher"
       },
       {
-        "player_id": "baseline"
+        "player_id": "rusher"
       }
     ]
   }

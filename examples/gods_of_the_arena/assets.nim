@@ -160,11 +160,20 @@ proc browserAssets*(): seq[Asset] =
     for part in look:
       if part notin parts:
         parts.add part
-  result.add modelAsset(HeroModelPath, parts, textureSize = 512)
+  result.add modelAsset(
+    HeroModelPath,
+    parts,
+    clips = @["Run", "Idle", "Death", "Attack01", "Attack02"],
+    textureSize = 512
+  )
   for path in FootmanModels:
     result.add modelAsset(path, textureSize = 512)
   for path in GodModels:
-    result.add modelAsset(path, textureSize = 512)
+    result.add modelAsset(
+      path,
+      clips = @["Idle", "Death", "Victory"],
+      textureSize = 512
+    )
   for path in HeroPortraitPaths:
     result.add fileAsset(path)
   for hero in HeroClass:
