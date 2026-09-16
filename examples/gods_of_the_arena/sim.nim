@@ -34,14 +34,14 @@ var
   lanePathPoints*: array[3, seq[PathPoint]]
   lanePathTiles: array[3, seq[PathTile]]
   laneWorldLayers: array[3, seq[int32]]
-  visionBlockers {.threadvar.}: seq[int16]
-  visionSources {.threadvar.}: seq[VisionSource]
-  visionSkipNow {.threadvar.}: seq[int32]
-  heroPathPoints {.threadvar.}: seq[PathPoint]
-  heroPathTiles {.threadvar.}: seq[PathTile]
-  gotaWalkLayer {.threadvar.}: int
-  gotaWalkDestLayer {.threadvar.}: int
-  gotaWalkOrigin {.threadvar.}: FixedVec2
+  visionBlockers: seq[int16]
+  visionSources: seq[VisionSource]
+  visionSkipNow: seq[int32]
+  heroPathPoints: seq[PathPoint]
+  heroPathTiles: seq[PathTile]
+  gotaWalkLayer: int
+  gotaWalkDestLayer: int
+  gotaWalkOrigin: FixedVec2
 
 ## Simulation
 
@@ -252,7 +252,7 @@ type
     recordingError*: string
     heroVms*: seq[HeroVm]
 
-var navigationWorld {.threadvar.}: World
+var navigationWorld: World
 
 const
   WorldScale* = 60_000'i32
