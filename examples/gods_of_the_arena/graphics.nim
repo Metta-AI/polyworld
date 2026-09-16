@@ -273,6 +273,13 @@ proc runGraphics*() =
     ## Matches the apparent body size of both lane-creep models.
     FootmanSizeFactors[team]
 
+  proc creepTint(team: Team): Color =
+    ## Gives Dire soldiers and nexus creeps a red cast over their textures.
+    if team == RedTeam:
+      color(1.0, 0.45, 0.45, 1.0)
+    else:
+      color(1, 1, 1, 1)
+
   proc towerPropName(tier: TowerTier): string =
     ## Returns the matching fort model for one tower tier.
     case tier
@@ -1118,6 +1125,7 @@ proc runGraphics*() =
           footman.animTicks,
           footman.state == Dying
         ),
+        tint = creepTint(footman.team),
         sizeFactor = footmanSizeFactor(footman.team)
       )
       finishCharacters(scene)
@@ -1133,6 +1141,7 @@ proc runGraphics*() =
         god.facing,
         footmanRenderClips[god.team][god.godClip],
         god.animTime,
+        tint = creepTint(god.team),
         sizeFactor = 2.6
       )
       finishCharacters(scene)
@@ -1931,6 +1940,7 @@ proc runGraphics*() =
               clip,
               holdClipTime(
                 model, clip, footman.animTicks, footman.state == Dying),
+              tint = creepTint(footman.team),
               sizeFactor = footmanSizeFactor(footman.team)
             )
           for hero in run.world.heroes:
@@ -1976,7 +1986,7 @@ proc runGraphics*() =
               animTime = min(animTime, clipDuration(model, clip))
             drawCharacter(
               scene, model, god.position, god.facing,
-              clip, animTime, sizeFactor = 2.6)
+              clip, animTime, tint = creepTint(god.team), sizeFactor = 2.6)
 
         sunDepthPasses(window.size):
           drawTerrainSunDepth()
