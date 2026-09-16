@@ -579,7 +579,16 @@ proc loadBots*(
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
 
-proc runHeroScript(game: Game, index: int) =
+proc finishHeroScript(game: Game, index: int) =
+  let vm = game.heroVms[index]
+  vm.lastWork = vm.runtime.workUsed
+  vm.lastInstructions = vm.runtime.instructionsUsed
+  game.metrics.decision(
+    index, game.world.tick, vm.lastInstructions,
+    heroVmLimits().maxInstructions
+  )
+
+proc runHeroScript*(game: Game, index: int) =
   ## Runs one bounded persistent BASIC decision for a living hero.
   if index < 0 or index >= game.heroVms.len:
     return
@@ -624,6 +633,8 @@ proc runHeroScript(game: Game, index: int) =
     )
     vm.runtime.setData(heroDataIds[DataSelfAttacksLanded], hero.attacksLanded)
     discard vm.runtime.run(vm.output)
+    if vm.runtime.hostCallPaused:
+      return
     inc vm.decisions
   except BasicError as error:
     vm.failed = true
@@ -632,12 +643,15 @@ proc runHeroScript(game: Game, index: int) =
       playerError(index, error.msg)
     else:
       echo "hero ", hero.id, " BASIC error: ", error.msg
-  vm.lastWork = vm.runtime.workUsed
-  vm.lastInstructions = vm.runtime.instructionsUsed
-  game.metrics.decision(
-    index, game.world.tick, vm.lastInstructions,
-    heroVmLimits().maxInstructions
-  )
+  finishHeroScript(game, index)
+
+proc resumeHeroScript*(game: Game, index: int, action: int32) =
+  let vm = game.heroVms[index]
+  vm.runtime.resumeHostCall(action)
+  discard vm.runtime.run(vm.output)
+  doAssert not vm.runtime.hostCallPaused, "One external action is allowed per hero decision"
+  inc vm.decisions
+  finishHeroScript(game, index)
 
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every VM in seeded cyclic order and advances the first slot.
