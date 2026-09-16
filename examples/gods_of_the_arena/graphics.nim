@@ -262,11 +262,11 @@ proc runGraphics*() =
     BarracksScale = 1.65'f
 
   const
-    # Preserve the undead footprint adjustment and enlarge Radiant humans 10%.
+    # Preserve the undead footprint adjustment and enlarge Radiant humans 21%.
     FootmanSizeIncrease = 1.1'f32
     FootmanSizeFactors: array[Team, float32] = [
       RedTeam: 1.15'f32 * FootmanSizeIncrease,
-      BlueTeam: 1.1'f32 * FootmanSizeIncrease
+      BlueTeam: 1.21'f32 * FootmanSizeIncrease
     ]
 
   proc footmanSizeFactor(team: Team): float32 =
