@@ -98,12 +98,12 @@ proc runWorker(worker: ptr Worker) {.thread, gcsafe.} =
 proc newGotaBatch*(count, threadCount: int, config: GotaConfig, bot: string): GotaBatch =
   doAssert count > 0
   doAssert threadCount > 0 and threadCount <= count
-  prewarmPathing()
   result = GotaBatch(
     games: newGames(count, config, bot),
     buffers: newRolloutBuffers(count),
     nextBuffer: 0
   )
+  prewarmPathing()
   result.workers.setLen(threadCount)
   result.threads.setLen(threadCount)
   result.completed.open(threadCount)
