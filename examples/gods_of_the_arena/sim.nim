@@ -256,7 +256,7 @@ const
   PathPointRadius = WorldScale div 3
   ChasePathTicks = 6'i32
   FailedPathTicks = TickRate
-  TowerHitPoints*: array[TowerTier, int32] = [900'i32, 1_200, 1_800]
+  TowerHitPoints*: array[TowerTier, int32] = [950'i32, 1_300, 1_950]
   TowerDamages*: array[TowerTier, int32] = [18'i32, 24, 30]
   TowerAttackRanges*: array[TowerTier, int32] = [
     300_000'i32,

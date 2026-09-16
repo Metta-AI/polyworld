@@ -252,8 +252,8 @@ const
       hitPointsPerLevel: 42,
       baseMana: 80,
       manaPerLevel: 6,
-      baseDamage: 43,
-      damagePerLevel: 8,
+      baseDamage: 46,
+      damagePerLevel: 9,
       baseMovePerTick: 6_000,
       movePerLevel: 60,
       attackRange: 390_000,
@@ -306,8 +306,8 @@ const
       hitPointsPerLevel: 55,
       baseMana: 40,
       manaPerLevel: 4,
-      baseDamage: 35,
-      damagePerLevel: 7,
+      baseDamage: 38,
+      damagePerLevel: 8,
       baseMovePerTick: 6_800,
       movePerLevel: 90,
       attackRange: 80_000,
@@ -413,7 +413,7 @@ const
     ),
     AbilitySpec(
       name: "Sanguine Chalice", icon: "sanguine_chalice",
-      kind: Heal, cooldownTicks: 192, heal: 30
+      kind: Heal, cooldownTicks: 192, heal: 36
     ),
     AbilitySpec(
       name: "Afterlight Sickle", icon: "afterlight_sickle",
@@ -458,7 +458,7 @@ const
     AbilitySpec(
       name: "Ice Spear", icon: "ice_spear",
       kind: Strike, cooldownTicks: 96, manaCost: 30,
-      range: 380_000, damage: 44
+      range: 400_000, damage: 48
     ),
     AbilitySpec(
       name: "Bone Marionette", icon: "bone_marionette",
@@ -472,7 +472,7 @@ const
     ),
     AbilitySpec(
       name: "Aether Siphon", icon: "aether_siphon",
-      kind: Restore, cooldownTicks: 168, restore: 24
+      kind: Restore, cooldownTicks: 168, restore: 30
     ),
     AbilitySpec(
       name: "Moth Hex", icon: "moth_hex",
