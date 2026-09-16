@@ -1,6 +1,7 @@
 import
   std/[algorithm, math, random, tables],
-  vmath
+  chroma, gltf, pixie, vmath,
+  assets, images
 
 const
   Tau = 2.0'f * PI.float32
@@ -8,7 +9,6 @@ const
   PresetNames* = ["Tall angular", "Low compact", "Broken slab", "River stone",
     "Forest pebble", "Upright fieldstone", "Low wedge", "Leaning shard",
     "Broad boulder"]
-  ReferencePresets* = [4, 5, 6, 3, 2, 1, 0, 7, 8]
   FillUv* = vec2(0.125, 0.375)
   TrimTop* = 0.008'f
   TrimBottom* = 0.020'f
@@ -49,6 +49,8 @@ type
     faces*: seq[RockFace]
     minimum*, maximum*: Vec3
     details*: int
+  RockMaterials* = object
+    stone*, regions*: Material
   PlaneFace = object
     points: seq[Vec3]
     normal: Vec3
@@ -811,7 +813,7 @@ proc cutFloor(geometry: var RockGeometry, height: float32) =
     clipped.faces.add info
   geometry = move(clipped)
 
-proc generate*(settings: RockSettings): RockGeometry =
+proc generateGeometry*(settings: RockSettings): RockGeometry =
   ## Builds a deterministic rock with an optional open ground-contact base.
   settings.validate()
   var rng = initRand(settings.seed xor 0x5163A)
@@ -842,3 +844,79 @@ proc generate*(settings: RockSettings): RockGeometry =
     vertex.shade *= 1.0'f - settings.mottling * wash
   if settings.floorCut > 0:
     result.cutFloor(settings.height * settings.floorCut)
+
+proc loadMaterials*(): RockMaterials =
+  ## Loads the shared atlas for reusable rock and diagnostic materials.
+  var atlas: Image
+  try:
+    atlas = loadTexturePng(RockgenTexture)
+  except IOError, PixieError:
+    raise newException(RockgenError, "Cannot load rock atlas: " &
+      getCurrentExceptionMsg())
+  if atlas.width != GeneratorTextureSize or
+    atlas.height != GeneratorTextureSize:
+      raise newException(RockgenError, "Rock atlas must be 512 by 512")
+  let
+    sampler = TextureSampler(
+      magFilter: LinearMagFilter, minFilter: LinearMinFilter,
+      wrapS: ClampToEdgeWrap, wrapT: ClampToEdgeWrap
+    )
+    white = newImage(1, 1)
+  white.fill(color(1, 1, 1, 1))
+  result.stone = Material(
+    name: "Tintable rock trim", baseColor: atlas,
+    baseColorSampler: sampler, baseColorFactor: color(1, 1, 1, 1),
+    roughnessFactor: 1, alphaMode: OpaqueAlphaMode
+  )
+  result.regions = Material(
+    name: "Face regions", baseColor: white,
+    baseColorSampler: sampler, baseColorFactor: color(1, 1, 1, 1),
+    roughnessFactor: 1, alphaMode: OpaqueAlphaMode
+  )
+
+proc tint*(materials: RockMaterials, settings: RockSettings) =
+  ## Multiplies the gray texture by the selected rock color.
+  materials.stone.baseColorFactor = color(
+    settings.tint.x, settings.tint.y, settings.tint.z, 1
+  )
+
+proc rockNode*(
+  geometry: RockGeometry,
+  materials: RockMaterials,
+  showRegions = false
+): Node =
+  ## Converts the flat generated mesh into one textured or diagnostic node.
+  let primitive = Primitive(
+    material: (if showRegions: materials.regions else: materials.stone),
+    mode: TrianglesMode, indices32: geometry.mesh.indices
+  )
+  for vertex in geometry.mesh.vertices:
+    primitive.points.add vertex.position
+    primitive.normals.add vertex.normal
+    primitive.uvs.add vertex.uv
+    var shade = vec3(vertex.shade)
+    if showRegions:
+      case vertex.region
+      of Edge:
+        shade = vec3(1, 0.62, 0.18)
+      of Fill:
+        shade = vec3(0.22, 0.68, 0.7)
+      of Detail:
+        shade = vec3(0.92, 0.28, 0.62)
+    primitive.colors.add rgbx(
+      (shade.x * 255).uint8, (shade.y * 255).uint8,
+      (shade.z * 255).uint8, 255
+    )
+  result = Node(
+    name: "Generated rock", visible: true,
+    scale: vec3(1), rot: quat(0, 0, 0, 1),
+    mesh: Mesh(name: "Rock", primitives: @[primitive])
+  )
+
+proc generate*(settings: RockSettings): Node =
+  ## Builds a renderable rock node with its tinted material and trim texture.
+  let
+    geometry = generateGeometry(settings)
+    materials = loadMaterials()
+  materials.tint(settings)
+  rockNode(geometry, materials)

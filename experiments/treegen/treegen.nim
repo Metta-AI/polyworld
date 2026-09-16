@@ -1,8 +1,8 @@
 import
   std/[math, os, random, strutils, times],
   bumpy, chroma, gltf, pixie, silky, vmath,
-  polyworld/[shadows, toon],
-  trees, views
+  polyworld/[shadows, toon], polyworld/treegen as generator,
+  views
 
 const
   WindowSize = ivec2(1440, 940)
@@ -97,14 +97,14 @@ proc rebuild(app: var TreeApp) =
   app.releaseTrees()
   app.materials = loadMaterials(app.settings.barkTexture)
   app.materials.tint(app.settings)
-  app.geometry = generate(app.settings)
+  app.geometry = generateGeometry(app.settings)
   app.node = treeNode(app.geometry, app.materials)
   if app.gallery:
     let spacing = (app.geometry.maximum.x - app.geometry.minimum.x) * 1.15'f
     for i in [-1, 1]:
       var settings = app.settings
       settings.seed = (settings.seed + i + 1_000_000_001) mod 1_000_000_001
-      let node = treeNode(generate(settings), app.materials)
+      let node = treeNode(generateGeometry(settings), app.materials)
       node.pos.x = i.float32 * spacing
       app.variants.add node
   app.built = app.settings

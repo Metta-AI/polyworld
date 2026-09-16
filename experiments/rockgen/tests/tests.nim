@@ -1,7 +1,8 @@
 import
   std/[math, os, tables],
   gltf, vmath,
-  ../[rocks, views]
+  polyworld/rockgen,
+  ../views
 
 proc welded(
   points, localPoints: var seq[Vec3],
@@ -134,20 +135,21 @@ proc testRecipes() =
     for seed in 0 ..< 40:
       let
         settings = preset(index, seed)
-        geometry = generate(settings)
+        geometry = generateGeometry(settings)
       geometry.checkGeometry("Preset " & $index & ", seed " & $seed)
-      doAssert geometry == generate(settings)
+      doAssert geometry == generateGeometry(settings)
       doAssert length(geometry.maximum - geometry.minimum -
         vec3(settings.width, settings.height, settings.depth)) < 0.0001'f
       doAssert abs(geometry.minimum.y) < 0.00001'f
-    doAssert generate(preset(index, 42)) != generate(preset(index, 43))
+    doAssert generateGeometry(preset(index, 42)) !=
+      generateGeometry(preset(index, 43))
 
 proc testControls() =
   ## Checks parameter limits, disabled regions, and independent tinting.
   var settings = preset(0)
-  let original = generate(settings)
+  let original = generateGeometry(settings)
   settings.tint = vec3(1, 0, 0)
-  doAssert generate(settings) == original
+  doAssert generateGeometry(settings) == original
   for seed in [0, 42, 999, 1_000_000_000]:
     for sides in [4, 12]:
       for trim in [0.0'f, 0.4'f]:
@@ -160,7 +162,7 @@ proc testControls() =
           settings.detailChance = detail
           settings.detailSize = 0.9
           settings.detailOffset = 0.6
-          let geometry = generate(settings)
+          let geometry = generateGeometry(settings)
           geometry.checkGeometry("Controls " & $seed & "/" & $sides &
             "/" & $trim & "/" & $detail)
           if detail == 0:
@@ -172,7 +174,7 @@ proc testControls() =
     settings = preset(0)
     settings.detailKind = kind
     settings.detailChance = 1
-    for face in generate(settings).faces:
+    for face in generateGeometry(settings).faces:
       if face.detailTile >= 0:
         if kind == Cracks:
           doAssert face.detailTile in 5 .. 10
@@ -189,14 +191,14 @@ proc testControls() =
         settings.crown = crown
         settings.lean = -0.5
         settings.detailChance = 1
-        generate(settings).checkGeometry("Dimensions " & $dimensions &
+        generateGeometry(settings).checkGeometry("Dimensions " & $dimensions &
           "/" & $taper & "/" & $crown)
   for bad in [NaN.float32, Inf.float32, -1.0'f, 11.0'f]:
     settings = preset(0)
     settings.height = bad
     var rejected = false
     try:
-      discard generate(settings)
+      discard generateGeometry(settings)
     except RockgenError:
       rejected = true
     doAssert rejected
@@ -213,7 +215,7 @@ proc testCuts() =
       settings.trimChance = amount
       settings.mottling = amount * 0.4'f
       settings.detailChance = 1
-      let geometry = generate(settings)
+      let geometry = generateGeometry(settings)
       geometry.checkGeometry("Cuts " & $seed & "/" & $amount)
       for vertex in geometry.mesh.vertices:
         doAssert vertex.shade >= 0 and vertex.shade <= 1
@@ -221,9 +223,9 @@ proc testCuts() =
           doAssert vertex.region != Edge
   var settings = preset(0)
   settings.mottling = 0
-  let plain = generate(settings)
+  let plain = generateGeometry(settings)
   settings.mottling = 0.4
-  let painted = generate(settings)
+  let painted = generateGeometry(settings)
   doAssert plain.mesh.indices == painted.mesh.indices
   doAssert plain.mesh.vertices.len == painted.mesh.vertices.len
   var changed = false
@@ -262,12 +264,12 @@ proc testFiles() =
   doAssert rejected
   let
     materials = loadMaterials()
-    geometry = generate(settings)
+    geometry = generateGeometry(settings)
     node = rockNode(geometry, materials)
   materials.tint(settings)
   doAssert node.mesh.primitives.len == 1
   doAssert node.mesh.primitives[0].points.len == geometry.mesh.vertices.len
-  doAssert materials.stone.baseColor.width == 1254
+  doAssert materials.stone.baseColor.width == 512
   doAssert materials.stone.baseColorSampler.minFilter == LinearMinFilter
   settings.exportRock(model)
   let data = readFile(model)
@@ -284,7 +286,7 @@ proc testFiles() =
       for primitive in current.mesh.primitives:
         triangleCount += (primitive.indices32.len +
           primitive.indices16.len) div 3
-        doAssert primitive.material.baseColor.width == 1254
+        doAssert primitive.material.baseColor.width == 512
         doAssert primitive.material.baseColorSampler.minFilter ==
           LinearMinFilter
   doAssert triangleCount == geometry.mesh.indices.len div 3
@@ -301,7 +303,7 @@ proc testFiles() =
         for point in primitive.points:
           doAssert point.y >= 0
           doAssert point.y <= detailed.height * 0.5'f + 0.00001'f
-  doAssert triangleCount == generate(detailed).mesh.indices.len div 3
+  doAssert triangleCount == generateGeometry(detailed).mesh.indices.len div 3
   removeFile(recipe)
   removeFile(model)
   removeDir(directory)
@@ -311,9 +313,9 @@ proc testFloor() =
   for index in 0 .. PresetNames.high:
     for seed in [0, 42, 999]:
       var settings = preset(index, seed)
-      let closed = generate(settings)
+      let closed = generateGeometry(settings)
       settings.removeBottom = true
-      let opened = generate(settings)
+      let opened = generateGeometry(settings)
       opened.checkGeometry("Open bottom " & $index & "/" & $seed, true)
       doAssert opened.minimum == closed.minimum
       doAssert opened.maximum == closed.maximum
@@ -332,7 +334,7 @@ proc testFloor() =
         for cut in [0.1'f, 0.5'f, 0.9'f]:
           settings.floorCut = cut
           settings.removeBottom = false
-          let buried = generate(settings)
+          let buried = generateGeometry(settings)
           buried.checkGeometry(
             "Floor " & $index & "/" & $seed & "/" & $cut,
             openBase = true,
@@ -344,13 +346,13 @@ proc testFloor() =
           for vertex in buried.mesh.vertices:
             doAssert vertex.position.y >= 0
           settings.removeBottom = true
-          doAssert generate(settings) == buried
+          doAssert generateGeometry(settings) == buried
   for invalid in [NaN.float32, -0.1'f, 1.0'f]:
     var settings = preset(0)
     settings.floorCut = invalid
     var rejected = false
     try:
-      discard generate(settings)
+      discard generateGeometry(settings)
     except RockgenError:
       rejected = true
     doAssert rejected
@@ -365,20 +367,20 @@ proc testFill() =
   ## Checks the triangle budget and preserves shape across fill densities.
   for index in 0 .. PresetNames.high:
     var settings = preset(index)
-    let sparse = generate(settings)
+    let sparse = generateGeometry(settings)
     doAssert sparse.mesh.indices.len div 3 < 500
     settings.trimChance = 0
     settings.detailChance = 0
-    let plain = generate(settings)
+    let plain = generateGeometry(settings)
     plain.checkGeometry("Plain fill " & $index)
     for face in plain.faces:
       doAssert face.indexCount == (face.points.len - 2) * 3
     for seed in 0 ..< 10:
       settings = preset(index, seed)
-      let simple = generate(settings)
+      let simple = generateGeometry(settings)
       for subdivisions in 1 .. 2:
         settings.fillSubdivisions = subdivisions
-        let dense = generate(settings)
+        let dense = generateGeometry(settings)
         dense.checkGeometry("Fill density " & $index & "/" & $seed &
           "/" & $subdivisions)
         doAssert dense.faces.len == simple.faces.len
@@ -391,16 +393,16 @@ proc testFill() =
           doAssert face.normal == simple.faces[i].normal
           doAssert face.patch == simple.faces[i].patch
         settings.mottling = 0
-        let unpainted = generate(settings)
+        let unpainted = generateGeometry(settings)
         settings.fillSubdivisions = 0
-        doAssert unpainted == generate(settings)
+        doAssert unpainted == generateGeometry(settings)
         settings.mottling = preset(index).mottling
   for invalid in [-1, 3]:
     var settings = preset(0)
     settings.fillSubdivisions = invalid
     var rejected = false
     try:
-      discard generate(settings)
+      discard generateGeometry(settings)
     except RockgenError:
       rejected = true
     doAssert rejected
