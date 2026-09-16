@@ -167,13 +167,13 @@ var
   nodePathZs: seq[int32]
   edgeLinks: seq[array[4, EdgeLink]]
   edgeKnown: seq[array[4, bool]]
-  pathCosts: seq[int64]
-  pathCameFrom: seq[int]
-  pathSeen: seq[uint32]
-  pathGeneration = 0'u32
-  pathResultKeys: seq[int]
-  pathFrontierEdges: HeapQueue[(int64, int64, int)]
-  pathFrontierEight: HeapQueue[(int32, int32)]
+  pathCosts {.threadvar.}: seq[int64]
+  pathCameFrom {.threadvar.}: seq[int]
+  pathSeen {.threadvar.}: seq[uint32]
+  pathGeneration {.threadvar.}: uint32
+  pathResultKeys {.threadvar.}: seq[int]
+  pathFrontierEdges {.threadvar.}: HeapQueue[(int64, int64, int)]
+  pathFrontierEight {.threadvar.}: HeapQueue[(int32, int32)]
   dormantPathingContext: PathingContext
 
 ## Walkability
@@ -496,6 +496,14 @@ proc edgeLink*(layerIndex, x, z, direction: int): EdgeLink =
   edgeLinks[index][direction] = result
   edgeKnown[index][direction] = true
 
+proc prewarmPathing*() =
+  ## Materializes immutable edge links before parallel path searches.
+  for layerIndex, layer in layers:
+    for z in 0 ..< layer.depth:
+      for x in 0 ..< layer.width:
+        for direction in 0 .. 3:
+          discard edgeLink(layerIndex, x, z, direction)
+
 proc edgeMask*(
     layerIndex, x, z: int,
     blockers: openArray[seq[int32]] = [],
@@ -662,6 +670,10 @@ proc octileCost(
 
 proc beginSearch() =
   ## Advances the generation stamp so a new search can reuse scratch.
+  if pathSeen.len < nodeLayers.len:
+    pathCosts.setLen(nodeLayers.len)
+    pathCameFrom.setLen(nodeLayers.len)
+    pathSeen.setLen(nodeLayers.len)
   if pathGeneration == uint32.high:
     pathSeen = newSeq[uint32](pathSeen.len)
     pathGeneration = 1
