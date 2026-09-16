@@ -1,10 +1,11 @@
 import
   std/[math, os, random, strutils, times],
   bumpy, chroma, gltf, pixie, silky, vmath,
-  polyworld/[shadows, toon],
-  rocks, views
+  polyworld/[rockgen, shadows, toon],
+  views
 
 const
+  ReferencePresets = [4, 5, 6, 3, 2, 1, 0, 7, 8]
   WindowSize = ivec2(1440, 940)
   PanelWidth = 372.0'f
   PanelPosition = vec2(12, 12)
@@ -107,14 +108,18 @@ proc releaseRocks(app: var RockApp) =
 proc rebuild(app: var RockApp) =
   ## Rebuilds the selected seed and optional neighboring seed previews.
   app.releaseRocks()
-  app.geometry = generate(app.settings)
+  app.geometry = generateGeometry(app.settings)
   app.node = rockNode(app.geometry, app.materials, app.regions)
   if app.gallery:
     let spacing = app.settings.width + 0.6'f
     for i in [-1, 1]:
       var settings = app.settings
       settings.seed = (settings.seed + i + 1_000_000_001) mod 1_000_000_001
-      let node = rockNode(generate(settings), app.materials, app.regions)
+      let node = rockNode(
+        generateGeometry(settings),
+        app.materials,
+        app.regions
+      )
       node.pos.x = i.float32 * spacing
       app.variants.add node
   app.built = app.settings
@@ -429,7 +434,7 @@ proc drawSheet(app: var RockApp, window: Window, options: Options) =
     if options.fillSubdivisions >= 0:
       settings.fillSubdivisions = options.fillSubdivisions
     let
-      geometry = generate(settings)
+      geometry = generateGeometry(settings)
       node = rockNode(geometry, app.materials, options.regions)
       target = (geometry.minimum + geometry.maximum) * 0.5'f
       extent = geometry.maximum - geometry.minimum
