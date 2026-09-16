@@ -308,23 +308,23 @@ proc initHeroHost(game: Game, heroId: int32): Host =
   ): int32 =
     ## Records and applies the same attack-move order used by human players.
     try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.record ReplayAction(
-          tick: uint32(activeGame.world.tick),
+      if game.recorder != nil:
+        game.recorder.record ReplayAction(
+          tick: uint32(game.world.tick),
           heroId: heroId,
           kind: ActionAttackMove,
           first: arguments[0],
           second: arguments[1]
         )
     except ReplayError as error:
-      activeGame.recordingError = error.msg
+      game.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyAttackMove(
+    let accepted = game.world.applyAttackMove(
       heroId, arguments[0], arguments[1]
     )
     if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      game.metrics.command(
+        heroIndex(game.world, heroId), game.world.tick
       )
     int32(accepted)
   let attackTargetProc: HostProc = proc(
