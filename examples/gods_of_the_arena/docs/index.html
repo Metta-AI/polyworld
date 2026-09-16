@@ -2010,7 +2010,7 @@
         <thead><tr><th>Value</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>selfMoveSpeed</code></td><td>Unblocked movement speed in world units per tick, including level and equipment bonuses.</td></tr>
-          <tr><td><code>selfAttackRange</code></td><td>Basic-attack range in world units, measured by planar Euclidean distance between centers. Towers allow at least 105000 units; forts use 255000 units.</td></tr>
+          <tr><td><code>selfAttackRange</code></td><td>Basic-attack range in world units, measured by planar Euclidean distance between centers. Towers and barracks allow at least 105000 units measured from their occupied footprint; forts use 255000 units.</td></tr>
           <tr><td><code>selfAttackDamage</code></td><td>Current basic-attack damage, including level and equipment bonuses.</td></tr>
           <tr><td><code>selfTarget</code></td><td>Current ordered or automatically acquired attack target's stable object ID, or zero for none.</td></tr>
           <tr><td><code>selfAttackCooldown</code></td><td>Ticks until the next basic hit could land if the target stays in range. Includes remaining recovery and the next windup, or the remainder of a current windup. An idle hero reports a full windup. Excludes chasing and is separate from ability cooldowns. Movement can cancel a swing.</td></tr>
@@ -2018,7 +2018,7 @@
         </tbody>
       </table>
       <h3>Visible objects</h3>
-      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. The existing ID, kind, team, class, position, HP, and alive queries still apply. New queries respect the same visibility filter:</p>
+      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = fort, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
       <table class="spell-table api-table">
         <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -2045,7 +2045,7 @@
       </table>
       <p>Other invalid spell queries return zero. Visibility of an enemy warning does not reveal its hidden caster's identity.</p>
       <h3 id="terrain-api">Terrain API</h3>
-      <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect static terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Terrain remains observable through fog.</p>
+      <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>
       <p>Read-only constants expose <code>mapWidth</code>, <code>mapHeight</code>, <code>mapLayers</code>, <code>GroundLayer</code>, <code>RedFortLayer</code>, <code>BlueFortLayer</code>, and <code>WaterLayer</code>. Terrain kinds are <code>TerrainNone</code>, <code>TerrainGrass</code>, <code>TerrainRoad</code>, <code>TerrainRock</code>, <code>TerrainTrees</code>, <code>TerrainMarsh</code>, <code>TerrainWall</code>, and <code>TerrainWater</code>.</p>
     </section>
 

@@ -173,6 +173,11 @@ proc verifyBarracks(map: MapData) =
       a = first.position - path.nearest(first.position)
       b = second.position - path.nearest(second.position)
     doAssert dot(a, b) < 0
+    doAssert length(first.route[1] - second.route[1]) < 0.01
+    doAssert length(
+      (first.position + second.position) / 2 - first.route[1]
+    ) < 0.01
+    doAssert abs(first.distance - second.distance) < 0.01
 
 proc verifyStems(map: MapData) =
   ## Ensures clearings only attach through their own single stem.

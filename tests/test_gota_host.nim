@@ -159,8 +159,8 @@ proc checkHostObservations() =
   enemy.velocity = heading(-789, 234)
   enemy.attackObjectId = hero.id
   hidden.position = WorldPoint(x: WorldScale * 6)
-  world.towers = @[
-    Tower(
+  world.buildings = @[
+    Building(
       id: 10, team: RedTeam, hp: 900, maxHp: 900,
       facing: heading(-WorldScale * 4, 0), targetId: enemy.id
     )
@@ -203,12 +203,12 @@ proc checkHostObservations() =
     ownIndex = vm.objectIndex(hero.id)
     enemyIndex = vm.objectIndex(enemy.id)
     allyIndex = vm.objectIndex(ally.id)
-    towerIndex = vm.objectIndex(10)
+    buildingIndex = vm.objectIndex(10)
     fortIndex = vm.objectIndex(world.forts[RedTeam.ord].id)
     creepIndex = vm.objectIndex(1000)
     windup = heroAttackTicks(hero.class) * 45 div 100
   doAssert ownIndex >= 0 and enemyIndex >= 0 and allyIndex >= 0
-  doAssert towerIndex >= 0 and fortIndex >= 0 and creepIndex >= 0
+  doAssert buildingIndex >= 0 and fortIndex >= 0 and creepIndex >= 0
   doAssert vm.objectIndex(hidden.id) == -1
   doAssert vm.runtime.getGlobal("scale") == 60_000
   doAssert vm.runtime.getGlobal("ticksPerSecond") == 24
@@ -243,19 +243,19 @@ proc checkHostObservations() =
   doAssert vm.runtime.getArray("targets", ownIndex) == enemy.id
   doAssert vm.runtime.getArray("targets", enemyIndex) == hero.id
   doAssert vm.runtime.getArray("targets", allyIndex) == 0
-  doAssert vm.runtime.getArray("targets", towerIndex) == enemy.id
+  doAssert vm.runtime.getArray("targets", buildingIndex) == enemy.id
   doAssert vm.runtime.getArray("targets", creepIndex) == hero.id
-  doAssert vm.runtime.getArray("facingX", towerIndex) == -WorldScale
+  doAssert vm.runtime.getArray("facingX", buildingIndex) == -WorldScale
   doAssert vm.runtime.getArray("facingY", creepIndex) == -WorldScale
   doAssert vm.runtime.getArray("velX", creepIndex) == 321
   doAssert vm.runtime.getArray("velY", creepIndex) == 789
-  for index in [fortIndex, towerIndex, creepIndex]:
+  for index in [fortIndex, buildingIndex, creepIndex]:
     doAssert vm.runtime.getArray("levels", index) == 0
     doAssert vm.runtime.getArray("mana", index) == 0
     for slot in 0'i32 ..< InventorySlots.int32:
       doAssert vm.runtime.getArray("items", index * 6 + slot) == 0
       doAssert vm.runtime.getArray("counts", index * 6 + slot) == 0
-  for index in [fortIndex, towerIndex]:
+  for index in [fortIndex, buildingIndex]:
     doAssert vm.runtime.getArray("velX", index) == 0
     doAssert vm.runtime.getArray("velY", index) == 0
   doAssert vm.runtime.getArray("facingX", fortIndex) == 0

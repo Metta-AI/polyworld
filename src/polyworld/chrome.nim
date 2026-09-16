@@ -824,7 +824,10 @@ proc mouseOverDebugMenu*(mouse: Vec2): bool =
     mouse.y >= state.pos.y and
     mouse.y <= state.pos.y + state.size.y
 
-proc drawDebugMenu*(sk: Silky, window: Window) =
+proc drawDebugMenu*(
+    sk: Silky, window: Window,
+    creepWaypoints: ptr bool = nil, waypointStatus = ""
+) =
   ## Draws the shared F1 debug window when it is open.
   noteFps()
   if not debugMenuOpen:
@@ -835,7 +838,7 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
       DebugWindowTitle,
       debugMenuOpen,
       DebugWindowOrigin,
-      DebugWindowSize
+      DebugWindowSize + vec2(0, if creepWaypoints == nil: 0 else: 62)
     ):
       group "fpsRow":
         box(
@@ -894,6 +897,10 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
       checkBox "Interpolation", interpolateVisuals
       checkBox "Show paths", showPaths
       checkBox "Show tiles", showTiles
+      if creepWaypoints != nil:
+        checkBox "Creep waypoints", creepWaypoints[]
+        text "creepWaypointStatus":
+          characters waypointStatus
   finally:
     sk.endDsl()
 

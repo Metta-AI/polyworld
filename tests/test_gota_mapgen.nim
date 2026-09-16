@@ -2,7 +2,7 @@ import polyworld/pathing
 import ../examples/gods_of_the_arena/maps as gameMaps
 import ../examples/gods_of_the_arena/generation/maps as editorMaps
 import ../examples/gods_of_the_arena/generation/tiles as editorTiles
-import ../examples/gods_of_the_arena/[sim, replays, terrains]
+import ../examples/gods_of_the_arena/[content, sim, replays, terrains]
 
 const Size = editorTiles.TileCount
 
@@ -131,8 +131,10 @@ echo "Game terrain matches every editor tile and movement edge."
 echo "Checking generated towers, hero spawns, and paired barracks in play."
 let game = newGame(map, 100_000, 10, false, ReplayData())
 game.world.heroTurnTicks = 100_000
-doAssert game.world.towers.len == 18
-for tower in game.world.towers:
+doAssert game.world.buildings.len == 30
+for tower in game.world.buildings:
+  if tower.kind != TowerBuilding:
+    continue
   let point = map.layout.towers[tower.lane][tower.team.ord][tower.tier.ord].position
   doAssert tower.position.x == point.x * (WorldScale div PathUnitsPerTile)
   doAssert tower.position.z == point.z * (WorldScale div PathUnitsPerTile)
@@ -143,10 +145,15 @@ for hero in game.world.heroes:
   ]
   doAssert tile.terrain == editorTiles.SpawnGround
 game.tickWorld(nil)
-doAssert game.world.footmen.len == 12
+doAssert game.world.footmen.len == 12 * CreepsPerBarracks
 for team in sim.Team:
   for lane in 0 .. 2:
-    let sites = game.world.barracksPairs[team.ord][lane]
+    var sites: seq[WorldPoint]
+    for building in game.world.buildings:
+      if building.kind == BarracksBuilding and building.team == team and
+          building.lane == lane:
+        sites.add building.spawn
+    doAssert sites.len == 2
     doAssert sites[0] != sites[1], "Both creeps must use their own barracks."
 for tick in 1 .. 500:
   game.tickWorld(nil)
@@ -158,7 +165,7 @@ for footman in game.world.footmen:
   doAssert tile.terrain notin {
     editorTiles.CastleGround, editorTiles.KeepGround, editorTiles.SpawnGround
   }, "A creep failed to march out of its generated fort."
-echo "Generated structures and all twelve creep spawns passed."
+echo "Generated structures and all thirty-six creep spawns passed."
 echo "Map fingerprint: ", map.hash, "; simulation fingerprint: ", game.stateHash()
 
 echo "Checking that direct movement respects cliffs and crosses ramps."
@@ -177,7 +184,9 @@ for edge in [editorTiles.CliffEdge, editorTiles.RampEdge]:
   doAssert sourceX >= 0, "No walkable tiles found on either side of the edge."
   let trial = newGame(map, 100_000, 10, false, ReplayData())
   trial.world.heroes.setLen(1)
-  trial.world.towers.setLen(0)
+  for building in trial.world.buildings.mitems:
+    building.hp = 0
+  trial.world.syncBuildings()
   trial.world.spawnTimerTicks = 100_000
   trial.world.heroTurnTicks = 100_000
   let
@@ -191,7 +200,10 @@ for edge in [editorTiles.CliffEdge, editorTiles.RampEdge]:
   hero.movePath = @[target]
   hero.movePathLayers = @[0'i32]
   hero.hasMoveTarget = true
+  hero.moveRevision = trial.world.navigationRevision
   for tick in 0 ..< 60:
+    # Keep this deliberate straight route to isolate cliff collision.
+    hero.stuckTicks = 0
     trial.tickWorld(nil)
   let expectedX = sourceX + int(edge == editorTiles.RampEdge)
   doAssert mapCoordinate(hero.position.x).int == expectedX,

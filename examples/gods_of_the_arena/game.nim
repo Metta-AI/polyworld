@@ -200,8 +200,8 @@ proc teamHeroGold(team: Team): int =
 
 proc teamTowerCount(team: Team): int =
   ## Returns the number of standing towers owned by one team.
-  for tower in run.world.towers:
-    if tower.team == team and tower.hp > 0:
+  for tower in run.world.buildings:
+    if tower.kind == TowerBuilding and tower.team == team and tower.hp > 0:
       inc result
 
 proc heroVmStatus*(): tuple[active, decisions: int] =

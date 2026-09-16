@@ -111,7 +111,19 @@ proc terrainProc(
         if index < 0:
           return 0
         activeGame.world.heroes[index].navLayer
-    terrainValue(arguments[0], arguments[1], layer, field)
+    let value = terrainValue(arguments[0], arguments[1], layer, field)
+    if field != TerrainWalkableField or value == 0:
+      return value
+    let index = heroIndex(activeGame.world, heroId)
+    if index < 0:
+      return 0
+    let floor = layers[int(layer)]
+    int32(activeGame.world.knownWalkable(
+      activeGame.world.heroes[index].team,
+      int(layer),
+      int(arguments[0]) + mapOrigin() - floor.originX,
+      int(arguments[1]) + mapOrigin() - floor.originZ
+    ))
 
 proc objectProc(heroId: int32, field: ObjectField): HostProc =
   ## Binds one field to the hero's visibility-filtered object snapshot.
