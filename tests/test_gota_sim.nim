@@ -34,7 +34,9 @@ block:
   doAssert run.recorder.data.actions[0].kind == ActionManualSpells
   let
     data = decodeReplay(run.recorder.data.encodeReplay())
-    replay = newGame(run.map, 240, 10, true, data)
+    replay = newGame(
+      run.map, data.config.spawnIntervalTicks, 10, true, data
+    )
   replay.historyPlayback = true
   replay.replayPlayer = initReplayPlayer(data)
   for tick in 0 ..< data.hashes.len:
