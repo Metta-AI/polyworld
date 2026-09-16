@@ -16,7 +16,7 @@ type
   PanelTab = enum
     Shape, Surface, Colors
   Options = object
-    preset, seed, frames: int
+    preset, seed, frames, fillSubdivisions: int
     yaw, pitch: float32
     screenshot, exportPath, loadPath: string
     gallery, regions, wireframe, noPanel, sheet: bool
@@ -40,6 +40,7 @@ type
 proc optionsFromArgs(): Options =
   ## Parses reproducible startup, export, and hidden capture options.
   result.seed = 42
+  result.fillSubdivisions = -1
   result.yaw = 0.55'f
   result.pitch = 0.5'f
   try:
@@ -64,6 +65,10 @@ proc optionsFromArgs(): Options =
         result.seed = argument[7 .. ^1].parseInt
       elif argument.startsWith("--frames="):
         result.frames = argument[9 .. ^1].parseInt
+      elif argument.startsWith("--fill-subdivisions="):
+        result.fillSubdivisions = argument[20 .. ^1].parseInt
+        if result.fillSubdivisions notin 0 .. 2:
+          raise newException(RockgenError, "Fill subdivisions must be 0 to 2")
       elif argument.startsWith("--yaw="):
         result.yaw = argument[6 .. ^1].parseFloat.float32
       elif argument.startsWith("--pitch="):
@@ -120,7 +125,10 @@ proc frameRock(app: var RockApp) =
   ## Fits the whole rock or comparison gallery in the available viewport.
   app.target = (app.geometry.minimum + app.geometry.maximum) * 0.5'f
   let extent = app.geometry.maximum - app.geometry.minimum
-  app.distance = max(extent.y, max(extent.x, extent.z)) * 1.9'f
+  app.distance = max(
+    max(extent.y, max(extent.x, extent.z)) * 1.9'f,
+    length(extent) * 1.55'f
+  )
   if app.gallery:
     app.distance = max(app.distance, (app.settings.width * 3 + 1.2'f) * 1.6'f)
 
@@ -217,6 +225,12 @@ template control(caption: string, target: untyped, low, high: untyped) =
 proc shapeControls(app: var RockApp, window: Window) =
   ## Exposes proportions and the planes that make broad polygonal faces.
   let sk = app.sk
+  checkBox("Remove bottom triangles", app.settings.removeBottom)
+  text("Omits the flat ground-contact face.")
+  var floorPercent = app.settings.floorCut * 100
+  control("Floor (%)", floorPercent, 0.0'f, 90.0'f)
+  app.settings.floorCut = floorPercent / 100
+  text("Cuts the buried part; leaves an open base.")
   control("Width", app.settings.width, 0.5'f, 8.0'f)
   control("Height", app.settings.height, 0.5'f, 10.0'f)
   control("Depth", app.settings.depth, 0.5'f, 8.0'f)
@@ -234,6 +248,8 @@ proc shapeControls(app: var RockApp, window: Window) =
 proc surfaceControls(app: var RockApp, window: Window) =
   ## Exposes the coplanar perimeter and optional square texture patches.
   let sk = app.sk
+  control("Fill subdivisions", app.settings.fillSubdivisions, 0, 2)
+  text("0: fewest triangles / 2: finer surface wash")
   control("Trim width", app.settings.trimWidth, 0.0'f, 0.4'f)
   control("Worn edges", app.settings.trimChance, 0.0'f, 1.0'f)
   control("Detail chance", app.settings.detailChance, 0.0'f, 1.0'f)
@@ -360,6 +376,11 @@ proc drawUi(app: var RockApp, window: Window) =
 
 proc drawScene(app: var RockApp, window: Window) =
   ## Renders the rock and ground with the same toon pipeline as Treegen.
+  app.ground.pos.y =
+    if app.settings.removeBottom or app.settings.floorCut > 0:
+      0.025'f
+    else:
+      0.0'f
   let
     left = (if app.showPanel: PanelWidth.int32 + 28 else: 0'i32)
     width = max(1'i32, window.size.x - left)
@@ -404,8 +425,10 @@ proc drawSheet(app: var RockApp, window: Window, options: Options) =
       cos(options.yaw) * cos(options.pitch)
     )
   for i, index in ReferencePresets:
+    var settings = preset(index, (options.seed + i) mod 1_000_000_001)
+    if options.fillSubdivisions >= 0:
+      settings.fillSubdivisions = options.fillSubdivisions
     let
-      settings = preset(index, (options.seed + i) mod 1_000_000_001)
       geometry = generate(settings)
       node = rockNode(geometry, app.materials, options.regions)
       target = (geometry.minimum + geometry.maximum) * 0.5'f
@@ -455,6 +478,8 @@ proc main() =
   var settings = preset(options.preset, options.seed)
   if options.loadPath.len > 0:
     settings = loadSettings(options.loadPath)
+  if options.fillSubdivisions >= 0:
+    settings.fillSubdivisions = options.fillSubdivisions
   settings.validate()
   if options.exportPath.len > 0:
     settings.exportRock(options.exportPath)

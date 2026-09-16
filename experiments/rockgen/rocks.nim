@@ -21,13 +21,15 @@ type
   DetailKind* = enum
     Mixed, Cracks, Scuffs
   RockSettings* = object
-    seed*, sides*, crownCuts*, chips*: int
+    seed*, sides*, crownCuts*, chips*, fillSubdivisions*: int
     width*, height*, depth*, irregularity*, taper*, crown*: float32
     cornerClip*, shoulder*, chipSize*: float32
     lean*, trimWidth*, detailChance*, detailSize*, detailOffset*: float32
     detailKind*: DetailKind
     shadeVariation*, mottling*, trimChance*: float32
     tint*: Vec3
+    removeBottom*: bool
+    floorCut*: float32
   RockVertex* = object
     position*, normal*: Vec3
     uv*: Vec2
@@ -57,7 +59,7 @@ type
 proc preset*(index: int, seed = 42): RockSettings =
   ## Returns a reproducible recipe for one of the rock silhouettes.
   result = RockSettings(
-    seed: seed, sides: 4, crownCuts: 4, chips: 5,
+    seed: seed, sides: 4, crownCuts: 4, chips: 5, fillSubdivisions: 0,
     width: 2.6, height: 3.8, depth: 2.25,
     irregularity: 0.2, taper: 0.14, crown: 0.85, lean: 0.06,
     cornerClip: 0.27, shoulder: 0.52, chipSize: 0.14,
@@ -159,6 +161,8 @@ proc validate*(settings: RockSettings) {.raises: [RockgenError].} =
   requireRange(settings.sides, 4, 12)
   requireRange(settings.crownCuts, 3, 12)
   requireRange(settings.chips, 0, 12)
+  requireRange(settings.fillSubdivisions, 0, 2)
+  requireRange(settings.floorCut, 0, 0.9)
   requireRange(settings.chipSize, 0, 0.25)
   requireRange(settings.width, 0.5, 8)
   requireRange(settings.height, 0.5, 10)
@@ -378,12 +382,12 @@ proc addTriangle(
   shade: float32,
   region: RockRegion,
   tile: int,
-  paintLevel = 0
+  subdivisions = 0
 ) =
   ## Emits one outward triangle with explicit face normals and UV seams.
   if cross2(points[1] - points[0], points[2] - points[0]) <= 0:
     raise newException(RockgenError, "Invalid face triangulation")
-  if region == Fill and paintLevel < 2 and
+  if region == Fill and subdivisions > 0 and
     cross2(points[1] - points[0], points[2] - points[0]) > 0.02'f:
       let
         middle = points[0] * 0.28'f + points[1] * 0.33'f +
@@ -394,7 +398,7 @@ proc addTriangle(
         mesh.addTriangle(
           [middle, points[i], points[next]],
           [uv, uvs[i], uvs[next]],
-          origin, u, v, normal, shade, region, tile, paintLevel + 1
+          origin, u, v, normal, shade, region, tile, subdivisions - 1
         )
       return
   for i in 0 ..< 3:
@@ -403,6 +407,62 @@ proc addTriangle(
       position: origin + u * points[i].x + v * points[i].y,
       normal: normal, uv: uvs[i], shade: shade, region: region, tile: tile
     )
+
+proc addFill(
+  mesh: var RockMesh,
+  points: seq[Vec2],
+  origin, u, v, normal: Vec3,
+  shade: float32,
+  subdivisions: int
+) =
+  ## Triangulates fill from its boundary with optional pigment subdivisions.
+  var remaining: seq[int]
+  for i in 0 ..< points.len:
+    remaining.add i
+  while remaining.len > 3:
+    var
+      best = -1
+      bestQuality = 0.0'f
+    for i, index in remaining:
+      let
+        previous = remaining[(i + remaining.len - 1) mod remaining.len]
+        next = remaining[(i + 1) mod remaining.len]
+        a = points[previous]
+        b = points[index]
+        c = points[next]
+        area = cross2(b - a, c - a)
+      if area <= 0:
+        continue
+      var occupied = false
+      for candidate in remaining:
+        if candidate in [previous, index, next]:
+          continue
+        let point = points[candidate]
+        if cross2(b - a, point - a) >= -Epsilon * Epsilon and
+          cross2(c - b, point - b) >= -Epsilon * Epsilon and
+          cross2(a - c, point - c) >= -Epsilon * Epsilon:
+            occupied = true
+            break
+      let quality = area /
+        (lengthSq(b - a) + lengthSq(c - a) + lengthSq(c - b))
+      if not occupied and quality > bestQuality:
+        best = i
+        bestQuality = quality
+    if best < 0:
+      raise newException(RockgenError, "Cannot triangulate fill polygon")
+    mesh.addTriangle(
+      [points[remaining[(best + remaining.len - 1) mod remaining.len]],
+        points[remaining[best]],
+        points[remaining[(best + 1) mod remaining.len]]],
+      [FillUv, FillUv, FillUv], origin, u, v, normal,
+      shade, Fill, 4, subdivisions
+    )
+    remaining.delete(best)
+  mesh.addTriangle(
+    [points[remaining[0]], points[remaining[1]], points[remaining[2]]],
+    [FillUv, FillUv, FillUv], origin, u, v, normal,
+    shade, Fill, 4, subdivisions
+  )
 
 proc relaxFill(mesh: var RockMesh, firstIndex: int, normal: Vec3) =
   ## Flips interior fill diagonals to reduce thin pigment triangles.
@@ -484,6 +544,11 @@ proc buildFace(
     shade = 1.0'f - rng.rand(1.0).float32 * settings.shadeVariation
     firstIndex = geometry.mesh.indices.len
     edgeTile = rng.rand(3)
+    subdivisions =
+      if settings.mottling > 0:
+        settings.fillSubdivisions
+      else:
+        0
   var
     outer, inner: seq[Vec2]
     info = RockFace(points: face.points, normal: face.normal,
@@ -505,6 +570,7 @@ proc buildFace(
     patch: array[4, Vec2]
     ring: seq[Vec2]
     edges = newSeq[seq[Vec2]](inner.len)
+    fills: seq[seq[Vec2]]
   if makeDetail:
     let
       angle = rng.rand(Tau.float64).float32
@@ -570,16 +636,29 @@ proc buildFace(
         index = (index + 1) mod ring.len
         polygon.add ring[index]
       polygon.add patch[next]
-      var middle = vec2(0)
-      for point in polygon:
-        middle += point
-      middle /= polygon.len.float32
-      for j, point in polygon:
-        geometry.mesh.addTriangle(
-          [middle, point, polygon[(j + 1) mod polygon.len]],
-          [FillUv, FillUv, FillUv], origin, axes.u, axes.v, face.normal,
-          shade, Fill, 4
-        )
+      fills.add polygon
+  else:
+    for i, point in inner:
+      edges[i] = @[point, inner[(i + 1) mod inner.len]]
+    fills.add inner
+  var
+    worn = newSeq[bool](outer.len)
+    starts = newSeq[float32](outer.len)
+    anyWorn = false
+  if hasTrim:
+    for i in 0 ..< outer.len:
+      worn[i] = rng.rand(1.0).float32 < settings.trimChance and
+        settings.trimWidth > 0
+      starts[i] = edgeTile.float32 * 0.25'f + TilePadding +
+        rng.rand(0.14).float32
+      anyWorn = anyWorn or worn[i]
+  if not makeDetail and not anyWorn:
+    fills = @[outer]
+  for polygon in fills:
+    geometry.mesh.addFill(
+      polygon, origin, axes.u, axes.v, face.normal, shade, subdivisions
+    )
+  if makeDetail:
     let uvs = [vec2(0, 1), vec2(1, 1), vec2(1, 0), vec2(0, 0)]
     for indices in [[0, 1, 2], [0, 2, 3]]:
       geometry.mesh.addTriangle(
@@ -590,24 +669,13 @@ proc buildFace(
         origin, axes.u, axes.v, face.normal, shade, Detail, info.detailTile
       )
     inc geometry.details
-  else:
-    for i, point in inner:
-      let next = inner[(i + 1) mod inner.len]
-      edges[i] = @[point, next]
-      geometry.mesh.addTriangle(
-        [vec2(0), point, next], [FillUv, FillUv, FillUv],
-        origin, axes.u, axes.v, face.normal, shade, Fill, 4
-      )
-  if hasTrim:
+  if hasTrim and (makeDetail or anyWorn):
     for i, a in outer:
       let
-        worn = rng.rand(1.0).float32 < settings.trimChance and
-          settings.trimWidth > 0
         next = (i + 1) mod outer.len
         b = outer[next]
         edge = inner[next] - inner[i]
-        left = edgeTile.float32 * 0.25'f + TilePadding +
-          rng.rand(0.14).float32
+        left = starts[i]
         right = left + 0.08'f
       var
         polygon = @[a, b]
@@ -618,7 +686,7 @@ proc buildFace(
         uvs.add vec2(mix(left, right, amount), TrimTop)
       for j in 1 ..< polygon.high:
         let
-          region = (if worn: Edge else: Fill)
+          region = (if worn[i]: Edge else: Fill)
           tile = (if region == Edge: edgeTile else: 4)
           mapped =
             if region == Edge:
@@ -628,9 +696,11 @@ proc buildFace(
         geometry.mesh.addTriangle(
           [polygon[0], polygon[j], polygon[j + 1]],
           mapped,
-          origin, axes.u, axes.v, face.normal, shade, region, tile
+          origin, axes.u, axes.v, face.normal, shade, region, tile,
+          subdivisions
         )
-  geometry.mesh.relaxFill(firstIndex, face.normal)
+  if subdivisions > 0:
+    geometry.mesh.relaxFill(firstIndex, face.normal)
   info.indexCount = geometry.mesh.indices.len - firstIndex
   geometry.faces.add info
 
@@ -659,20 +729,116 @@ proc paintNoise(point: Vec3, seed: int): float32 =
           cell.x.int + x, cell.y.int + y, cell.z.int + z, seed
         ) * weight
 
+proc floorVertex(a, b: RockVertex, height: float32): RockVertex =
+  ## Interpolates an edge at the floor while preserving its texture mapping.
+  let
+    low = (if a.position.y < b.position.y: a else: b)
+    high = (if a.position.y < b.position.y: b else: a)
+    amount = (height - low.position.y) / (high.position.y - low.position.y)
+  result = low
+  result.position += (high.position - low.position) * amount
+  result.position.y = height
+  result.uv += (high.uv - low.uv) * amount
+  result.shade += (high.shade - low.shade) * amount
+
+proc aboveFloor(points: seq[RockVertex], height: float32): seq[RockVertex] =
+  ## Clips a convex polygon and merges numerically coincident cut corners.
+  for i, a in points:
+    let b = points[(i + 1) mod points.len]
+    if a.position.y >= height:
+      result.add a
+    if (a.position.y < height and b.position.y > height) or
+      (a.position.y > height and b.position.y < height):
+        result.add floorVertex(a, b, height)
+  var cleaned: seq[RockVertex]
+  for vertex in result:
+    if cleaned.len > 0 and
+      lengthSq(cleaned[^1].position - vertex.position) < 0.000000000001'f:
+        if vertex.position.y == height:
+          cleaned[^1] = vertex
+    else:
+      cleaned.add vertex
+  if cleaned.len > 1 and
+    lengthSq(cleaned[0].position - cleaned[^1].position) < 0.000000000001'f:
+      if cleaned[^1].position.y == height:
+        cleaned[0] = cleaned[^1]
+      cleaned.setLen(cleaned.len - 1)
+  result = move(cleaned)
+
+proc cutFloor(geometry: var RockGeometry, height: float32) =
+  ## Removes buried triangles and places the open cut at ground height.
+  var clipped = RockGeometry(
+    minimum: vec3(Inf.float32), maximum: vec3(-Inf.float32)
+  )
+  for face in geometry.faces:
+    var
+      outline: seq[RockVertex]
+      info = face
+      hasDetail = false
+    for point in face.points:
+      outline.add RockVertex(position: point)
+    outline = aboveFloor(outline, height)
+    if outline.len < 3:
+      continue
+    info.points = @[]
+    for vertex in outline:
+      info.points.add vertex.position - vec3(0, height, 0)
+    info.firstIndex = clipped.mesh.indices.len
+    for i in countup(face.firstIndex, face.firstIndex + face.indexCount - 1, 3):
+      var triangle: seq[RockVertex]
+      for j in 0 ..< 3:
+        triangle.add geometry.mesh.vertices[geometry.mesh.indices[i + j]]
+      let polygon = aboveFloor(triangle, height)
+      for j in 1 ..< polygon.high:
+        for index in [0, j, j + 1]:
+          var vertex = polygon[index]
+          vertex.position.y -= height
+          clipped.mesh.indices.add clipped.mesh.vertices.len.uint32
+          clipped.mesh.vertices.add vertex
+          clipped.minimum = min(clipped.minimum, vertex.position)
+          clipped.maximum = max(clipped.maximum, vertex.position)
+          hasDetail = hasDetail or vertex.region == Detail
+    info.indexCount = clipped.mesh.indices.len - info.firstIndex
+    if info.indexCount == 0:
+      continue
+    if hasDetail:
+      inc clipped.details
+      for point in info.patch.mitems:
+        point.y -= height
+    else:
+      info.detailTile = -1
+      info.patch = default(array[4, Vec3])
+    clipped.faces.add info
+  geometry = move(clipped)
+
 proc generate*(settings: RockSettings): RockGeometry =
-  ## Builds a deterministic closed rock with trim, fill, and detail regions.
+  ## Builds a deterministic rock with an optional open ground-contact base.
   settings.validate()
   var rng = initRand(settings.seed xor 0x5163A)
   result.minimum = vec3(Inf.float32)
   result.maximum = vec3(-Inf.float32)
   for face in silhouette(settings):
+    let
+      firstVertex = result.mesh.vertices.len
+      firstIndex = result.mesh.indices.len
     result.buildFace(face, settings, rng)
+    var bottom = face.normal.y < -0.999'f
     for point in face.points:
       result.minimum = min(result.minimum, point)
       result.maximum = max(result.maximum, point)
+      bottom = bottom and abs(point.y) < Epsilon
+    if settings.removeBottom and bottom:
+      # Consume the face's random choices to preserve the other surfaces.
+      if result.faces[^1].detailTile >= 0:
+        dec result.details
+      result.mesh.vertices.setLen(firstVertex)
+      result.mesh.indices.setLen(firstIndex)
+      result.faces.setLen(result.faces.len - 1)
   for vertex in result.mesh.vertices.mitems:
     let
       point = vertex.position /
         vec3(settings.width, settings.height, settings.depth)
       wash = paintNoise(point * 8, settings.seed)
     vertex.shade *= 1.0'f - settings.mottling * wash
+  if settings.floorCut > 0:
+    result.cutFloor(settings.height * settings.floorCut)
