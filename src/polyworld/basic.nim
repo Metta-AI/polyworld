@@ -241,6 +241,8 @@ type
     printedEvents: int64
     allocatedBytes: int64
     finished: bool
+    hostCallPaused*: bool
+    hostResultRegister: int32
 
   Expr = object
     constant: bool
@@ -2263,6 +2265,7 @@ proc reset*(runtime: var Runtime) =
   runtime.printedBytes = 0
   runtime.printedEvents = 0
   runtime.finished = false
+  runtime.hostCallPaused = false
 
 proc restart*(runtime: var Runtime) =
   ## Restarts execution and budgets while preserving globals and arrays.
@@ -2277,6 +2280,7 @@ proc restart*(runtime: var Runtime) =
   runtime.printedBytes = 0
   runtime.printedEvents = 0
   runtime.finished = false
+  runtime.hostCallPaused = false
 
 proc memoryBytes*(runtime: Runtime): int64 {.inline.} =
   ## Returns the logical bytes preallocated for runtime state.
@@ -2429,10 +2433,21 @@ proc chargePrint(runtime: var Runtime, bytes: int64) =
   inc runtime.printedEvents
   runtime.printedBytes += bytes
 
+proc pauseHostCall*(runtime: Runtime) =
+  ## A host callback may suspend execution until its result becomes available.
+  runtime.hostCallPaused = true
+
+proc resumeHostCall*(runtime: Runtime, value: int32) =
+  doAssert runtime.hostCallPaused
+  if runtime.hostResultRegister >= 0:
+    runtime.registers[runtime.hostResultRegister] = value
+  runtime.hostCallPaused = false
+
 proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
   ## Executes verified bytecode with bounded work, memory, calls, and output.
   if runtime.finished:
     return
+  doAssert not runtime.hostCallPaused, "Resume the pending host result before running"
   let
     startInstructions = runtime.remainingInstructions
     startWork = runtime.remainingWork
@@ -2647,6 +2662,9 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
       if item.a >= 0:
         register(item.a) = value
       inc runtime.pc
+      if runtime.hostCallPaused:
+        runtime.hostResultRegister = if item.a < 0: -1 else: runtime.base + item.a
+        break
     of CallOp:
       if runtime.depth + 1 >= int32(runtime.frames.len):
         fail("BASIC call depth limit exceeded")
