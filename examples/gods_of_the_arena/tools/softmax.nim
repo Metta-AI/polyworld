@@ -184,13 +184,19 @@ proc snapshot*(client: Softmax, settings: JsonNode): JsonNode =
     )
     version = locks[if locks["game_version_locked"].getBool:
       "locked_game_version" else: "canonical_game_version"].getStr
-  var world: JsonNode
-  for candidate in client.entries("/v2/coworlds?limit=200"):
+  var worldSummary: JsonNode
+  for candidate in client.entries("/v2/coworlds/summaries?limit=200"):
     if candidate["name"] == league["game"]["coworld_name"] and
       candidate["version"].getStr == version:
-        require(world == nil, "Ambiguous game release")
-        world = candidate
-  require(world != nil, "Cannot resolve frozen game release")
+        require(worldSummary == nil, "Ambiguous game release")
+        worldSummary = candidate
+  require(worldSummary != nil, "Cannot resolve frozen game release")
+  let worldId = worldSummary{"id"}.getStr
+  require(worldId.len > 0, "Frozen game release has no Coworld ID")
+  let world = client.request(
+    "GET",
+    "/v2/coworlds/" & encodeUrl(worldId)
+  )
   let manifest = world["manifest"]
   require(%"total_xp" in manifest["game"]["results_schema"]["required"].elems,
     "The hosted GotA release must emit total_xp")
