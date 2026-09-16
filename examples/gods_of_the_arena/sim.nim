@@ -3371,13 +3371,12 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           if hero.team == world.winner: heroIdleClip else: heroDeathClip
         hero.animTicks = 0
 
-  let hash = stateHash(game)
   if game.historyPlayback:
-    checkReplayHash(game, hash)
+    checkReplayHash(game, stateHash(game))
   elif game.recorder != nil and game.recordingError.len == 0 and
       game.recorder.data.hashes.len < world.tick:
     try:
-      game.recorder.recordHash(hash)
+      game.recorder.recordHash(stateHash(game))
     except ReplayError as error:
       game.recordingError = error.msg
 
