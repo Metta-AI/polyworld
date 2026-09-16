@@ -7,26 +7,36 @@ const
   ExperimentDirectory* = currentSourcePath().parentDir
   AtlasPath* = ExperimentDirectory / "assets/tree-foliage-atlas.png"
   BarkPath* = ExperimentDirectory / "assets/bark.png"
+  StumpPath* = ExperimentDirectory / "assets/stump-rings.png"
   CustomPath* = ExperimentDirectory / "presets/custom.json"
 
 type TreeMaterials* = object
-  bark*, foliage*: Material
+  bark*, foliage*, cut*: Material
 
 proc loadMaterials*(textureStrength: float32): TreeMaterials =
-  ## Loads separate leaf and repeating bark textures with RGB tint support.
-  var atlas, bark: Image
+  ## Loads leaf, repeating bark, and cut-wood textures for the tree materials.
+  var atlas, bark, rings: Image
   try:
     atlas = loadStraightAlphaImage(AtlasPath)
   except IOError, PixieError:
     raise newException(TreegenError, "Cannot load tree atlas: " &
       getCurrentExceptionMsg())
-  if atlas.width != 2048 or atlas.height != 2048:
-    raise newException(TreegenError, "Tree atlas must be 2048 by 2048")
+  if atlas.width != 512 or atlas.height != 512:
+    raise newException(TreegenError, "Tree atlas must be 512 by 512")
   try:
     bark = loadStraightAlphaImage(BarkPath)
   except IOError, PixieError:
     raise newException(TreegenError, "Cannot load bark texture: " &
       getCurrentExceptionMsg())
+  if bark.width != 512 or bark.height != 512:
+    raise newException(TreegenError, "Bark texture must be 512 by 512")
+  try:
+    rings = loadStraightAlphaImage(StumpPath)
+  except IOError, PixieError:
+    raise newException(TreegenError, "Cannot load stump texture: " &
+      getCurrentExceptionMsg())
+  if rings.width != 512 or rings.height != 512:
+    raise newException(TreegenError, "Stump texture must be 512 by 512")
   for pixel in bark.data.mitems:
     let
       luminance = min(1.0'f, (pixel.r.float32 * 0.2126'f +
@@ -49,6 +59,10 @@ proc loadMaterials*(textureStrength: float32): TreeMaterials =
     name: "White foliage", baseColor: atlas, baseColorSampler: leafSampler,
     baseColorFactor: color(1, 1, 1, 1), roughnessFactor: 1,
     alphaMode: MaskAlphaMode, alphaCutoff: 0.45, doubleSided: true)
+  result.cut = Material(
+    name: "Stump rings", baseColor: rings, baseColorSampler: leafSampler,
+    baseColorFactor: color(1, 1, 1, 1), roughnessFactor: 1,
+    alphaMode: OpaqueAlphaMode)
 
 proc tint*(materials: TreeMaterials, settings: TreeSettings) =
   ## Updates material factors without rebuilding tree geometry.
@@ -69,12 +83,14 @@ proc primitive(mesh: TreeMesh, material: Material): Primitive =
     result.colors.add rgbx(value, value, value, 255)
 
 proc treeNode*(geometry: TreeGeometry, materials: TreeMaterials): Node =
-  ## Makes one node with opaque wood and double-sided alpha-cutout leaves.
+  ## Makes one node with opaque bark, optional cut wood, and cutout leaves.
   result = Node(name: "Generated tree", visible: true,
     scale: vec3(1), rot: quat(0, 0, 0, 1), mesh: Mesh(name: "Tree"))
   result.mesh.primitives.add geometry.bark.primitive(materials.bark)
   if geometry.foliage.vertices.len > 0:
     result.mesh.primitives.add geometry.foliage.primitive(materials.foliage)
+  if geometry.cut.vertices.len > 0:
+    result.mesh.primitives.add geometry.cut.primitive(materials.cut)
 
 proc groundNode*(): Node =
   ## Creates a neutral ground plane for the shared toon shadow pass.
@@ -118,7 +134,7 @@ proc loadSettings*(path: string): TreeSettings =
   result.validate()
 
 proc exportTree*(settings: TreeSettings, path: string) =
-  ## Exports a portable GLB with embedded bark and foliage textures.
+  ## Exports a portable GLB with the tree's textures embedded.
   let
     geometry = generate(settings)
     materials = loadMaterials(settings.barkTexture)

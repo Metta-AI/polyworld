@@ -32,8 +32,11 @@ proc testRecipes() =
         geometry = generate(settings)
       geometry.bark.checkMesh()
       geometry.foliage.checkMesh(atlas = true)
+      geometry.cut.checkMesh(atlas = true)
       doAssert geometry == generate(settings)
-      if settings.kind == Leafless:
+      if settings.kind != Stump:
+        doAssert geometry.cut.vertices.len == 0
+      if settings.kind in {Leafless, Stump}:
         doAssert geometry.cards == 0
         doAssert geometry.foliage.vertices.len == 0
       else:
@@ -444,15 +447,64 @@ proc testCaps() =
       center = geometry.foliage.vertices[^(CapSlices + 1)]
     columns.incl (center.uv.x * 4).int
   doAssert columns == {1, 2, 3}
+  let cell = material.baseColor.width div 4
   for column in 0 .. 3:
-    for y in 0 ..< 512:
-      for x in 0 ..< 512:
-        let pixel = material.baseColor.data[y * 2048 + column * 512 + x]
+    for y in 0 ..< cell:
+      for x in 0 ..< cell:
+        let pixel = material.baseColor.data[
+          y * material.baseColor.width + column * cell + x]
         if pixel.a.float32 / 255.0'f >= material.alphaCutoff:
           # All visible texels fit inside the fan, including between corners.
-          let offset = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) - vec2(256)
+          let offset = vec2(x.float32 + 0.5'f, y.float32 + 0.5'f) -
+            vec2(cell.float32 * 0.5'f)
           doAssert length(offset) <
-            512.0'f * 0.49'f * cos(PI.float32 / CapSlices.float32)
+            cell.float32 * 0.49'f * cos(PI.float32 / CapSlices.float32)
+
+proc testStumps() =
+  ## Checks closed level cuts, exact rim joins, and roots below the cut plane.
+  for seed in [0, 42, 999]:
+    for height in [0.3'f, 0.95'f, 3.0'f]:
+      for sides in [3, 8, 12]:
+        var settings = preset(9, seed)
+        settings.height = height
+        settings.radialSides = sides
+        settings.trunkRadius = 1.4
+        settings.rootThickness = 1.5
+        settings.bend = 0.8
+        settings.branches = 24
+        settings.forks = 3
+        let
+          geometry = generate(settings)
+          cap = geometry.cut
+          rim = settings.trunkSegments * (sides + 1)
+        geometry.bark.checkMesh()
+        cap.checkMesh(atlas = true)
+        doAssert geometry.limbs == 0 and geometry.cards == 0
+        doAssert geometry.foliage.vertices.len == 0
+        doAssert cap.vertices.len == sides + 1
+        doAssert cap.indices.len == sides * 3
+        doAssert abs(geometry.maximum.y - height) < 0.00001'f
+        for j, vertex in cap.vertices:
+          doAssert abs(vertex.position.y - height) < 0.00001'f
+          doAssert vertex.normal == vec3(0, 1, 0)
+          doAssert length(vertex.uv - vec2(0.5)) <= 0.43001'f
+          if j > 0:
+            doAssert vertex.position ==
+              geometry.bark.vertices[rim + j - 1].position
+        for j in 0 ..< sides:
+          let
+            a = cap.vertices[cap.indices[j * 3]]
+            b = cap.vertices[cap.indices[j * 3 + 1]]
+            c = cap.vertices[cap.indices[j * 3 + 2]]
+          doAssert cross(b.position - a.position, c.position - a.position).y > 0
+          doAssert length(b.position - a.position) >
+            settings.trunkRadius * 0.4'f
+  let rings = loadStraightAlphaImage(StumpPath)
+  for y in 0 ..< rings.height:
+    for x in 0 ..< rings.width:
+      let uv = vec2(x.float32, y.float32) / rings.width.float32
+      if length(uv - vec2(0.5)) <= 0.432'f:
+        doAssert rings.data[y * rings.width + x].a == 255
 
 proc testFiles() =
   ## Checks recipe round trips, alpha preservation, and portable GLB output.
@@ -465,13 +517,19 @@ proc testFiles() =
   doAssert loadSettings(directory / "tree.json") == settings
   doAssert materials.foliage.alphaMode == MaskAlphaMode
   doAssert materials.foliage.doubleSided
-  doAssert materials.foliage.baseColor.data[512 * 2048].a == 0
+  doAssert materials.foliage.baseColor.width == 512
+  doAssert materials.foliage.baseColor.height == 512
+  doAssert materials.foliage.baseColor.data[128 * 512].a == 0
   doAssert materials.foliage.baseColor.data ==
     loadStraightAlphaImage(AtlasPath).data
   doAssert materials.foliage.baseColorSampler.wrapS == ClampToEdgeWrap
   doAssert materials.foliage.baseColorSampler.wrapT == ClampToEdgeWrap
-  doAssert materials.bark.baseColor.width == 1254
-  doAssert materials.bark.baseColor.height == 1254
+  doAssert materials.bark.baseColor.width == 512
+  doAssert materials.bark.baseColor.height == 512
+  doAssert materials.cut.baseColor.width == 512
+  doAssert materials.cut.baseColor.height == 512
+  doAssert materials.cut.baseColor.data ==
+    loadStraightAlphaImage(StumpPath).data
   doAssert materials.bark.baseColorSampler.wrapS == RepeatWrap
   doAssert materials.bark.baseColorSampler.wrapT == RepeatWrap
   for pixel in materials.bark.baseColor.data:
@@ -494,20 +552,40 @@ proc testFiles() =
         if primitive.material.alphaMode == MaskAlphaMode:
           foliageFound = true
           doAssert primitive.material.doubleSided
-          doAssert primitive.material.baseColor.width == 2048
+          doAssert primitive.material.baseColor.width == 512
           doAssert abs(primitive.material.baseColorFactor.g -
             settings.leafColor.y) < 0.001
           doAssert primitive.uvs ==
             treeNode(generate(settings), materials).mesh.primitives[1].uvs
         else:
           barkFound = true
-          doAssert primitive.material.baseColor.width == 1254
-          doAssert primitive.material.baseColor.height == 1254
+          doAssert primitive.material.baseColor.width == 512
+          doAssert primitive.material.baseColor.height == 512
           doAssert primitive.material.baseColorSampler.wrapS == RepeatWrap
           doAssert primitive.material.baseColorSampler.wrapT == RepeatWrap
           doAssert primitive.uvs ==
             treeNode(generate(settings), materials).mesh.primitives[0].uvs
   doAssert materialsFound == 2 and foliageFound and barkFound
+  let stump = preset(9, 123)
+  stump.saveSettings(directory / "stump.json")
+  doAssert loadSettings(directory / "stump.json") == stump
+  stump.exportTree(directory / "stump.glb")
+  let exportedStump = loadModel(directory / "stump.glb")
+  var cutsFound = 0
+  for node in exportedStump.walkNodes():
+    if node.mesh != nil:
+      doAssert node.mesh.primitives.len == 2
+      for i, primitive in node.mesh.primitives:
+        doAssert primitive.material.alphaMode == OpaqueAlphaMode
+        if i == 1:
+          inc cutsFound
+          doAssert primitive.material.baseColor.width == 512
+          doAssert primitive.material.baseColor.height == 512
+          doAssert primitive.material.baseColor.data[256 * 512 + 256] ==
+            materials.cut.baseColor.data[256 * 512 + 256]
+          doAssert primitive.uvs ==
+            treeNode(generate(stump), materials).mesh.primitives[1].uvs
+  doAssert cutsFound == 1
   writeFile(directory / "bad.json", "{broken")
   var rejected = false
   try:
@@ -544,6 +622,8 @@ echo "Testing downward root claws"
 testRoots()
 echo "Testing cap topology, UVs, and alpha coverage from all sides"
 testCaps()
+echo "Testing stump cuts, growth-ring UVs, and root clearance"
+testStumps()
 echo "Testing atlas, presets, and GLB export"
 testFiles()
 echo "Treegen tests passed"

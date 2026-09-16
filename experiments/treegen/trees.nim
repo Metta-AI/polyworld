@@ -11,12 +11,12 @@ const
   LeafIndices* = 12
   EvergreenAspect = 1.4'f
   PresetNames* = ["Old oak", "Autumn", "Round sapling", "Blue spruce",
-    "Tall fir", "Young pine", "Haunted", "Twisted", "Dead sapling"]
+    "Tall fir", "Young pine", "Haunted", "Twisted", "Dead sapling", "Stump"]
 
 type
   TreegenError* = object of CatchableError
   TreeKind* = enum
-    Leafless, Evergreen, Broadleaf
+    Leafless, Evergreen, Broadleaf, Stump
   BranchKind* = enum
     Spreading, Angular, Drooping
   BranchLayout* = enum
@@ -53,7 +53,7 @@ type
     vertices*: seq[TreeVertex]
     indices*: seq[uint32]
   TreeGeometry* = object
-    bark*, foliage*: TreeMesh
+    bark*, foliage*, cut*: TreeMesh
     minimum*, maximum*: Vec3
     cards*, limbs*: int
     omittedCards*, shiftedCards*: int
@@ -173,6 +173,18 @@ proc preset*(index: int, seed = 42): TreeSettings =
       result.branches = 4
       result.branchLength = 1.2
       result.rootSpread = 0.65
+  of 9:
+    result.kind = Stump
+    result.height = 0.95
+    result.trunkRadius = 0.7
+    result.taper = 1.1
+    result.bend = 0.08
+    result.trunkSegments = 4
+    result.radialSides = 12
+    result.rootSpread = 1.4
+    result.rootThickness = 0.85
+    result.branches = 0
+    result.forks = 0
   else:
     discard
 
@@ -183,7 +195,10 @@ proc validate*(settings: TreeSettings) =
     if not (value >= typeof(value)(low) and value <= typeof(value)(high)):
       raise newException(TreegenError, astToStr(value) & " is out of range")
   requireRange(settings.seed, 0, 1_000_000_000)
-  requireRange(settings.height, 1, 16)
+  if settings.kind == Stump:
+    requireRange(settings.height, 0.3, 3)
+  else:
+    requireRange(settings.height, 1, 16)
   requireRange(settings.trunkRadius, 0.06, 1.4)
   requireRange(settings.taper, 0.3, 3)
   requireRange(settings.bend, 0, 1.5)
@@ -253,15 +268,19 @@ proc taperedRadius(radius, fraction, taper: float32): float32 =
 
 proc tube(mesh: var TreeMesh, points: openArray[Vec3],
     radius, taper: float32, sides: int, phase, density: float32,
-    endFraction = 1.0'f) =
-  ## Maps repeating bark by surface distance along transported tube rings.
+    endFraction = 1.0'f, openTop = false) =
+  ## Maps bark by surface distance, optionally leaving a level stump cut.
   let start = mesh.vertices.len.uint32
   var right, previous: Vec3
   for i, point in points:
     let
       t = i.float32 / (points.len - 1).float32
-      direction = normalize(
-        points[min(i + 1, points.high)] - points[max(i - 1, 0)])
+      direction =
+        if openTop:
+          Up
+        else:
+          normalize(points[min(i + 1, points.high)] -
+            points[max(i - 1, 0)])
       width = taperedRadius(radius, t * endFraction, taper)
       perimeter = 2.0'f * sides.float32 * width *
         sin(PI.float32 / sides.float32)
@@ -299,9 +318,13 @@ proc tube(mesh: var TreeMesh, points: openArray[Vec3],
           b = a + (sides + 1).uint32
         mesh.quad(a, a + 1, b + 1, b)
   for edge in [0, points.high]:
+    if openTop and edge == points.high:
+      continue
     let
       normal =
-        if edge == 0:
+        if openTop:
+          -Up
+        elif edge == 0:
           normalize(points[0] - points[1])
         else:
           normalize(points[^1] - points[^2])
@@ -324,6 +347,24 @@ proc tube(mesh: var TreeMesh, points: openArray[Vec3],
         mesh.indices.add [center, b, a]
       else:
         mesh.indices.add [center, a, b]
+
+proc stumpCap(mesh: var TreeMesh, bark: TreeMesh, center: Vec3,
+    ring, sides: int) =
+  ## Maps the sealed cut at a fixed scale around the painted rings' center.
+  const
+    RingCenter = vec2(0.61, 0.5)
+    RingScale = 0.24'f
+  let start = mesh.vertex(center, Up, RingCenter)
+  for j in 0 ..< sides:
+    let
+      position = bark.vertices[ring + j].position
+      offset = position - center
+      # Fixed ring spacing keeps even the widest stump inside opaque wood.
+      uv = RingCenter + vec2(offset.x, -offset.z) * RingScale
+    discard mesh.vertex(position, Up, uv)
+  for j in 0 ..< sides:
+    mesh.indices.add [start, start + 1 + j.uint32,
+      start + 1 + ((j + 1) mod sides).uint32]
 
 proc trunkPoint(points: openArray[Vec3], fraction: float32): Vec3 =
   ## Interpolates a branch attachment along the trunk's actual centerline.
@@ -804,7 +845,7 @@ proc cap(geometry: var TreeGeometry, settings: TreeSettings,
 proc canopy(geometry: var TreeGeometry, settings: TreeSettings,
     trunk: openArray[Vec3]) =
   ## Places offset, irregular radial rings on a cone or rounded envelope.
-  if settings.kind == Leafless or settings.density == 0:
+  if settings.kind in {Leafless, Stump} or settings.density == 0:
     return
   var
     rng = initRand(settings.seed.int64 + 71_921)
@@ -968,8 +1009,17 @@ proc generate*(settings: TreeSettings): TreeGeometry =
     settings.taper,
     settings.radialSides,
     phase,
-    settings.barkDensity
+    settings.barkDensity,
+    endFraction = (if settings.kind == Stump: 0.22'f else: 1.0'f),
+    openTop = settings.kind == Stump
   )
+  if settings.kind == Stump:
+    result.cut.stumpCap(
+      result.bark,
+      trunk[^1],
+      settings.trunkSegments * (settings.radialSides + 1),
+      settings.radialSides
+    )
   for i in 0 ..< settings.roots:
     let
       angle = phase + Tau * i.float32 / settings.roots.float32
@@ -978,21 +1028,34 @@ proc generate*(settings: TreeSettings): TreeGeometry =
       claw = length * settings.rootClaw
       drop = claw * tan(settings.rootAngle * PI.float32 / 180.0'f)
       knee = min(0.1'f, drop * 0.35'f)
+      rootHeight =
+        if settings.kind == Stump:
+          min(settings.trunkRadius * 0.75'f, settings.height * 0.3'f)
+        else:
+          settings.trunkRadius * 0.75'f
+      rootRadius =
+        if settings.kind == Stump:
+          min(settings.trunkRadius * settings.rootThickness,
+            settings.height * 0.45'f)
+        else:
+          settings.trunkRadius * settings.rootThickness
       points = [
-        Up * settings.trunkRadius * 0.75'f,
+        Up * rootHeight,
         direction * (length - claw) * 0.5'f + Up * (knee + 0.06'f),
         direction * (length - claw) + Up * knee,
         direction * length + Up * (knee - drop)
       ]
     result.bark.tube(
       points,
-      settings.trunkRadius * settings.rootThickness,
+      rootRadius,
       1.1'f,
       settings.radialSides,
       angle,
       settings.barkDensity
     )
   for i in 0 ..< settings.branches:
+    if settings.kind == Stump:
+      break
     let
       clearance = min(settings.stemClearance, settings.height * 0.6'f)
       bottom = max(settings.branchStart,
@@ -1028,5 +1091,8 @@ proc generate*(settings: TreeSettings): TreeGeometry =
     result.minimum = min(result.minimum, vertex.position)
     result.maximum = max(result.maximum, vertex.position)
   for vertex in result.foliage.vertices:
+    result.minimum = min(result.minimum, vertex.position)
+    result.maximum = max(result.maximum, vertex.position)
+  for vertex in result.cut.vertices:
     result.minimum = min(result.minimum, vertex.position)
     result.maximum = max(result.maximum, vertex.position)
