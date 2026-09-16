@@ -53,8 +53,9 @@ const
     when defined(emscripten): 256
     else: 512
   FootmanModels*: array[2, string] = [
-    DataRoot & "/characters/mini_legion/human/footman.glb",
-    DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb"
+    # Red/Dire uses undead; blue/Radiant uses humans, including nexus creeps.
+    DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb",
+    DataRoot & "/characters/mini_legion/human/footman.glb"
   ]
   HeroModelPath* = DataRoot & "/characters/modular_chars/character.glb"
   HeroTargetHeight* = 1.7'f
