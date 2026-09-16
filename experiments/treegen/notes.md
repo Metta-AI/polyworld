@@ -6,8 +6,9 @@ Run from the Polyworld repository:
 nim r experiments/treegen/treegen.nim
 ```
 
-The left panel contains nine presets across leafless, evergreen, and round
-broadleaf trees. Cycle Previous Preset and Next Preset, randomize the seed,
+The left panel contains ten presets across leafless, evergreen, round
+broadleaf trees, and stumps. Cycle Previous Preset and Next Preset,
+randomize the seed,
 then tune the Trunk, Branches, Canopy, Leaves, and Colors tabs.
 Drag the parameter tracks.
 The parameter area scrolls independently. The current seed is displayed
@@ -22,7 +23,20 @@ selected seed in the center with its immediate neighbors on either side.
 
 Save preset writes `presets/custom.json`. Load restores that recipe.
 Export GLB writes `exports/tree-SEED.glb` with embedded textures and
-separate bark and foliage materials. Exports use the selected center seed.
+separate bark, foliage, or cut-wood materials as needed.
+Exports use the selected center seed.
+
+## Stumps
+
+The Stump preset keeps the roots and a short trunk with a flat cut surface.
+Cut height in the Trunk tab ranges from 0.3 to 3 world units. Radius, taper,
+bend, polygon resolution, and the root controls also apply. The trunk keeps
+a broad top, and roots stay below the cut. Stumps have no branches or leaves.
+The cut surface shares the trunk's rim positions and maps the supplied
+`assets/stump-rings.png` texture once across the disk. Its UVs stay inside
+the painted wood so the texture's transparent border cannot create holes.
+Ring spacing stays constant in world units. Narrow cuts zoom into the
+painted ring center and show fewer rings; wider cuts reveal more rings.
 
 ## Canopy construction
 
@@ -76,7 +90,11 @@ After replacing the foliage atlas, regenerate them with
 `python3 experiments/treegen/tools/gen_trims.py` (requires Pillow).
 The source PNG is read unchanged.
 
-The supplied v8 foliage atlas is copied unchanged into `assets`.
+All three tree texture assets are 512 by 512 pixels. The supplied v8 foliage
+atlas and bark texture are downsampled with alpha-aware Lanczos filtering;
+the supplied 512-pixel stump texture is copied unchanged. Source images are
+preserved. The foliage atlas keeps the same normalized UV layout, with
+128-pixel cells in its four-by-four grid.
 Its first row contains four top-down cap textures. Evergreens use the first
 tile, and broadleaf trees choose one of the other three from their seed.
 The middle two rows contain eight broadleaf trims, and the bottom row
@@ -95,7 +113,7 @@ so smaller limbs sample less texture instead of squeezing in a whole tile.
 The orientation follows bends without flipping. Cut ends use planar UVs at
 the same density. Both texture axes repeat, including in exported GLBs.
 
-Both materials use the shared `polyworld/toon`
+All materials use the shared `polyworld/toon`
 renderer, and alpha-cutout leaves participate in its sun shadow pass.
 
 Generation uses local random streams for wood and foliage. The same seed
@@ -111,11 +129,12 @@ nim r experiments/treegen/tests/tests.nim
 nim c -o:/tmp/treegen experiments/treegen/treegen.nim
 /tmp/treegen --preset=3 --seed=42 --gallery
 /tmp/treegen --preset=6 --smoke --screenshot=/tmp/treegen-bare.png
+/tmp/treegen --preset=9 --pitch=0.65 --smoke --screenshot=/tmp/stump.png
 /tmp/treegen --preset=0 --export=/tmp/tree.glb
 /tmp/treegen --load=experiments/treegen/presets/custom.json
 ```
 
-Preset indices follow the dropdown order, from 0 to 8. `--frames=N`
+Preset indices follow the dropdown order, from 0 to 9. `--frames=N`
 runs a hidden preview for a bounded number of frames. `--screenshot=PATH`
 captures the final frame and defaults to four frames. `--export=PATH`
 exports directly without opening a window.
