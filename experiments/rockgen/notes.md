@@ -12,6 +12,37 @@ angular rocks, low compact boulders, slabs, pebbles, and leaning shards.
 The seed controls the silhouette, trim selection, face shading, and details.
 Compare three seeds shows the selected rock between its neighboring seeds.
 
+## Using rocks in a game
+
+Import `polyworld/rockgen` to generate a standard renderable `gltf.Node`:
+
+```nim
+import polyworld/rockgen
+
+var settings = rockgen.preset(0, seed = 42)
+settings.floorCut = 0.5
+let rock = rockgen.generate(settings)
+```
+
+Pass this node directly to the game's renderer, for example `toon.draw(rock)`.
+It contains the mesh, flat normals, UVs, vertex shading, tinted material,
+and trim texture. GPU upload and cleanup follow the renderer's normal node
+lifecycle. Generation needs no window, GLB files, or experiment imports.
+The 512-pixel atlas lives in `polyworld_data/terrain/rockgen` and loads at
+runtime through the shared asset path. Run native programs from the Polyworld
+repository. Browser builds package the atlas in `.data`, outside `.wasm`.
+
+`generateGeometry(settings)` returns the mesh, face regions, and bounds for
+callers that need to inspect them. For many rocks sharing one material,
+call `loadMaterials()` once, apply `materials.tint(settings)`, then use
+`rockNode(generateGeometry(settings), materials)` for each seed. Those nodes
+share the material and texture; tinting that material affects all of them.
+Each one-call `generate(settings)` instead creates its own material.
+
+The experiment uses these same public geometry and node functions. Editor
+controls, recipe files, the preview floor, and optional GLB export remain
+under `experiments/rockgen`.
+
 ## Controls
 
 - Shape sets dimensions, side planes, crown cuts, irregularity, taper,
@@ -100,8 +131,8 @@ lightweight approximation of the reference's richer painted texture.
 
 ## Texture
 
-`assets/rock-trim-atlas.png` is the exact 1254 by 1254 image supplied for
-this experiment. It uses the normalized four-by-four layout:
+`polyworld_data/terrain/rockgen/rock-trim-atlas.png` is the supplied atlas
+downsampled to 512 by 512. It keeps the normalized four-by-four layout:
 
 | Row | Column 1 | Column 2 | Column 3 | Column 4 |
 | --- | --- | --- | --- | --- |
@@ -128,7 +159,9 @@ the current shared writer omits base-color sampler settings.
 ## Checks and captures
 
 ```sh
+nim check src/polyworld/rockgen.nim
 nim check experiments/rockgen/rockgen.nim
+nim r tests/test_rockgen.nim
 nim r experiments/rockgen/tests/tests.nim
 nim r experiments/rockgen/tests/bench_rocks.nim
 nim c -o:experiments/rockgen/rockgen experiments/rockgen/rockgen.nim

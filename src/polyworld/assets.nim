@@ -45,6 +45,13 @@ const
   GrassPath* = DataRoot & "/terrain/low_poly_grass.glb"
   PaintedRockPath* = DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb"
   PaintedRockNames* = ["rock_large_02a", "rock_medium_01a"]
+  GeneratorTextureSize* = 512
+  TreegenTextures* = [
+    DataRoot & "/terrain/treegen/tree-foliage-atlas.png",
+    DataRoot & "/terrain/treegen/bark.png",
+    DataRoot & "/terrain/treegen/stump-rings.png"
+  ]
+  RockgenTexture* = DataRoot & "/terrain/rockgen/rock-trim-atlas.png"
   DefaultTerrainAssets* = TerrainAssets(
     grass: true, water: true, size: 1024, materials: CartoonMaterials
   )

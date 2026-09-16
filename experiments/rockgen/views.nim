@@ -1,82 +1,11 @@
 import
   std/[json, os],
   chroma, flatty/binny, gltf, jsony, pixie, vmath,
-  rocks
+  polyworld/rockgen
 
 const
   ExperimentDirectory* = currentSourcePath().parentDir
-  AtlasPath* = ExperimentDirectory / "assets/rock-trim-atlas.png"
   CustomPath* = ExperimentDirectory / "presets/custom.json"
-
-type RockMaterials* = object
-  stone*, regions*: Material
-
-proc loadMaterials*(): RockMaterials =
-  ## Loads the supplied atlas without changing its pixels or tile layout.
-  var atlas: Image
-  try:
-    atlas = loadStraightAlphaImage(AtlasPath)
-  except IOError, PixieError:
-    raise newException(RockgenError, "Cannot load rock atlas: " &
-      getCurrentExceptionMsg())
-  if atlas.width != atlas.height or atlas.width < 16:
-    raise newException(RockgenError, "Rock atlas must be a square image")
-  let
-    sampler = TextureSampler(
-      magFilter: LinearMagFilter, minFilter: LinearMinFilter,
-      wrapS: ClampToEdgeWrap, wrapT: ClampToEdgeWrap
-    )
-    white = newImage(1, 1)
-  white.fill(color(1, 1, 1, 1))
-  result.stone = Material(
-    name: "Tintable rock trim", baseColor: atlas,
-    baseColorSampler: sampler, baseColorFactor: color(1, 1, 1, 1),
-    roughnessFactor: 1, alphaMode: OpaqueAlphaMode
-  )
-  result.regions = Material(
-    name: "Face regions", baseColor: white,
-    baseColorSampler: sampler, baseColorFactor: color(1, 1, 1, 1),
-    roughnessFactor: 1, alphaMode: OpaqueAlphaMode
-  )
-
-proc tint*(materials: RockMaterials, settings: RockSettings) =
-  ## Multiplies the gray texture by the selected rock color.
-  materials.stone.baseColorFactor = color(
-    settings.tint.x, settings.tint.y, settings.tint.z, 1
-  )
-
-proc rockNode*(
-  geometry: RockGeometry,
-  materials: RockMaterials,
-  showRegions = false
-): Node =
-  ## Converts the flat generated mesh into one textured or diagnostic node.
-  let primitive = Primitive(
-    material: (if showRegions: materials.regions else: materials.stone),
-    mode: TrianglesMode, indices32: geometry.mesh.indices
-  )
-  for vertex in geometry.mesh.vertices:
-    primitive.points.add vertex.position
-    primitive.normals.add vertex.normal
-    primitive.uvs.add vertex.uv
-    var shade = vec3(vertex.shade)
-    if showRegions:
-      case vertex.region
-      of Edge:
-        shade = vec3(1, 0.62, 0.18)
-      of Fill:
-        shade = vec3(0.22, 0.68, 0.7)
-      of Detail:
-        shade = vec3(0.92, 0.28, 0.62)
-    primitive.colors.add rgbx(
-      (shade.x * 255).uint8, (shade.y * 255).uint8,
-      (shade.z * 255).uint8, 255
-    )
-  result = Node(
-    name: "Generated rock", visible: true,
-    scale: vec3(1), rot: quat(0, 0, 0, 1),
-    mesh: Mesh(name: "Rock", primitives: @[primitive])
-  )
 
 proc groundNode*(): Node =
   ## Creates a neutral floor for the common toon renderer's sun shadows.
@@ -152,13 +81,12 @@ proc preserveSampler(path: string, sampler: TextureSampler) =
 proc exportRock*(settings: RockSettings, path: string) =
   ## Writes a portable GLB with the supplied atlas embedded in its material.
   let
-    geometry = generate(settings)
-    materials = loadMaterials()
-  materials.tint(settings)
+    node = generate(settings)
+    sampler = node.mesh.primitives[0].material.baseColorSampler
   try:
     createDir(path.parentDir)
-    rockNode(geometry, materials).writeGLB(path)
-    preserveSampler(path, materials.stone.baseColorSampler)
+    node.writeGLB(path)
+    preserveSampler(path, sampler)
   except IOError, OSError, GltfError, ValueError, JsonParsingError:
     raise newException(RockgenError, "Cannot export rock: " &
       getCurrentExceptionMsg())

@@ -1,7 +1,7 @@
 import
   std/math,
   pixie, vmath,
-  ../[trees, views]
+  polyworld/treegen
 
 type
   Face = object
@@ -126,10 +126,10 @@ proc testCrossings*() =
   for index in 0 .. 5:
     for seed in [0, 42, 999]:
       var settings = preset(index, seed)
-      let separated = generate(settings)
+      let separated = generateGeometry(settings)
       settings.separateLeaves = false
       let
-        original = generate(settings)
+        original = generateGeometry(settings)
         before = original.crossings(atlas)
         after = separated.crossings(atlas)
       echo PresetNames[index], " seed ", seed, ": ", before, " -> ", after,
@@ -147,6 +147,6 @@ proc testCrossings*() =
     settings.leafWidth = 2.0'f
     settings.droop = 1.5'f
     settings.curl = 0.8'f
-    let geometry = generate(settings)
+    let geometry = generateGeometry(settings)
     doAssert geometry.cards > 0
     doAssert geometry.crossings(atlas) == 0
