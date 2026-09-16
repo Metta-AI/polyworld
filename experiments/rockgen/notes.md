@@ -16,9 +16,18 @@ Compare three seeds shows the selected rock between its neighboring seeds.
 
 - Shape sets dimensions, side planes, crown cuts, irregularity, taper,
   crown slope, lean, shoulder height, corner clipping, and local chips.
+  Remove bottom triangles omits the flat ground-contact cap, including its
+  fill and trim. It defaults to off and applies to the preview and export.
+  Floor (%) cuts away 0 to 90 percent of the original height and lowers
+  the remaining rock to ground level. At 50 percent, half the rock remains;
+  at 90 percent, only the top tenth remains. Any positive floor cut leaves
+  an open base automatically. The preview floor meets this open boundary,
+  so there is no horizontal rock face competing with the ground surface.
 - Surface sets trim width, worn-edge probability, detail probability,
   square size, detail offset, crack or scuff selection, variation between
-  faces, and a subtle surface wash carried by vertex colors.
+  faces, and a subtle surface wash carried by vertex colors. Fill
+  subdivisions defaults to 0. Set it to 1 or 2 for finer surface shading
+  at the cost of more triangles. Disabling Surface wash skips subdivisions.
 - Colors multiplies the gray atlas by an RGB tint and adjusts the sun.
 - Face regions colors trim amber, fill teal, and detail patches pink.
 - Wireframe reveals the actual mesh triangulation. Combine it with Face
@@ -57,12 +66,26 @@ center rock with the textured material, including while inspecting regions.
    Insert their intersection points into both the trim and fill boundaries.
    Triangulate the four surrounding sectors and give the square exactly
    two triangles. All subdivisions retain the original plane and normal.
-6. Add interior vertices to large fill triangles and improve their shapes
-   by flipping interior diagonals. This keeps boundary edges and detail
-   squares intact. Sample seeded smooth noise into grayscale vertex colors
-   to give the planes a subtle wash. Surface wash changes the color only.
+6. Triangulate each fill polygon using its boundary vertices. A polygon
+   with N corners uses N minus 2 triangles. Faces with no trim or details
+   omit the inner ring completely. Sample seeded smooth noise into vertex
+   colors for a subtle wash. Optional subdivisions add interior samples
+   and flip interior diagonals to improve their spacing. They preserve
+   the rock silhouette, flat face normals, trim, and detail squares.
+7. If Floor (%) is positive, clip the textured triangles at that height
+   and translate the remaining geometry down to ground level. Interpolate
+   UVs and vertex colors along cut edges, preserving texture placement.
+   Details intersecting the floor become partial patches. Do not add a cap
+   to the cut, and update the bounds and counts to the exposed geometry.
 
-The closed solid keeps shared positions across face boundaries. Normals
+The default mesh uses 322 to 440 triangles across the nine presets at seed
+42, down from 1,616 to 2,146. The extra triangles in the previous version
+only made the vertex wash more detailed. The trim texture, cracks, chips,
+and silhouette do not require them. Keep Fill subdivisions at 0 for normal
+gameplay rocks; use 1 or 2 when the finer wash is useful in close-up views.
+
+The solid keeps shared positions across face boundaries. Removing the
+bottom leaves an open boundary at ground height. Normals
 and UVs split at those boundaries for flat shading and independent texture
 placement. Tint changes only the material. Geometry rebuilds when shape,
 surface settings, seed, or the inspection mode changes.
@@ -113,6 +136,7 @@ experiments/rockgen/rockgen --preset=0 --seed=42 --gallery
 experiments/rockgen/rockgen --preset=1 --smoke --screenshot=tmp/rock.png
 experiments/rockgen/rockgen --regions --wireframe --smoke
 experiments/rockgen/rockgen --sheet --screenshot=tmp/rockgen-sheet.png
+experiments/rockgen/rockgen --fill-subdivisions=2 --preset=0
 experiments/rockgen/rockgen --preset=0 --export=tmp/rock.glb
 experiments/rockgen/rockgen --load=experiments/rockgen/presets/custom.json
 ```
@@ -122,10 +146,12 @@ presets as a 3 by 3 image using consecutive seeds. `--frames=N` runs a
 hidden preview for N frames. `--screenshot=PATH` defaults to four hidden
 frames. `--no-panel` captures only the preview. `--yaw=RADIANS` and
 `--pitch=RADIANS` set the camera. `--export=PATH` runs without a window.
+`--fill-subdivisions=0|1|2` overrides the preset for preview, sheet, or export.
 
 Tests verify seeded determinism, closed mesh edges, triangle winding,
 face area coverage, coplanarity, square patches, UV region selection,
 parameter bounds, preset serialization, and an embedded-texture GLB
 round trip. They also exercise corner cuts and surface controls at their
-limits. The benchmark measures complete CPU geometry generation, including
-the interior triangulation and vertex wash.
+limits, enforce the default triangle budget, and verify that changing fill
+density preserves the shape and textured regions. The benchmark measures
+complete CPU geometry generation, including triangulation and vertex wash.
