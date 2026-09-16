@@ -83,6 +83,9 @@ proc advance*(lane: TrainingLane, action: int32 = 0) =
     game.world.heroTurnStart = (game.world.heroTurnStart + 1) mod game.world.heroes.len
     discard lane.cursor()
     doAssert finished(lane.cursor)
+    for vm in game.heroVms:
+      lane.transition.maxWork = max(lane.transition.maxWork, vm.lastWork)
+      lane.transition.maxInstructions = max(lane.transition.maxInstructions, vm.lastInstructions)
     lane.inTick = false
 
 proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
@@ -118,9 +121,12 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
 
 proc reset*(batch: TrainingBatch, seed: int) =
   for index in 0 ..< batch.lanes.len:
+    let nextSeed =
+      if seed == -1: batch.lanes[index].seed + batch.lanes.len
+      else: seed * batch.lanes.len + index
     batch.lanes[index].game.heroVms.setLen(0)
     batch.lanes[index].cursor = nil
-    batch.lanes[index] = batch.newLane(seed * batch.lanes.len + index)
+    batch.lanes[index] = batch.newLane(nextSeed)
 
 proc newTrainingBatch*(config: GotaConfig, bot, opponent, policy: string,
                        count, maxTicks: int): TrainingBatch =
