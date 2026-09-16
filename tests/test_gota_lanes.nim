@@ -28,7 +28,7 @@ proc standingTile(creep: Footman): PathTile =
 echo "Testing living tower and barracks footprints across supported map sizes"
 for size in [64, 116, 256]:
   let game = quietGame(size)
-  doAssert game.world.buildings.len == 30
+  doAssert game.world.buildings.len == 34
   for building in game.world.buildings:
     doAssert building.footprint.len > 0
     for tile in building.footprint:

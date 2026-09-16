@@ -131,9 +131,17 @@ echo "Game terrain matches every editor tile and movement edge."
 echo "Checking generated towers, hero spawns, and paired barracks in play."
 let game = newGame(map, 100_000, 10, false, ReplayData())
 game.world.heroTurnTicks = 100_000
-doAssert game.world.buildings.len == 30
+doAssert game.world.buildings.len == 34
 for tower in game.world.buildings:
   if tower.kind != TowerBuilding:
+    continue
+  if tower.guardsGod:
+    var found = false
+    for site in map.layout.guards[tower.team.ord]:
+      if tower.position.x == site.position.x * (WorldScale div PathUnitsPerTile) and
+          tower.position.z == site.position.z * (WorldScale div PathUnitsPerTile):
+        found = true
+    doAssert found
     continue
   let point = map.layout.towers[tower.lane][tower.team.ord][tower.tier.ord].position
   doAssert tower.position.x == point.x * (WorldScale div PathUnitsPerTile)

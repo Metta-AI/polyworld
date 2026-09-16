@@ -341,7 +341,8 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         kind: (if tower.kind == BarracksBuilding: SelectedBarracks
           else: SelectedTower),
         team: tower.team,
-        callsign: (if tower.kind == BarracksBuilding: "BARRACKS" else: role),
+        callsign: (if tower.kind == BarracksBuilding: "BARRACKS"
+          elif tower.guardsGod: "GOD GUARD" else: role),
         classLabel: (if tower.kind == BarracksBuilding: "BARRACKS" else: "TOWER"),
         status:
           if tower.hp <= 0:
@@ -365,8 +366,11 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         kind: SelectedGod,
         team: fort.team,
         callsign: "GOD",
-        classLabel: "FORT",
-        status: if fort.hp > 0: "Defending" else: "Fallen",
+        classLabel: (if fort.team == RedTeam: "WARLOCK" else: "DRUID"),
+        status:
+          if fort.hp <= 0: "Fallen"
+          elif fortExposed(run.world, fort.team): "Exposed"
+          else: "Protected by god guards",
         hp: max(fort.hp, 0'i32).float32,
         maxHp: FortHp.float32,
         level: 1

@@ -99,6 +99,12 @@ proc generateMap*(
     hash.addHashy(site.spawn.z)
     hash.addHashy(site.lane)
     hash.addHashy(site.team)
+  for team in savedArena.layout.guards:
+    for site in team:
+      hash.addHashy(site.position.x)
+      hash.addHashy(site.position.z)
+      hash.addHashy(site.facing.x)
+      hash.addHashy(site.facing.z)
   for lane in savedArena.layout.lanes:
     for point in lane:
       hash.addHashy(point.x)

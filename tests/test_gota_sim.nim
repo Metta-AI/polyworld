@@ -143,7 +143,10 @@ block:
   run.world.buildings[lane[InnerTower]].hp = 0
   doAssert buildingExposed(run.world, run.world.buildings[lane[GateTower]])
   run.world.buildings[lane[GateTower]].hp = 0
-  doAssert fortExposed(run.world, RedTeam)
+  doAssert not fortExposed(run.world, RedTeam)
+  for tower in run.world.buildings:
+    if tower.team == RedTeam and tower.guardsGod:
+      doAssert buildingExposed(run.world, tower)
 
 echo "Testing towers prefer footmen and attack once per period"
 block:

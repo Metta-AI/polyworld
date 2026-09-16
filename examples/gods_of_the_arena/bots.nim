@@ -302,6 +302,30 @@ proc initHeroHost(heroId: int32): Host =
         heroIndex(activeGame.world, heroId), activeGame.world.tick
       )
     int32(accepted)
+  let attackMoveProc: HostProc = proc(
+      arguments: openArray[int32]
+  ): int32 =
+    ## Records and applies the same attack-move order used by human players.
+    try:
+      if activeGame.recorder != nil:
+        activeGame.recorder.record ReplayAction(
+          tick: uint32(activeGame.world.tick),
+          heroId: heroId,
+          kind: ActionAttackMove,
+          first: arguments[0],
+          second: arguments[1]
+        )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyAttackMove(
+      heroId, arguments[0], arguments[1]
+    )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
   let attackTargetProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -495,6 +519,7 @@ proc initHeroHost(heroId: int32): Host =
   discard result.addFunction("objectHp", 1, objectHpProc, 4)
   discard result.addFunction("objectAlive", 1, objectAliveProc, 4)
   discard result.addFunction("walkTo", 2, walkToProc, 800)
+  discard result.addFunction("attackMove", 2, attackMoveProc, 800)
   discard result.addFunction("attackTarget", 1, attackTargetProc, 20)
   discard result.addFunction("itemId", 1, itemIdProc, 4)
   discard result.addFunction("itemCount", 1, itemCountProc, 4)
