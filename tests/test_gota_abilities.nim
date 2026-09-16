@@ -87,6 +87,15 @@ block:
       tier: OuterTower,
       hp: 600
     )
+  for i in 0 ..< 2:
+    world.buildings.add Building(
+      id: int32(28 + i),
+      team: BlueTeam,
+      lane: -1,
+      tier: GateTower,
+      guardsGod: true,
+      hp: 1950
+    )
   hero.attackObjectId = 11
   doAssert not world.applyUseItem(hero.id, 0)
   hero.attackObjectId = 2
@@ -97,6 +106,10 @@ block:
   doAssert world.buildings[1].hp == 800 - PoisonPotion.itemSpec.strike
   world.buildings[1].hp = 0
   hero.attackObjectId = 2
+  doAssert not world.applyUseItem(hero.id, 0)
+  world.buildings[4].hp = 0
+  doAssert not world.applyUseItem(hero.id, 0)
+  world.buildings[5].hp = 0
   world.forts[1].center.x = heroAttackRange(hero.class) + 1
   doAssert not world.applyUseItem(hero.id, 0)
   world.forts[1].center.x -= 1

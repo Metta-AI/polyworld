@@ -33,6 +33,8 @@ const
 
 type
   GraphicsError = object of CatchableError
+  GodAnimation = enum
+    GodIdle, GodDeath, GodVictory
 
 proc renderPoint(position: WorldPoint): Vec3 =
   ## Converts authoritative integer coordinates at the rendering boundary.
@@ -200,7 +202,7 @@ proc runGraphics*() =
     footmanModels: array[Team, CharacterModel]
     footmanRenderClips: array[Team, array[6, int]]
     godModels: array[Team, CharacterModel]
-    godRenderClips: array[Team, array[6, int]]
+    godRenderClips: array[Team, array[GodAnimation, int]]
     heroModels: array[HeroClass, CharacterModel]
     heroRenderClips: array[5, int]
   profileBlock "models":
@@ -218,12 +220,9 @@ proc runGraphics*() =
       let god = loadCharacterModel(GodModels[ord(team)], GodTargetHeight)
       godModels[team] = god
       godRenderClips[team] = [
-        god.clipIndex("Run"),
         god.clipIndex("Idle"),
         god.clipIndex("Death"),
-        god.clipIndex("Victory"),
-        god.clipIndex("Attack01"),
-        god.clipIndex("Attack02")
+        god.clipIndex("Victory")
       ]
     for class in HeroClass:
       heroModels[class] = loadModularCharacterModel(
@@ -411,14 +410,14 @@ proc runGraphics*() =
     god.position = renderPoint(run.world.forts[i].center)
     god.facing = arctan2(-god.position.x, -god.position.z)
 
-  proc godClip(god: God): int =
+  proc godClip(god: God): GodAnimation =
     ## Selects the god animation for the current game state.
     if not run.world.gameOver:
-      idleClip
+      GodIdle
     elif god.team == run.world.winner:
-      victoryClip
+      GodVictory
     else:
-      deathClip
+      GodDeath
 
   proc heroSizeFactor(hero: Hero): float32 =
     ## Returns the small visual scale increase earned through hero levels.
@@ -1889,7 +1888,7 @@ proc runGraphics*() =
             god.animTime = min(
               god.animTime,
               clipDuration(
-                godModels[god.team], godRenderClips[god.team][deathClip])
+                godModels[god.team], godRenderClips[god.team][GodDeath])
             )
 
       feedGotaActions()
