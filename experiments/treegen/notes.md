@@ -26,6 +26,31 @@ Export GLB writes `exports/tree-SEED.glb` with embedded textures and
 separate bark, foliage, or cut-wood materials as needed.
 Exports use the selected center seed.
 
+## Use in a game
+
+The shared generator lives in `src/polyworld/treegen.nim`. Import it directly:
+
+```nim
+import polyworld/treegen
+
+let
+  settings = preset(3, seed = 42)
+  tree = generate(settings)
+```
+
+`generate` returns a standard glTF `Node` with meshes, tinted materials, and
+textures ready for the game's renderer. Add it to your scene or pass it to
+the toon renderer's `draw` procedure. GPU upload happens when it is rendered.
+The 512-pixel textures load from `polyworld_data/terrain/treegen` at runtime.
+Run native programs from the Polyworld repository. Browser builds package
+these shared textures in `.data`, outside `.wasm`.
+
+`generateGeometry` returns the flat `TreeGeometry` data for callers that need
+mesh statistics or direct vertex access. `loadMaterials`, `tint`, and
+`treeNode` let callers reuse materials when assembling several trees.
+The experiment uses these same shared procedures for its preview.
+Preset JSON and GLB export remain editor utilities in `views.nim`.
+
 ## Stumps
 
 The Stump preset keeps the roots and a short trunk with a flat cut surface.
@@ -33,7 +58,8 @@ Cut height in the Trunk tab ranges from 0.3 to 3 world units. Radius, taper,
 bend, polygon resolution, and the root controls also apply. The trunk keeps
 a broad top, and roots stay below the cut. Stumps have no branches or leaves.
 The cut surface shares the trunk's rim positions and maps the supplied
-`assets/stump-rings.png` texture once across the disk. Its UVs stay inside
+`polyworld_data/terrain/treegen/stump-rings.png` texture once across the disk.
+Its UVs stay inside
 the painted wood so the texture's transparent border cannot create holes.
 Ring spacing stays constant in world units. Narrow cuts zoom into the
 painted ring center and show fewer rings; wider cuts reveal more rings.
@@ -85,12 +111,13 @@ This also applies to exported trees and does not run physics each frame.
 The default presets retain about 100 cards on average with separation enabled.
 Very crowded settings can omit more cards rather than reintroduce crossings.
 
-The trim outlines in `trims.nim` are generated from the atlas alpha at 0.45.
+The outlines in `src/polyworld/treegen/trims.nim` come from atlas alpha at 0.45.
 After replacing the foliage atlas, regenerate them with
-`python3 experiments/treegen/tools/gen_trims.py` (requires Pillow).
+`python3 tools/gen_tree_trims.py` (requires Pillow).
 The source PNG is read unchanged.
 
-All three tree texture assets are 512 by 512 pixels. The supplied v8 foliage
+All three assets in `polyworld_data/terrain/treegen` are 512 by 512 pixels.
+The supplied v8 foliage
 atlas and bark texture are downsampled with alpha-aware Lanczos filtering;
 the supplied 512-pixel stump texture is copied unchanged. Source images are
 preserved. The foliage atlas keeps the same normalized UV layout, with
@@ -104,7 +131,7 @@ darkening at each branch attachment and the brighter leaf tips. Presets use
 zero Shade variation so whole leaf cards receive the same brightness factor.
 The Shade variation slider remains available for deliberate variation.
 
-Bark uses the separate, supplied tileable `assets/bark.png` texture.
+Bark uses the supplied tileable `polyworld_data/terrain/treegen/bark.png`.
 Its luminance is neutralized in memory so the Bark RGB controls set its color.
 The Colors tab has Bark texture for contrast and Bark density for repeats
 per world unit. Higher density gives smaller details. UVs follow measured

@@ -3,7 +3,7 @@
 import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  assets, brushes, content, landscapes, sim, game, maps, replays, ui, walls,
+  assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
@@ -30,8 +30,6 @@ const
   CryptFortSurface = CryptRockSurface + 2
   CryptRoadSurface = CryptRockSurface + 3
   CryptSpawnSurface = CryptRockSurface + 4
-  # Match crypt-rock-1's mean RGB while preserving the rock texture detail.
-  CryptRockTint = vec3(0.993051'f, 0.760436'f, 0.854697'f)
 
 type
   GraphicsError = object of CatchableError
@@ -138,10 +136,8 @@ proc runGraphics*() =
   profileBlock "terrain":
     amplitude = 2.8'f
     seed = ArenaSeed
-    treeHeight = 5.8'f / 2
-    treeWidth = 0.0'f
     initTerrain(
-      GotaTreeStyle, GeneratedTerrain, PaintedRocks, ArenaTextures,
+      GotaTreeStyle, GeneratedTerrain, NoRocks, ArenaTextures,
       settings = GotaTerrainAssets
     )
     terrainUnboostedMaterial = CourtyardSurface.float32
@@ -361,6 +357,7 @@ proc runGraphics*() =
   var
     towerPacks: array[Team, PropPack]
     decorPack: PropPack
+    grove: Grove
   let brush = mixBrush(layers[GroundLayer], run.map.preset.seed)
   profileBlock "props":
     for team in Team:
@@ -378,49 +375,8 @@ proc runGraphics*() =
     for nodes in ArenaDecorNodes:
       for name in nodes:
         doAssert decorPack.hasProp(name), "missing arena decoration: " & name
-    let
-      darkTreePack = loadPropPack(
-        darkTreePaths(),
-        textured = true,
-        textureSize = FortTextureSize,
-        mergeNodes = true
-      )
-      boulders = loadPropPack(
-        propPaths(PaintedRockPath, GotaBoulderNames),
-        only = @GotaBoulderNames,
-        textured = true,
-        repeatTexture = true,
-        textureSize = GotaDecorTextureSize
-      )
-    treeTileBrightness = brush.trees
-    darkTreePack.plantRocks(
-      DarkTreeNames,
-      ArenaRockKind,
-      run.map.preset.seed,
-      height = treeHeight,
-      sizeRange = vec2(0.85'f, 1.3'f),
-      burial = 0.03'f,
-      mask = brush.darkTrees
-    )
-    boulders.plantRocks(
-      GotaBoulderNames,
-      ArenaRockKind,
-      ArenaSeed,
-      height = 1.6'f,
-      sizeRange = vec2(0.5'f, 1.5'f),
-      burial = 0.4'f,
-      tint = CryptRockTint,
-      mask = brush.darkRocks
-    )
-    boulders.plantRocks(
-      GotaBoulderNames,
-      TreeTile,
-      ArenaSeed,
-      height = 1.6'f,
-      sizeRange = vec2(0.5'f, 1.5'f),
-      burial = 0.4'f,
-      mask = brush.lightRocks
-    )
+    grove = generateGrove(run.map.preset.seed)
+    grove.plantGrove(brush, run.map.preset.seed)
     for camp in run.map.layout.camps:
       let center = renderSite(camp)
       decorPack.placeProp("wood_crate_01a", center, scale = 0.6'f)
@@ -430,19 +386,11 @@ proc runGraphics*() =
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
     for i, color in run.map.minimap.mpairs:
-      let tile = layers[GroundLayer].tiles[i]
       var tint = terrainTileColor(GroundLayer, i) * 1.25'f
       if layers[WaterLayer].tiles[i].exists:
         tint = vec3(69, 135, 161) / 255'f
-      elif treeTileBrightness[i] > 0:
-        tint = vec3(55, 83, 40) / 255'f * treeTileBrightness[i]
-      elif brush.darkTrees[i]:
-        tint = vec3(58, 35, 26) / 255'f
-      elif tile.kind == ArenaRockKind:
-        tint = terrainTileColor(GroundLayer, i) * 0.88'f
-      elif tile.kind == TreeTile:
-        # Light-side replacement rocks retain their natural gray color.
-        tint = vec3(85, 85, 81) / 255'f
+      elif grove.colors[i] != vec3(0):
+        tint = grove.colors[i]
       color = uint32(clamp(tint.x * 255, 0'f, 255'f)) shl 16 or
         uint32(clamp(tint.y * 255, 0'f, 255'f)) shl 8 or
         uint32(clamp(tint.z * 255, 0'f, 255'f))

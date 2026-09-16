@@ -1,7 +1,12 @@
 import
   std/[math, os],
   gltf, vmath,
-  ../[trees, views], crossings
+  polyworld/[assets, treegen],
+  ../views, crossings
+
+const
+  AtlasPath = TreegenTextures[0]
+  StumpPath = TreegenTextures[2]
 
 proc checkMesh(mesh: TreeMesh, atlas = false) =
   ## Checks finite geometry, unit normals, valid triangles, and UVs.
@@ -29,11 +34,11 @@ proc testRecipes() =
     for seed in [0, 42, 999, 1_000_000_000]:
       let
         settings = preset(i, seed)
-        geometry = generate(settings)
+        geometry = generateGeometry(settings)
       geometry.bark.checkMesh()
       geometry.foliage.checkMesh(atlas = true)
       geometry.cut.checkMesh(atlas = true)
-      doAssert geometry == generate(settings)
+      doAssert geometry == generateGeometry(settings)
       if settings.kind != Stump:
         doAssert geometry.cut.vertices.len == 0
       if settings.kind in {Leafless, Stump}:
@@ -52,32 +57,62 @@ proc testRecipes() =
             doAssert vertex.uv.y > 0.75
           else:
             doAssert vertex.uv.y > 0.25 and vertex.uv.y < 0.75
-    doAssert generate(preset(i, 42)) != generate(preset(i, 43))
+    doAssert generateGeometry(preset(i, 42)) != generateGeometry(preset(i, 43))
+
+proc testNodes() =
+  ## Checks the game-facing generator returns directly renderable nodes.
+  for i in 0 .. PresetNames.high:
+    let
+      settings = preset(i)
+      node = generate(settings)
+      geometry = generateGeometry(settings)
+      bark = node.mesh.primitives[0]
+    doAssert node.visible and node.scale == vec3(1)
+    doAssert bark.points.len == geometry.bark.vertices.len
+    doAssert bark.indices32 == geometry.bark.indices
+    doAssert abs(bark.material.baseColorFactor.r -
+      settings.barkColor.x) < 0.001
+    doAssert node.mesh.primitives.len ==
+      (if settings.kind == Leafless: 1 else: 2)
+    for primitive in node.mesh.primitives:
+      doAssert primitive.mode == TrianglesMode
+      doAssert primitive.normals.len == primitive.points.len
+      doAssert primitive.uvs.len == primitive.points.len
+      doAssert primitive.material.baseColor.width == 512
+      doAssert primitive.material.baseColor.height == 512
+    if settings.kind in {Evergreen, Broadleaf}:
+      let foliage = node.mesh.primitives[1]
+      doAssert foliage.indices32 == geometry.foliage.indices
+      doAssert foliage.material.alphaMode == MaskAlphaMode
+      doAssert abs(foliage.material.baseColorFactor.g -
+        settings.leafColor.y) < 0.001
+    elif settings.kind == Stump:
+      doAssert node.mesh.primitives[1].indices32 == geometry.cut.indices
 
 proc testControls() =
   ## Checks independent color, density, and branch controls at boundaries.
   var settings = preset(0)
   settings.separateLeaves = false
-  let original = generate(settings)
+  let original = generateGeometry(settings)
   settings.leafColor = vec3(1, 0, 1)
   settings.barkColor = vec3(0, 0, 1)
-  doAssert original == generate(settings)
+  doAssert original == generateGeometry(settings)
   settings.rings *= 2
-  let denser = generate(settings)
+  let denser = generateGeometry(settings)
   doAssert original.bark == denser.bark
   doAssert denser.cards > original.cards * 3 div 2
   settings.density = 0
-  doAssert generate(settings).foliage.vertices.len == 0
+  doAssert generateGeometry(settings).foliage.vertices.len == 0
   settings = preset(6)
   settings.branches = 0
   settings.roots = 0
-  doAssert generate(settings).limbs == 0
+  doAssert generateGeometry(settings).limbs == 0
   for kind in BranchKind:
     settings.branchKind = kind
     settings.branches = 24
     settings.forks = 3
     settings.branchSegments = 8
-    let geometry = generate(settings)
+    let geometry = generateGeometry(settings)
     geometry.bark.checkMesh()
     doAssert geometry.limbs > 0 and geometry.limbs <= 24 * 15
   settings = preset(3)
@@ -85,13 +120,13 @@ proc testControls() =
   settings.cardsPerRing = 32
   settings.shells = 3
   settings.density = 2
-  let maximum = generate(settings)
+  let maximum = generateGeometry(settings)
   doAssert maximum.cards + maximum.omittedCards == 23 * 64 * 3
   maximum.foliage.checkMesh(atlas = true)
   settings.height = NaN.float32
   var rejected = false
   try:
-    discard generate(settings)
+    discard generateGeometry(settings)
   except TreegenError:
     rejected = true
   doAssert rejected
@@ -105,11 +140,11 @@ proc testBroadleaves() =
       settings.irregularity = 0
       settings.leafJitter = 0
       settings.crownCoverage = 1
-      let complete = generate(settings)
+      let complete = generateGeometry(settings)
       for coverage in [0.5'f, 0.75'f]:
         settings.crownCoverage = coverage
         let
-          clipped = generate(settings)
+          clipped = generateGeometry(settings)
           cutoff = settings.crownBase +
             settings.crownHeight * (1.0'f - coverage)
         var removed = 0
@@ -125,9 +160,9 @@ proc testBroadleaves() =
           doAssert vertex == complete.foliage.indices[removed * LeafIndices + i] -
             (removed * LeafVertices).uint32
   var settings = preset(3)
-  let evergreen = generate(settings)
+  let evergreen = generateGeometry(settings)
   settings.crownCoverage = 0.5'f
-  doAssert generate(settings) == evergreen
+  doAssert generateGeometry(settings) == evergreen
 
 proc testEvergreens() =
   ## Measures uniform card sizes and increased counts on wider lower rings.
@@ -141,7 +176,7 @@ proc testEvergreens() =
       var originalCount = 0
       for spread in [1.0'f, 1.4'f]:
         settings.crownRadius = preset(index).crownRadius * spread
-        let geometry = generate(settings)
+        let geometry = generateGeometry(settings)
         var
           heights: seq[float32]
           counts: seq[int]
@@ -186,7 +221,7 @@ proc testBark() =
       settings.radialSides = sides
       settings.branchMinimum = 0.001'f
       let
-        original = generate(settings)
+        original = generateGeometry(settings)
         mesh = original.bark
         density = settings.barkDensity
         stride = sides + 1
@@ -226,7 +261,7 @@ proc testBark() =
         start += (rings + 2) * stride
       doAssert start == mesh.vertices.len
       settings.barkDensity *= 2
-      let doubled = generate(settings)
+      let doubled = generateGeometry(settings)
       doAssert doubled.foliage == original.foliage
       doAssert doubled.bark.indices == mesh.indices
       doAssert doubled.bark.vertices.len == mesh.vertices.len
@@ -240,7 +275,7 @@ proc testBark() =
       rejected = false
     settings.barkDensity = density
     try:
-      discard generate(settings)
+      discard generateGeometry(settings)
     except TreegenError:
       rejected = true
     doAssert rejected
@@ -266,7 +301,7 @@ proc testForks() =
       settings.branchSegments = segments
       settings.taper = taper
       let
-        geometry = generate(settings)
+        geometry = generateGeometry(settings)
         sides = settings.radialSides
         trunkVertices = (settings.trunkSegments + 3) * (sides + 1)
         limbVertices = (segments + 3) * (sides + 1)
@@ -279,9 +314,9 @@ proc testForks() =
         doAssert childRadius < parentRadius * 0.7'f
   var settings = preset(7)
   settings.branchMinimum = 0.001'f
-  let thin = generate(settings)
+  let thin = generateGeometry(settings)
   settings.branchMinimum = 0.1'f
-  let pruned = generate(settings)
+  let pruned = generateGeometry(settings)
   doAssert pruned.limbs < thin.limbs
 
 proc testClearance() =
@@ -293,7 +328,7 @@ proc testClearance() =
     settings.droop = 1.5'f
     settings.curl = 0.8'f
     settings.leafJitter = 0.6'f
-    let geometry = generate(settings)
+    let geometry = generateGeometry(settings)
     for vertex in geometry.foliage.vertices:
       doAssert vertex.position.y >= settings.stemClearance - 0.0001'f
   var settings = preset(6)
@@ -303,7 +338,7 @@ proc testClearance() =
   settings.branchLength = 5.0'f
   settings.stemClearance = 1.0'f
   let
-    geometry = generate(settings)
+    geometry = generateGeometry(settings)
     trunkVertices = (settings.trunkSegments + 3) *
       (settings.radialSides + 1)
   for i in trunkVertices ..< geometry.bark.vertices.len:
@@ -313,7 +348,7 @@ proc testRoots() =
   ## Measures downward claw slopes from the generated root ring centers.
   let
     settings = preset(6)
-    geometry = generate(settings)
+    geometry = generateGeometry(settings)
     sides = settings.radialSides
     trunkVertices = (settings.trunkSegments + 3) * (sides + 1)
     rootVertices = 6 * (sides + 1)
@@ -373,7 +408,7 @@ proc testCaps() =
       settings.shells = 1
       settings.irregularity = 0.65'f
       let
-        geometry = generate(settings)
+        geometry = generateGeometry(settings)
         mesh = geometry.foliage
         firstVertex = mesh.vertices.len - CapSlices - 1
         firstIndex = mesh.indices.len - CapSlices * 3
@@ -433,7 +468,7 @@ proc testCaps() =
               ), "Uncovered cap: " & $index & " seed " & $seed
       settings.capSize = 1.5'f
       settings.capSlope = 35.0'f
-      let adjusted = generate(settings)
+      let adjusted = generateGeometry(settings)
       doAssert adjusted.bark == geometry.bark
       doAssert adjusted.cards == geometry.cards
       for i in 0 ..< firstVertex:
@@ -443,7 +478,7 @@ proc testCaps() =
   var columns: set[0 .. 3]
   for seed in 0 .. 31:
     let
-      geometry = generate(preset(0, seed))
+      geometry = generateGeometry(preset(0, seed))
       center = geometry.foliage.vertices[^(CapSlices + 1)]
     columns.incl (center.uv.x * 4).int
   doAssert columns == {1, 2, 3}
@@ -474,7 +509,7 @@ proc testStumps() =
         settings.branches = 24
         settings.forks = 3
         let
-          geometry = generate(settings)
+          geometry = generateGeometry(settings)
           cap = geometry.cut
           rim = settings.trunkSegments * (sides + 1)
         geometry.bark.checkMesh()
@@ -556,7 +591,7 @@ proc testFiles() =
           doAssert abs(primitive.material.baseColorFactor.g -
             settings.leafColor.y) < 0.001
           doAssert primitive.uvs ==
-            treeNode(generate(settings), materials).mesh.primitives[1].uvs
+            treeNode(generateGeometry(settings), materials).mesh.primitives[1].uvs
         else:
           barkFound = true
           doAssert primitive.material.baseColor.width == 512
@@ -564,7 +599,7 @@ proc testFiles() =
           doAssert primitive.material.baseColorSampler.wrapS == RepeatWrap
           doAssert primitive.material.baseColorSampler.wrapT == RepeatWrap
           doAssert primitive.uvs ==
-            treeNode(generate(settings), materials).mesh.primitives[0].uvs
+            treeNode(generateGeometry(settings), materials).mesh.primitives[0].uvs
   doAssert materialsFound == 2 and foliageFound and barkFound
   let stump = preset(9, 123)
   stump.saveSettings(directory / "stump.json")
@@ -584,7 +619,7 @@ proc testFiles() =
           doAssert primitive.material.baseColor.data[256 * 512 + 256] ==
             materials.cut.baseColor.data[256 * 512 + 256]
           doAssert primitive.uvs ==
-            treeNode(generate(stump), materials).mesh.primitives[1].uvs
+            treeNode(generateGeometry(stump), materials).mesh.primitives[1].uvs
   doAssert cutsFound == 1
   writeFile(directory / "bad.json", "{broken")
   var rejected = false
@@ -605,6 +640,8 @@ proc testFiles() =
 
 echo "Testing tree recipes and deterministic seeds"
 testRecipes()
+echo "Testing game-facing renderable tree nodes"
+testNodes()
 echo "Testing tree parameter boundaries"
 testControls()
 echo "Testing broadleaf sphere coverage and removal of hidden rings"
