@@ -27,6 +27,7 @@ type
   ArenaLayout* = object
     lanes*: array[3, seq[ArenaStop]]
     towers*: array[3, array[2, array[3, ArenaSite]]]
+    guards*: array[2, array[2, ArenaSite]]
     barracks*: seq[ArenaSite]
     forts*, spawns*: array[2, PathPoint]
     camps*: seq[PathPoint]
@@ -94,7 +95,17 @@ proc makeLayout(
       resolution
     )
   var towers: array[3, array[2, seq[ArenaSite]]]
+  var guardCounts: array[2, int]
   for tower in map.towers:
+    let team = 1 - tower.team.ord
+    if tower.guardsGod:
+      result.guards[team][guardCounts[team]] = ArenaSite(
+        position: arenaPoint(tower.position, resolution),
+        facing: arenaPoint(vec2(layouts.MapSize / 2), resolution),
+        team: team
+      )
+      inc guardCounts[team]
+      continue
     var
       lane = 0
       distance = float32.high
@@ -107,7 +118,6 @@ proc makeLayout(
         distance = candidate
         lane = Lanes[source]
         facing = nearest
-    let team = 1 - tower.team.ord
     towers[lane][team].add(ArenaSite(
       position: arenaPoint(tower.position, resolution),
       facing: arenaPoint(facing, resolution),

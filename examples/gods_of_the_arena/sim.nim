@@ -154,6 +154,7 @@ type
 
   Building* = object
     kind*: BuildingKind
+    guardsGod*: bool
     spawn*: WorldPoint
     footprint*: seq[PathTile]
     occupied*: bool
@@ -652,12 +653,28 @@ proc buildingById*(world: World, id: int32): Building =
   if index >= 0:
     result = world.buildings[index]
 
+proc laneCleared(world: World, team: Team): bool =
+  ## Returns whether attackers have destroyed every tower in any one lane.
+  for lane in 0 .. 2:
+    var standing = false
+    for tower in world.buildings:
+      if tower.kind == TowerBuilding and not tower.guardsGod and
+          tower.team == team and tower.lane == lane and tower.hp > 0:
+        standing = true
+        break
+    if not standing:
+      return true
+  false
+
 proc buildingExposed*(world: World, tower: Building): bool =
-  ## Returns whether every earlier tower in this lane has been destroyed.
+  ## Exposes lane structures in order and god guards after any lane falls.
   if tower.id == 0 or tower.hp <= 0:
     return false
+  if tower.guardsGod:
+    return world.laneCleared(tower.team)
   for other in world.buildings:
-    if other.kind == TowerBuilding and other.team == tower.team and
+    if other.kind == TowerBuilding and not other.guardsGod and
+        other.team == tower.team and
         other.lane == tower.lane and other.hp > 0 and
         (tower.kind == BarracksBuilding or other.tier.ord < tower.tier.ord):
       return false
@@ -666,11 +683,12 @@ proc buildingExposed*(world: World, tower: Building): bool =
 proc nextEnemyBuilding(
     world: World, team: Team, lane: int, position: WorldPoint
 ): Building =
-  ## Finds the next lane tower, followed by the closest surviving barracks.
+  ## Finds lane towers, then barracks, then the nearest exposed god guard.
   let enemy = if team == RedTeam: BlueTeam else: RedTeam
   for tier in TowerTier:
     for tower in world.buildings:
-      if tower.kind == TowerBuilding and tower.team == enemy and
+      if tower.kind == TowerBuilding and not tower.guardsGod and
+          tower.team == enemy and
           tower.lane == lane and tower.tier == tier and tower.hp > 0:
         return tower
 
@@ -682,19 +700,27 @@ proc nextEnemyBuilding(
       if distance < nearest:
         nearest = distance
         result = building
+  if result.id != 0:
+    return
+  for building in world.buildings:
+    if building.guardsGod and building.team == enemy and
+        world.buildingExposed(building):
+      let distance = distanceSquared(position, building.position)
+      if distance < nearest:
+        nearest = distance
+        result = building
 
 proc fortExposed*(world: World, team: Team): bool =
-  ## Returns whether one complete lane into a team's fort has been cleared.
-  for lane in 0 .. 2:
-    var standing = false
-    for tower in world.buildings:
-      if tower.kind == TowerBuilding and tower.team == team and
-          tower.lane == lane and tower.hp > 0:
-        standing = true
-        break
-    if not standing:
-      return true
-  false
+  ## Keeps a god invulnerable until both of its own guard towers are dead.
+  for tower in world.buildings:
+    if tower.guardsGod and tower.team == team and tower.hp > 0:
+      return false
+  true
+
+proc damageFort(world: World, index: int, damage: int32) =
+  ## Applies damage only after the god's two guards have been destroyed.
+  if damage > 0 and world.fortExposed(world.forts[index].team):
+    world.forts[index].hp = max(0'i32, world.forts[index].hp - damage)
 
 proc xpForNextLevel*(level: int): int =
   ## Returns the XP needed to advance from the given hero level.
@@ -2162,7 +2188,7 @@ proc updateFootman(world: World, footman: var Footman) =
         elif targetBuilding >= 0:
           world.damageBuilding(targetBuilding, FootmanDamage)
         else:
-          world.forts[fortIndex].hp -= FootmanDamage
+          world.damageFort(fortIndex, FootmanDamage)
       if footman.swingTicks >= duration:
         startSwing(world, footman)
       footman.animClip = footman.swingClip
@@ -2173,11 +2199,15 @@ proc updateFootman(world: World, footman: var Footman) =
   footman.swingTicks = -1
   footman.animClip = runClip
   inc footman.animTicks
-  let goal =
-    if footman.waypointIndex < laneWorldPaths[footman.lane].len:
-      footman.currentWaypoint
-    else:
-      world.forts[enemyFort(footman.team)].center
+  var goal = world.forts[enemyFort(footman.team)].center
+  if footman.waypointIndex < laneWorldPaths[footman.lane].len:
+    goal = footman.currentWaypoint
+  else:
+    let objective = world.nextEnemyBuilding(
+      footman.team, footman.lane, footman.position
+    )
+    if objective.id != 0:
+      goal = buildingAim(objective, footman.position)
   world.followCreepPath(footman, goal)
 
 proc respawn(hero: Hero) =
@@ -2268,7 +2298,7 @@ proc applyHeroHit(
       hero.gainRewards(TowerXpReward, TowerGoldReward)
       world.stats.add(heroIndex(world, hero.id), GoldMetric, TowerGoldReward)
   elif fortIndex >= 0:
-    world.forts[fortIndex].hp -= damage
+    world.damageFort(fortIndex, damage)
 
 proc consumeItem(hero: Hero, slot: int) =
   ## Removes one charge from an inventory slot and clears an empty stack.
@@ -3114,6 +3144,7 @@ proc stateHash*(game: Game): uint64 =
   hash.addHashy(world.buildings.len)
   for tower in world.buildings:
     hash.addHashy(tower.kind.ord)
+    hash.addHashy(tower.guardsGod)
     hash.addHashy(tower.knownAlive)
     hash.addHashy(tower.id)
     hash.addHashy(tower.team.ord)
@@ -3510,7 +3541,7 @@ proc newGame*(
     var point = worldPoint(map.layout.spawns[team.ord])
     point.y = fixedSurfaceHeight(point)
     world.heroSpawns[team.ord] = point
-  for site in map.layout.barracks:
+  for i, site in map.layout.barracks:
     var
       position = worldPoint(site.position)
       spawn = worldPoint(site.spawn)
@@ -3518,13 +3549,32 @@ proc newGame*(
     spawn.y = fixedSurfaceHeight(spawn)
     world.buildings.add Building(
       kind: BarracksBuilding,
-      id: FirstBarracksId + int32(world.buildings.len - 18),
+      id: FirstBarracksId + int32(i),
       team: Team(site.team), lane: site.lane,
       position: position, spawn: spawn,
       facing: heading(site.facing.x - site.position.x,
         site.facing.z - site.position.z),
       hp: TowerHitPoints[OuterTower], maxHp: TowerHitPoints[OuterTower]
     )
+  for team in Team:
+    for i, site in map.layout.guards[team.ord]:
+      var position = worldPoint(site.position)
+      position.y = fixedSurfaceHeight(position)
+      world.buildings.add Building(
+        id: FirstTowerId + 18 + int32(team.ord * 2 + i),
+        kind: TowerBuilding,
+        guardsGod: true,
+        team: team,
+        lane: -1,
+        tier: GateTower,
+        position: position,
+        facing: heading(
+          site.facing.x - site.position.x,
+          site.facing.z - site.position.z
+        ),
+        hp: TowerHitPoints[GateTower],
+        maxHp: TowerHitPoints[GateTower]
+      )
   world.initOccupancy()
   sightTerrain = buildSightTerrain()
   let visionCells = mapTiles() * mapTiles()

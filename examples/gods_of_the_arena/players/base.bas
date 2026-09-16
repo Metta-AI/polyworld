@@ -26,9 +26,9 @@
 '   11 dagger, 12 wand, 13 sword, 14 bow, 15 pauldrons, 16 armor,
 '   17 staff, 18 axe, 19 crossbow, 20 spellbook
 '
-' Object kinds are 1 = fort, 2 = hero, 3 = footman, 4 = tower, and 5 = barracks.
+' Object kinds are 1 = god, 2 = hero, 3 = footman, 4 = tower, and 5 = barracks.
 ' Towers become attackable outer first, then inner, then gate.
-' The enemy fort becomes attackable after one lane is cleared.
+' Clearing a lane exposes the two god guards. Both must fall to hurt the god.
 ' Hero classes are stable integer values from 0 to 9. Non-heroes use -1.
 ' Actions return 1 when accepted and 0 when rejected:
 '   walkTo(x, y), attackTarget(objectId), buyItem(itemId), useItem(slot)
