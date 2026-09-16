@@ -3235,8 +3235,8 @@ proc checkReplayHash(game: Game, hash: uint64) =
     else: game.replayPlayer.data.hashes
   hashes.checkReplayHash(uint32(game.world.tick), hash, game.hashCheck)
 
-proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
-  ## Advances exactly one authoritative integer simulation tick.
+iterator tickWorldSteps*(game: Game): bool {.closure.} =
+  ## Suspends at the authoritative hero turn; resuming completes the same tick.
   let world = game.world
   world.syncBuildings()
   if world.gameOver:
@@ -3272,7 +3272,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       world.heroTurnStart = (world.heroTurnStart + 1) mod world.heroes.len
     else:
       profileBlock "decisions":
-        onHeroTurn()
+        yield true
 
   profileBlock "footmen":
     for footman in world.footmen.mitems:
@@ -3375,6 +3375,10 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       game.recorder.recordHash(stateHash(game))
     except ReplayError as error:
       game.recordingError = error.msg
+
+proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
+  for _ in tickWorldSteps(game):
+    onHeroTurn()
 
 proc initLanePaths(map: MapData) =
   ## Samples symmetric lane goals without baking live buildings into roads.
