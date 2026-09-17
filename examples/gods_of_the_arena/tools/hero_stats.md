@@ -54,17 +54,20 @@ nim r -o:tmp/gota/hero_report \
 This command also updates the website when its checkout is present. It
 accepts `--site CHECKOUT` and `--no-site`, just like the full analyzer.
 
-To update the page in this tools folder, pass its output filename:
+The website report lives in `polyworld-buff/GOTA/heros/index.html`. To update
+that page from saved results, use the website checkout:
 
 ```sh
 nim r -o:tmp/gota/hero_report \
   examples/gods_of_the_arena/tools/hero_report.nim \
   tmp/gota/hero-stats/balance-check \
-  examples/gods_of_the_arena/tools/hero_stats.html
+  --site ../polyworld-buff
 ```
 
-Open the generated `hero_stats.html` directly in a browser. Keep its adjacent
-`hero_assets/` folder with it when copying or publishing it to GitHub Pages.
+Open `../polyworld-buff/GOTA/heros/index.html` directly in a browser. Generated
+HTML and assets are not kept beside the tool source in this repository.
+The analysis directory also contains `report.html` and `hero_assets/` for
+offline use. Keep those together when copying a standalone report.
 Asset paths are relative, so the report works under a project subdirectory.
 Local reports link to the published game guide and standings.
 No server is required to view it locally. Hero data is embedded in the HTML

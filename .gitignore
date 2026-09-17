@@ -27,6 +27,9 @@ experiments/characters/characters_shot.png
 examples/gods_of_the_arena/gota_shot.png
 examples/gods_of_the_arena/emscripten/
 examples/gods_of_the_arena/profiles/
+# Generated hero reports belong in polyworld-buff or tmp.
+examples/gods_of_the_arena/tools/hero_stats.html
+examples/gods_of_the_arena/tools/hero_assets/
 examples/call_to_adventure/shot.png
 examples/call_to_adventure/emscripten/
 examples/light_vs_dark/*.png
