@@ -1,0 +1,16 @@
+Revised eye atlas: 4 x 4 pairs, 1254 x 1254 pixels.
+
+Use the transparent art plus the Non-Color pupil mask.
+White mask pixels select grayscale iris/pupil regions.
+Black mask pixels protect white sclera, white highlights, dark accents, and background.
+
+rgb = mix(art.rgb, art.rgb * pupilTint.rgb, mask.r)
+alpha = art.a
+
+White tint preserves the grayscale art. Black tint produces black pupils
+while leaving the white highlights and sclera unchanged. Multiplication
+preserves the iris shading for other tint colors. Do not tint the whole material.
+
+Use the measured contentRect bounds and uvRect cells from atlas.json.
+The generated columns are not exactly evenly spaced; do not cut at quarters.
+The source alpha is retained. An alpha cutoff of 0.5 suits the game decal material.

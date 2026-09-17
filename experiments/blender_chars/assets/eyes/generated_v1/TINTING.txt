@@ -1,0 +1,23 @@
+Generated eye atlas v1
+
+16 pairs in a 4 by 4 grid. The PNG is 1254 by 1254 pixels.
+Use quarter-width/quarter-height UV cells instead of assuming integer cell sizes.
+The atlas.json file lists every normalized cell rectangle, indexed from the top left.
+
+Files:
+- eyes_4x4_pink.png: imagegen master on bright pink.
+- eyes_4x4_transparent.png: imagegen RGBA background extraction.
+- eyes_4x4_pupil_mask.png: pupil selection data measured from the gray regions.
+
+Tint only the selected pupil pixels:
+  rgb = mix(art.rgb, chosenColor.rgb, pupilMask.r)
+  alpha = art.a
+
+Read the mask as linear / Non-Color data.
+Use a white material base-color factor. Do not multiply the entire atlas by a tint.
+The mask is black over the white sclera, white highlights, black outlines and backdrop.
+Choosing RGB (0, 0, 0) gives black pupils while retaining the white highlights.
+The source alpha is preserved separately from the pupil selection mask.
+
+The original and new character models have not been replaced with these generated
+styles. This is a separate atlas for review and integration.
