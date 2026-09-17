@@ -1,12 +1,12 @@
 ## Shared browser/server session options, deterministic bots and snapshot codec.
 ## Card programs stay in the base set; the wire format contains stable card IDs.
-import std/[json, sets, strutils]
+import std/[algorithm, json, sets, strutils]
 import awmsim
 export awmsim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 8
+  SnapshotSchemaVersion* = 9
 
 type
   SessionOptions* = object
@@ -17,12 +17,13 @@ type
     botPaths*: seq[string]
 
   BotActionKind* = enum
-    PlayCardAction, EndTurnAction, ResolveTriggerAction
+    PlayCardAction, EndTurnAction, ResolveTriggerAction, TossAction
 
   BotAction* = object
     kind*: BotActionKind
     handIndex*: int
     choices*: seq[Choice]  ## One per target of the card or trigger, in order.
+    tossIndices*: seq[int]  ## Hand positions to discard, for TossAction.
 
   Snapshot* = object
     matchId*: string
@@ -116,6 +117,16 @@ proc nextBotAction*(game: GameState, playsThisTurn = 0,
   ## The fixed hand order and target preferences make bots deterministic.
   ## An explicit budget also bounds future free cards and bouncing strategies.
   result = BotAction(kind: EndTurnAction, handIndex: -1, choices: @[NoTarget])
+  if game.waitingToss:
+    # Discard the most expensive cards; among equals, the last in hand.
+    let hand = game.players[game.pendingToss.player].hand
+    var order: seq[int]
+    for index in 0 ..< hand.len:
+      order.add index
+    order.sort(proc(a, b: int): int =
+      cmp((hand[b].energyCost, b), (hand[a].energyCost, a)))
+    return BotAction(kind: TossAction, handIndex: -1,
+      tossIndices: order[0 ..< game.pendingToss.count])
   if game.waitingTrigger:
     # Answer the waiting trigger for its owner, target by target.
     let owner = game.actingPlayer()
@@ -152,12 +163,14 @@ proc applyBotAction*(game: var GameState, action: BotAction): bool =
   of PlayCardAction:
     game.playCard(action.handIndex, action.choices)
   of EndTurnAction:
-    if game.waitingTrigger:
+    if game.waitingChoice:
       return false
     game.finishTurn()
     true
   of ResolveTriggerAction:
     game.resolvePendingTrigger(action.choices)
+  of TossAction:
+    game.resolvePendingToss(action.tossIndices)
 
 proc requireKind(node: JsonNode, kind: JsonNodeKind, label: string) =
   if node.isNil or node.kind != kind:
@@ -233,6 +246,92 @@ proc keywordsFromJson(node: JsonNode): set[Keyword] =
   for entry in node:
     result.incl parseEnum[Keyword](entry.stringValue("keyword"))
 
+proc effectToJson(effect: Effect): JsonNode =
+  result = %*{"kind": $effect.kind, "beat": effect.beat}
+  case effect.kind
+  of DamageHeroEffect:
+    result["heroPlayer"] = %effect.heroPlayer
+    result["heroDamage"] = %effect.heroDamage
+  of DamageCreatureEffect:
+    result["damagedCreatureId"] = %effect.damagedCreatureId
+    result["creatureDamage"] = %effect.creatureDamage
+  of BounceCreatureEffect:
+    result["bouncedCreatureId"] = %effect.bouncedCreatureId
+  of ModifyStatsEffect:
+    result["modifiedCreatureId"] = %effect.modifiedCreatureId
+    result["powerChange"] = %effect.powerChange
+    result["toughnessChange"] = %effect.toughnessChange
+  of LoseKeywordEffect:
+    result["keywordLoserId"] = %effect.keywordLoserId
+    result["lostKeyword"] = %($effect.lostKeyword)
+  of FightEffect:
+    result["fighterId"] = %effect.fighterId
+    result["opponentId"] = %effect.opponentId
+  of SummonEffect:
+    result["summonedId"] = %effect.summonedId
+    result["summonedOwner"] = %effect.summonedOwner
+    result["summonedCard"] = cardToJson(effect.summonedCard)
+  of DestroyEffect:
+    result["destroyedId"] = %effect.destroyedId
+  of DrawEffect:
+    result["drawPlayer"] = %effect.drawPlayer
+    result["drawCount"] = %effect.drawCount
+  of TossEffect:
+    result["tossPlayer"] = %effect.tossPlayer
+    result["tossCount"] = %effect.tossCount
+    result["tossSource"] = %effect.tossSource
+    result["tossText"] = %effect.tossText
+  of TargetVfxEffect:
+    result["targetVfx"] = %ord(effect.targetVfx)
+    result["visualTarget"] = choiceToJson(effect.visualTarget)
+
+proc effectFromJson(node: JsonNode): Effect =
+  let kind = parseEnum[EffectKind](node.field("kind").stringValue("effect kind"))
+  proc int(name: string, minimum = low(int)): int =
+    node.field(name).integer("effect " & name, minimum)
+  proc player(name: string): int =
+    node.field(name).integer("effect " & name, 0, PlayerCount - 1)
+  result =
+    case kind
+    of DamageHeroEffect:
+      Effect(kind: kind, heroPlayer: player("heroPlayer"),
+        heroDamage: int("heroDamage"))
+    of DamageCreatureEffect:
+      Effect(kind: kind, damagedCreatureId: int("damagedCreatureId", 1),
+        creatureDamage: int("creatureDamage"))
+    of BounceCreatureEffect:
+      Effect(kind: kind, bouncedCreatureId: int("bouncedCreatureId", 1))
+    of ModifyStatsEffect:
+      Effect(kind: kind, modifiedCreatureId: int("modifiedCreatureId", 1),
+        powerChange: int("powerChange"),
+        toughnessChange: int("toughnessChange"))
+    of LoseKeywordEffect:
+      Effect(kind: kind, keywordLoserId: int("keywordLoserId", 1),
+        lostKeyword: parseEnum[Keyword](
+          node.field("lostKeyword").stringValue("lost keyword")))
+    of FightEffect:
+      Effect(kind: kind, fighterId: int("fighterId", 1),
+        opponentId: int("opponentId", 1))
+    of SummonEffect:
+      Effect(kind: kind, summonedId: int("summonedId", 1),
+        summonedOwner: player("summonedOwner"),
+        summonedCard: cardFromJson(node.field("summonedCard")))
+    of DestroyEffect:
+      Effect(kind: kind, destroyedId: int("destroyedId", 1))
+    of DrawEffect:
+      Effect(kind: kind, drawPlayer: player("drawPlayer"),
+        drawCount: int("drawCount", 0))
+    of TossEffect:
+      Effect(kind: kind, tossPlayer: player("tossPlayer"),
+        tossCount: int("tossCount", 0),
+        tossSource: node.field("tossSource").stringValue("toss source"),
+        tossText: node.field("tossText").stringValue("toss text"))
+    of TargetVfxEffect:
+      Effect(kind: kind, targetVfx: VfxKind(node.field("targetVfx").integer(
+          "effect VFX", ord(low(VfxKind)), ord(high(VfxKind)))),
+        visualTarget: choiceFromJson(node.field("visualTarget")))
+  result.beat = int("beat")
+
 proc gameToJson*(game: GameState): JsonNode =
   var players = newJArray()
   for player in game.players:
@@ -259,10 +358,18 @@ proc gameToJson*(game: GameState): JsonNode =
     if event.kind == DeathVfx:
       entry["card"] = cardToJson(event.card)
       entry["power"] = %event.power
-    if event.kind == BounceVfx:
+    if event.kind in {BounceVfx, TossVfx}:
       entry["card"] = cardToJson(event.card)
       entry["handIndex"] = %event.handIndex
     visualEvents.add entry
+  var pendingToss = newJNull()
+  if game.waitingToss:
+    var remaining = newJArray()
+    for effect in game.pendingToss.remaining:
+      remaining.add effectToJson(effect)
+    pendingToss = %*{"player": game.pendingToss.player,
+      "count": game.pendingToss.count, "source": game.pendingToss.source,
+      "text": game.pendingToss.text, "remaining": remaining}
   var pendingTriggers = newJArray()
   for pending in game.pendingTriggers:
     pendingTriggers.add %*{"owner": pending.owner,
@@ -270,6 +377,7 @@ proc gameToJson*(game: GameState): JsonNode =
   %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
     "visualEvents": visualEvents, "visualBeat": game.visualBeat,
+    "pendingToss": pendingToss,
     "pendingTriggers": pendingTriggers,
     "gameOver": game.gameOver, "winner": game.winner}
 
@@ -333,9 +441,10 @@ proc gameFromJson*(node: JsonNode): GameState =
       boardCount: entry.field("boardCount").integer("visual board count", 0),
       beat: if entry.hasKey("beat"): entry["beat"].integer("visual beat", 0)
         else: 0,
-      card: if kind in {DeathVfx, BounceVfx}: cardFromJson(entry.field("card"))
+      card: if kind in {DeathVfx, BounceVfx, TossVfx}:
+        cardFromJson(entry.field("card"))
         else: Card(),
-      handIndex: if kind == BounceVfx:
+      handIndex: if kind in {BounceVfx, TossVfx}:
         entry.field("handIndex").integer("bounce hand index", 0) else: 0,
       power: if kind == DeathVfx and entry.hasKey("power"):
         entry["power"].integer("visual power", 0) else: 0)
@@ -347,6 +456,20 @@ proc gameFromJson*(node: JsonNode): GameState =
           event.card.kind == Spell)):
       raise newException(ValueError, "Invalid snapshot visual event target")
     result.visualEvents.add event
+  if node.hasKey("pendingToss") and node["pendingToss"].kind != JNull:
+    let entry = node["pendingToss"]
+    var pending = PendingToss(
+      player: entry.field("player").integer("toss player", 0, PlayerCount - 1),
+      count: entry.field("count").integer("toss count", 1),
+      source: entry.field("source").stringValue("toss source"),
+      text: entry.field("text").stringValue("toss text"))
+    if pending.count > result.players[pending.player].hand.len:
+      raise newException(ValueError, "Invalid snapshot pending toss")
+    let remaining = entry.field("remaining")
+    remaining.requireKind(JArray, "toss effects")
+    for effect in remaining:
+      pending.remaining.add effectFromJson(effect)
+    result.pendingToss = pending
   result.visualBeat = if node.hasKey("visualBeat"):
     node["visualBeat"].integer("visual beat", 0) else: 0
   if node.hasKey("pendingTriggers"):

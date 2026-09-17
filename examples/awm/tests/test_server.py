@@ -188,7 +188,7 @@ class BrowserServerTests(unittest.TestCase):
         with self.server("--player0=bot", "--player1=bot",
                          "--step-ms=500") as (port, _):
             first = self.snapshot(port)
-            self.assertEqual(first["schemaVersion"], 8)
+            self.assertEqual(first["schemaVersion"], 9)
             self.assertEqual(len(first["game"]["players"]), 2)
             time.sleep(1.1)
             later = self.snapshot(port)

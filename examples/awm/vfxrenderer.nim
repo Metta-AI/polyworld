@@ -262,7 +262,7 @@ proc newVfx*(kind: VfxKind, target: Choice, position: Vec3, seed: int): ActiveVf
       of SwordClashVfx: 1.25'f32
       of SwordBreakVfx: 1.4'f32
       of OozeSplatVfx: 1.8'f32
-      of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx: 0.0'f32)
+      of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx: 0.0'f32)
 
 proc advance*(effects: var seq[ActiveVfx], dt: float32) =
   for effect in effects.mitems:
@@ -537,7 +537,7 @@ proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
       let t = effect.elapsed / effect.duration
       renderer.addBillboard(effect.position, 1.2'f32 + t * 0.8'f32, eye,
         vec4(1, 0.025, 0.05, (1 - t) * 0.38'f32), 4)
-    of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx: discard
+    of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx: discard
 
 proc draw*(renderer: var VfxRenderer, viewProjection: Mat4,
     additive = true, depthTest = true) =

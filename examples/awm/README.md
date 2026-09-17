@@ -97,7 +97,9 @@ python3 tests/test_server.py
 | Warrior | Footsoldier | 6 | 1 | Minion | 1/2 | — |
 | Warrior | Commander | 4 | 5 | Minion | 2/3 | Summons 2 Footsoldiers |
 | Warrior | Rally | 3 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
-| Mage | Bouncer | 24 | 1 | Minion | 1/1 | Return a minion to owner's hand |
-| Mage | Plan | 8 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
-| Mage | Oozification | 8 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
-| Mage | Ooze | — | 1 | Minion | 1/1 | — (only summoned, by Oozification) |
+| Mage | Bouncer | 18 | 1 | Minion | 1/1 | Return a minion to owner's hand |
+| Mage | Primordial | 2 | 10 | Minion | 10/10 | Return all other cards to their owners' hands |
+| Mage | Study | 6 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
+| Mage | Plan | 7 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
+| Mage | Oozification | 7 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
+| Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |

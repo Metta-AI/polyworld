@@ -80,6 +80,8 @@ type
     # Presentation cue, not a card VFX: a minion returns to its owner's hand.
     # The UI flies it from its board slot, carrying any VFX aimed at it.
     BounceVfx
+    # Presentation cue, not a card VFX: a card was discarded from a hand.
+    TossVfx
 
   Keyword* = enum
     ## Printed minion keywords. Each prints as its own line of rules text.
@@ -176,6 +178,7 @@ type
     SummonEffect
     DestroyEffect
     DrawEffect
+    TossEffect
     TargetVfxEffect
 
   Effect* = object
@@ -218,6 +221,12 @@ type
     of DrawEffect:
       ## Drawing from an empty deck loses the game.
       drawPlayer*, drawCount*: int
+    of TossEffect:
+      ## The player chooses cards from hand to discard. The rest of the
+      ## resolution waits until they do.
+      tossPlayer*, tossCount*: int
+      tossSource*: string  ## The card that asked, for the prompt.
+      tossText*: string    ## Its rule text, for the prompt.
     of TargetVfxEffect:
       targetVfx*: VfxKind
       visualTarget*: Choice
@@ -263,47 +272,57 @@ type
     zone*: Zone
     kinds*: set[CardKind]
     anyOwner*: bool  ## No `owner:` filter was given.
+    includeSelf*: bool  ## false: leave out the card these rules belong to.
     owner*: RuleValue[Owner]
+
+  SelectionKind* = enum
+    SelectTarget  ## A player picks one: `target({Minion})`.
+    SelectQuery   ## Every match, nothing to pick: `game.board.choose(...)`.
+
+  Selection* = object
+    ## What a rule acts on. Targets and queries both convert to it, so
+    ## `target(...)` and `game.board.choose(...)` are interchangeable.
+    case kind*: SelectionKind
+    of SelectTarget:
+      target*: Target
+    of SelectQuery:
+      query*: CardQuery
 
   DamageRule* = ref object of Rule
     amount*: RuleValue[int]
-    target*: Target
+    what*: Selection
+    vfx*: VfxKind  ## Played on each selected object.
 
   BounceRule* = ref object of Rule
-    target*: Target
+    what*: Selection
+    vfx*: VfxKind
 
   KeywordRule* = ref object of Rule
     ## A static ability. It has no on-play program; the engine reads it
     ## through `keywords`.
     keyword*: Keyword
 
-  DamageEachRule* = ref object of Rule
-    ## Damages every card a query selects. Nothing to choose.
-    amount*: RuleValue[int]
-    cards*: CardQuery
-    vfx*: VfxKind
-
-  StatsEachRule* = ref object of Rule
-    ## Permanently changes the power and toughness of every card a query
-    ## selects. Nothing to choose.
-    power*, toughness*: RuleValue[int]
-    cards*: CardQuery
-    vfx*: VfxKind
-
   StatsRule* = ref object of Rule
-    ## Permanently changes one target's power and toughness.
+    ## Permanently changes power and toughness.
     power*, toughness*: RuleValue[int]
-    target*: Target
+    what*: Selection
+    vfx*: VfxKind
     removes*: bool  ## Subtracts its amounts, printed "-1/-0".
 
   DestroyRule* = ref object of Rule
-    target*: Target
+    what*: Selection
+    vfx*: VfxKind
 
   DestroyCardRule* = ref object of Rule
     ## Destroys a card in play named by a value: `destroy(self())`.
     card*: RuleValue[Card]
 
   DrawRule* = ref object of Rule
+    count*: RuleValue[int]
+    player*: RuleValue[Owner]
+
+  TossRule* = ref object of Rule
+    ## Discard cards the player chooses from their hand.
     count*: RuleValue[int]
     player*: RuleValue[Owner]
 
@@ -329,7 +348,8 @@ type
 
   LoseKeywordRule* = ref object of Rule
     keyword*: Keyword
-    target*: Target
+    what*: Selection
+    vfx*: VfxKind
 
   FightRule* = ref object of Rule
     ## Two minions fight each other, as in combat, without attacking.
@@ -646,105 +666,25 @@ method run*(
   discard (rule, card, context)
   true
 
-method text*(rule: DamageRule, card: Card): string =
-  rule.amount.damageText(rule.target.targetText(card), card)
-
-method choices*(
-    rule: DamageRule,
-    card: Card,
-    context: RuleContext
-): seq[Choice] =
-  discard card
-  rule.target.candidates(context)
-
-method needsChoice*(rule: DamageRule): bool =
-  discard rule
-  true
-
-method targets*(rule: DamageRule): seq[Target] =
-  @[rule.target]
-
-method run*(
-    rule: DamageRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let selected = rule.target.choose(context)
-  let amount = rule.amount.value(context)
-  case selected.kind
-  of CanceledChoice:
-    false
-  of NoTargetChoice:
-    true
-  of HeroChoice:
-    context.effects.add Effect(
-      kind: DamageHeroEffect,
-      heroPlayer: selected.owner,
-      heroDamage: amount
-    )
-    true
-  of CreatureChoice:
-    context.effects.add Effect(
-      kind: DamageCreatureEffect,
-      damagedCreatureId: selected.creatureId,
-      creatureDamage: amount
-    )
-    true
-
-method text*(rule: BounceRule, card: Card): string =
-  discard card
-  "Return " & rule.target.text() & " to its owner's hand."
-
-method choices*(
-    rule: BounceRule,
-    card: Card,
-    context: RuleContext
-): seq[Choice] =
-  discard card
-  rule.target.candidates(context)
-
-method needsChoice*(rule: BounceRule): bool =
-  discard rule
-  true
-
-method targets*(rule: BounceRule): seq[Target] =
-  @[rule.target]
-
-method run*(
-    rule: BounceRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let selected = rule.target.choose(context)
-  if selected.kind == NoTargetChoice:
-    return true
-  if selected.kind != CreatureChoice:
-    return false
-  context.effects.add Effect(
-    kind: BounceCreatureEffect,
-    bouncedCreatureId: selected.creatureId
-  )
-  true
-
 method text*(rule: KeywordRule, card: Card): string =
   discard card
   $rule.keyword
 
 proc subject(query: CardQuery, card: Card): string =
   ## "minions", "friendly minions", "minions the target's owner controls".
-  let things =
-    if query.kinds == {CardKind.Minion}: "minions"
-    elif query.kinds == {Spell}: "spells"
-    elif query.kinds == {Trinket}: "trinkets"
-    else: "cards"
+  let
+    other = if query.includeSelf: "" else: "other "
+    things =
+      if query.kinds == {CardKind.Minion}: "minions"
+      elif query.kinds == {Spell}: "spells"
+      elif query.kinds == {Trinket}: "trinkets"
+      else: "cards"
   if query.anyOwner:
-    things
+    other & things
   elif query.owner.kind == FixedValue:
-    (if query.owner.fixed == You: "friendly " else: "enemy ") & things
+    other & (if query.owner.fixed == You: "friendly " else: "enemy ") & things
   else:
-    things & " " & query.owner.text(card) & " controls"
+    other & things & " " & query.owner.text(card) & " controls"
 
 proc text*(query: CardQuery, card: Card): string =
   ## "all enemy minions".
@@ -758,6 +698,10 @@ proc matches*(query: CardQuery, context: var RuleContext): seq[Choice] =
     for entry in context.game.board:
       let owner =
         if entry.choice.owner == context.sourcePlayer: You else: Opponent
+      if not query.includeSelf and context.sourceId != 0 and
+          entry.choice.kind == CreatureChoice and
+          entry.choice.creatureId == context.sourceId:
+        continue
       if entry.card.kind in query.kinds and
           (query.anyOwner or owner == wanted):
         result.add entry.choice
@@ -847,132 +791,6 @@ proc text*(named: RuleValue[Card], card: Card): string =
   of SelfCard: "this card"
   else: raiseAssert "not a card: " & $named.kind
 
-method text*(rule: DamageEachRule, card: Card): string =
-  rule.amount.damageText(rule.cards.text(card), card)
-
-method run*(
-    rule: DamageEachRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let
-    hit = rule.cards.matches(context)
-    amount = rule.amount.value(context)
-  # Every visual lands before damage can remove a card from the board.
-  if rule.vfx != NoVfx:
-    for choice in hit:
-      context.effects.add Effect(kind: TargetVfxEffect,
-        targetVfx: rule.vfx, visualTarget: choice)
-  for choice in hit:
-    case choice.kind
-    of HeroChoice:
-      context.effects.add Effect(kind: DamageHeroEffect,
-        heroPlayer: choice.owner, heroDamage: amount)
-    of CreatureChoice:
-      context.effects.add Effect(kind: DamageCreatureEffect,
-        damagedCreatureId: choice.creatureId, creatureDamage: amount)
-    of CanceledChoice, NoTargetChoice:
-      discard
-  true
-
-
-method text*(rule: StatsEachRule, card: Card): string =
-  ## "Give all friendly minions +1/+0." Give, not get: the change is permanent.
-  "Give " & rule.cards.text(card) & " " &
-    statsText(rule.power, rule.toughness, false, card) & "."
-
-method run*(
-    rule: StatsEachRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let hit = rule.cards.matches(context)
-  if rule.vfx != NoVfx:
-    for choice in hit:
-      context.effects.add Effect(kind: TargetVfxEffect,
-        targetVfx: rule.vfx, visualTarget: choice)
-  for choice in hit:
-    if choice.kind == CreatureChoice:
-      context.effects.add Effect(kind: ModifyStatsEffect,
-        modifiedCreatureId: choice.creatureId,
-        powerChange: rule.power.change(false, context),
-        toughnessChange: rule.toughness.change(false, context))
-  true
-
-method text*(rule: StatsRule, card: Card): string =
-  "Give " & rule.target.text() & " " &
-    statsText(rule.power, rule.toughness, rule.removes, card) & "."
-
-method choices*(
-    rule: StatsRule,
-    card: Card,
-    context: RuleContext
-): seq[Choice] =
-  discard card
-  rule.target.candidates(context)
-
-method needsChoice*(rule: StatsRule): bool =
-  discard rule
-  true
-
-method targets*(rule: StatsRule): seq[Target] =
-  @[rule.target]
-
-method helpsTarget*(rule: StatsRule): bool =
-  let total = rule.power.estimate() + rule.toughness.estimate()
-  if rule.removes: total < 0 else: total > 0
-
-method run*(
-    rule: StatsRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let selected = rule.target.choose(context)
-  if selected.isCanceled:
-    return false
-  if selected.kind == CreatureChoice:
-    context.effects.add Effect(kind: ModifyStatsEffect,
-      modifiedCreatureId: selected.creatureId,
-      powerChange: rule.power.change(rule.removes, context),
-      toughnessChange: rule.toughness.change(rule.removes, context))
-  true
-
-method text*(rule: LoseKeywordRule, card: Card): string =
-  discard card
-  rule.target.text().capitalizeAscii() & " loses " & $rule.keyword & "."
-
-method choices*(
-    rule: LoseKeywordRule,
-    card: Card,
-    context: RuleContext
-): seq[Choice] =
-  discard card
-  rule.target.candidates(context)
-
-method needsChoice*(rule: LoseKeywordRule): bool =
-  discard rule
-  true
-
-method targets*(rule: LoseKeywordRule): seq[Target] =
-  @[rule.target]
-
-method run*(
-    rule: LoseKeywordRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let selected = rule.target.choose(context)
-  if selected.isCanceled:
-    return false
-  if selected.kind == CreatureChoice:
-    context.effects.add Effect(kind: LoseKeywordEffect,
-      keywordLoserId: selected.creatureId, lostKeyword: rule.keyword)
-  true
-
 method text*(rule: FightRule, card: Card): string =
   rule.fighter.targetText(card).capitalizeAscii() & " fights " &
     rule.opponent.targetText(card) & "."
@@ -1006,15 +824,214 @@ method run*(
     fighterId: fighter.creatureId, opponentId: opponent.creatureId)
   true
 
-proc addPowerToughness*(power, toughness: RuleValue[int], target: Target): Rule =
-  ## `addPowerToughness(1, 1, target({Minion}))`.
-  StatsRule(power: power, toughness: toughness, target: target)
+converter toSelection*(target: Target): Selection =
+  Selection(kind: SelectTarget, target: target)
 
-proc removePowerToughness*(power, toughness: RuleValue[int], target: Target): Rule =
+converter toSelection*(query: CardQuery): Selection =
+  Selection(kind: SelectQuery, query: query)
+
+proc plural(what: Selection): bool =
+  what.kind == SelectQuery
+
+proc text(what: Selection, card: Card): string =
+  ## "a minion", "the target", "all other cards".
+  case what.kind
+  of SelectTarget: what.target.targetText(card)
+  of SelectQuery: what.query.text(card)
+
+proc picks(what: Selection): seq[Target] =
+  if what.kind == SelectTarget and not (what.target of PickedTarget):
+    result.add what.target
+
+proc candidates(what: Selection, context: RuleContext): seq[Choice] =
+  if what.kind == SelectTarget:
+    result = what.target.candidates(context)
+
+proc resolve(
+    what: Selection,
+    context: var RuleContext,
+    vfx: VfxKind
+): tuple[ok: bool, chosen: seq[Choice]] =
+  ## The objects a rule acts on: the target's pick (none when it took no
+  ## target), or every card the query matches. `ok` is false when a target
+  ## was canceled. Every visual is added before any effect, so each lands
+  ## before its card can move.
+  result.ok = true
+  case what.kind
+  of SelectTarget:
+    let selected = what.target.choose(context)
+    case selected.kind
+    of CanceledChoice:
+      result.ok = false
+    of NoTargetChoice:
+      discard
+    of HeroChoice, CreatureChoice:
+      result.chosen.add selected
+  of SelectQuery:
+    result.chosen = what.query.matches(context)
+  if vfx != NoVfx:
+    for choice in result.chosen:
+      context.effects.add Effect(kind: TargetVfxEffect, targetVfx: vfx,
+        visualTarget: choice)
+
+method text*(rule: DamageRule, card: Card): string =
+  rule.amount.damageText(rule.what.text(card), card)
+
+method choices*(rule: DamageRule, card: Card, context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: DamageRule): seq[Target] =
+  rule.what.picks()
+
+method run*(rule: DamageRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  let amount = rule.amount.value(context)
+  for choice in selection.chosen:
+    case choice.kind
+    of HeroChoice:
+      context.effects.add Effect(kind: DamageHeroEffect,
+        heroPlayer: choice.owner, heroDamage: amount)
+    of CreatureChoice:
+      context.effects.add Effect(kind: DamageCreatureEffect,
+        damagedCreatureId: choice.creatureId, creatureDamage: amount)
+    of CanceledChoice, NoTargetChoice:
+      discard
+  true
+
+method text*(rule: StatsRule, card: Card): string =
+  "Give " & rule.what.text(card) & " " &
+    statsText(rule.power, rule.toughness, rule.removes, card) & "."
+
+method choices*(rule: StatsRule, card: Card, context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: StatsRule): seq[Target] =
+  rule.what.picks()
+
+method helpsTarget*(rule: StatsRule): bool =
+  let total = rule.power.estimate() + rule.toughness.estimate()
+  if rule.removes: total < 0 else: total > 0
+
+method run*(rule: StatsRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  for choice in selection.chosen:
+    if choice.kind == CreatureChoice:
+      context.effects.add Effect(kind: ModifyStatsEffect,
+        modifiedCreatureId: choice.creatureId,
+        powerChange: rule.power.change(rule.removes, context),
+        toughnessChange: rule.toughness.change(rule.removes, context))
+  true
+
+method text*(rule: BounceRule, card: Card): string =
+  ## "Return a minion to its owner's hand.", "Return all other cards to
+  ## their owners' hands."
+  "Return " & rule.what.text(card) &
+    (if rule.what.plural: " to their owners' hands." else: " to its owner's hand.")
+
+method choices*(rule: BounceRule, card: Card, context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: BounceRule): seq[Target] =
+  rule.what.picks()
+
+method run*(rule: BounceRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  for choice in selection.chosen:
+    if choice.kind == CreatureChoice:
+      context.effects.add Effect(kind: BounceCreatureEffect,
+        bouncedCreatureId: choice.creatureId)
+  true
+
+method text*(rule: DestroyRule, card: Card): string =
+  "Destroy " & rule.what.text(card) & "."
+
+method choices*(rule: DestroyRule, card: Card, context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: DestroyRule): seq[Target] =
+  rule.what.picks()
+
+method run*(rule: DestroyRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  for choice in selection.chosen:
+    if choice.kind == CreatureChoice:
+      context.effects.add Effect(kind: DestroyEffect,
+        destroyedId: choice.creatureId)
+  true
+
+method text*(rule: LoseKeywordRule, card: Card): string =
+  ## "A minion loses Ranged.", "All enemy minions lose Ranged."
+  rule.what.text(card).capitalizeAscii() &
+    (if rule.what.plural: " lose " else: " loses ") & $rule.keyword & "."
+
+method choices*(rule: LoseKeywordRule, card: Card,
+    context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: LoseKeywordRule): seq[Target] =
+  rule.what.picks()
+
+method run*(rule: LoseKeywordRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  for choice in selection.chosen:
+    if choice.kind == CreatureChoice:
+      context.effects.add Effect(kind: LoseKeywordEffect,
+        keywordLoserId: choice.creatureId, lostKeyword: rule.keyword)
+  true
+
+proc damage*(amount: RuleValue[int], what: Selection, vfx = NoVfx): Rule =
+  ## `damage(1, target({Minion}))`, `damage(1, game.board.choose(...))`.
+  DamageRule(amount: amount, what: what, vfx: vfx)
+
+proc addPowerToughness*(
+    power, toughness: RuleValue[int],
+    what: Selection,
+    vfx = NoVfx
+): Rule =
+  ## `addPowerToughness(1, 1, target({Minion}))`: permanent.
+  StatsRule(power: power, toughness: toughness, what: what, vfx: vfx)
+
+proc removePowerToughness*(
+    power, toughness: RuleValue[int],
+    what: Selection,
+    vfx = NoVfx
+): Rule =
   ## `removePowerToughness(1, 0, target({Minion}))`: permanent, and power
   ## never drops below 0.
-  StatsRule(power: power, toughness: toughness, target: target,
+  StatsRule(power: power, toughness: toughness, what: what, vfx: vfx,
     removes: true)
+
+proc bounce*(what: Selection, vfx = NoVfx): Rule =
+  ## `bounce(target({Minion}))`, `bounce(game.board.choose({self: false}))`.
+  BounceRule(what: what, vfx: vfx)
+
+proc destroy*(what: Selection, vfx = NoVfx): Rule =
+  ## `destroy(target({Minion}))`: straight to the discard pile.
+  DestroyRule(what: what, vfx: vfx)
+
+proc lose*(keyword: KeywordRule, what: Selection, vfx = NoVfx): Rule =
+  ## `lose(ranged(), target({Minion}))`: permanent while on the board.
+  LoseKeywordRule(keyword: keyword.keyword, what: what, vfx: vfx)
 
 proc playerIndex(owner: Owner, context: RuleContext): int =
   ## The player an Owner names, seen from the player the rules run for.
@@ -1023,43 +1040,6 @@ proc playerIndex(owner: Owner, context: RuleContext): int =
     for hero in context.heroes:
       if hero.owner != context.sourcePlayer:
         return hero.owner
-
-method text*(rule: DestroyRule, card: Card): string =
-  discard card
-  "Destroy " & rule.target.text() & "."
-
-method choices*(
-    rule: DestroyRule,
-    card: Card,
-    context: RuleContext
-): seq[Choice] =
-  discard card
-  rule.target.candidates(context)
-
-method needsChoice*(rule: DestroyRule): bool =
-  discard rule
-  true
-
-method targets*(rule: DestroyRule): seq[Target] =
-  @[rule.target]
-
-method run*(
-    rule: DestroyRule,
-    card: Card,
-    context: var RuleContext
-): bool =
-  discard card
-  let selected = rule.target.choose(context)
-  if selected.isCanceled:
-    return false
-  if selected.kind == CreatureChoice:
-    context.effects.add Effect(kind: DestroyEffect,
-      destroyedId: selected.creatureId)
-  true
-
-proc destroy*(target: Target): Rule =
-  ## `destroy(target({Minion}))`: straight to the discard pile.
-  DestroyRule(target: target)
 
 method text*(rule: DestroyCardRule, card: Card): string =
   "Destroy " & rule.card.text(card) & "."
@@ -1084,18 +1064,25 @@ proc destroy*(card: RuleValue[Card]): Rule =
   ## `destroy(self())`: that card leaves play for its owner's discard pile.
   DestroyCardRule(card: card)
 
+proc cardsText(count: RuleValue[int], card: Card): string =
+  ## "1 card", "2 cards", "cards equal to the target's toughness".
+  if count.kind == FixedValue:
+    $count.fixed & (if count.fixed == 1: " card" else: " cards")
+  else:
+    "cards equal to " & count.text(card)
+
+proc playerSentence(player: RuleValue[Owner], verb, verbs, rest: string,
+    card: Card): string =
+  ## "Draw 1 card.", or with a subject: "Your opponent draws 1 card."
+  if player.kind == FixedValue and player.fixed == You:
+    verb.capitalizeAscii() & " " & rest & "."
+  else:
+    player.text(card).capitalizeAscii() & " " & verbs & " " & rest & "."
+
 method text*(rule: DrawRule, card: Card): string =
   ## "Draw 1 card.", "Draw 2 cards.", "Your opponent draws 1 card.",
   ## "The target's owner draws cards equal to the target's toughness."
-  let cards =
-    if rule.count.kind == FixedValue:
-      $rule.count.fixed & (if rule.count.fixed == 1: " card" else: " cards")
-    else:
-      "cards equal to " & rule.count.text(card)
-  if rule.player.kind == FixedValue and rule.player.fixed == You:
-    "Draw " & cards & "."
-  else:
-    rule.player.text(card).capitalizeAscii() & " draws " & cards & "."
+  rule.player.playerSentence("draw", "draws", rule.count.cardsText(card), card)
 
 method run*(
     rule: DrawRule,
@@ -1114,6 +1101,30 @@ proc draw*(
 ): Rule =
   ## `draw(1)`, `draw(2, Opponent)`.
   DrawRule(count: count, player: player)
+
+method text*(rule: TossRule, card: Card): string =
+  ## "Discard 1 card.", "Your opponent discards 2 cards."
+  rule.player.playerSentence("discard", "discards",
+    rule.count.cardsText(card), card)
+
+method run*(
+    rule: TossRule,
+    card: Card,
+    context: var RuleContext
+): bool =
+  context.effects.add Effect(kind: TossEffect,
+    tossPlayer: rule.player.value(context).playerIndex(context),
+    tossCount: rule.count.value(context),
+    tossSource: card.name, tossText: rule.text(card))
+  true
+
+proc toss*(
+    count: RuleValue[int],
+    player: RuleValue[Owner] = toRuleValue(You)
+): Rule =
+  ## `toss(1)`: that player discards cards of their choice. (`discard` is a
+  ## Nim keyword.)
+  TossRule(count: count, player: player)
 
 proc nextTurn*(player: RuleValue[Owner]): Trigger =
   ## `on(nextTurn(You), ...)`: fires once, when that player's next turn
@@ -1231,45 +1242,39 @@ proc checkCardNames*(card: Card, cardNamed: CardLookup) =
     if rule of SummonRule and SummonRule(rule).card.kind == CardNamed:
       discard cardNamed(SummonRule(rule).card.name)
 
-proc lose*(keyword: KeywordRule, target: Target): Rule =
-  ## `lose(ranged(), target({Minion}))`: the target loses that keyword,
-  ## permanently while it stays on the board.
-  LoseKeywordRule(keyword: keyword.keyword, target: target)
-
 proc fight*(fighter, opponent: Target, vfx = NoVfx): Rule =
   ## `fight(getTarget(0), getTarget(1))`: both deal their power at once.
   FightRule(fighter: fighter, opponent: opponent, vfx: vfx)
-
-proc damage*(amount: RuleValue[int], target: Target): Rule =
-  DamageRule(amount: amount, target: target)
-
-proc damage*(amount: RuleValue[int], cards: CardQuery, vfx = NoVfx): Rule =
-  ## `damage(1, game.board.choose(kind: Minion, owner: Opponent))`.
-  DamageEachRule(amount: amount, cards: cards, vfx: vfx)
-
-proc addPowerToughness*(
-    power, toughness: RuleValue[int],
-    cards: CardQuery,
-    vfx = NoVfx
-): Rule =
-  ## `addPowerToughness(1, 0, game.board.choose(kind: Minion, owner: You))`.
-  StatsEachRule(power: power, toughness: toughness, cards: cards, vfx: vfx)
 
 proc board*(game: GameQuery): ZoneQuery =
   ZoneQuery(zone: BoardZone)
 
 macro choose*(zone: ZoneQuery, filters: varargs[untyped]): CardQuery =
-  ## Selects every card in `zone` matching `kind: CardKind` and
-  ## `owner:` (`You`, `Opponent`, or computed: `getTarget().owner`). An
-  ## omitted filter matches anything.
+  ## Selects every card in `zone` matching `kind: CardKind`, `owner:`
+  ## (`You`, `Opponent`, or computed: `getTarget().owner`) and `self: false`
+  ## (not the card these rules belong to). An omitted filter matches
+  ## anything.
   let query = genSym(nskVar, "query")
   var body = newStmtList(quote do:
     var `query` = CardQuery(zone: `zone`.zone,
       kinds: {low(CardKind) .. high(CardKind)},
-      anyOwner: true))
+      anyOwner: true, includeSelf: true))
+  # Filters come as `kind: Minion` or in braces: `{self: false}`. `{}` is
+  # no filter at all.
+  var named: seq[NimNode]
   for filter in filters:
-    if filter.kind != nnkExprColonExpr:
+    case filter.kind
+    of nnkExprColonExpr:
+      named.add filter
+    of nnkTableConstr:
+      for pair in filter:
+        named.add pair
+    of nnkCurly:
+      if filter.len > 0:
+        error("choose filters are written `name: value`", filter)
+    else:
       error("choose filters are written `name: value`", filter)
+  for filter in named:
     let value = filter[1]
     if filter[0].eqIdent("kind"):
       body.add(quote do:
@@ -1282,8 +1287,13 @@ macro choose*(zone: ZoneQuery, filters: varargs[untyped]): CardQuery =
           let owner: RuleValue[Owner] = `value`
           `query`.owner = owner
           `query`.anyOwner = false)
+    elif filter[0].eqIdent("self"):
+      body.add(quote do:
+        block:
+          let includeSelf: bool = `value`
+          `query`.includeSelf = includeSelf)
     else:
-      error("unknown choose filter; use `kind` or `owner`", filter[0])
+      error("unknown choose filter; use `kind`, `owner` or `self`", filter[0])
   body.add query
   result = newBlockStmt(body)
 
@@ -1299,9 +1309,6 @@ proc chooseCalls(node: NimNode): NimNode =
     result = node
     for index in 0 ..< node.len:
       result[index] = chooseCalls(node[index])
-
-proc bounce*(target: Target): Rule =
-  BounceRule(target: target)
 
 proc ranged*(): KeywordRule =
   ## Ranged minions take no combat damage from non-ranged minions. Also
