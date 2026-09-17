@@ -7,13 +7,16 @@ suite "AWM base set":
     check DeckSize == 40
     let deck = Mage.baseDeck()
     check deck.len == DeckSize
-    var bouncers, oozifications, plans: int
+    var bouncers, oozifications, plans, studies, primordials: int
     for card in deck:
       check card.class == some(Mage)
       if card == baseCard("bouncer-1"): inc bouncers
       elif card == baseCard("oozification-4"): inc oozifications
       elif card == baseCard("plan-3"): inc plans
-    check (bouncers, oozifications, plans) == (24, 8, 8)
+      elif card == baseCard("study-2"): inc studies
+      elif card == baseCard("primordial-10"): inc primordials
+    check (bouncers, oozifications, plans, studies, primordials) ==
+      (18, 7, 7, 6, 2)
 
   test "the Warrior deck is forty cards of every Warrior card":
     let deck = Warrior.baseDeck()
@@ -1206,10 +1209,11 @@ suite "AWM Oozification":
 
   test "Ooze and Oozification print their rules":
     let
-      ooze = baseCard("Ooze", 1)
+      ooze = baseCard("Ooze", 0)
       oozification = baseCard("Oozification", 4)
     check ooze.kind == Minion
-    check ooze.power == 1
+    check ooze.energyCost == 0
+    check ooze.power == 0
     check ooze.toughness == 1
     check ooze.ruleText().len == 0
     check oozification.class == some(Mage)
@@ -1240,7 +1244,7 @@ suite "AWM Oozification":
     check game.players[me].board.len == 0
     check game.players[enemy].board.len == 3
     for index, ooze in game.players[enemy].board:
-      check ooze.card == baseCard("Ooze", 1)
+      check ooze.card == baseCard("Ooze", 0)
       check ooze.owner == enemy
       check ooze.id == index + 2
       check not ooze.canAttack
@@ -1254,7 +1258,7 @@ suite "AWM Oozification":
     var (game, me, enemy) = oozeGame(809, 1)
     check game.playCard(0, creatureChoice(enemy, 1))
     check game.players[enemy].board.len == 1
-    check game.players[enemy].board[0].card == baseCard("Ooze", 1)
+    check game.players[enemy].board[0].card == baseCard("Ooze", 0)
     check game.players[me].board.len == 0
 
   test "Oozification on your own minion gives you the Oozes":
@@ -1264,7 +1268,7 @@ suite "AWM Oozification":
     check game.playCard(0, creatureChoice(me, 2))
     check game.players[me].discardPile.len == 2
     check game.players[me].board.len == 2
-    check game.players[me].board[0].card == baseCard("Ooze", 1)
+    check game.players[me].board[0].card == baseCard("Ooze", 0)
     check game.players[enemy].board.len == 1
 
   test "Oozification without a target is canceled":
@@ -1698,3 +1702,229 @@ suite "AWM presentation beats":
         beats.add event.beat
     check beats.len == 2
     check beats[0] < beats[1]
+
+suite "AWM Study and discards":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  proc studyGame(seed: int64): (GameState, int, int) =
+    ## Study plus two cards in hand, energy for Study.
+    var game = newGame(Mage, Warrior, seed)
+    let me = game.currentPlayer
+    game.players[me].hand =
+      @[baseCard("Study", 2), baseCard("Bouncer", 1), baseCard("Plan", 3)]
+    game.players[me].energy = 2
+    (game, me, 1 - me)
+
+  test "Study and toss print their rules":
+    let study = baseCard("Study", 2)
+    check study.kind == Spell
+    check study.class == some(Mage)
+    check not study.needsChoice()
+    check study.ruleText() == "Draw 2 cards.\nDiscard 1 card."
+    check printed(rules(toss(2, Opponent))) == "Your opponent discards 2 cards."
+    check printed(rules(destroy(target({Minion})),
+      toss(getTarget().toughness, getTarget().owner))) ==
+      "Destroy a minion.\n" &
+      "The target's owner discards cards equal to the target's toughness."
+
+  test "Study draws, then waits for its player to pick a discard":
+    var (game, me, _) = studyGame(1301)
+    let deck = game.players[me].deck.len
+    check game.playCard(0)
+    check game.players[me].energy == 0
+    check game.players[me].hand.len == 4
+    check game.players[me].deck.len == deck - 2
+    check game.players[me].discardPile == @[baseCard("Study", 2)]
+    check game.waitingToss
+    check game.waitingChoice
+    check game.actingPlayer() == me
+    check game.pendingToss.count == 1
+    check game.pendingToss.source == "Study"
+    check game.pendingToss.text == "Discard 1 card."
+    check not game.canPlay(0)
+    let turn = game.turnNumber
+    game.finishTurn()
+    check game.turnNumber == turn
+    discard game.takeVisualEvents()
+    let tossed = game.players[me].hand[1]
+    check game.resolvePendingToss(@[1])
+    check not game.waitingToss
+    check game.players[me].hand.len == 3
+    check game.players[me].discardPile == @[baseCard("Study", 2), tossed]
+    var tosses: seq[VisualEvent]
+    for event in game.takeVisualEvents():
+      if event.kind == TossVfx:
+        tosses.add event
+    check tosses.len == 1
+    check tosses[0].card == tossed
+    check (tosses[0].handIndex, tosses[0].boardCount) == (1, 4)
+
+  test "bad discard picks are refused and it keeps waiting":
+    var (game, me, _) = studyGame(1303)
+    check game.playCard(0)
+    check not game.resolvePendingToss(@[])
+    check not game.resolvePendingToss(@[0, 1])
+    check not game.resolvePendingToss(@[9])
+    check not game.resolvePendingToss(@[-1])
+    check game.waitingToss
+    check game.players[me].hand.len == 4
+
+  test "a discard takes at most the hand, and none from an empty hand":
+    var game = newGame(Mage, Warrior, 1305)
+    let me = game.currentPlayer
+    game.players[me].hand = @[
+      Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(toss(3))),
+      baseCard("Bouncer", 1)]
+    check game.playCard(0)
+    check game.pendingToss.count == 1
+    check game.resolvePendingToss(@[0])
+    check game.players[me].hand.len == 0
+    game.players[me].hand = @[
+      Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(toss(1)))]
+    check game.playCard(0)
+    check not game.waitingToss
+
+  test "rules after a discard wait until it's chosen":
+    var game = newGame(Mage, Warrior, 1307)
+    let
+      me = game.currentPlayer
+      deck = game.players[me].deck.len
+    game.players[me].hand = @[
+      Card(name: "Swap", energyCost: 0, kind: Spell,
+        rules: rules(toss(1), draw(1))),
+      baseCard("Bouncer", 1)]
+    check game.playCard(0)
+    check game.waitingToss
+    check game.pendingToss.remaining.len == 1
+    check game.players[me].deck.len == deck
+    check game.resolvePendingToss(@[0])
+    # The draw came after the discard, so the drawn card stays in hand.
+    check game.players[me].deck.len == deck - 1
+    check game.players[me].hand.len == 1
+    check game.players[me].hand[0] != baseCard("Bouncer", 1)
+
+  test "an opponent's discard waits for the opponent":
+    var game = newGame(Mage, Warrior, 1309)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[Card(name: "Rot", energyCost: 0, kind: Spell,
+      rules: rules(toss(1, Opponent)))]
+    check game.playCard(0)
+    check game.waitingToss
+    check game.currentPlayer == me
+    check game.actingPlayer() == enemy
+    check game.resolvePendingToss(@[0])
+    check game.players[enemy].discardPile.len == 1
+
+  test "a discard inside a trigger holds the trigger queue":
+    let grind = Card(name: "Grind", energyCost: 0, kind: Trinket,
+      rules: rules(on(nextTurn(You), toss(1), draw(1))))
+    var game = newGame(Mage, Warrior, 1311)
+    let me = game.currentPlayer
+    game.players[me].hand = @[grind]
+    check game.playCard(0)
+    game.finishTurn()
+    game.finishTurn()
+    check game.waitingToss
+    check game.actingPlayer() == me
+    let hand = game.players[me].hand.len
+    check game.resolvePendingToss(@[0])
+    check not game.waitingChoice
+    check game.players[me].hand.len == hand
+
+suite "AWM selections and Primordial":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  test "targets and queries are interchangeable; text follows the form":
+    check printed(rules(bounce(target({Minion})))) ==
+      "Return a minion to its owner's hand."
+    check printed(rules(bounce(
+      game.board.choose(kind: Minion, owner: Opponent)))) ==
+      "Return all enemy minions to their owners' hands."
+    check printed(rules(destroy(game.board.choose(kind: Minion)))) ==
+      "Destroy all minions."
+    check printed(rules(lose(ranged(),
+      game.board.choose(kind: Minion, owner: Opponent)))) ==
+      "All enemy minions lose Ranged."
+    check printed(rules(removePowerToughness(1, 0,
+      game.board.choose(kind: Minion, owner: Opponent)))) ==
+      "Give all enemy minions -1/-0."
+    check printed(rules(addPowerToughness(1, 1, target({Minion})))) ==
+      "Give a minion +1/+1."
+
+  test "choose filters in braces, self: false and no filter at all":
+    check printed(rules(damage(1, game.board.choose({})))) ==
+      "Deal 1 damage to all cards."
+    check printed(rules(damage(1,
+      game.board.choose({self: false, kind: Minion})))) ==
+      "Deal 1 damage to all other minions."
+    check printed(rules(damage(game.board.choose({self: false, owner: You}).count,
+      target({Hero})))) ==
+      "Deal the number of other friendly cards damage to a hero."
+    check not compiles(rules(damage(1, game.board.choose({color: Minion}))))
+
+  test "Primordial returns every other card to its owner's hand":
+    let primordial = baseCard("Primordial", 10)
+    check primordial.kind == Minion
+    check primordial.class == some(Mage)
+    check primordial.power == 10
+    check primordial.toughness == 10
+    check not primordial.needsChoice()
+    check primordial.ruleText() ==
+      "Return all other cards to their owners' hands."
+    var game = newGame(Mage, Warrior, 1401)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[readyMinion(me, 1, Warrior.classCard()),
+      MinionState(id: 2, owner: me, card: baseCard("Plan", 3),
+        enteredTurn: game.turnNumber)]
+    game.players[enemy].board = @[readyMinion(enemy, 3, baseCard("Sniper", 2)),
+      readyMinion(enemy, 4, Warrior.classCard())]
+    game.nextMinionId = 5
+    game.players[me].hand = @[primordial]
+    game.players[me].energy = 10
+    let enemyHand = game.players[enemy].hand.len
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].card == primordial
+    check game.players[enemy].board.len == 0
+    check game.players[me].hand == @[Warrior.classCard(), baseCard("Plan", 3)]
+    check game.players[enemy].hand.len == enemyHand + 2
+    check game.players[enemy].hand[^2 .. ^1] ==
+      @[baseCard("Sniper", 2), Warrior.classCard()]
+    var bubbles, bounces: seq[int]
+    for event in game.takeVisualEvents():
+      case event.kind
+      of BubbleVfx: bubbles.add event.beat
+      of BounceVfx: bounces.add event.beat
+      else: discard
+    check bubbles.len == 4
+    check bounces.len == 4
+    for beat in bubbles & bounces:
+      check beat == bubbles[0]
+
+  test "query forms act on every match, and a spell has no self to skip":
+    let sweep = Card(name: "Sweep", energyCost: 0, kind: Spell, rules: rules(
+      lose(ranged(), game.board.choose(kind: Minion, owner: Opponent)),
+      removePowerToughness(1, 0,
+        game.board.choose(kind: Minion, owner: Opponent)),
+      destroy(game.board.choose({self: false, owner: You}))))
+    var game = newGame(Mage, Archer, 1403)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[readyMinion(me, 1, Warrior.classCard())]
+    game.players[enemy].board = @[readyMinion(enemy, 2, baseCard("Sniper", 2)),
+      readyMinion(enemy, 3, baseCard("Sharpshooter", 3))]
+    game.nextMinionId = 4
+    game.players[me].hand = @[sweep]
+    check game.playCard(0)
+    check game.players[me].board.len == 0
+    for minion in game.players[enemy].board:
+      check minion.lostKeywords == {Ranged}
+    check game.players[enemy].board[0].power == 1
+    check game.players[enemy].board[1].power == 2

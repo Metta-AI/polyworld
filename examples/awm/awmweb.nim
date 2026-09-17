@@ -215,6 +215,10 @@ when defined(emscripten):
   proc sendPlayCard*(feed: PlayerFeed, handIndex: int, choice: Choice) =
     feed.sendPlayCard(handIndex, @[choice])
 
+  proc sendToss*(feed: PlayerFeed, handIndices: seq[int]) =
+    ## Answers a waiting discard with hand positions.
+    awmWsSend(($(%*{"type": "toss", "handIndices": handIndices})).cstring)
+
   proc sendResolveTrigger*(feed: PlayerFeed, choices: seq[Choice]) =
     ## Answers the waiting trigger's targets, in order.
     var msg = %*{"type": "resolveTrigger"}

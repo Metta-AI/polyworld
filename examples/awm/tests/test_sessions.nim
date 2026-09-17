@@ -350,3 +350,53 @@ suite "waiting triggers in snapshots":
     check game.applyBotAction(action)
     check not game.waitingTrigger
     check game.players[enemy].board[0].currentToughness == 1
+
+suite "waiting discards":
+  test "the built-in bot discards its most expensive card":
+    var game = newGame(Mage, Warrior, 1313)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("study-2"), baseCard("plan-3"),
+      baseCard("oozification-4"), baseCard("bouncer-1")]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    check game.waitingToss
+    let action = game.nextBotAction()
+    check action.kind == TossAction
+    let hand = game.players[me].hand
+    var best = 0
+    for index, card in hand:
+      if card.energyCost >= hand[best].energyCost:
+        best = index
+    check action.tossIndices == @[best]
+    check game.applyBotAction(action)
+    check not game.waitingToss
+
+  test "a waiting discard and its later effects survive a round trip":
+    var game = newGame(Mage, Warrior, 1315)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: Warrior.classCard(), currentToughness: 2)]
+    game.nextMinionId = 3
+    game.pendingToss = PendingToss(player: me, count: 1, source: "Study",
+      text: "Discard 1 card.", remaining: @[
+        Effect(kind: DrawEffect, beat: 1, drawPlayer: me, drawCount: 1),
+        Effect(kind: DamageCreatureEffect, beat: 2, damagedCreatureId: 2,
+          creatureDamage: 1),
+        Effect(kind: SummonEffect, beat: 3, summonedId: 9,
+          summonedOwner: enemy, summonedCard: baseCard("ooze-0")),
+        Effect(kind: TargetVfxEffect, beat: 3, targetVfx: OozeSplatVfx,
+          visualTarget: creatureChoice(enemy, 2)),
+        Effect(kind: LoseKeywordEffect, beat: 4, keywordLoserId: 2,
+          lostKeyword: Ranged)])
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check decoded.waitingToss
+    check decoded.pendingToss.count == 1
+    check decoded.pendingToss.remaining.len == 5
+    check gameToJson(decoded) == encoded
+    var invalid = encoded.copy()
+    invalid["pendingToss"]["remaining"][0]["kind"] = %"NoSuchEffect"
+    expect ValueError:
+      discard gameFromJson(invalid)

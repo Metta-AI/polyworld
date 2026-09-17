@@ -337,7 +337,7 @@ proc serve(options: ServerOptions) {.async.} =
         case action.kind
         of EndTurnAction: match.playsThisTurn = 0
         of PlayCardAction: inc match.playsThisTurn
-        of ResolveTriggerAction: discard
+        of ResolveTriggerAction, TossAction: discard
         inc match.revision
         broadcastState()
       else:
@@ -353,6 +353,15 @@ proc serve(options: ServerOptions) {.async.} =
             let handIndex = action["handIndex"].getInt()
             if match.game.playCard(handIndex, action.actionChoices()):
               inc match.playsThisTurn
+              inc match.revision
+              broadcastState()
+          of "toss":
+            var indices: seq[int]
+            if action.hasKey("handIndices") and
+                action["handIndices"].kind == JArray:
+              for entry in action["handIndices"]:
+                indices.add entry.getInt(-1)
+            if match.game.resolvePendingToss(indices):
               inc match.revision
               broadcastState()
           of "resolveTrigger":
@@ -440,7 +449,7 @@ proc serve(options: ServerOptions) {.async.} =
               checkTransition()
             except ValueError:
               discard
-        of "playCard", "endTurn", "resolveTrigger":
+        of "playCard", "endTurn", "resolveTrigger", "toss":
           # Whoever must act: a waiting trigger's owner, else the current
           # player.
           if match.phase == Playing and

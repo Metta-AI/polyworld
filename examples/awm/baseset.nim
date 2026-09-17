@@ -115,10 +115,10 @@ let warrior = [
 
 let mage = [
   Card(
-    name: "Ooze", energyCost: 1,
+    name: "Ooze", energyCost: 0,
     class: some(Mage), kind: Minion,
     rules: rules(),
-    power: 1, toughness: 1
+    power: 0, toughness: 1
   ),
   Card(
     name: "Bouncer", energyCost: 1,
@@ -136,6 +136,19 @@ let mage = [
         destroy(self())
       )
     )
+  ),
+  Card(
+    name: "Study", energyCost: 2,
+    class: some(Mage), kind: Spell,
+    rules: rules(draw(2), toss(1))
+  ),
+  Card(
+    name: "Primordial", energyCost: 8,
+    class: some(Mage), kind: Minion,
+    rules: rules(
+      bounce(game.board.choose({ self: false }), vfx = BubbleVfx)
+    ),
+    power: 10, toughness: 10
   ),
   Card(
     name: "Oozification", energyCost: 4,
@@ -210,5 +223,6 @@ proc baseDeck*(heroClass: HeroClass): seq[Card] =
           ("Tactician", 5), ("Footsoldier", 6), ("Commander", 4),
           ("Rally", 3)])
       of Mage:
-        mage.deck([("Bouncer", 24), ("Oozification", 8), ("Plan", 8)])
+        mage.deck([("Bouncer", 20), ("Oozification", 4), ("Plan", 7),
+          ("Study", 7), ("Primordial", 2)])
   doAssert result.len == DeckSize

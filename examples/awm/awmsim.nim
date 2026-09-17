@@ -1,5 +1,5 @@
 ## Deterministic AWM simulation shared by native, browser and server builds.
-import std/random
+import std/[algorithm, random]
 import awmcore, baseset
 export awmcore, baseset
 
@@ -51,8 +51,17 @@ type
     sourceId*: int  ## The card in play whose trigger fired.
     trigger*: int   ## Which of that card's `on(...)` rules.
 
+  PendingToss* = object
+    ## A discard waiting for its player to choose cards from hand. Whatever
+    ## else the resolution does waits with it. Nothing waits when count is 0.
+    player*: int
+    count*: int  ## Already capped at the hand size.
+    source*, text*: string  ## The asking card and its rule, for prompts.
+    remaining*: seq[Effect]  ## The resolution's later effects, in order.
+
   GameState* = object
     players*: array[PlayerCount, PlayerState]
+    pendingToss*: PendingToss
     visualBeat*: int  ## The beat new visual events belong to.
     pendingTriggers*: seq[PendingTrigger]
       ## While not empty, the first one's owner must act before anyone else.
@@ -151,14 +160,24 @@ proc waitingTrigger*(game: GameState): bool =
   ## A fired trigger is waiting for its owner to choose targets.
   game.pendingTriggers.len > 0
 
+proc waitingToss*(game: GameState): bool =
+  ## A discard is waiting for its player to choose cards.
+  game.pendingToss.count > 0
+
+proc waitingChoice*(game: GameState): bool =
+  ## Someone must choose before play goes on: a discard, or a trigger.
+  game.waitingToss or game.waitingTrigger
+
 proc actingPlayer*(game: GameState): int =
-  ## Who must act next: a waiting trigger's owner, else the current player.
-  if game.waitingTrigger: game.pendingTriggers[0].owner
+  ## Who must act next: a waiting discard's player, then a waiting trigger's
+  ## owner, else the current player.
+  if game.waitingToss: game.pendingToss.player
+  elif game.waitingTrigger: game.pendingTriggers[0].owner
   else: game.currentPlayer
 
 proc canPlay*(game: GameState, cardIndex: int): bool =
   let player = game.players[game.currentPlayer]
-  not game.waitingTrigger and
+  not game.waitingChoice and
     cardIndex >= 0 and
     cardIndex < player.hand.len and
     player.hand[cardIndex].energyCost <= player.energy
@@ -299,8 +318,10 @@ proc damageMinion(game: var GameState, minionId, amount: int) =
 
 proc applyEffects(game: var GameState, effects: openArray[Effect]) =
   ## Each resolution starts a new beat, and so does each rule within it.
+  ## A discard stops here until its player chooses; the effects after it
+  ## wait in `pendingToss`.
   var beat = low(int)
-  for effect in effects:
+  for index, effect in effects:
     if effect.beat != beat:
       beat = effect.beat
       inc game.visualBeat
@@ -369,6 +390,15 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) =
             game.gameOver = true
             game.winner = (effect.drawPlayer + 1) mod PlayerCount
           break
+    of TossEffect:
+      let count = min(effect.tossCount,
+        game.players[effect.tossPlayer].hand.len)
+      if count > 0:
+        game.pendingToss = PendingToss(player: effect.tossPlayer,
+          count: count, source: effect.tossSource, text: effect.tossText,
+          remaining: @(effects.toOpenArray(index + 1, effects.high)))
+        game.checkWinCondition()
+        return
     of DestroyEffect:
       let location = game.minionLocation(effect.destroyedId)
       if location.found:
@@ -425,6 +455,8 @@ proc advanceTriggers(game: var GameState) =
   ## Resolves queued triggers in order until one needs its owner to choose
   ## a target (and has something legal to choose), or the queue is empty.
   while game.pendingTriggers.len > 0:
+    if game.waitingToss:
+      return
     if game.gameOver:
       game.pendingTriggers.setLen(0)
       return
@@ -445,7 +477,7 @@ proc advanceTriggers(game: var GameState) =
 proc resolvePendingTrigger*(game: var GameState, choices: seq[Choice]): bool =
   ## The waiting trigger's owner answers its targets in order. A canceled
   ## pick means no target; an illegal one is refused and it keeps waiting.
-  if not game.waitingTrigger:
+  if game.waitingToss or not game.waitingTrigger:
     return false
   let pending = game.pendingTriggers[0]
   let source = game.triggerSource(pending)
@@ -461,6 +493,36 @@ proc resolvePendingTrigger*(game: var GameState, choices: seq[Choice]): bool =
     return false
   game.pendingTriggers.delete(0)
   game.applyEffects(context.effects)
+  game.advanceTriggers()
+  true
+
+proc resolvePendingToss*(game: var GameState, handIndices: seq[int]): bool =
+  ## The discarding player's picks: exactly the waiting count of distinct
+  ## hand positions. Those cards go to their discard pile, then the rest of
+  ## the resolution (and any waiting triggers) goes on. Bad picks are
+  ## refused and it keeps waiting.
+  if not game.waitingToss:
+    return false
+  let
+    pending = game.pendingToss
+    player = pending.player
+  if handIndices.len != pending.count:
+    return false
+  for i, index in handIndices:
+    if index notin 0 ..< game.players[player].hand.len or
+        index in handIndices[0 ..< i]:
+      return false
+  inc game.visualBeat
+  # Highest positions first, so each event's slot is right when it leaves.
+  for index in handIndices.sorted(Descending):
+    let card = game.players[player].hand[index]
+    game.visualEvents.add VisualEvent(kind: TossVfx,
+      target: heroChoice(player), card: card, handIndex: index,
+      boardCount: game.players[player].hand.len, beat: game.visualBeat)
+    game.players[player].hand.delete(index)
+    game.players[player].discardPile.add card
+  game.pendingToss = PendingToss()
+  game.applyEffects(pending.remaining)
   game.advanceTriggers()
   true
 
@@ -575,7 +637,7 @@ proc attackHero*(game: var GameState, minionId: int): bool =
   if not location.found: return false
   if location.player != game.currentPlayer: return false
   let minion = game.players[location.player].board[location.index]
-  if game.waitingTrigger or minion.card.kind != Minion or
+  if game.waitingChoice or minion.card.kind != Minion or
       not minion.canAttack or
       minion.hasAttacked: return false
   let targetPlayer = (game.currentPlayer + 1) mod PlayerCount
@@ -594,7 +656,7 @@ proc attackTargets*(game: GameState, attackerId: int): seq[Choice] =
   if not location.found or location.player != game.currentPlayer:
     return
   let attacker = game.players[location.player].board[location.index]
-  if game.waitingTrigger or attacker.card.kind != Minion or
+  if game.waitingChoice or attacker.card.kind != Minion or
       not attacker.canAttack or
       attacker.hasAttacked:
     return
@@ -626,7 +688,7 @@ proc attack*(game: var GameState, attackerId: int, target: Choice): bool =
   of CanceledChoice, NoTargetChoice: false
 
 proc eligibleAttackers*(game: GameState): seq[int] =
-  if game.waitingTrigger:
+  if game.waitingChoice:
     return
   for minion in game.players[game.currentPlayer].board:
     if minion.card.kind == Minion and minion.canAttack and
@@ -634,7 +696,7 @@ proc eligibleAttackers*(game: GameState): seq[int] =
       result.add minion.id
 
 proc finishTurn*(game: var GameState) =
-  if game.gameOver or game.waitingTrigger: return
+  if game.gameOver or game.waitingChoice: return
   game.currentPlayer = (game.currentPlayer + 1) mod PlayerCount
   inc game.turnNumber
   game.beginTurn()
