@@ -62,6 +62,36 @@ Loop over `0` through `spellCount() - 1`. This list contains unresolved casts fr
 
 Other invalid spell queries return zero. Visibility of an enemy warning does not reveal its hidden caster's identity.
 
+## Action feedback
+
+`lastActionError()` returns the reason for your hero's latest submitted
+command. A successful action clears it to `NoActionError` (0). A failed
+action returns 0 as before, and sets the first failing validation reason.
+Read-only queries and internal automatic spell attempts do not change it.
+Unlike the sampled self data, this query updates immediately after commands.
+
+```basic
+accepted = castTarget(1, targetId)
+if accepted = 0 and lastActionError() = ActionInsufficientMana then
+  print "Need more mana"
+end if
+```
+
+Read-only reason constants are `NoActionError`, `ActionNotAlive`,
+`ActionInvalidSlot`, `ActionUnknownItem`, `ActionInsufficientGold`,
+`ActionAlreadyEquipped`, `ActionStackFull`, `ActionInventoryFull`,
+`ActionEmptySlot`, `ActionNotConsumable`, `ActionFullHealth`, `ActionFullMana`,
+`ActionTargetUnavailable`, `ActionOutOfRange`, `ActionNoRoute`,
+`ActionInvalidPoint`, `ActionCooldown`, `ActionNoCharges`,
+`ActionInsufficientMana`, and `ActionSpellLimit` (values 0 through 19).
+Unavailable targets share a generic error without exposing hidden state.
+This feedback is recorded deterministically through submitted replay actions.
+
+For post-match analysis, the [replay extractor](../../docs/stats.md#gota-replay-events)
+resimulates an exact-version replay and exposes typed damage, healing,
+death, reward, and rejection events for all players. Its omniscient buffer
+is not available to live BASIC policies.
+
 ## Terrain and execution
 
 BASIC can inspect the complete static terrain with `terrainKind(x, y)`, `terrainWalkable(x, y)`, `terrainHeight(x, y)`, and `terrainWaterDepth(x, y)`. These use global tile coordinates on `selfLayer`. Each has an explicit `At(x, y, layer)` version, such as `terrainKindAt(x, y, GroundLayer)`. Read-only constants expose `mapWidth`, `mapHeight`, `mapLayers`, the layer names, and terrain kinds. Height and water depth use eighths of a tile; invalid or absent tiles return zero. The Terrain API section of the game documentation lists all constants and edge cases. Static terrain is available through fog, while enemy objects remain visibility-filtered. Walkability also includes team-known building footprints; unseen enemy destruction does not reveal newly open tiles.

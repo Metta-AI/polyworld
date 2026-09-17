@@ -70,3 +70,106 @@ explicit size limits.
 
 For viewer screenshots, build with `-d:takeScreenshot` and set
 `SHOW_STATS=1` to include the overlay. Normal builds use TAB and the button.
+
+## GotA replay events
+
+GotA can emit a typed per-tick log when compiled with `-d:replayEvents`.
+`examples/gods_of_the_arena/tools/replay_extractor.nims` enables that flag
+and `headless` automatically for the extractor:
+
+```sh
+nim r examples/gods_of_the_arena/tools/replay_extractor.nim
+```
+
+The extractor is a short, top-level script intended for agents to copy and
+modify. Edit `ReplayPath` at the top to choose a recording. It has no
+command-line options, filters, helper functions, or output limits. It
+prints the configuration, then every god, building, hero, creep, spell,
+and event at tick zero and after every simulation tick. Both teams are
+included. Edit the loops directly to select fields or calculate statistics.
+It verifies each recorded hash and fails on incompatible or incomplete
+replays.
+
+Records are flat value structs from
+`examples/gods_of_the_arena/events.nim`, with enums and fixed-width numbers.
+The simulation does not format strings or write log files. This is an
+in-memory binary representation, not a separate binary file format.
+
+Capture includes both teams, regardless of visibility. Records retain
+entity IDs, kinds, teams, hero classes, player slots, and event positions
+after removal. BASIC cannot read this omniscient buffer. It exists only
+in capture builds, so normal native and WASM builds have no event buffer
+or event-construction work.
+
+The buffer begins with `EntitySpawned` events at tick zero. Each advancing
+tick clears it while retaining capacity, including before that tick's wave
+spawns. Consume or explicitly copy records before advancing. Checkpoint
+copies and restores clear the transient buffer. It is excluded from
+replay payloads and state hashes, and never accumulates a match history.
+
+| Kind | Meaning |
+| --- | --- |
+| `Damage` | Requested damage, effective HP removed, and raw HP before/after. Overkill can leave negative HP, but effective damage excludes it. |
+| `Death` | One positive-to-nonpositive HP transition. Actor is the actual killer, including creeps and towers. `related` references the lethal damage. |
+| `Assist` | Existing hero assist credit, linked to the death. |
+| `Healing` | Effective healing with requested amount and HP before/after. |
+| `XpGained`, `GoldGained` | Recipient, defeated source entity, amount, and related death. XP before/after is lifetime XP. |
+| `GoldSpent`, `LevelChanged` | Actual resource changes. Spent amounts are negative. |
+| `HealthAdjusted`, `ManaChanged` | Equipment, level, respawn, regeneration, consumable, or ability changes, distinguished by cause. Stat adjustments are not healing. |
+| `SpellReleased` | Successful automatic or explicit cast with caster, aim target ID if any, slot, and ability ID. |
+| `ItemPurchased`, `ItemConsumed` | Item ID and stack count before/after. Consumption amounts are negative. |
+| `ActionRejected` | Explicit command, original numeric arguments, and typed rejection reason. Internal auto-cast candidate failures are omitted. |
+| `EntitySpawned`, `EntityRespawned`, `EntityRemoved` | Entity lifecycle; corpse expiration is distinct from death. |
+| `MatchEnded` | God destruction or configured time limit. `amount` is winning team (0 red, 1 blue), or -1 for timeout. A partial recording does not imply a match ended. |
+
+`related` is a zero-based index within the same tick, or -1 when absent.
+It is not a persistent event ID. `detail` is an ability or item enum ID
+where applicable. Amounts and before/after values are signed 64-bit
+integers. Actor and target metadata use -1 for absent team/class/player,
+and zero for absent entity ID/kind. Rejected commands preserve raw IDs in
+`first`, `second`, and `slot` without resolving hidden target metadata.
+
+The event log preserves current damage, reward, and validation rules. No
+new nearby-player XP or gold distribution is introduced. Movement traces,
+pathfinding logs, and automatic failure spam are not included.
+
+### Live action errors
+
+`lastActionError()` is available to BASIC even without `replayEvents`.
+A successful submitted action clears it to `NoActionError` (0). A rejected
+action sets the first failing validator's reason. Queries and automatic
+casts leave it unchanged. Read it immediately after a command to diagnose
+that attempt; multiple commands in one decision replace the latest value.
+This per-hero value is checkpointed and hashed, because a bot can branch
+on it. It reveals only that hero's own command error. Unavailable targets
+use a generic reason rather than revealing hidden object state.
+
+Named read-only BASIC constants match `ActionError` in `events.nim`:
+
+| Value | Constant |
+| --- | --- |
+| 0 | `NoActionError` |
+| 1 | `ActionNotAlive` |
+| 2 | `ActionInvalidSlot` |
+| 3 | `ActionUnknownItem` |
+| 4 | `ActionInsufficientGold` |
+| 5 | `ActionAlreadyEquipped` |
+| 6 | `ActionStackFull` |
+| 7 | `ActionInventoryFull` |
+| 8 | `ActionEmptySlot` |
+| 9 | `ActionNotConsumable` |
+| 10 | `ActionFullHealth` |
+| 11 | `ActionFullMana` |
+| 12 | `ActionTargetUnavailable` |
+| 13 | `ActionOutOfRange` |
+| 14 | `ActionNoRoute` |
+| 15 | `ActionInvalidPoint` |
+| 16 | `ActionCooldown` |
+| 17 | `ActionNoCharges` |
+| 18 | `ActionInsufficientMana` |
+| 19 | `ActionSpellLimit` |
+
+Gameplay version 42 records the signed cast slot separately from action
+kind, including invalid slots. Playback regenerates the same failures and
+diagnostic state. This client accepts only version 42; older recordings
+require their archived client.

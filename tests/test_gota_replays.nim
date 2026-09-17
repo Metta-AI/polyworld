@@ -71,6 +71,8 @@ block:
   for slot in 0'i32 .. 3'i32:
     spells.recordCast(2, 100, slot, 105, 0, false)
     spells.recordCast(2, 100, slot, 64, 42, true)
+  spells.recordCast(2, 100, -7, 105, 0, false)
+  spells.recordCast(2, 100, int32.high, -20, 42, true)
   spells.recordHash(123)
   spells.recordHash(456)
   let restored = decodeReplay(spells.data.encodeReplay())

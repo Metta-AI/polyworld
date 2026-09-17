@@ -11,9 +11,11 @@
 import
   polyworld/[basic, bodies, fixed, hashes, metrics, noises, pathing, profiles, rngs,
     tapes, visions],
-  content,
+  content, events,
   maps,
   replays
+
+export events
 
 ## Deterministic animation slots shared by every backend.
 
@@ -143,6 +145,7 @@ type
     recharges*: array[HeroAbilitySlot, int32]
     spellsReady*: bool
     manualSpells*: bool
+    lastActionError*: ActionError
 
   Fort* = object
     id*: int32
@@ -201,6 +204,9 @@ type
     resolved*: bool
 
   World* = ref object
+    when defined(replayEvents):
+      events*: seq[GameEvent]
+      eventTick: int32
     heroSpawns*: array[2, WorldPoint]
     casts*: seq[SpellCast]
     stats*: CombatStats
@@ -431,12 +437,17 @@ proc clone*(w: World): World =
   result[] = w[]
   result.stats = w.stats.clone()
   result.heroes = cloneHeroes(w.heroes)
+  when defined(replayEvents):
+    result.events = @[]
 
 proc restore*(w: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
   w[] = snapshot[]
   w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
+  when defined(replayEvents):
+    w.events = @[]
+    w.eventTick = w.tick
   navigationWorld = w
 
 proc buildSightTerrain(): tuple[
@@ -643,6 +654,193 @@ proc buildingIndex*(world: World, id: int32): int =
       return i
   -1
 
+when defined(replayEvents):
+  proc eventEntity(world: World, id: int32): EventEntity =
+    ## Retains entity identity even after removal from the world.
+    result = EventEntity(id: id, team: -1, class: -1, player: -1)
+    var position: WorldPoint
+    let hero = world.heroIndex(id)
+    if hero >= 0:
+      let value = world.heroes[hero]
+      result.kind = HeroObjectKind
+      result.team = value.team.ord.int32
+      result.class = value.class.ord.int32
+      result.player = hero.int32
+      position = value.position
+    else:
+      let creep = world.footmanIndex(id)
+      let building = world.buildingIndex(id)
+      if creep >= 0:
+        let value = world.footmen[creep]
+        result.kind = FootmanObjectKind
+        result.team = value.team.ord.int32
+        position = value.position
+      elif building >= 0:
+        let value = world.buildings[building]
+        result.kind =
+          if value.kind == TowerBuilding: TowerObjectKind
+          else: BarracksObjectKind
+        result.team = value.team.ord.int32
+        position = value.position
+      else:
+        for value in world.forts:
+          if id != 0 and value.id == id:
+            result.kind = FortObjectKind
+            result.team = value.team.ord.int32
+            position = value.center
+    result.x = position.x
+    result.y = position.y
+    result.z = position.z
+
+  proc emit(world: World, event: GameEvent) =
+    ## Appends one value record to the current tick's reusable buffer.
+    var value = event
+    value.tick = world.eventTick
+    world.events.add value
+
+  proc deathEvent(world: World, id: int32): int32 =
+    ## Finds the lethal event that precedes this tick's kill reward.
+    for i in countdown(world.events.high, 0):
+      if world.events[i].kind == Death and world.events[i].target.id == id:
+        return i.int32
+    -1
+
+  proc damageEvent(
+      world: World,
+      source, target, requested, before, after: int32,
+      cause: EventCause,
+      detail: int32
+  ) =
+    ## Records effective damage, the lethal hit, and existing assist credit.
+    if requested <= 0 or after == before:
+      return
+    let
+      actor = world.eventEntity(source)
+      victim = world.eventEntity(target)
+      hit = world.events.len.int32
+    world.emit GameEvent(
+      kind: Damage, actor: actor, target: victim, cause: cause,
+      detail: detail, requested: requested,
+      amount: max(before, 0) - max(after, 0),
+      before: before, after: after, related: -1
+    )
+    if before > 0 and after <= 0:
+      let death = world.events.len.int32
+      world.emit GameEvent(
+        kind: Death, actor: actor, target: victim, cause: cause,
+        detail: detail, related: hit
+      )
+      if victim.kind == HeroObjectKind and world.stats != nil:
+        let count = world.stats.values.len
+        for slot in 0 ..< count:
+          let lastHit = world.stats.hits[victim.player.int * count + slot]
+          if slot != actor.player and lastHit >= 0 and
+            world.tick - lastHit <= TickRate * 10 and
+            world.stats.teams[slot] != victim.team:
+              world.emit GameEvent(
+                kind: Assist, actor: world.eventEntity(world.heroes[slot].id),
+                target: victim, cause: KillReward, related: death, amount: 1
+              )
+      if victim.kind in [TowerObjectKind, BarracksObjectKind]:
+        world.emit GameEvent(
+          kind: EntityRemoved, actor: actor, target: victim,
+          cause: cause, related: death
+        )
+
+  proc valueEvent(
+      world: World,
+      kind: EventKind,
+      source, target: int32,
+      cause: EventCause,
+      detail: int32,
+      before, after, requested: int64,
+      related = -1'i32
+  ) =
+    ## Records a resource mutation without formatting or heap payloads.
+    if before != after:
+      world.emit GameEvent(
+        kind: kind, actor: world.eventEntity(source),
+        target: world.eventEntity(target), cause: cause, detail: detail,
+        before: before, after: after, amount: after - before,
+        requested: requested, related: related
+      )
+
+  proc lifecycleEvent(
+      world: World,
+      kind: EventKind,
+      source, target: int32,
+      cause: EventCause
+  ) =
+    ## Captures the identity of one initialized, spawned, or removed entity.
+    world.emit GameEvent(
+      kind: kind, actor: world.eventEntity(source),
+      target: world.eventEntity(target), cause: cause, related: -1
+    )
+
+proc applyDamage[T: Hero | Footman](
+    world: World,
+    target: var T,
+    amount, source: int32,
+    cause = BasicAttack,
+    detail = 0'i32
+) =
+  ## Applies a unit hit and records its actual health change.
+  when defined(replayEvents):
+    let before = target.hp
+  target.hp -= amount
+  when defined(replayEvents):
+    world.damageEvent(source, target.id, amount, before, target.hp, cause, detail)
+
+proc healHero(
+    world: World,
+    target: Hero,
+    amount, source: int32,
+    cause: EventCause,
+    detail: int32
+) =
+  ## Restores health up to the hero's maximum and records the effective heal.
+  when defined(replayEvents):
+    let before = target.hp
+  target.hp = min(target.maxHp, target.hp + amount)
+  when defined(replayEvents):
+    world.valueEvent(Healing, source, target.id, cause, detail,
+      before, target.hp, amount)
+
+proc restoreMana(
+    world: World,
+    target: Hero,
+    amount, source: int32,
+    cause: EventCause,
+    detail: int32
+) =
+  ## Restores mana up to the hero's maximum and records the resource change.
+  when defined(replayEvents):
+    let before = target.mana
+  target.mana = min(target.maxMana, target.mana + amount)
+  when defined(replayEvents):
+    world.valueEvent(ManaChanged, source, target.id, cause, detail,
+      before, target.mana, amount)
+
+proc finishAction(
+    world: World,
+    heroId: int32,
+    action: uint8,
+    slot, first, second: int32,
+    error: ActionError
+): bool =
+  ## Updates only the submitting hero's diagnostic and records failed commands.
+  let index = world.heroIndex(heroId)
+  if index >= 0:
+    world.heroes[index].lastActionError = error
+  when defined(replayEvents):
+    if error != NoActionError:
+      world.emit GameEvent(
+        kind: ActionRejected, actor: world.eventEntity(heroId),
+        target: world.eventEntity(0), cause: Command, related: -1,
+        action: action, slot: slot, first: first, second: second, error: error
+      )
+  error == NoActionError
+
 proc buildingById*(world: World, id: int32): Building =
   ## Reads one tower by its script-visible object ID.
   let index = buildingIndex(world, id)
@@ -713,10 +911,18 @@ proc fortExposed*(world: World, team: Team): bool =
       return false
   true
 
-proc damageFort(world: World, index: int, damage: int32) =
+proc damageFort(
+    world: World, index: int, damage, source: int32,
+    cause = BasicAttack, detail = 0'i32
+) =
   ## Applies damage only after the god's two guards have been destroyed.
   if damage > 0 and world.fortExposed(world.forts[index].team):
+    when defined(replayEvents):
+      let before = world.forts[index].hp
     world.forts[index].hp = max(0'i32, world.forts[index].hp - damage)
+    when defined(replayEvents):
+      world.damageEvent(source, world.forts[index].id, damage,
+        before, world.forts[index].hp, cause, detail)
 
 proc xpForNextLevel*(level: int): int =
   ## Returns the XP needed to advance from the given hero level.
@@ -740,8 +946,17 @@ proc heroItemBonus(hero: Hero): tuple[
     result.damage += spec.damage
     result.movePerTick += spec.movePerTick
 
-proc refreshHeroStats*(hero: Hero) =
-  ## Rebuilds current maximums from class, level, and held equipment.
+proc refreshHeroStats*(
+    hero: Hero,
+    world: World = nil,
+    cause = Initialization,
+    detail = 0'i32
+) =
+  ## Rebuilds maximums and records live level or equipment adjustments.
+  when defined(replayEvents):
+    let
+      beforeHp = hero.hp
+      beforeMana = hero.mana
   let
     previousMaxHp = hero.maxHp
     previousMaxMana = hero.maxMana
@@ -754,6 +969,12 @@ proc refreshHeroStats*(hero: Hero) =
     hero.hp = hero.maxHp
   if hero.mana > hero.maxMana:
     hero.mana = hero.maxMana
+  when defined(replayEvents):
+    if world != nil:
+      world.valueEvent(ManaChanged, hero.id, hero.id, cause, detail,
+        beforeMana, hero.mana, 0)
+      world.valueEvent(HealthAdjusted, hero.id, hero.id, cause, detail,
+        beforeHp, hero.hp, 0)
 
 proc heroAttackDamage*(hero: Hero): int32 =
   ## Returns basic-attack damage including held equipment.
@@ -781,16 +1002,27 @@ proc heroMoveSpeed*(hero: Hero): int32 =
   heroMovePerTick(hero.class, hero.level) +
     hero.heroItemBonus().movePerTick
 
-proc gainRewards(hero: Hero, xp, gold: int) =
-  ## Grants kill rewards and applies every level gained from the new XP.
+proc gainRewards(world: World, hero: Hero, xp, gold: int, victim: int32) =
+  ## Grants the existing kill rewards and links them to their lethal event.
+  when defined(replayEvents):
+    let related = world.deathEvent(victim)
+    world.valueEvent(XpGained, victim, hero.id, KillReward, 0,
+      hero.totalXp, hero.totalXp + xp, xp, related)
+    world.valueEvent(GoldGained, victim, hero.id, KillReward, 0,
+      hero.gold, hero.gold + gold, gold, related)
   hero.xp += xp
   hero.totalXp += xp
   hero.gold += gold
   while hero.level < HeroMaxLevel and
       hero.xp >= xpForNextLevel(hero.level):
     hero.xp -= xpForNextLevel(hero.level)
+    when defined(replayEvents):
+      let beforeLevel = hero.level
     inc hero.level
-    hero.refreshHeroStats()
+    when defined(replayEvents):
+      world.valueEvent(LevelChanged, hero.id, hero.id, LevelUp, 0,
+        beforeLevel, hero.level, 1)
+    hero.refreshHeroStats(world, LevelUp)
 
 proc layerFixedHeight(
     layerIndex: int,
@@ -1064,9 +1296,17 @@ proc buildingAim*(building: Building, fromPoint: WorldPoint): WorldPoint =
       best = distance
       result = point
 
-proc damageBuilding(world: World, index: int, damage: int32) =
+proc damageBuilding(
+    world: World, index: int, damage, source: int32,
+    cause = BasicAttack, detail = 0'i32
+) =
   ## Applies building damage and releases occupied tiles on the killing hit.
+  when defined(replayEvents):
+    let before = world.buildings[index].hp
   world.buildings[index].hp -= damage
+  when defined(replayEvents):
+    world.damageEvent(source, world.buildings[index].id, damage,
+      before, world.buildings[index].hp, cause, detail)
   if world.buildings[index].hp <= 0:
     world.syncBuildings()
 
@@ -1393,6 +1633,8 @@ proc spawnWave(world: World) {.measure.} =
       inc world.nextFootmanId
       footman.advanceWaypoints()
       world.footmen.add footman
+      when defined(replayEvents):
+        world.lifecycleEvent(EntitySpawned, building.id, footman.id, Wave)
 
 proc mapCoordinate*(value: int32): int32 =
   ## Converts one world coordinate to a clamped script map coordinate.
@@ -1810,18 +2052,33 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
   navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionWalkTo,
+      0,
+      mapX,
+      mapY,
+      ActionNotAlive
+    )
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = false
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
   world.heroes[index].targetBuildingId = 0
   world.heroes[index].attackingFort = false
-  setHeroDestination(
+  let accepted = setHeroDestination(
     world.heroes[index],
     int(mapX),
     int(mapY),
     world.heroes[index].position.y
+  )
+  world.finishAction(
+    heroId,
+    ActionWalkTo,
+    0,
+    mapX,
+    mapY,
+    if accepted: NoActionError else: ActionNoRoute
   )
 
 proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
@@ -1829,18 +2086,33 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
   navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionAttackMove,
+      0,
+      mapX,
+      mapY,
+      ActionNotAlive
+    )
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = true
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
   world.heroes[index].targetBuildingId = 0
   world.heroes[index].attackingFort = false
-  setHeroDestination(
+  let accepted = setHeroDestination(
     world.heroes[index],
     int(mapX),
     int(mapY),
     world.heroes[index].position.y
+  )
+  world.finishAction(
+    heroId,
+    ActionAttackMove,
+    0,
+    mapX,
+    mapY,
+    if accepted: NoActionError else: ActionNoRoute
   )
 
 proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
@@ -1873,76 +2145,116 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionAttackTarget,
+      0,
+      targetId,
+      0,
+      ActionNotAlive
+    )
   if targetId == 0:
     world.heroes[index].attackObjectId = 0
     world.heroes[index].attackMoving = false
-    return true
+    return world.finishAction(
+      heroId,
+      ActionAttackTarget,
+      0,
+      targetId,
+      0,
+      NoActionError
+    )
   if not world.isEnemyTarget(world.heroes[index], targetId):
-    return false
+    return world.finishAction(
+      heroId,
+      ActionAttackTarget,
+      0,
+      targetId,
+      0,
+      ActionTargetUnavailable
+    )
   world.heroes[index].attackMoving = false
   if world.heroes[index].attackObjectId != targetId:
     world.heroes[index].hasMoveTarget = false
   world.heroes[index].attackObjectId = targetId
-  true
+  world.finishAction(heroId, ActionAttackTarget, 0, targetId, 0, NoActionError)
 
-proc purchaseReason*(world: World, heroId, itemId: int32): string =
-  ## Returns an empty string when a purchase is allowed, or its rejection.
+proc purchaseError(world: World, heroId, itemId: int32): ActionError =
+  ## Returns the first failing purchase check without allocating a string.
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
-    return "Available when alive"
+    return ActionNotAlive
   if world.heroes[index].hp <= 0:
-    return "Available when alive"
+    return ActionNotAlive
   let item = itemFromId(itemId)
   if item == NoItem:
-    return "Unknown item"
+    return ActionUnknownItem
   let spec = item.itemSpec
   if world.heroes[index].gold < spec.cost:
-    return "Not enough gold"
+    return ActionInsufficientGold
   var empty = false
   for slot in 0 ..< InventorySlots:
     if world.heroes[index].inventory[slot] == NoItem:
       empty = true
     elif world.heroes[index].inventory[slot] == item:
       if spec.kind == Equipment:
-        return "Already equipped"
+        return ActionAlreadyEquipped
       if world.heroes[index].itemCounts[slot] >= MaxItemStack:
-        return "Stack full"
-      return ""
+        return ActionStackFull
+      return NoActionError
   if not empty:
-    return "Inventory full"
+    return ActionInventoryFull
+  NoActionError
+
+proc purchaseReason*(world: World, heroId, itemId: int32): string =
+  ## Formats the same purchase validator for the shop UI.
+  world.purchaseError(heroId, itemId).actionErrorMessage()
 
 proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
-  ## Spends gold to put one shop item into a hero inventory.
-  if world.purchaseReason(heroId, itemId).len > 0:
-    return false
+  ## Spends gold to put one validated shop item into a hero inventory.
+  let error = world.purchaseError(heroId, itemId)
+  if error != NoActionError:
+    return world.finishAction(heroId, ActionBuyItem, 0, itemId, 0, error)
   let
-    index = heroIndex(world, heroId)
+    hero = world.heroes[world.heroIndex(heroId)]
     item = itemFromId(itemId)
     spec = item.itemSpec
   var
     stackSlot = -1
     emptySlot = -1
   for slot in 0 ..< InventorySlots:
-    if world.heroes[index].inventory[slot] == item:
+    if hero.inventory[slot] == item:
       stackSlot = slot
-    elif world.heroes[index].inventory[slot] == NoItem and
-        emptySlot < 0:
+    elif hero.inventory[slot] == NoItem and emptySlot < 0:
       emptySlot = slot
   if spec.kind == Consumable and stackSlot >= 0:
-    if world.heroes[index].itemCounts[stackSlot] >= MaxItemStack:
-      return false
-    inc world.heroes[index].itemCounts[stackSlot]
+    if hero.itemCounts[stackSlot] >= MaxItemStack:
+      return world.finishAction(heroId, ActionBuyItem, 0, itemId, 0,
+        ActionStackFull)
   elif spec.kind == Equipment and stackSlot >= 0:
-    return false
-  elif emptySlot >= 0:
-    world.heroes[index].inventory[emptySlot] = item
-    world.heroes[index].itemCounts[emptySlot] = 1
+    return world.finishAction(heroId, ActionBuyItem, 0, itemId, 0,
+      ActionAlreadyEquipped)
+  elif emptySlot < 0:
+    return world.finishAction(heroId, ActionBuyItem, 0, itemId, 0,
+      ActionInventoryFull)
+  let slot = if stackSlot >= 0: stackSlot else: emptySlot
+  when defined(replayEvents):
+    let beforeCount = hero.itemCounts[slot]
+  hero.inventory[slot] = item
+  if stackSlot >= 0:
+    inc hero.itemCounts[slot]
   else:
-    return false
-  world.heroes[index].gold -= spec.cost
-  world.heroes[index].refreshHeroStats()
-  true
+    hero.itemCounts[slot] = 1
+  when defined(replayEvents):
+    world.valueEvent(ItemPurchased, heroId, heroId, EquipmentChange, itemId,
+      beforeCount, hero.itemCounts[slot], 1)
+    let beforeGold = hero.gold
+  hero.gold -= spec.cost
+  when defined(replayEvents):
+    world.valueEvent(GoldSpent, heroId, heroId, EquipmentChange, itemId,
+      beforeGold, hero.gold, -spec.cost)
+  hero.refreshHeroStats(world, EquipmentChange, itemId)
+  world.finishAction(heroId, ActionBuyItem, 0, itemId, 0, NoActionError)
 
 proc footmanAttackTicks(clip: int): int32 =
   ## Returns the deterministic footman attack duration in ticks.
@@ -2030,10 +2342,12 @@ proc updateTower*(world: World, tower: var Building) =
   tower.attackTicks -= TowerAttackTicks
   let damage = TowerDamages[tower.tier]
   if targetFootman >= 0:
-    world.footmen[targetFootman].hp -= damage
+    world.applyDamage(world.footmen[targetFootman],
+      damage, tower.id, BasicAttack, 0)
   else:
     let wasAlive = world.heroes[targetHero].hp > 0
-    world.heroes[targetHero].hp -= damage
+    world.applyDamage(world.heroes[targetHero],
+      damage, tower.id, BasicAttack, 0)
     if wasAlive and world.heroes[targetHero].hp <= 0:
       recordHeroKill(world, tower.team, world.heroes[targetHero].team)
       world.stats.hitHero(-1, targetHero, world.tick, TickRate, true)
@@ -2174,17 +2488,19 @@ proc updateFootman(world: World, footman: var Footman) =
           footman.swingTicks >= duration * 45 div 100:
         footman.damageLanded = true
         if targetFootman >= 0:
-          world.footmen[targetFootman].hp -= FootmanDamage
+          world.applyDamage(world.footmen[targetFootman],
+            FootmanDamage, footman.id, BasicAttack, 0)
         elif targetHero >= 0:
           let wasAlive = world.heroes[targetHero].hp > 0
-          world.heroes[targetHero].hp -= FootmanDamage
+          world.applyDamage(world.heroes[targetHero],
+            FootmanDamage, footman.id, BasicAttack, 0)
           if wasAlive and world.heroes[targetHero].hp <= 0:
             recordHeroKill(world, footman.team, world.heroes[targetHero].team)
             world.stats.hitHero(-1, targetHero, world.tick, TickRate, true)
         elif targetBuilding >= 0:
-          world.damageBuilding(targetBuilding, FootmanDamage)
+          world.damageBuilding(targetBuilding, FootmanDamage, footman.id)
         else:
-          world.damageFort(fortIndex, FootmanDamage)
+          world.damageFort(fortIndex, FootmanDamage, footman.id)
       if footman.swingTicks >= duration:
         startSwing(world, footman)
       footman.animClip = footman.swingClip
@@ -2206,8 +2522,12 @@ proc updateFootman(world: World, footman: var Footman) =
       goal = buildingAim(objective, footman.position)
   world.followCreepPath(footman, goal)
 
-proc respawn(hero: Hero) =
-  ## Restores a fallen hero at its original barracks spawn.
+proc respawn(world: World, hero: Hero) =
+  ## Restores a fallen hero and records the new life's resource adjustments.
+  when defined(replayEvents):
+    let
+      beforeHp = hero.hp
+      beforeMana = hero.mana
   hero.place(hero.spawnPosition)
   hero.applyBody()
   hero.hp = hero.maxHp
@@ -2232,6 +2552,12 @@ proc respawn(hero: Hero) =
   for slot in HeroAbilitySlot:
     hero.cooldowns[slot] = 0
   hero.spellsReady = false
+  when defined(replayEvents):
+    world.valueEvent(ManaChanged, hero.id, hero.id, Respawn, 0,
+      beforeMana, hero.mana, 0)
+    world.valueEvent(HealthAdjusted, hero.id, hero.id, Respawn, 0,
+      beforeHp, hero.hp, 0)
+    world.lifecycleEvent(EntityRespawned, 0, hero.id, Respawn)
 
 proc initHeroCharges(hero: Hero) =
   ## Starts a new life with every ability fully charged.
@@ -2255,53 +2581,66 @@ proc tickHeroCooldowns(world: World, hero: Hero) =
         if hero.charges[slot] < spec.charges:
           hero.recharges[slot] = spec.rechargeTicks
 
-proc regenHeroMana(hero: Hero, tick: int32) =
+proc regenHeroMana(world: World, hero: Hero, tick: int32) =
   ## Restores a small amount of mana on a stable cadence.
   if tick mod 6 == 0 and hero.mana < hero.maxMana:
-    inc hero.mana
+    world.restoreMana(hero, 1, hero.id, Regeneration, 0)
 
 proc applyHeroHit(
     world: World,
     hero: Hero,
     damage: int32,
-    targetFootman, targetHero, targetBuilding, fortIndex: int
+    targetFootman, targetHero, targetBuilding, fortIndex: int,
+    cause = BasicAttack, detail = 0'i32
 ) =
   ## Applies one hero hit to the current combat target.
   if damage <= 0:
     return
   if targetFootman >= 0:
     let wasAlive = world.footmen[targetFootman].hp > 0
-    world.footmen[targetFootman].hp -= damage
+    world.applyDamage(world.footmen[targetFootman],
+      damage, hero.id, cause, detail)
     if wasAlive and world.footmen[targetFootman].hp <= 0:
-      hero.gainRewards(FootmanXpReward, FootmanGoldReward)
+      world.gainRewards(hero, FootmanXpReward, FootmanGoldReward,
+        world.footmen[targetFootman].id)
       world.stats.add(heroIndex(world, hero.id), GoldMetric, FootmanGoldReward)
   elif targetHero >= 0:
     let wasAlive = world.heroes[targetHero].hp > 0
-    world.heroes[targetHero].hp -= damage
+    world.applyDamage(world.heroes[targetHero],
+      damage, hero.id, cause, detail)
     if wasAlive:
       world.stats.hitHero(
         heroIndex(world, hero.id), targetHero, world.tick, TickRate,
         world.heroes[targetHero].hp <= 0
       )
     if wasAlive and world.heroes[targetHero].hp <= 0:
-      hero.gainRewards(HeroXpReward, HeroGoldReward)
+      world.gainRewards(hero, HeroXpReward, HeroGoldReward,
+        world.heroes[targetHero].id)
       world.stats.add(heroIndex(world, hero.id), GoldMetric, HeroGoldReward)
       recordHeroKill(world, hero.team, world.heroes[targetHero].team)
   elif targetBuilding >= 0:
     let wasStanding = world.buildings[targetBuilding].hp > 0
-    world.damageBuilding(targetBuilding, damage)
+    world.damageBuilding(targetBuilding, damage, hero.id, cause, detail)
     if wasStanding and world.buildings[targetBuilding].hp <= 0:
-      hero.gainRewards(TowerXpReward, TowerGoldReward)
+      world.gainRewards(hero, TowerXpReward, TowerGoldReward,
+        world.buildings[targetBuilding].id)
       world.stats.add(heroIndex(world, hero.id), GoldMetric, TowerGoldReward)
   elif fortIndex >= 0:
-    world.damageFort(fortIndex, damage)
+    world.damageFort(fortIndex, damage, hero.id, cause, detail)
 
-proc consumeItem(hero: Hero, slot: int) =
-  ## Removes one charge from an inventory slot and clears an empty stack.
+proc consumeItem(world: World, hero: Hero, slot: int) =
+  ## Removes one charge and records consumption before an empty stack is lost.
+  when defined(replayEvents):
+    let
+      item = hero.inventory[slot]
+      before = hero.itemCounts[slot]
   dec hero.itemCounts[slot]
   if hero.itemCounts[slot] <= 0:
     hero.inventory[slot] = NoItem
     hero.itemCounts[slot] = 0
+  when defined(replayEvents):
+    world.valueEvent(ItemConsumed, hero.id, hero.id, ItemEffect,
+      item.ord.int32, before, hero.itemCounts[slot], -1)
 
 proc canHitTarget(
     world: World,
@@ -2345,35 +2684,87 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
     index = heroIndex(world, heroId)
     slot = int(slotId)
   if index < 0 or world.heroes[index].state == Dying:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionUseItem,
+      slotId,
+      slotId,
+      0,
+      ActionNotAlive
+    )
   if world.heroes[index].hp <= 0:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionUseItem,
+      slotId,
+      slotId,
+      0,
+      ActionNotAlive
+    )
   if slot < 0 or slot >= InventorySlots:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionUseItem,
+      slotId,
+      slotId,
+      0,
+      ActionInvalidSlot
+    )
   let item = world.heroes[index].inventory[slot]
   if item == NoItem:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionUseItem,
+      slotId,
+      slotId,
+      0,
+      ActionEmptySlot
+    )
   let spec = item.itemSpec
   if spec.kind != Consumable:
-    return false
+    return world.finishAction(
+      heroId,
+      ActionUseItem,
+      slotId,
+      slotId,
+      0,
+      ActionNotConsumable
+    )
   if spec.heal > 0:
     if world.heroes[index].hp >= world.heroes[index].maxHp:
-      return false
-    world.heroes[index].hp = min(
-      world.heroes[index].maxHp,
-      world.heroes[index].hp + spec.heal
-    )
+      return world.finishAction(
+        heroId,
+        ActionUseItem,
+        slotId,
+        slotId,
+        0,
+        ActionFullHealth
+      )
+    world.healHero(world.heroes[index], spec.heal, heroId,
+      ItemEffect, item.ord.int32)
   elif spec.restore > 0:
     if world.heroes[index].mana >= world.heroes[index].maxMana:
-      return false
-    world.heroes[index].mana = min(
-      world.heroes[index].maxMana,
-      world.heroes[index].mana + spec.restore
-    )
+      return world.finishAction(
+        heroId,
+        ActionUseItem,
+        slotId,
+        slotId,
+        0,
+        ActionFullMana
+      )
+    world.restoreMana(world.heroes[index], spec.restore, heroId,
+      ItemEffect, item.ord.int32)
   elif spec.strike > 0:
     let targetId = world.heroes[index].attackObjectId
     if targetId == 0:
-      return false
+      return world.finishAction(
+        heroId,
+        ActionUseItem,
+        slotId,
+        slotId,
+        0,
+        ActionTargetUnavailable
+      )
     var
       targetFootman = footmanIndex(world, targetId)
       targetHero = heroIndex(world, targetId)
@@ -2386,7 +2777,14 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
           break
     if targetFootman < 0 and targetHero < 0 and
         targetBuilding < 0 and fortIndex < 0:
-      return false
+      return world.finishAction(
+        heroId,
+        ActionUseItem,
+        slotId,
+        slotId,
+        0,
+        ActionTargetUnavailable
+      )
     if not world.canHitTarget(
       world.heroes[index],
       targetFootman,
@@ -2395,7 +2793,14 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       fortIndex,
       heroAttackRange(world.heroes[index].class)
     ):
-      return false
+      return world.finishAction(
+        heroId,
+        ActionUseItem,
+        slotId,
+        slotId,
+        0,
+        ActionTargetUnavailable
+      )
     applyHeroHit(
       world,
       world.heroes[index],
@@ -2403,12 +2808,21 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       targetFootman,
       targetHero,
       targetBuilding,
-      fortIndex
+      fortIndex,
+      ItemEffect,
+      item.ord.int32
     )
   else:
-    return false
-  world.heroes[index].consumeItem(slot)
-  true
+    return world.finishAction(
+      heroId,
+      ActionUseItem,
+      slotId,
+      slotId,
+      0,
+      ActionNotConsumable
+    )
+  world.consumeItem(world.heroes[index], slot)
+  world.finishAction(heroId, ActionUseItem, slotId, slotId, 0, NoActionError)
 
 proc spellTarget*(world: World, id: int32, value: var WorldObject): bool =
   ## Resolves an existing object without depending on the script query cache.
@@ -2455,14 +2869,16 @@ proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
         fortIndex = i
     world.applyHeroHit(
       hero, spec.damage, world.footmanIndex(id), world.heroIndex(id),
-      world.buildingIndex(id), fortIndex
+      world.buildingIndex(id), fortIndex, AbilityEffect, spell.ability.ord.int32
     )
   elif target.team == hero.team:
     let index = world.heroIndex(id)
     if index >= 0:
       let ally = world.heroes[index]
-      ally.hp = min(ally.maxHp, ally.hp + spec.heal)
-      ally.mana = min(ally.maxMana, ally.mana + spec.restore)
+      world.healHero(ally, spec.heal, hero.id, AbilityEffect,
+        spell.ability.ord.int32)
+      world.restoreMana(ally, spec.restore, hero.id, AbilityEffect,
+        spell.ability.ord.int32)
 
 proc spellContains*(spell: SpellCast, area: FxArea, point: WorldPoint): bool =
   ## Transforms a target into the spell's fixed local frame before hit testing.
@@ -2611,45 +3027,50 @@ proc castAbility(
     slot: HeroAbilitySlot,
     targetId: int32,
     aim: WorldPoint
-): bool =
+): ActionError =
   ## Releases an object or ground spell after atomically checking its costs.
-  if hero.hp <= 0 or hero.state == Dying or
-    world.casts.len >= 512:
-      return false
+  if hero.hp <= 0 or hero.state == Dying:
+    return ActionNotAlive
+  if world.casts.len >= 512:
+    return ActionSpellLimit
   if not hero.spellsReady:
     hero.initHeroCharges()
   let
     ability = heroAbility(hero.class, slot)
     spec = ability.abilitySpec
-  if hero.cooldowns[slot] > 0 or hero.charges[slot] <= 0 or
-    hero.mana < spec.manaCost:
-      return false
+  if hero.cooldowns[slot] > 0:
+    return ActionCooldown
+  if hero.charges[slot] <= 0:
+    return ActionNoCharges
+  if hero.mana < spec.manaCost:
+    return ActionInsufficientMana
   var
     point = aim
     selected = targetId
   if spec.casting == SelfCast:
     point = hero.position
     selected = hero.id
-    if (spec.kind == Heal and hero.hp >= hero.maxHp) or
-      (spec.kind == Restore and hero.mana >= hero.maxMana):
-        return false
+    if spec.kind == Heal and hero.hp >= hero.maxHp:
+      return ActionFullHealth
+    if spec.kind == Restore and hero.mana >= hero.maxMana:
+      return ActionFullMana
   else:
     if selected != 0:
       var target: WorldObject
       if not world.spellTarget(selected, target) or not target.alive or
         not world.visible(hero.team, target.position):
-          return false
+          return ActionTargetUnavailable
       if (spec.kind == Strike and target.team == hero.team) or
         (spec.kind != Strike and target.team != hero.team):
-          return false
+          return ActionTargetUnavailable
       point = target.position
       if not within(hero.position, point, spec.range):
-        return false
+        return ActionOutOfRange
     elif not within(hero.position, point, spec.range):
       point = hero.position + scaledPlanar(point - hero.position, spec.range)
       point.y = fixedSurfaceHeightNear(point, aim.y)
     if not world.visible(hero.team, point):
-      return false
+      return ActionTargetUnavailable
   var direction = scaledPlanar(point - hero.position, WorldScale)
   if direction.x == 0 and direction.z == 0:
     direction = scaledPlanar(
@@ -2676,7 +3097,17 @@ proc castAbility(
       distanceSquared(spell.origin, point)) + spec.projectileSpeed - 1) div
       max(spec.projectileSpeed, 1)))
   spell.ends = spell.impact + 12
+  when defined(replayEvents):
+    world.emit GameEvent(
+      kind: SpellReleased, actor: world.eventEntity(hero.id),
+      target: world.eventEntity(selected), cause: AbilityEffect,
+      detail: ability.ord.int32, slot: slot.ord.int32, related: -1
+    )
+    let beforeMana = hero.mana
   hero.mana -= spec.manaCost
+  when defined(replayEvents):
+    world.valueEvent(ManaChanged, hero.id, hero.id, AbilityEffect,
+      ability.ord.int32, beforeMana, hero.mana, -spec.manaCost)
   dec hero.charges[slot]
   hero.cooldowns[slot] = spec.cooldownTicks
   if hero.recharges[slot] == 0:
@@ -2685,32 +3116,86 @@ proc castAbility(
   if spell.impact <= world.tick:
     world.resolveSpell(spell)
   world.casts.add spell
-  true
+  NoActionError
 
 proc applyCastTarget*(world: World, heroId, slotId, targetId: int32): bool =
-  ## Casts one ability on an object, or on the caster for a self action.
+  ## Records the first failure of an explicit object-targeted spell.
   let index = world.heroIndex(heroId)
-  if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord:
-    return false
+  if index < 0:
+    return world.finishAction(
+      heroId,
+      ActionCastTarget,
+      slotId,
+      targetId,
+      0,
+      ActionNotAlive
+    )
+  if slotId < 0 or slotId > HeroAbilitySlot.high.ord:
+    return world.finishAction(
+      heroId,
+      ActionCastTarget,
+      slotId,
+      targetId,
+      0,
+      ActionInvalidSlot
+    )
   let hero = world.heroes[index]
-  world.castAbility(hero, HeroAbilitySlot(slotId), targetId, hero.position)
+  world.finishAction(
+    heroId,
+    ActionCastTarget,
+    slotId,
+    targetId,
+    0,
+    world.castAbility(hero, HeroAbilitySlot(slotId), targetId, hero.position)
+  )
 
 proc applyCastPoint*(
     world: World,
     heroId, slotId, mapX, mapY: int32
 ): bool =
-  ## Casts toward a map tile, clamping empty-ground shots to their range.
+  ## Records explicit ground casts while preserving the raw input arguments.
   let index = world.heroIndex(heroId)
-  if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord or
-    mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles():
-      return false
+  if index < 0:
+    return world.finishAction(
+      heroId,
+      ActionCastPoint,
+      slotId,
+      mapX,
+      mapY,
+      ActionNotAlive
+    )
+  if slotId < 0 or slotId > HeroAbilitySlot.high.ord:
+    return world.finishAction(
+      heroId,
+      ActionCastPoint,
+      slotId,
+      mapX,
+      mapY,
+      ActionInvalidSlot
+    )
+  if mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles():
+    return world.finishAction(
+      heroId,
+      ActionCastPoint,
+      slotId,
+      mapX,
+      mapY,
+      ActionInvalidPoint
+    )
   let hero = world.heroes[index]
   var point = WorldPoint(
     x: (mapX - mapTiles().int32 div 2) * WorldScale + WorldScale div 2,
     z: (mapY - mapTiles().int32 div 2) * WorldScale + WorldScale div 2
   )
   point.y = fixedSurfaceHeightNear(point, hero.position.y)
-  world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
+  world.finishAction(
+    heroId,
+    ActionCastPoint,
+    slotId,
+    mapX,
+    mapY,
+    world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
+  )
 
 proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
@@ -2727,12 +3212,12 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     applyBuyItem(world, action.heroId, action.first)
   of ActionUseItem:
     applyUseItem(world, action.heroId, action.first)
-  of ActionCastTarget .. ActionCastPoint - 1:
+  of ActionCastTarget:
     applyCastTarget(world, action.heroId,
-      int32(action.kind - ActionCastTarget), action.first)
-  of ActionCastPoint .. ActionManualSpells - 1:
+      action.slot, action.first)
+  of ActionCastPoint:
     applyCastPoint(world, action.heroId,
-      int32(action.kind - ActionCastPoint), action.first, action.second)
+      action.slot, action.first, action.second)
   of ActionManualSpells:
     let index = world.heroIndex(action.heroId)
     if index >= 0:
@@ -2752,12 +3237,16 @@ proc tryCastAbility(
   var targetId = 0'i32
   if spec.kind != Strike:
     if spec.casting == SelfCast:
-      return world.castAbility(hero, slot, hero.id, hero.position)
+      return world.castAbility(
+        hero, slot, hero.id, hero.position
+      ) == NoActionError
     for ally in world.heroes:
       if ally.team == hero.team and ally.hp > 0 and ally.hp < ally.maxHp and
         ally.state != Dying and
         within(hero.position, ally.position, spec.range):
-          if world.castAbility(hero, slot, ally.id, ally.position):
+          if world.castAbility(
+            hero, slot, ally.id, ally.position
+          ) == NoActionError:
             return true
     return false
   if targetFootman >= 0:
@@ -2770,7 +3259,7 @@ proc tryCastAbility(
     targetId = world.forts[fortIndex].id
   if targetId == 0:
     return false
-  world.castAbility(hero, slot, targetId, hero.position)
+  world.castAbility(hero, slot, targetId, hero.position) == NoActionError
 
 proc tryCombatAbilities(
     world: World,
@@ -2888,7 +3377,7 @@ proc updateHero(world: World, hero: Hero) =
     hero.animClip = heroDeathClip
     hero.animTicks = min(hero.deathTicks, HeroDeathTicks)
     if hero.deathTicks >= HeroDeathTicks + HeroRespawnTicks:
-      hero.respawn()
+      world.respawn(hero)
     return
 
   if hero.hp <= 0:
@@ -2993,7 +3482,7 @@ proc updateHero(world: World, hero: Hero) =
   hero.targetBuildingId =
     if targetBuilding >= 0: world.buildings[targetBuilding].id else: 0
 
-  regenHeroMana(hero, world.tick)
+  world.regenHeroMana(hero, world.tick)
   tryCombatAbilities(
     world,
     hero,
@@ -3208,6 +3697,7 @@ proc stateHash*(game: Game): uint64 =
       hash.addHashy(hero.recharges[slot])
     hash.addHashy(hero.spellsReady)
     hash.addHashy(hero.manualSpells)
+    hash.addHashy(hero.lastActionError.ord)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
@@ -3269,6 +3759,9 @@ proc checkReplayHash(game: Game, hash: uint64) =
 proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   ## Advances exactly one authoritative integer simulation tick.
   let world = game.world
+  when defined(replayEvents):
+    world.events.setLen(0)
+    world.eventTick = world.tick + 1
   world.syncBuildings()
   if world.gameOver:
     return
@@ -3324,6 +3817,10 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       if write != read:
         world.footmen[write] = world.footmen[read]
       inc write
+    else:
+      when defined(replayEvents):
+        world.lifecycleEvent(EntityRemoved, 0, world.footmen[read].id,
+          CorpseExpired)
   world.footmen.setLen(write)
 
   profileBlock "separate":
@@ -3397,6 +3894,18 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
         hero.animClip =
           if hero.team == world.winner: heroIdleClip else: heroDeathClip
         hero.animTicks = 0
+
+  when defined(replayEvents):
+    if world.gameOver:
+      world.emit GameEvent(
+        kind: MatchEnded, cause: GodDestroyed, amount: world.winner.ord,
+        actor: world.eventEntity(0), target: world.eventEntity(0), related: -1
+      )
+    elif world.tick == game.config.maxTicks:
+      world.emit GameEvent(
+        kind: MatchEnded, cause: TimeLimit, amount: -1,
+        actor: world.eventEntity(0), target: world.eventEntity(0), related: -1
+      )
 
   if game.historyPlayback:
     checkReplayHash(game, stateHash(game))
@@ -3608,6 +4117,13 @@ proc newGame*(
   if replayMode:
     validateReplayWorld(result)
   result.sampleMetrics(true)
+  when defined(replayEvents):
+    for fort in world.forts:
+      world.lifecycleEvent(EntitySpawned, 0, fort.id, Initialization)
+    for building in world.buildings:
+      world.lifecycleEvent(EntitySpawned, 0, building.id, Initialization)
+    for hero in world.heroes:
+      world.lifecycleEvent(EntitySpawned, 0, hero.id, Initialization)
 
 proc scores*(world: World): seq[int] =
   ## Awards every hero on the victorious team one win.

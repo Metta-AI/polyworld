@@ -192,6 +192,8 @@ proc spellProc(heroId: int32, field: SpellField): HostProc =
 proc initHeroHost(heroId: int32): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
+  for error in ActionError:
+    discard result.addData($error, error.ord.int32)
   for name in HeroDataNames:
     discard result.addData(name)
   discard result.addData("mapWidth", mapTiles().int32)
@@ -418,8 +420,6 @@ proc initHeroHost(heroId: int32): Host =
   let castTargetProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and attempts an explicit object-targeted spell.
     let slot = arguments[0]
-    if slot < 0 or slot > HeroAbilitySlot.high.ord:
-      return 0
     try:
       activeGame.recorder.recordCast(
         uint32(activeGame.world.tick), heroId, slot, arguments[1], 0, false
@@ -436,8 +436,6 @@ proc initHeroHost(heroId: int32): Host =
   let castPointProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and attempts a ground-aimed spell.
     let slot = arguments[0]
-    if slot < 0 or slot > HeroAbilitySlot.high.ord:
-      return 0
     try:
       activeGame.recorder.recordCast(
         uint32(activeGame.world.tick),
@@ -476,6 +474,14 @@ proc initHeroHost(heroId: int32): Host =
     if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
       return 0
     activeGame.world.heroes[index].recharges[HeroAbilitySlot(arguments[0])]
+  let lastActionErrorProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads only this hero's last submitted command error.
+    let index = activeGame.world.heroIndex(heroId)
+    if index >= 0:
+      activeGame.world.heroes[index].lastActionError.ord.int32
+    else:
+      0'i32
+  discard result.addFunction("lastActionError", 0, lastActionErrorProc, 4)
   discard result.addFunction("castTarget", 2, castTargetProc, 80)
   discard result.addFunction("castPoint", 3, castPointProc, 80)
   discard result.addFunction("abilityCharges", 1, abilityChargesProc, 4)
