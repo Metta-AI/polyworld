@@ -596,7 +596,10 @@ block:
   let credentials = %*{"tokens": {"server": "user"}, "player_sessions": {
     "server": {"active": "p", "cache": {"p": {"token": "player",
       "expires_at": "2999-01-01T00:00:00.123456+00:00"}}}}}
+  doAssert tokenFromCredentials(credentials, "server") == "user"
+  credentials["tokens"].delete("server")
   doAssert tokenFromCredentials(credentials, "server") == "player"
+  credentials["tokens"]["server"] = %"user"
   credentials["player_sessions"]["server"]["cache"]["p"]["expires_at"] =
     %"2000-01-01T00:00:00+00:00"
   doAssert tokenFromCredentials(credentials, "server") == "user"

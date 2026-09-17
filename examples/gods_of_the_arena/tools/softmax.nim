@@ -10,7 +10,10 @@ type
     token: string
 
 proc tokenFromCredentials*(credentials: JsonNode, server: string): string =
-  ## Uses the active unexpired player session, then the saved user login.
+  ## Prefers account access so roster discovery can see other players.
+  result = credentials{"tokens", server}.getStr
+  if result.len > 0:
+    return
   let
     sessions = credentials{"player_sessions", server}
     active = sessions{"active"}.getStr
