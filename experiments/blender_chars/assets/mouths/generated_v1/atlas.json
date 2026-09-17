@@ -1,0 +1,303 @@
+{
+  "size": [
+    1254,
+    1254
+  ],
+  "columns": 4,
+  "rows": 4,
+  "mouths": 16,
+  "art": "mouths_4x4_transparent.png",
+  "pinkMaster": "mouths_4x4_pink.png",
+  "coordinates": "Top-left origin; contentRect uses pixel bounds, uvRect uses normalized bounds.",
+  "notes": "New expressions inspired by the original kit. Mouth cavities and teeth are opaque artwork; only the background is transparent. Render unlit when integrating into the character viewer.",
+  "cells": [
+    {
+      "index": 1,
+      "name": "Relaxed smile",
+      "row": 0,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.0,
+        0.25,
+        0.25
+      ],
+      "contentRect": [
+        95,
+        145,
+        248,
+        192
+      ]
+    },
+    {
+      "index": 2,
+      "name": "Confident smirk",
+      "row": 0,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.0,
+        0.5,
+        0.25
+      ],
+      "contentRect": [
+        391,
+        128,
+        561,
+        193
+      ]
+    },
+    {
+      "index": 3,
+      "name": "Neutral",
+      "row": 0,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.0,
+        0.75,
+        0.25
+      ],
+      "contentRect": [
+        703,
+        138,
+        849,
+        177
+      ]
+    },
+    {
+      "index": 4,
+      "name": "Frown",
+      "row": 0,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.0,
+        1.0,
+        0.25
+      ],
+      "contentRect": [
+        1009,
+        141,
+        1158,
+        191
+      ]
+    },
+    {
+      "index": 5,
+      "name": "Playful smile",
+      "row": 1,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.25,
+        0.25,
+        0.5
+      ],
+      "contentRect": [
+        76,
+        438,
+        255,
+        491
+      ]
+    },
+    {
+      "index": 6,
+      "name": "Tense",
+      "row": 1,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.25,
+        0.5,
+        0.5
+      ],
+      "contentRect": [
+        397,
+        454,
+        549,
+        492
+      ]
+    },
+    {
+      "index": 7,
+      "name": "Surprised",
+      "row": 1,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.25,
+        0.75,
+        0.5
+      ],
+      "contentRect": [
+        731,
+        404,
+        828,
+        518
+      ]
+    },
+    {
+      "index": 8,
+      "name": "Happy open",
+      "row": 1,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.25,
+        1.0,
+        0.5
+      ],
+      "contentRect": [
+        1011,
+        430,
+        1170,
+        519
+      ]
+    },
+    {
+      "index": 9,
+      "name": "Tongue out",
+      "row": 2,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.5,
+        0.25,
+        0.75
+      ],
+      "contentRect": [
+        83,
+        726,
+        262,
+        832
+      ]
+    },
+    {
+      "index": 10,
+      "name": "Laugh",
+      "row": 2,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.5,
+        0.5,
+        0.75
+      ],
+      "contentRect": [
+        381,
+        716,
+        560,
+        820
+      ]
+    },
+    {
+      "index": 11,
+      "name": "Toothy grin",
+      "row": 2,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.5,
+        0.75,
+        0.75
+      ],
+      "contentRect": [
+        685,
+        719,
+        876,
+        819
+      ]
+    },
+    {
+      "index": 12,
+      "name": "Grimace",
+      "row": 2,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.5,
+        1.0,
+        0.75
+      ],
+      "contentRect": [
+        983,
+        731,
+        1185,
+        806
+      ]
+    },
+    {
+      "index": 13,
+      "name": "Side smile",
+      "row": 3,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.75,
+        0.25,
+        1.0
+      ],
+      "contentRect": [
+        86,
+        1022,
+        255,
+        1111
+      ]
+    },
+    {
+      "index": 14,
+      "name": "Shout",
+      "row": 3,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.75,
+        0.5,
+        1.0
+      ],
+      "contentRect": [
+        396,
+        989,
+        544,
+        1132
+      ]
+    },
+    {
+      "index": 15,
+      "name": "Big laugh",
+      "row": 3,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.75,
+        0.75,
+        1.0
+      ],
+      "contentRect": [
+        675,
+        1002,
+        885,
+        1131
+      ]
+    },
+    {
+      "index": 16,
+      "name": "Sly grin",
+      "row": 3,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.75,
+        1.0,
+        1.0
+      ],
+      "contentRect": [
+        989,
+        1023,
+        1188,
+        1097
+      ]
+    }
+  ]
+}

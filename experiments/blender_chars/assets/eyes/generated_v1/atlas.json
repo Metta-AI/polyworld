@@ -1,0 +1,195 @@
+{
+  "size": [
+    1254,
+    1254
+  ],
+  "columns": 4,
+  "rows": 4,
+  "pairs": 16,
+  "pupilRegions": 32,
+  "art": "eyes_4x4_transparent.png",
+  "pinkMaster": "eyes_4x4_pink.png",
+  "tintMask": "eyes_4x4_pupil_mask.png",
+  "maskMeaning": "White selects gray pupil regions. Black protects eye whites, highlights, outlines, and background.",
+  "tintFormula": "mix(art.rgb, chosenColor.rgb, mask.r); output alpha = art.a",
+  "maskColorSpace": "Non-Color / linear",
+  "alpha": "Straight alpha; preserve the source alpha channel.",
+  "cells": [
+    {
+      "index": 1,
+      "row": 0,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.0,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "index": 2,
+      "row": 0,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.0,
+        0.5,
+        0.25
+      ]
+    },
+    {
+      "index": 3,
+      "row": 0,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.0,
+        0.75,
+        0.25
+      ]
+    },
+    {
+      "index": 4,
+      "row": 0,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.0,
+        1.0,
+        0.25
+      ]
+    },
+    {
+      "index": 5,
+      "row": 1,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.25,
+        0.25,
+        0.5
+      ]
+    },
+    {
+      "index": 6,
+      "row": 1,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.25,
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "index": 7,
+      "row": 1,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.25,
+        0.75,
+        0.5
+      ]
+    },
+    {
+      "index": 8,
+      "row": 1,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.25,
+        1.0,
+        0.5
+      ]
+    },
+    {
+      "index": 9,
+      "row": 2,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.5,
+        0.25,
+        0.75
+      ]
+    },
+    {
+      "index": 10,
+      "row": 2,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.5,
+        0.5,
+        0.75
+      ]
+    },
+    {
+      "index": 11,
+      "row": 2,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.5,
+        0.75,
+        0.75
+      ]
+    },
+    {
+      "index": 12,
+      "row": 2,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.5,
+        1.0,
+        0.75
+      ]
+    },
+    {
+      "index": 13,
+      "row": 3,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.75,
+        0.25,
+        1.0
+      ]
+    },
+    {
+      "index": 14,
+      "row": 3,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.75,
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "index": 15,
+      "row": 3,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.75,
+        0.75,
+        1.0
+      ]
+    },
+    {
+      "index": 16,
+      "row": 3,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.75,
+        1.0,
+        1.0
+      ]
+    }
+  ]
+}
