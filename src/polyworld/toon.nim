@@ -438,7 +438,7 @@ proc setPalette*(ctx: ToonContext, palette: ToonPalette) =
   ctx.groundColor.a = 1
   ctx.horizonHeight = 0.42
 
-proc newToonContext*(): ToonContext =
+proc newToonContext*(vertexSrc = ToonVertSrc, fragmentSrc = ToonFragSrc): ToonContext =
   result = ToonContext(
     transform: mat4(),
     lightDirection: ToonLightDirection,
@@ -446,7 +446,7 @@ proc newToonContext*(): ToonContext =
     rimColor: color(1, 1, 1, 0),
   )
   result.setPalette(ToonPalettes[0])
-  result.shader = compileShaderFiles(ToonVertSrc, ToonFragSrc)
+  result.shader = compileShaderFiles(vertexSrc, fragmentSrc)
   template loc(field: untyped, name: string) =
     result.uniforms.field = glGetUniformLocation(result.shader, name)
   loc(model, "toonModel")
