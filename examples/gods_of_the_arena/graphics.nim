@@ -875,6 +875,10 @@ proc runGraphics*() =
     )
 
   window.onButtonPress = proc(button: Button) =
+    if setupOpen:
+      if button == KeyReturn:
+        restartHumanGame(menuSlot)
+      return
     if options.playerSlot > 0 and not run.replayMode:
       if button == KeyB:
         shopOpen = not shopOpen
@@ -1906,8 +1910,9 @@ proc runGraphics*() =
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
       updateWorldSelection(viewProjection)
-      updatePlayerSpells(viewProjection)
-      updatePlayerOrder(viewProjection)
+      if not setupOpen:
+        updatePlayerSpells(viewProjection)
+        updatePlayerOrder(viewProjection)
 
       profileBlock "drawWorld":
         # One clock for the whole frame: the palette, the sun's position,

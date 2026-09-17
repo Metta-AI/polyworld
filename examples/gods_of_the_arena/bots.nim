@@ -2,6 +2,7 @@
 ## on the simulation.
 
 import
+  std/os,
   polyworld/[metrics, basic, bodies, cli, controllers, fixed, pathing,
     profiles, tapes],
   content,
@@ -66,6 +67,7 @@ const
 
 var
   activeGame: Game
+  practiceEnemyTeam* = -1
   heroDataIds: array[HeroDataSlot, int32]
 
 proc bindHeroData(program: Program) =
@@ -502,6 +504,12 @@ proc initHeroHost(heroId: int32): Host =
       32
     )
 
+proc resolveBotPath(path: string): string =
+  ## Maps bundled aliases onto files next to this module.
+  if path == "@baseline":
+    return currentSourcePath().parentDir / "players" / "baseline.bas"
+  path
+
 proc loadBots*(
     game: Game,
     groups: openArray[BotGroup],
@@ -509,11 +517,14 @@ proc loadBots*(
 ) =
   ## Loads bot files into every hero slot except the optional human slot.
   activeGame = game
+  var resolved: seq[BotGroup]
+  for group in groups:
+    resolved.add BotGroup(path: resolveBotPath(group.path), count: group.count)
   let
     limits = heroVmLimits()
     schema = initHeroHost(0)
     kinds = controllerKinds(game.world.heroes.len, playerSlot)
-    sources = groups.expandBotSources(kinds)
+    sources = resolved.expandBotSources(kinds)
   game.heroVms.setLen(game.world.heroes.len)
   var bound = false
   for i in 0 ..< game.world.heroes.len:
@@ -548,6 +559,9 @@ proc runHeroScript(game: Game, index: int) =
     hero = game.world.heroes[index]
     vm = game.heroVms[index]
   if vm == nil or vm.failed or hero.state == Dying:
+    return
+  if practiceEnemyTeam >= 0 and hero.team.ord == practiceEnemyTeam and
+      game.world.tick mod 12 != 0:
     return
   vm.runtime.restart()
   try:
