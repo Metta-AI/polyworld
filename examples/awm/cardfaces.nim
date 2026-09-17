@@ -5,7 +5,7 @@
 import std/[os, options, strutils, tables]
 import pixie
 import pixie/fileformats/svg
-import awmcore
+import awmcore, paths
 
 const
   CardFaceWidth* = 600
@@ -48,19 +48,18 @@ proc assetImage(relativePath: string, width = 0, height = 0): Image =
       readImage(assetsRoot / relativePath)
   assetImages[key]
 
-proc initCardAssets*(root: string) =
-  ## Accept either the project root or the artwork/cards directory.
-  let resolved = if dirExists(root / "frames"): root else: root / "artwork/cards"
-  if resolved == assetsRoot and not titleTypeface.isNil:
+proc initCardAssets*(root = artworkRoot() / "cards") =
+  ## Load card components from the AWM data folder or an explicit directory.
+  if root == assetsRoot and not titleTypeface.isNil:
     return
-  assetsRoot = resolved
+  assetsRoot = root
   assetImages.clear()
   titleTypeface = readFont(assetsRoot / "fonts/Grenze-SemiBold.ttf").typeface
   rulesTypeface = readFont(assetsRoot / "fonts/Grenze-Regular.ttf").typeface
 
 proc ensureAssets() =
   if assetsRoot.len == 0:
-    initCardAssets(currentSourcePath().parentDir)
+    initCardAssets()
 
 proc cardFont(size: float32, ink: string, semibold = false): Font =
   result = newFont(if semibold: titleTypeface else: rulesTypeface)

@@ -3,12 +3,12 @@
 ## nim c -r --out:/tmp/awm-render-cards tools/render_cards.nim
 import std/[os, strutils]
 import pixie
-import ../[awmcore, baseset, cardfaces]
+import ../[awmcore, baseset, cardfaces, paths]
 
 let
-  root = currentSourcePath().parentDir.parentDir
-  outputDir = root / "artwork/cards/previews"
-initCardAssets(root)
+  root = artworkRoot() / "cards"
+  outputDir = root / "previews"
+initCardAssets()
 createDir(outputDir)
 
 const
@@ -22,11 +22,12 @@ const
   FooterHeight = 72
 
 proc artworkSlug(card: Card): string =
+  ## Convert a card name to its illustration filename.
   card.name.toLowerAscii().replace(" ", "-")
 
 # A complete contact sheet must never silently include placeholder art.
 for card in baseCards:
-  let artPath = root / "artwork/cards/art" / (card.artworkSlug() & ".png")
+  let artPath = root / "art" / (card.artworkSlug() & ".png")
   if not fileExists(artPath):
     raise newException(IOError, "Missing artwork for " & card.name & ": " & artPath)
 
@@ -38,8 +39,8 @@ let
   sheet = newImage(sheetWidth, sheetHeight)
 sheet.fill(parseHtmlColor("#111a20"))
 let
-  title = readFont(root / "artwork/cards/fonts/Grenze-SemiBold.ttf")
-  subtitle = readFont(root / "artwork/cards/fonts/Grenze-Regular.ttf")
+  title = readFont(root / "fonts/Grenze-SemiBold.ttf")
+  subtitle = readFont(root / "fonts/Grenze-Regular.ttf")
 title.size = 52
 title.paint.color = parseHtmlColor("#ebd9b4")
 subtitle.size = 25

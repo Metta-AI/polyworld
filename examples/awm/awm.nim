@@ -10,7 +10,7 @@ when not defined(headless):
 when not defined(headless):
   import
     chroma, opengl, pixie, shady, silky, vmath, windy,
-    cardfaces, cardrenderer, vfxrenderer, awmsessions, awmweb, awmbots,
+    cardfaces, cardrenderer, vfxrenderer, awmsessions, awmweb, awmbots, paths,
     polyworld/[assets, characters, chrome, common, viewers]
 
   const
@@ -1053,16 +1053,6 @@ when not defined(headless):
         return model.clipIndex(name)
     0
 
-  proc cardAssetsRoot(): string =
-    for candidate in [
-      getAppDir() / "artwork" / "cards",
-      getCurrentDir() / "artwork" / "cards",
-      currentSourcePath().parentDir / "artwork" / "cards"
-    ]:
-      if dirExists(candidate / "frames") and dirExists(candidate / "fonts"):
-        return candidate
-    raise newException(IOError, "Could not find artwork/cards beside the game.")
-
   proc drawButton(
       sk: Silky,
       window: Window,
@@ -1310,7 +1300,6 @@ when not defined(headless):
     let sessionOptions = parseSessionOptions(commandLineParams())
     when defined(emscripten):
       let appDir = "/"
-      let cardAssets = "/artwork/cards"
       setCurrentDir("/")
     else:
       const sourceDir = currentSourcePath().parentDir
@@ -1320,13 +1309,13 @@ when not defined(headless):
           elif dirExists(sourceDir / "players"): sourceDir
           else: getAppDir()
         root = polyworldRoot()
-        cardAssets = cardAssetsRoot()
       if root.len == 0:
         raise newException(IOError,
           "Could not find Polyworld. Set POLYWORLD_REPO to its repository root.")
       setCurrentDir(root)
 
     let
+      cardAssets = artworkRoot() / "cards"
       atlasPath = appDir / "awm.atlas.png"
       atlasBuilder = newHudAtlas(4096)
     initCardAssets(cardAssets)

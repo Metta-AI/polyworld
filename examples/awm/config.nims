@@ -47,8 +47,6 @@ when defined(emscripten):
   switch("passL", "--preload-file " &
     quoteShell(awmWebAssets / "polyworld_data" & "@/polyworld_data"))
   switch("passL", "--preload-file " &
-    quoteShell(awmWebAssets / "artwork" & "@/artwork"))
-  switch("passL", "--preload-file " &
     quoteShell(awmWebAssets / "players" & "@/players"))
   switch("passL", "--pre-js " &
     quoteShell(awmPolyworldRepo / "src/polyworld/webinputs.js"))
