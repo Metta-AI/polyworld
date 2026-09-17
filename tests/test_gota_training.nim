@@ -1,10 +1,11 @@
 import ../examples/gods_of_the_arena/[training, presets]
 
 let policy = """
-dim f(16)
+dim f(25)
 f(0) = selfHp * 100 / selfMaxHp
 f(1) = selfTeam * 100
 f(2) = selfClass * 10
+f(24) = 77
 ' METTA_DECISION
 if decision = 0 then
   walkTo(10, 10)
@@ -25,6 +26,8 @@ end if
 let config = loadConfig("examples/gods_of_the_arena/presets/saved.json")
 let bot = "examples/gods_of_the_arena/players/base.bas"
 let batch = newTrainingBatch(config, bot, bot, policy, 3, 120)
+for lane in batch.lanes:
+  doAssert lane.transition.features[24] == 77
 var scalar: seq[TrainingBatch]
 for index in 0 ..< 3:
   scalar.add newTrainingBatch(config, bot, bot, policy, 1, 120)
