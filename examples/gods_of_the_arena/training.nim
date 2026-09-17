@@ -11,7 +11,8 @@ type
     reward*: float32
     terminal*, tick*, seat*, outcome*: int32
     stateHash*: uint64
-    xp*, structureHp*, maxWork*, maxInstructions*: int64
+    xp*, structureHp*, heroXp*, heroGold*, heroKills*, heroDeaths*: int64
+    maxWork*, maxInstructions*: int64
 
   TickCursor = iterator(): bool {.closure.}
   TrainingLane* = ref object
@@ -40,6 +41,11 @@ proc snapshot(lane: TrainingLane, terminal: bool) =
       lane.transition.structureHp += (if building.team == team: 1 else: -1) * max(building.hp, 0)
   for fort in game.world.forts:
     lane.transition.structureHp += (if fort.team == team: 1 else: -1) * max(fort.hp, 0)
+  let hero = game.world.heroes[lane.seat]
+  lane.transition.heroXp = hero.totalXp
+  lane.transition.heroGold = game.world.stats.values[lane.seat][GoldMetric]
+  lane.transition.heroKills = game.world.stats.values[lane.seat][KillsMetric]
+  lane.transition.heroDeaths = game.world.stats.values[lane.seat][LossesMetric]
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError
     lane.transition.maxWork = max(lane.transition.maxWork, vm.lastWork)
@@ -117,7 +123,9 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
   bindHeroData(program)
   game.heroVms[seat] = HeroVm(runtime: initRuntime(program, host, limits), limits: limits, ready: true)
   lane.advance()
-  lane.previousScore = lane.transition.xp + lane.transition.structureHp
+  lane.previousScore = lane.transition.xp + lane.transition.structureHp +
+    4 * lane.transition.heroXp + 2 * lane.transition.heroGold +
+    500 * (lane.transition.heroKills - lane.transition.heroDeaths)
   result = lane
 
 proc reset*(batch: TrainingBatch, seed: int) =
@@ -140,7 +148,9 @@ proc step*(batch: TrainingBatch, actions: openArray[int32], transitions: var ope
   doAssert actions.len == batch.lanes.len and transitions.len == batch.lanes.len
   for index, lane in batch.lanes:
     lane.advance(actions[index])
-    let score = lane.transition.xp + lane.transition.structureHp
+    let score = lane.transition.xp + lane.transition.structureHp +
+      4 * lane.transition.heroXp + 2 * lane.transition.heroGold +
+      500 * (lane.transition.heroKills - lane.transition.heroDeaths)
     lane.transition.reward = float32(score - lane.previousScore) / 1000'f32
     lane.previousScore = score
     if lane.transition.terminal != 0:
