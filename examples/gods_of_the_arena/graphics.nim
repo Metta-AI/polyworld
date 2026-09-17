@@ -1471,7 +1471,7 @@ proc runGraphics*() =
             aimY = int32(layers[ground.layer].originZ + ground.z - mapOrigin())
         attackMoveArmed = false
         if not activatePlayerAbility(
-          run.world, hero.id, slot.int32, primaryId, aimX, aimY
+          run.world, hero.id, slot.int32, primaryId, aimX, aimY, castMode
         ):
           selectEntity(hero.id)
 

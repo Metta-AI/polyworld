@@ -189,6 +189,9 @@ type
     ends*: int32
     resolved*: bool
 
+  SpellPreview* = object
+    reason*: string
+
   World* = ref object
     heroSpawns*: array[2, WorldPoint]
     barracksPairs*: array[2, array[3, array[2, WorldPoint]]]
@@ -1188,6 +1191,22 @@ proc mapCoordinate*(value: int32): int32 =
     0,
     mapTiles() - 1
   ))
+
+proc secondsLabel*(ticks: int32): string =
+  ## Formats a tick count as a whole number of seconds for HUD copy.
+  $((max(ticks, 0'i32) + TickRate - 1) div TickRate) & "s"
+
+proc respawnTicks*(hero: Hero): int32 =
+  ## Remaining ticks before a fallen hero returns at spawn.
+  max(0'i32, HeroDeathTicks + HeroRespawnTicks - hero.deathTicks)
+
+proc spellAimPoint*(hero: Hero, mapX, mapY: int32): WorldPoint =
+  ## Returns the integer ground point at the center of a map tile.
+  result = WorldPoint(
+    x: (mapX - mapTiles().int32 div 2) * WorldScale + WorldScale div 2,
+    z: (mapY - mapTiles().int32 div 2) * WorldScale + WorldScale div 2
+  )
+  result.y = fixedSurfaceHeightNear(result, hero.position.y)
 
 proc rawWorldObjectCount(world: World): int =
   ## Returns the total number of stable script-addressable objects.
@@ -2400,6 +2419,60 @@ proc applyCastPoint*(
   )
   point.y = fixedSurfaceHeightNear(point, hero.position.y)
   world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
+
+proc abilityReadyReason*(world: World, hero: Hero, slot: HeroAbilitySlot): string =
+  ## Explains why an ability cannot fire, or returns an empty string.
+  discard world
+  if hero.id == 0:
+    return "Hero unavailable"
+  if hero.hp <= 0 or hero.state == Dying:
+    return "Respawning in " & hero.respawnTicks.secondsLabel
+  let spec = heroAbility(hero.class, slot).abilitySpec
+  if hero.cooldowns[slot] > 0:
+    return "Ready in " & hero.cooldowns[slot].secondsLabel
+  if hero.charges[slot] <= 0:
+    return "Next charge in " & hero.recharges[slot].secondsLabel
+  if hero.mana < spec.manaCost:
+    return "Not enough mana"
+
+proc previewSpell*(
+    world: World,
+    hero: Hero,
+    slot: HeroAbilitySlot,
+    targetId: int32,
+    aim: WorldPoint
+): SpellPreview =
+  ## Validates a cast using the same rules as `castAbility` without mutating.
+  result.reason = world.abilityReadyReason(hero, slot)
+  if result.reason.len > 0:
+    return
+  let spec = heroAbility(hero.class, slot).abilitySpec
+  if spec.casting == SelfCast:
+    if spec.kind == Heal and hero.hp >= hero.maxHp:
+      result.reason = "Health is full"
+    elif spec.kind == Restore and hero.mana >= hero.maxMana:
+      result.reason = "Mana is full"
+    return
+  var point = aim
+  if targetId != 0:
+    var target: WorldObject
+    if not world.spellTarget(targetId, target) or not target.alive:
+      result.reason = "Target unavailable or protected"
+      return
+    if not world.visible(hero.team, target.position):
+      result.reason = "Target is in fog"
+      return
+    if (spec.kind == Strike and target.team == hero.team) or
+        (spec.kind != Strike and target.team != hero.team):
+      result.reason = "Choose a valid target"
+      return
+    if spec.casting == MeleeCast and
+        not within(hero.position, target.position, spec.range):
+      result.reason = "Out of range"
+      return
+    point = target.position
+  if not world.visible(hero.team, point):
+    result.reason = "That ground is in fog"
 
 proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
