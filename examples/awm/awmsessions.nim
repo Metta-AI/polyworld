@@ -6,7 +6,7 @@ export awmsim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 5
+  SnapshotSchemaVersion* = 8
 
 type
   SessionOptions* = object
@@ -17,12 +17,12 @@ type
     botPaths*: seq[string]
 
   BotActionKind* = enum
-    PlayCardAction, EndTurnAction
+    PlayCardAction, EndTurnAction, ResolveTriggerAction
 
   BotAction* = object
     kind*: BotActionKind
     handIndex*: int
-    choices*: seq[Choice]  ## One per target of the card, in order.
+    choices*: seq[Choice]  ## One per target of the card or trigger, in order.
 
   Snapshot* = object
     matchId*: string
@@ -116,6 +116,18 @@ proc nextBotAction*(game: GameState, playsThisTurn = 0,
   ## The fixed hand order and target preferences make bots deterministic.
   ## An explicit budget also bounds future free cards and bouncing strategies.
   result = BotAction(kind: EndTurnAction, handIndex: -1, choices: @[NoTarget])
+  if game.waitingTrigger:
+    # Answer the waiting trigger for its owner, target by target.
+    let owner = game.actingPlayer()
+    let rules = game.waitingTriggerRules().rules
+    var picks: seq[Choice]
+    for step in 0 ..< rules.targetCount():
+      var pick = botPick(game.triggerChoices(picks), owner,
+        rules.helpsTarget(step))
+      if pick.isCanceled:
+        pick = NoTarget
+      picks.add pick
+    return BotAction(kind: ResolveTriggerAction, handIndex: -1, choices: picks)
   if playsThisTurn >= maxPlaysPerTurn:
     return
   for handIndex, card in game.players[game.currentPlayer].hand:
@@ -140,8 +152,12 @@ proc applyBotAction*(game: var GameState, action: BotAction): bool =
   of PlayCardAction:
     game.playCard(action.handIndex, action.choices)
   of EndTurnAction:
+    if game.waitingTrigger:
+      return false
     game.finishTurn()
     true
+  of ResolveTriggerAction:
+    game.resolvePendingTrigger(action.choices)
 
 proc requireKind(node: JsonNode, kind: JsonNodeKind, label: string) =
   if node.isNil or node.kind != kind:
@@ -227,6 +243,7 @@ proc gameToJson*(game: GameState): JsonNode =
         "currentToughness": minion.currentToughness,
         "bonusPower": minion.bonusPower,
         "lostKeywords": keywordsToJson(minion.lostKeywords),
+        "enteredTurn": minion.enteredTurn,
         "canAttack": minion.canAttack,
         "hasAttacked": minion.hasAttacked}
     players.add %*{"heroClass": player.heroClass.classId(),
@@ -238,14 +255,22 @@ proc gameToJson*(game: GameState): JsonNode =
   for event in game.visualEvents:
     var entry = %*{"kind": ord(event.kind),
       "target": choiceToJson(event.target), "boardIndex": event.boardIndex,
-      "boardCount": event.boardCount}
+      "boardCount": event.boardCount, "beat": event.beat}
     if event.kind == DeathVfx:
       entry["card"] = cardToJson(event.card)
       entry["power"] = %event.power
+    if event.kind == BounceVfx:
+      entry["card"] = cardToJson(event.card)
+      entry["handIndex"] = %event.handIndex
     visualEvents.add entry
+  var pendingTriggers = newJArray()
+  for pending in game.pendingTriggers:
+    pendingTriggers.add %*{"owner": pending.owner,
+      "sourceId": pending.sourceId, "trigger": pending.trigger}
   %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
-    "visualEvents": visualEvents,
+    "visualEvents": visualEvents, "visualBeat": game.visualBeat,
+    "pendingTriggers": pendingTriggers,
     "gameOver": game.gameOver, "winner": game.winner}
 
 proc gameFromJson*(node: JsonNode): GameState =
@@ -279,14 +304,18 @@ proc gameFromJson*(node: JsonNode): GameState =
         id: entry.field("id").integer("minion ID", 1),
         owner: entry.field("owner").integer("minion owner", 0, PlayerCount - 1),
         card: cardFromJson(entry.field("card")),
-        currentToughness: entry.field("currentToughness").integer("toughness", 1),
+        currentToughness: entry.field("currentToughness").integer("toughness", 0),
+        enteredTurn: if entry.hasKey("enteredTurn"):
+          entry["enteredTurn"].integer("entered turn", 0) else: 0,
         bonusPower: if entry.hasKey("bonusPower"):
           entry["bonusPower"].integer("power bonus") else: 0,
         lostKeywords: if entry.hasKey("lostKeywords"):
           keywordsFromJson(entry["lostKeywords"]) else: {},
         canAttack: if entry.hasKey("canAttack"): entry["canAttack"].getBool(true) else: true,
         hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false)
-      if minion.owner != owner or minion.card.kind != Minion or
+      # Trinkets have no toughness; minions always have some.
+      if minion.owner != owner or minion.card.kind == Spell or
+          (minion.card.kind == Minion and minion.currentToughness < 1) or
           minion.id >= result.nextMinionId or minion.id in minionIds:
         raise newException(ValueError, "Invalid snapshot board minion")
       minionIds.incl minion.id
@@ -302,7 +331,12 @@ proc gameFromJson*(node: JsonNode): GameState =
       target: choiceFromJson(entry.field("target")),
       boardIndex: entry.field("boardIndex").integer("visual board index", 0),
       boardCount: entry.field("boardCount").integer("visual board count", 0),
-      card: if kind == DeathVfx: cardFromJson(entry.field("card")) else: Card(),
+      beat: if entry.hasKey("beat"): entry["beat"].integer("visual beat", 0)
+        else: 0,
+      card: if kind in {DeathVfx, BounceVfx}: cardFromJson(entry.field("card"))
+        else: Card(),
+      handIndex: if kind == BounceVfx:
+        entry.field("handIndex").integer("bounce hand index", 0) else: 0,
       power: if kind == DeathVfx and entry.hasKey("power"):
         entry["power"].integer("visual power", 0) else: 0)
     # Removed minions legitimately remain in VFX snapshots after a bounce.
@@ -310,9 +344,25 @@ proc gameFromJson*(node: JsonNode): GameState =
         (event.target.kind == CreatureChoice and
           event.boardIndex >= event.boardCount) or
         (kind == DeathVfx and (event.target.kind != CreatureChoice or
-          event.card.kind != Minion)):
+          event.card.kind == Spell)):
       raise newException(ValueError, "Invalid snapshot visual event target")
     result.visualEvents.add event
+  result.visualBeat = if node.hasKey("visualBeat"):
+    node["visualBeat"].integer("visual beat", 0) else: 0
+  if node.hasKey("pendingTriggers"):
+    let pendingTriggers = node["pendingTriggers"]
+    pendingTriggers.requireKind(JArray, "pending triggers")
+    for entry in pendingTriggers:
+      let pending = PendingTrigger(
+        owner: entry.field("owner").integer("trigger owner", 0, PlayerCount - 1),
+        sourceId: entry.field("sourceId").integer("trigger source", 1),
+        trigger: entry.field("trigger").integer("trigger index", 0))
+      let location = result.minionLocation(pending.sourceId)
+      if not location.found or location.player != pending.owner or
+          pending.trigger >= result.players[location.player].board[
+            location.index].card.triggers().len:
+        raise newException(ValueError, "Invalid snapshot pending trigger")
+      result.pendingTriggers.add pending
   result.gameOver = if node.hasKey("gameOver"): node["gameOver"].getBool(false) else: false
   result.winner = if node.hasKey("winner"): node["winner"].getInt(-1) else: -1
 

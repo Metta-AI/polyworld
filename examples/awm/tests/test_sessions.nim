@@ -114,7 +114,10 @@ suite "global snapshots":
       VisualEvent(kind: SwordsIntoTheWindVfx, target: creatureChoice(1, 8),
         boardIndex: 0, boardCount: 1),
       VisualEvent(kind: DeathVfx, target: creatureChoice(1, 6),
-        boardIndex: 0, boardCount: 1, card: Warrior.classCard(), power: 4)]
+        boardIndex: 0, boardCount: 1, card: Warrior.classCard(), power: 4),
+      VisualEvent(kind: DrawVfx, target: heroChoice(0),
+        boardIndex: 3, boardCount: 4, beat: 7)]
+    game.visualBeat = 9
     let original = Snapshot(matchId: "global-23", revision: 42, game: game)
     let encoded = snapshotToJson(original)
     let decoded = snapshotFromJson($encoded)
@@ -134,6 +137,7 @@ suite "global snapshots":
     expect ValueError:
       discard gameFromJson(unknownKeyword)
     check decoded.game.visualEvents == game.visualEvents
+    check decoded.game.visualBeat == 9
 
   test "every base card has a unique ID and the Archer deck round trips":
     for card in baseCards:
@@ -282,3 +286,67 @@ suite "summoned minions":
     check decoded.players[me].board.len == 3
     check decoded.players[me].board[2].card == baseCard("footsoldier-1")
     check decoded.nextMinionId == game.nextMinionId
+
+suite "trinkets in snapshots":
+  test "a trinket in play and its trigger survive a round trip":
+    var game = newGame(Mage, Warrior, 1013)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("plan-3")]
+    game.players[me].energy = 3
+    check game.playCard(0)
+    var restored = gameFromJson(gameToJson(game))
+    check gameToJson(restored) == gameToJson(game)
+    check restored.players[me].board[0].card == baseCard("plan-3")
+    for _ in 0 ..< 2:
+      game.finishTurn()
+      restored.finishTurn()
+    check gameToJson(restored) == gameToJson(game)
+    check restored.players[me].board.len == 0
+    check restored.players[me].discardPile == @[baseCard("plan-3")]
+
+suite "waiting triggers in snapshots":
+  test "a trigger waiting for a target survives a round trip":
+    var game = newGame(Mage, Warrior, 1111)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: Warrior.classCard(), currentToughness: 2)]
+    # Snapshots hold base-set cards, so Plan stands in as the trigger's card.
+    game.players[me].board = @[MinionState(id: 3, owner: me,
+      card: baseCard("plan-3"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 4
+    game.pendingTriggers = @[PendingTrigger(owner: me, sourceId: 3, trigger: 0)]
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check decoded.pendingTriggers == game.pendingTriggers
+    check gameToJson(decoded) == encoded
+    var invalid = encoded.copy()
+    invalid["pendingTriggers"][0]["sourceId"] = %2
+    expect ValueError:
+      discard gameFromJson(invalid)
+
+  test "the built-in bot answers a waiting trigger for its owner":
+    let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
+      rules: rules(on(nextTurn(You), damage(1, target({Minion})))))
+    var game = newGame(Mage, Warrior, 1109)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[snare]
+    check game.playCard(0)
+    game.players[enemy].board = @[MinionState(id: 90, owner: enemy,
+      card: Warrior.classCard(), currentToughness: 2)]
+    game.nextMinionId = 91
+    game.finishTurn()
+    game.finishTurn()
+    check game.waitingTrigger
+    check game.nextBotAction().kind == ResolveTriggerAction
+    # Even out of budget, a waiting trigger is answered, not skipped.
+    let action = game.nextBotAction(playsThisTurn = 3)
+    check action.kind == ResolveTriggerAction
+    check action.choices == @[creatureChoice(enemy, 90)]
+    check not game.applyBotAction(BotAction(kind: EndTurnAction))
+    check game.applyBotAction(action)
+    check not game.waitingTrigger
+    check game.players[enemy].board[0].currentToughness == 1

@@ -115,23 +115,34 @@ let warrior = [
 
 let mage = [
   Card(
-    name: "Bouncer", energyCost: 1,
-    class: some(Mage), kind: Minion,
-    rules: rules(bounce(target({Minion}, vfx = BubbleVfx))),
-    power: 1, toughness: 1
-  ),
-  Card(
     name: "Ooze", energyCost: 1,
     class: some(Mage), kind: Minion,
     rules: rules(),
     power: 1, toughness: 1
   ),
   Card(
+    name: "Bouncer", energyCost: 1,
+    class: some(Mage), kind: Minion,
+    rules: rules(bounce(target({Minion}, vfx = BubbleVfx))),
+    power: 1, toughness: 1
+  ),
+  Card(
+    name: "Plan", energyCost: 3,
+    class: some(Mage), kind: Trinket,
+    rules: rules(
+      draw(1),
+      on(nextTurn(You),
+        draw(1),
+        destroy(self())
+      )
+    )
+  ),
+  Card(
     name: "Oozification", energyCost: 4,
     class: some(Mage), kind: Spell,
     rules: rules(
       destroy(target({Minion}, vfx = OozeSplatVfx)),
-      summon(getTarget().toughness, "Ooze")
+      summon(getTarget().toughness, "Ooze", getTarget().owner)
     )
   )
 ]
@@ -141,12 +152,19 @@ let baseCards* = archer & warrior & mage
 ## The card lists are never mutated after module init, so the lookups below
 ## cast to gcsafe: async server handlers deal decks and encode snapshots.
 
+proc named(cards: openArray[Card], name: string): Card =
+  for card in cards:
+    if card.name == name:
+      return card
+  raise newException(ValueError, "No base-set card named '" & name & "'")
+
 proc classCard*(heroClass: HeroClass): Card =
+  ## Each class's signature card, found by name so list order doesn't matter.
   {.cast(gcsafe).}:
     case heroClass
-    of Archer: archer[0]
-    of Warrior: warrior[0]
-    of Mage: mage[0]
+    of Archer: archer.named("Bolt")
+    of Warrior: warrior.named("Bear")
+    of Mage: mage.named("Bouncer")
 
 proc cardId*(card: Card): string =
   ## Stable wire ID. Name plus cost keeps same-named printings apart.
@@ -169,37 +187,28 @@ proc baseCardNamed*(name: string): Card {.nimcall, gcsafe.} =
 
 # A misspelled summon fails at startup rather than mid-game.
 for card in baseCards:
-  for name in card.summonedNames():
-    discard baseCardNamed(name)
+  card.checkCardNames(baseCardNamed)
 
-proc archerDeck(): seq[Card] =
+proc deck(cards: openArray[Card],
+    counts: openArray[(string, int)]): seq[Card] =
   {.cast(gcsafe).}:
-    for (card, count) in [
-        (archer[0], 10), (archer[1], 14), (archer[2], 10), (archer[3], 6)]:
-      for _ in 0 ..< count:
-        result.add card
-
-proc warriorDeck(): seq[Card] =
-  {.cast(gcsafe).}:
-    for (card, count) in [
-        (warrior[0], 8), (warrior[1], 5), (warrior[2], 4), (warrior[3], 5),
-        (warrior[4], 5), (warrior[5], 6), (warrior[6], 4), (warrior[7], 3)]:
-      for _ in 0 ..< count:
-        result.add card
-
-proc mageDeck(): seq[Card] =
-  ## Ooze isn't dealt: only Oozification summons it.
-  {.cast(gcsafe).}:
-    for (card, count) in [(mage[0], 32), (mage[2], 8)]:
+    for (name, count) in counts:
+      let card = cards.named(name)
       for _ in 0 ..< count:
         result.add card
 
 proc baseDeck*(heroClass: HeroClass): seq[Card] =
-  case heroClass
-  of Archer:
-    result = archerDeck()
-  of Warrior:
-    result = warriorDeck()
-  of Mage:
-    result = mageDeck()
+  ## Ooze isn't dealt: only Oozification summons it.
+  {.cast(gcsafe).}:
+    result =
+      case heroClass
+      of Archer:
+        archer.deck([("Bolt", 10), ("Sniper", 14), ("Sharpshooter", 10),
+          ("Hail of Arrows", 6)])
+      of Warrior:
+        warrior.deck([("Bear", 8), ("Swords", 5), ("Shields", 4), ("Duel", 5),
+          ("Tactician", 5), ("Footsoldier", 6), ("Commander", 4),
+          ("Rally", 3)])
+      of Mage:
+        mage.deck([("Bouncer", 24), ("Oozification", 8), ("Plan", 8)])
   doAssert result.len == DeckSize

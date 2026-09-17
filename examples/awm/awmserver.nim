@@ -191,7 +191,7 @@ proc observationJson(match: Match, slot: int): string =
     "game": gameToJson(match.game),
     "revision": match.revision,
     "yourTurn": match.phase == Playing and
-      match.game.currentPlayer == slot,
+      match.game.actingPlayer() == slot,
     "matchId": match.matchId})
 
 proc waitingJson(message: string): string =
@@ -311,11 +311,22 @@ proc serve(options: ServerOptions) {.async.} =
     match.playsThisTurn = 0
     broadcastState()
 
+  proc actionChoices(action: JsonNode): seq[Choice] =
+    ## "choices" answers each target in order; "choice" is the one-target
+    ## form.
+    if action.hasKey("choices") and action["choices"].kind == JArray:
+      for entry in action["choices"]:
+        result.add choiceFromJson(entry)
+    elif action.hasKey("choice"):
+      result.add choiceFromJson(action["choice"])
+    else:
+      result.add Canceled
+
   proc gameLoop() {.async.} =
     while match.phase != Playing:
       await sleepAsync(100)
     while true:
-      let current = match.game.currentPlayer
+      let current = match.game.actingPlayer()
       let seat = match.seats[current]
       if seat.kind == BotSeat:
         await sleepAsync(options.stepMs)
@@ -323,10 +334,10 @@ proc serve(options: ServerOptions) {.async.} =
         let action = nextBotAction(match.game, match.playsThisTurn)
         if not match.game.applyBotAction(action):
           break
-        if action.kind == EndTurnAction:
-          match.playsThisTurn = 0
-        else:
-          inc match.playsThisTurn
+        case action.kind
+        of EndTurnAction: match.playsThisTurn = 0
+        of PlayCardAction: inc match.playsThisTurn
+        of ResolveTriggerAction: discard
         inc match.revision
         broadcastState()
       else:
@@ -340,18 +351,12 @@ proc serve(options: ServerOptions) {.async.} =
           case actionType
           of "playCard":
             let handIndex = action["handIndex"].getInt()
-            # "choices" answers each of the card's targets in order;
-            # "choice" is the one-target form.
-            var choices: seq[Choice]
-            if action.hasKey("choices") and action["choices"].kind == JArray:
-              for entry in action["choices"]:
-                choices.add choiceFromJson(entry)
-            elif action.hasKey("choice"):
-              choices.add choiceFromJson(action["choice"])
-            else:
-              choices.add Canceled
-            if match.game.playCard(handIndex, choices):
+            if match.game.playCard(handIndex, action.actionChoices()):
               inc match.playsThisTurn
+              inc match.revision
+              broadcastState()
+          of "resolveTrigger":
+            if match.game.resolvePendingTrigger(action.actionChoices()):
               inc match.revision
               broadcastState()
           of "endTurn":
@@ -435,9 +440,11 @@ proc serve(options: ServerOptions) {.async.} =
               checkTransition()
             except ValueError:
               discard
-        of "playCard", "endTurn":
+        of "playCard", "endTurn", "resolveTrigger":
+          # Whoever must act: a waiting trigger's owner, else the current
+          # player.
           if match.phase == Playing and
-              match.game.currentPlayer == slot:
+              match.game.actingPlayer() == slot:
             submitAction(data)
         else: discard
     except CatchableError:
