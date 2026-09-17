@@ -109,11 +109,13 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
   let lane = TrainingLane(game: game, seat: seat, seed: seed, maxTicks: batch.maxTicks)
   var host = initHeroHost(game, game.world.heroes[seat].id)
   var limits = heroVmLimits()
+  let laneAddress = cast[pointer](lane)
   discard host.addFunction("chooseAction", 16, proc(values: openArray[int32]): int32 =
+    let callbackLane = cast[TrainingLane](laneAddress)
     for index, value in values:
       doAssert value in -100 .. 100
-      lane.transition.features[index] = float32(value)
-    game.heroVms[seat].runtime.pauseHostCall()
+      callbackLane.transition.features[index] = float32(value)
+    callbackLane.game.heroVms[callbackLane.seat].runtime.pauseHostCall()
     0'i32, 1)
   inc limits.maxHostFunctions
   let source = batch.policy.replace("' METTA_DECISION",
@@ -133,8 +135,6 @@ proc reset*(batch: TrainingBatch, seed: int) =
     let nextSeed =
       if seed == -1: batch.lanes[index].seed + batch.lanes.len
       else: seed * batch.lanes.len + index
-    batch.lanes[index].game.heroVms.setLen(0)
-    batch.lanes[index].cursor = nil
     batch.lanes[index] = batch.newLane(nextSeed)
 
 proc newTrainingBatch*(config: GotaConfig, bot, opponent, policy: string,
@@ -157,9 +157,8 @@ proc step*(batch: TrainingBatch, actions: openArray[int32], transitions: var ope
       lane.transition.reward += float32(lane.transition.outcome) * 10'f32
     transitions[index] = lane.transition
     if lane.transition.terminal != 0:
-      lane.game.heroVms.setLen(0)
-      lane.cursor = nil
-      batch.lanes[index] = batch.newLane(lane.seed + batch.lanes.len)
+      let replacement = batch.newLane(lane.seed + batch.lanes.len)
+      batch.lanes[index] = replacement
 
 proc gota_source_commit(): cstring {.cdecl, exportc, dynlib.} =
   GotaSourceCommit.cstring
@@ -193,10 +192,7 @@ proc gota_step(handle: pointer, actions: ptr UncheckedArray[int32],
     terminals[index] = uint8(transitions[index].terminal)
 
 proc close*(batch: TrainingBatch) =
-  # Host closures reference their lane; release them before dropping the handle.
-  for lane in batch.lanes:
-    lane.game.heroVms.setLen(0)
-    lane.cursor = nil
+  batch.lanes.setLen(0)
 
 proc gota_close(handle: pointer) {.cdecl, exportc, dynlib.} =
   let batch = cast[TrainingBatch](handle)
