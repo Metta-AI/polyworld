@@ -3,11 +3,13 @@
 import std/strutils
 include bots
 
-const GotaSourceCommit {.strdefine.} = ""
+const
+  GotaSourceCommit {.strdefine.} = ""
+  GotaFeatureCount* = 25
 
 type
   Transition* {.bycopy.} = object
-    features*: array[16, float32]
+    features*: array[GotaFeatureCount, float32]
     reward*: float32
     terminal*, tick*, seat*, outcome*: int32
     stateHash*: uint64
@@ -109,8 +111,9 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
   let lane = TrainingLane(game: game, seat: seat, seed: seed, maxTicks: batch.maxTicks)
   var host = initHeroHost(game, game.world.heroes[seat].id)
   var limits = heroVmLimits()
+  limits.maxParameters = GotaFeatureCount
   let laneAddress = cast[pointer](lane)
-  discard host.addFunction("chooseAction", 16, proc(values: openArray[int32]): int32 =
+  discard host.addFunction("chooseAction", GotaFeatureCount, proc(values: openArray[int32]): int32 =
     let callbackLane = cast[TrainingLane](laneAddress)
     for index, value in values:
       doAssert value in -100 .. 100
@@ -118,9 +121,11 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
     callbackLane.game.heroVms[callbackLane.seat].runtime.pauseHostCall()
     0'i32, 1)
   inc limits.maxHostFunctions
+  var featureArguments: seq[string]
+  for index in 0 ..< GotaFeatureCount:
+    featureArguments.add "f(" & $index & ")"
   let source = batch.policy.replace("' METTA_DECISION",
-    "decision = chooseAction(f(0),f(1),f(2),f(3),f(4),f(5),f(6),f(7)," &
-    "f(8),f(9),f(10),f(11),f(12),f(13),f(14),f(15))")
+    "decision = chooseAction(" & featureArguments.join(",") & ")")
   let program = compile(source, host, limits)
   bindHeroData(program)
   game.heroVms[seat] = HeroVm(runtime: initRuntime(program, host, limits), limits: limits, ready: true)
@@ -176,7 +181,8 @@ proc gota_reset(handle: pointer, seed: int64, observations: ptr UncheckedArray[f
   let batch = cast[TrainingBatch](handle)
   batch.reset(int(seed))
   for index, lane in batch.lanes:
-    copyMem(observations[index * 16].addr, lane.transition.features[0].addr, 16 * sizeof(float32))
+    copyMem(observations[index * GotaFeatureCount].addr,
+      lane.transition.features[0].addr, GotaFeatureCount * sizeof(float32))
     transitions[index] = lane.transition
 
 proc gota_step(handle: pointer, actions: ptr UncheckedArray[int32],
@@ -187,7 +193,8 @@ proc gota_step(handle: pointer, actions: ptr UncheckedArray[int32],
   let count = batch.lanes.len
   batch.step(actions.toOpenArray(0, count - 1), transitions.toOpenArray(0, count - 1))
   for index, lane in batch.lanes:
-    copyMem(observations[index * 16].addr, lane.transition.features[0].addr, 16 * sizeof(float32))
+    copyMem(observations[index * GotaFeatureCount].addr,
+      lane.transition.features[0].addr, GotaFeatureCount * sizeof(float32))
     rewards[index] = transitions[index].reward
     terminals[index] = uint8(transitions[index].terminal)
 
