@@ -11,7 +11,7 @@
 '
 ' HAND QUERIES (index 0 to handSize - 1)
 '   handCost(i)       energy cost
-'   handKind(i)       0 = minion, 1 = spell
+'   handKind(i)       0 = minion, 1 = spell, 2 = trinket
 '   handPower(i)      attack (minions only)
 '   handToughness(i)  toughness (minions only)
 '   canPlay(i)        1 if affordable

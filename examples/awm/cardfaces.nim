@@ -15,7 +15,7 @@ const
   ArtWidth = 546
   ArtHeight = 417
   # Minion stat number boxes in face pixels. Board minions draw their live
-  # stats over a stat-less face, so faces needn't be baked for every value.
+  # stats over the printed ones, so faces needn't be baked for every value.
   PowerBox* = Rect(x: 85, y: 757, w: 54, h: 61)
   ToughnessBox* = Rect(x: 503, y: 757, w: 54, h: 61)
   StatMargin* = 10'f32  ## Room around a stat box for glyph overhang.
@@ -23,6 +23,10 @@ const
   TypeLine* = Rect(x: 109, y: 532, w: 382, h: 32)
 
 type
+  StatSlot* = enum
+    PowerSlot
+    ToughnessSlot
+
   StatInk* = enum
     ## A live stat compared with the printed one.
     PrintedStat
@@ -30,6 +34,7 @@ type
     RaisedStat
 
 var
+  statBackdrop: Image  ## A minion frame with stat icons and no numbers.
   assetsRoot: string
   assetImages: Table[string, Image]
   titleTypeface, rulesTypeface: Typeface
@@ -113,13 +118,27 @@ proc color(ink: StatInk): string =
 proc drawStat(image: Image, value: int, ink: StatInk, box: Rect) =
   image.drawText($value, box.x, box.y, box.w, box.h, 68, ink.color, true)
 
-proc renderStat*(value: int, ink: StatInk): Image =
-  ## One stat number in its box plus `StatMargin`, drawn over a stat-less face.
+proc box*(slot: StatSlot): Rect =
+  case slot
+  of PowerSlot: PowerBox
+  of ToughnessSlot: ToughnessBox
+
+proc renderStat*(value: int, ink: StatInk, slot: StatSlot): Image =
+  ## One stat number in its box plus `StatMargin`, on an opaque patch of the
+  ## minion frame: drawn over a printed face, it hides the printed number.
   ensureAssets()
-  result = newImage(int(PowerBox.w + StatMargin * 2),
-    int(PowerBox.h + StatMargin * 2))
+  if statBackdrop.isNil:
+    statBackdrop = newImage(CardFaceWidth, CardFaceHeight)
+    statBackdrop.draw(assetImage("frames/creature.svg"))
+    statBackdrop.draw(assetImage("icons/power.svg"), translate(vec2(29, 745)))
+    statBackdrop.draw(assetImage("icons/toughness.svg"),
+      translate(vec2(447, 745)))
+  let box = slot.box()
+  result = statBackdrop.subImage(int(box.x - StatMargin),
+    int(box.y - StatMargin), int(box.w + StatMargin * 2),
+    int(box.h + StatMargin * 2))
   result.drawStat(value, ink,
-    Rect(x: StatMargin, y: StatMargin, w: PowerBox.w, h: PowerBox.h))
+    Rect(x: StatMargin, y: StatMargin, w: box.w, h: box.h))
 
 proc renderLostKeywords*(lost: set[Keyword]): Image =
   ## The minion type line with the keywords it lost ("MINION · LOST
@@ -144,7 +163,7 @@ proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
   result.drawText($card.energyCost, 40, 33, 92, 73, 75, "#fff4d5", true)
   result.drawText(card.name, 154, 40, 390, 58, 60, "#f7e6be", true,
     minimumSize = 35)
-  result.drawText(if card.kind == Minion: "MINION" else: "SPELL",
+  result.drawText(($card.kind).toUpperAscii(),
     109, 532, 382, 32, 31, "#e1c792", true)
 
   let rules = card.ruleText()

@@ -4,6 +4,7 @@ ranged minions can't receive damage from non-ranged minions
 - Sniper: 2/1 minion, ranged
 - Sharpshooter: 3/1 minion, ranged, deal 1 damage to any target, 3 energy
 - Hail of Arrows: deals 1 damage to all enemy minions
+
 - Positioning: two target minions gain ranged, 4 energy
 - Trap: deals 1 damage to attacking minions
 
@@ -13,8 +14,8 @@ Warrior:
 - Swords: +N power to all minions
 - Shields: +N toughness to all minions
 - Duel: 1 target minion gains +1/+1, 1 target minion loses range, and they fight, 2 energy
-- Footsoldier: 2/2 minion 1 energy
 - Tactician: small minion, -1 power to a target minion
+- Footsoldier: 2/2 minion 1 energy
 
 Mage:
 - Bouncer: 1/1 minion, bounce a target minion, 1 energy
@@ -23,6 +24,7 @@ Mage:
 - Study: draw 2 cards discard 2 cards
 - Summon: big bad expensive minion
 - Poacher: steal a card from hand when hits
+- Oozification: destroy a creature, its controller summons target's toughness creatures
 
 Multiclass:
 Players can build and play cards of any class. Cards of a class different of the player's cost (3 - class level) more energy.

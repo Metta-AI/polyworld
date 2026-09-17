@@ -1,5 +1,5 @@
 ## Regenerate standalone card previews without opening the game.
-## Run from the project root:
+## Run from the AWM project root (examples/awm):
 ## nim c -r --out:/tmp/awm-render-cards tools/render_cards.nim
 import std/[os, strutils]
 import pixie
@@ -11,27 +11,65 @@ let
 initCardAssets(root)
 createDir(outputDir)
 
-let sheet = newImage(2040, 1110)
+const
+  Columns = 5
+  PreviewWidth = 300
+  PreviewHeight = 425
+  Margin = 56
+  ColumnGap = 28
+  RowGap = 32
+  HeaderHeight = 158
+  FooterHeight = 72
+
+proc artworkSlug(card: Card): string =
+  card.name.toLowerAscii().replace(" ", "-")
+
+# A complete contact sheet must never silently include placeholder art.
+for card in baseCards:
+  let artPath = root / "artwork/cards/art" / (card.artworkSlug() & ".png")
+  if not fileExists(artPath):
+    raise newException(IOError, "Missing artwork for " & card.name & ": " & artPath)
+
+let
+  rows = (baseCards.len + Columns - 1) div Columns
+  sheetWidth = Margin * 2 + Columns * PreviewWidth + (Columns - 1) * ColumnGap
+  sheetHeight = HeaderHeight + rows * PreviewHeight +
+    (rows - 1) * RowGap + FooterHeight
+  sheet = newImage(sheetWidth, sheetHeight)
 sheet.fill(parseHtmlColor("#111a20"))
 let
   title = readFont(root / "artwork/cards/fonts/Grenze-SemiBold.ttf")
   subtitle = readFont(root / "artwork/cards/fonts/Grenze-Regular.ttf")
-title.size = 50
+title.size = 52
 title.paint.color = parseHtmlColor("#ebd9b4")
-subtitle.size = 26
+subtitle.size = 25
 subtitle.paint.color = parseHtmlColor("#b7b9b1")
-sheet.fillText(title, "The first three cards", translate(vec2(60, 26)))
-sheet.fillText(subtitle, "Illustration · Frame · Symbols · Living type",
-  translate(vec2(61, 89)))
+sheet.fillText(title, "AWM / The complete base set",
+  translate(vec2(Margin.float32, 22)))
+sheet.fillText(subtitle, $baseCards.len &
+  " illustrated cards · Archers · Warriors · Mages",
+  translate(vec2(Margin.float32 + 1, 87)))
 
-for i, heroClass in [Warrior, Mage, Archer]:
+let divider = newPath()
+divider.moveTo(Margin.float32, 133)
+divider.lineTo((sheetWidth - Margin).float32, 133)
+sheet.strokePath(divider, parseHtmlColor("#716347"), strokeWidth = 1)
+
+for i, card in baseCards:
   let
-    card = heroClass.classCard()
     face = renderCardFace(card)
-  face.writeFile(outputDir / card.name.toLowerAscii() & ".png")
-  sheet.draw(face, translate(vec2((60 + i * 660).float32, 163)))
+    x = Margin + (i mod Columns) * (PreviewWidth + ColumnGap)
+    y = HeaderHeight + (i div Columns) * (PreviewHeight + RowGap)
+  face.writeFile(outputDir / (card.artworkSlug() & ".png"))
+  sheet.draw(face.resize(PreviewWidth, PreviewHeight),
+    translate(vec2(x.float32, y.float32)))
 
 renderCardBack().writeFile(outputDir / "back.png")
 renderCardFace(Warrior.classCard(), currentToughness = 1).writeFile(outputDir / "bear-damaged.png")
+subtitle.size = 20
+subtitle.paint.color = parseHtmlColor("#8f978f")
+sheet.fillText(subtitle,
+  "Independent illustrations · Editable frames · Live rules and stats",
+  translate(vec2(Margin.float32, (sheetHeight - 44).float32)))
 sheet.writeFile(outputDir / "cards.png")
-echo "Card previews: ", outputDir
+echo "Rendered ", baseCards.len, " illustrated card previews: ", outputDir

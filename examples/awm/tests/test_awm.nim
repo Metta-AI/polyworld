@@ -7,12 +7,13 @@ suite "AWM base set":
     check DeckSize == 40
     let deck = Mage.baseDeck()
     check deck.len == DeckSize
-    var bouncers, oozifications: int
+    var bouncers, oozifications, plans: int
     for card in deck:
       check card.class == some(Mage)
       if card == baseCard("bouncer-1"): inc bouncers
       elif card == baseCard("oozification-4"): inc oozifications
-    check (bouncers, oozifications) == (32, 8)
+      elif card == baseCard("plan-3"): inc plans
+    check (bouncers, oozifications, plans) == (24, 8, 8)
 
   test "the Warrior deck is forty cards of every Warrior card":
     let deck = Warrior.baseDeck()
@@ -333,12 +334,20 @@ suite "AWM target visual effects":
     game.players[caster].energy = 1
     check game.playCard(0, target)
     check not game.minionLocation(75).found
-    check game.visualEvents.len == 1
+    check game.visualEvents.len == 2
     let event = game.visualEvents[0]
     check event.kind == BubbleVfx
     check event.target == target
     check event.boardIndex == 1
     check event.boardCount == 2
+    # The bounce itself follows in the same beat, so its bubble rides along.
+    let bounce = game.visualEvents[1]
+    check bounce.kind == BounceVfx
+    check bounce.beat == event.beat
+    check bounce.target == target
+    check (bounce.boardIndex, bounce.boardCount) == (1, 2)
+    check bounce.card == Warrior.classCard()
+    check bounce.handIndex == game.players[owner].hand.high
 
   test "declining Bouncer's target produces no bubble":
     var game = newGame(Mage, Archer, 109)
@@ -1207,8 +1216,11 @@ suite "AWM Oozification":
     check oozification.kind == Spell
     check oozification.needsChoice()
     check oozification.targetCount() == 1
-    check oozification.ruleText() ==
-      "Destroy a minion.\nSummon Oozes equal to the target's toughness."
+    check oozification.ruleText() == "Destroy a minion.\n" &
+      "Summon Oozes equal to the target's toughness for the target's owner."
+    check printed(rules(summon(1, "Ooze", Opponent))) ==
+      "Summon an Ooze for your opponent."
+    check printed(rules(summon(2, "Ooze", You))) == "Summon 2 Oozes."
     # With several targets, getTarget says which one.
     check printed(rules(destroy(target({Minion})), destroy(target({Minion})),
       summon(getTarget(1).toughness, "Ooze"))) ==
@@ -1222,12 +1234,14 @@ suite "AWM Oozification":
     check game.playCard(0, creatureChoice(enemy, 1))
     check game.players[me].energy == 0
     check game.players[me].discardPile == @[baseCard("Oozification", 4)]
-    check game.players[enemy].board.len == 0
+    check not game.minionLocation(1).found
     check game.players[enemy].discardPile == @[Warrior.classCard()]
-    check game.players[me].board.len == 3
-    for index, ooze in game.players[me].board:
+    # The Oozes go to the destroyed minion's owner.
+    check game.players[me].board.len == 0
+    check game.players[enemy].board.len == 3
+    for index, ooze in game.players[enemy].board:
       check ooze.card == baseCard("Ooze", 1)
-      check ooze.owner == me
+      check ooze.owner == enemy
       check ooze.id == index + 2
       check not ooze.canAttack
     check game.nextMinionId == 5
@@ -1237,11 +1251,13 @@ suite "AWM Oozification":
     check events[1].kind == DeathVfx
 
   test "Oozification counts current toughness, not printed":
-    var (game, me, _) = oozeGame(809, 1)
-    check game.playCard(0, creatureChoice(1 - me, 1))
-    check game.players[me].board.len == 1
+    var (game, me, enemy) = oozeGame(809, 1)
+    check game.playCard(0, creatureChoice(enemy, 1))
+    check game.players[enemy].board.len == 1
+    check game.players[enemy].board[0].card == baseCard("Ooze", 1)
+    check game.players[me].board.len == 0
 
-  test "Oozification can turn your own minion into Oozes":
+  test "Oozification on your own minion gives you the Oozes":
     var (game, me, enemy) = oozeGame(811, 2)
     game.players[me].board = @[readyMinion(me, 2, Warrior.classCard())]
     game.nextMinionId = 3
@@ -1311,3 +1327,374 @@ suite "AWM Oozification":
     check game.players[enemy].board.len == 1
     check game.players[enemy].board[0].id == 1
     check game.players[enemy].board[0].currentToughness == 1
+
+suite "AWM computed query owners and card names":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  test "a board query can follow a target's owner":
+    let purge = Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(
+      destroy(target({Minion})),
+      damage(1, game.board.choose(kind: Minion, owner: getTarget().owner))))
+    check purge.ruleText() == "Destroy a minion.\n" &
+      "Deal 1 damage to all minions the target's owner controls."
+    check printed(rules(damage(1,
+      game.board.choose(kind: Minion, owner: You)))) ==
+      "Deal 1 damage to all friendly minions."
+    var game = newGame(Mage, Warrior, 901)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+      bear = Warrior.classCard()
+    game.players[me].board = @[readyMinion(me, 1, bear)]
+    game.players[enemy].board =
+      @[readyMinion(enemy, 2, bear), readyMinion(enemy, 3, bear)]
+    game.nextMinionId = 4
+    game.players[me].hand = @[purge]
+    check game.playCard(0, creatureChoice(enemy, 2))
+    check not game.minionLocation(2).found
+    check game.players[enemy].board[0].currentToughness == 1
+    check game.players[me].board[0].currentToughness == 2
+
+  test "summon names resolve on play; a misspelling fails the startup check":
+    for card in baseCards:
+      card.checkCardNames(baseCardNamed)
+    let typo = Card(name: "Typo", energyCost: 0, kind: Spell,
+      rules: rules(summon(1, "Footsodlier")))
+    check typo.ruleText() == "Summon a Footsodlier."
+    expect ValueError:
+      typo.checkCardNames(baseCardNamed)
+
+suite "AWM rule values":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  test "rule values are data a reader can inspect":
+    let oozification = baseCard("Oozification", 4)
+    let summon = SummonRule(oozification.rules[1])
+    check summon.count.kind == ToughnessOf
+    check summon.card.kind == CardNamed
+    check summon.card.name == "Ooze"
+    check summon.owner.kind == OwnerOf
+    check PickedTarget(summon.owner.target).index == 0
+
+  test "fixed numbers fold and computed ones combine":
+    let folded = toRuleValue(2) + 3
+    check folded.kind == FixedValue
+    check folded.fixed == 5
+    let grown = getTarget().toughness + 1
+    check grown.kind == Sum
+    check printed(rules(destroy(target({Minion})),
+      summon(getTarget().toughness + 1, "Ooze"))) ==
+      "Destroy a minion.\nSummon Oozes equal to the target's toughness plus 1."
+    check printed(rules(damage(1, target({Minion})), damage(1, target({Minion})),
+      damage(getTarget(0).power - 1, getTarget(1)))) ==
+      "Deal 1 damage to a minion.\nDeal 1 damage to a minion.\n" &
+      "Deal the first target's power minus 1 damage to the second target."
+
+  test "a count reads how many cards a query matches":
+    let rallyCry = Card(name: "Rally Cry", energyCost: 0, kind: Spell,
+      rules: rules(damage(
+        game.board.choose(kind: Minion, owner: You).count, target({Hero}))))
+    check rallyCry.ruleText() ==
+      "Deal the number of friendly minions damage to a hero."
+    var game = newGame(Warrior, Mage, 911)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+      bear = Warrior.classCard()
+    game.players[me].board =
+      @[readyMinion(me, 1, bear), readyMinion(me, 2, bear)]
+    game.players[enemy].board = @[readyMinion(enemy, 3, bear)]
+    game.nextMinionId = 4
+    game.players[me].hand = @[rallyCry]
+    check game.playCard(0, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 2
+
+  test "power and sums resolve against live stats":
+    let hunt = Card(name: "Hunt", energyCost: 0, kind: Spell, rules: rules(
+      addPowerToughness(2, 0, target({Minion})),
+      damage(getTarget().power + 1, target({Hero}))))
+    var game = newGame(Warrior, Mage, 919)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[readyMinion(me, 1, Warrior.classCard())]
+    game.nextMinionId = 2
+    game.players[me].hand = @[hunt]
+    # The buff hasn't applied when the damage is worked out: 3 + 1.
+    check game.playCard(0, @[creatureChoice(me, 1), heroChoice(enemy)])
+    check game.players[enemy].life == StartingLife - 4
+    check game.players[me].board[0].power == 5
+
+suite "AWM Plan, draws and triggers":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  proc planGame(seed: int64): (GameState, int, int) =
+    ## Plan alone in hand, with energy for it.
+    var game = newGame(Mage, Warrior, seed)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("Plan", 3)]
+    game.players[me].energy = 3
+    (game, me, 1 - me)
+
+  test "Plan is a trinket that prints its trigger as one sentence":
+    let plan = baseCard("Plan", 3)
+    check plan.kind == Trinket
+    check plan.class == some(Mage)
+    check not plan.needsChoice()
+    check plan.targetCount() == 0
+    check plan.ruleText() == "Draw 1 card.\n" &
+      "At the start of your next turn, draw 1 card and destroy this card."
+    check Mage.classCard() == baseCard("Bouncer", 1)
+
+  test "draw and on read naturally":
+    check printed(rules(draw(2))) == "Draw 2 cards."
+    check printed(rules(draw(1, Opponent))) == "Your opponent draws 1 card."
+    check printed(rules(destroy(target({Minion})),
+      draw(getTarget().toughness, getTarget().owner))) ==
+      "Destroy a minion.\n" &
+      "The target's owner draws cards equal to the target's toughness."
+    check printed(rules(on(nextTurn(Opponent),
+      draw(1), draw(2), destroy(self())))) ==
+      "At the start of your opponent's next turn, " &
+      "draw 1 card, draw 2 cards and destroy this card."
+
+  test "Plan draws now, stays in play, and draws again next turn":
+    var (game, me, enemy) = planGame(1001)
+    let deck = game.players[me].deck.len
+    check game.playCard(0)
+    check game.players[me].energy == 0
+    check game.players[me].hand.len == 1
+    check game.players[me].deck.len == deck - 1
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].card == baseCard("Plan", 3)
+    check game.players[me].board[0].power == 0
+    check game.eligibleAttackers().len == 0
+    game.finishTurn()
+    # The opponent's turn: Plan waits, and can't be attacked.
+    check game.players[me].board.len == 1
+    check game.players[me].hand.len == 1
+    game.players[enemy].board = @[readyMinion(enemy, 50, Warrior.classCard())]
+    game.nextMinionId = 51
+    check game.attackTargets(50) == @[heroChoice(me)]
+    game.finishTurn()
+    # My next turn: the normal draw, then Plan's, then Plan is gone.
+    check game.players[me].hand.len == 3
+    check game.players[me].deck.len == deck - 3
+    check game.players[me].board.len == 0
+    check game.players[me].discardPile == @[baseCard("Plan", 3)]
+    game.finishTurn()
+    game.finishTurn()
+    check game.players[me].hand.len == 4
+
+  test "minion targets and minion effects ignore trinkets":
+    var (game, me, enemy) = planGame(1003)
+    check game.playCard(0)
+    game.finishTurn()
+    game.players[enemy].hand =
+      @[Mage.classCard(), baseCard("Hail of Arrows", 3)]
+    game.players[enemy].energy = 4
+    check game.availableChoices(0) == @[NoTarget]
+    check game.playCard(1)
+    check game.players[me].board.len == 1
+
+  test "a trinket that left play doesn't fire":
+    var (game, me, _) = planGame(1005)
+    check game.playCard(0)
+    game.players[me].board.setLen(0)
+    game.finishTurn()
+    game.finishTurn()
+    check game.players[me].hand.len == 2
+
+  test "drawing from an empty deck loses the game":
+    var (game, me, enemy) = planGame(1007)
+    game.players[me].deck.setLen(0)
+    check game.playCard(0)
+    check game.gameOver
+    check game.winner == enemy
+
+  test "a trigger on the opponent's next turn fires one turn later, once":
+    let omen = Card(name: "Omen", energyCost: 0, kind: Trinket,
+      rules: rules(on(nextTurn(Opponent), draw(1, Opponent))))
+    var game = newGame(Mage, Warrior, 1009)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[omen]
+    check game.playCard(0)
+    let enemyHand = game.players[enemy].hand.len
+    game.finishTurn()
+    check game.players[enemy].hand.len == enemyHand + 2
+    game.finishTurn()
+    game.finishTurn()
+    check game.players[enemy].hand.len == enemyHand + 3
+    check game.players[me].board.len == 1
+
+  test "self() is the copy whose rules are running":
+    let fleeting = Card(name: "Fleeting", energyCost: 0, kind: Minion,
+      rules: rules(destroy(self())), power: 1, toughness: 1)
+    check fleeting.ruleText() == "Destroy this card."
+    var game = newGame(Mage, Warrior, 1011)
+    let me = game.currentPlayer
+    game.players[me].board = @[readyMinion(me, 1, fleeting)]
+    game.nextMinionId = 2
+    game.players[me].hand = @[fleeting]
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].id == 1
+
+  test "every draw records its hand slot, turn draws and effects alike":
+    var (game, me, _) = planGame(1015)
+    proc draws(game: var GameState): seq[VisualEvent] =
+      for event in game.takeVisualEvents():
+        if event.kind == DrawVfx:
+          result.add event
+    check game.playCard(0)
+    let played = game.draws()
+    check played.len == 1
+    check played[0].target == heroChoice(me)
+    check (played[0].boardIndex, played[0].boardCount) == (0, 1)
+    game.finishTurn()
+    discard game.takeVisualEvents()
+    game.finishTurn()
+    # The turn draw, then Plan's, each into its own slot.
+    let nextTurn = game.draws()
+    check nextTurn.len == 2
+    check (nextTurn[0].boardIndex, nextTurn[1].boardIndex) == (1, 2)
+    check nextTurn[1].boardCount == 3
+
+suite "AWM triggers that choose targets":
+  let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
+    rules: rules(on(nextTurn(You), damage(1, target({Minion})))))
+
+  proc snareGame(seed: int64): (GameState, int, int) =
+    ## Snare in play for `me`, an enemy Bear on the board, and the game
+    ## advanced to the start of my next turn.
+    var game = newGame(Mage, Warrior, seed)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[snare]
+    check game.playCard(0)
+    game.players[enemy].board = @[readyMinion(enemy, 90, Warrior.classCard())]
+    game.nextMinionId = 91
+    game.finishTurn()
+    game.finishTurn()
+    (game, me, enemy)
+
+  test "a trigger with a target waits for its owner, who sees a prompt":
+    var (game, me, enemy) = snareGame(1101)
+    check game.waitingTrigger
+    check game.actingPlayer() == me
+    check game.triggerChoices() == @[creatureChoice(enemy, 90), NoTarget]
+    let waiting = game.waitingTriggerRules()
+    check waiting.card.name == "Snare"
+    check waiting.rules.targetPrompt(waiting.card, 0) ==
+      ("Deal 1 damage to a minion.", "Choose a minion.")
+    # Nothing else happens until it's answered.
+    game.players[me].hand = @[Mage.classCard()]
+    game.players[me].energy = 1
+    check not game.canPlay(0)
+    let turn = game.turnNumber
+    game.finishTurn()
+    check game.turnNumber == turn
+    check game.resolvePendingTrigger(@[creatureChoice(enemy, 90)])
+    check not game.waitingTrigger
+    check game.players[enemy].board[0].currentToughness == 1
+    check game.canPlay(0)
+
+  test "an illegal pick is refused and no target is allowed":
+    var (game, me, enemy) = snareGame(1103)
+    check not game.resolvePendingTrigger(@[heroChoice(enemy)])
+    check game.waitingTrigger
+    check game.resolvePendingTrigger(@[NoTarget])
+    check not game.waitingTrigger
+    check game.players[enemy].board[0].currentToughness == 2
+    check game.actingPlayer() == me
+
+  test "with nothing legal to target, a trigger resolves by itself":
+    var game = newGame(Mage, Warrior, 1105)
+    let me = game.currentPlayer
+    game.players[me].hand = @[snare]
+    check game.playCard(0)
+    game.finishTurn()
+    game.finishTurn()
+    check not game.waitingTrigger
+    check game.currentPlayer == me
+
+  test "a trigger on the opponent's turn waits for its owner, not them":
+    let trap = Card(name: "Trap", energyCost: 0, kind: Trinket,
+      rules: rules(on(nextTurn(Opponent), damage(1, target({Minion})))))
+    var game = newGame(Mage, Warrior, 1107)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[trap]
+    check game.playCard(0)
+    game.players[enemy].board = @[readyMinion(enemy, 92, Warrior.classCard())]
+    game.nextMinionId = 93
+    game.finishTurn()
+    check game.currentPlayer == enemy
+    check game.actingPlayer() == me
+    check game.eligibleAttackers().len == 0
+
+suite "AWM presentation beats":
+  test "Oozification's Oozes come a beat after its splat and destroy":
+    var game = newGame(Mage, Warrior, 1201)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[enemy].board = @[readyMinion(enemy, 1, Warrior.classCard())]
+    game.nextMinionId = 2
+    game.players[me].hand = @[baseCard("Oozification", 4)]
+    game.players[me].energy = 4
+    check game.playCard(0, creatureChoice(enemy, 1))
+    var
+      splat = -1
+      death = -1
+      summons: seq[int]
+    for event in game.takeVisualEvents():
+      case event.kind
+      of OozeSplatVfx: splat = event.beat
+      of DeathVfx: death = event.beat
+      of SummonVfx: summons.add event.beat
+      else: discard
+    check splat >= 0
+    check death == splat
+    check summons.len == 2
+    check summons[0] == summons[1]
+    check summons[0] > splat
+
+  test "Plan's turn draw, its draw and its destroy are beats in that order":
+    var game = newGame(Mage, Warrior, 1203)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("Plan", 3)]
+    game.players[me].energy = 3
+    check game.playCard(0)
+    game.finishTurn()
+    discard game.takeVisualEvents()
+    game.finishTurn()
+    var kinds: seq[VfxKind]
+    var beats: seq[int]
+    for event in game.takeVisualEvents():
+      if event.kind in {DrawVfx, DeathVfx}:
+        kinds.add event.kind
+        beats.add event.beat
+    check kinds == @[DrawVfx, DrawVfx, DeathVfx]
+    check beats[0] < beats[1]
+    check beats[1] < beats[2]
+
+  test "each card of a multi-card draw is its own beat":
+    var game = newGame(Mage, Warrior, 1205)
+    let me = game.currentPlayer
+    game.players[me].hand = @[Card(name: "Study", energyCost: 0, kind: Spell,
+      rules: rules(draw(2)))]
+    check game.playCard(0)
+    var beats: seq[int]
+    for event in game.takeVisualEvents():
+      if event.kind == DrawVfx:
+        beats.add event.beat
+    check beats.len == 2
+    check beats[0] < beats[1]

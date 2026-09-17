@@ -215,5 +215,14 @@ when defined(emscripten):
   proc sendPlayCard*(feed: PlayerFeed, handIndex: int, choice: Choice) =
     feed.sendPlayCard(handIndex, @[choice])
 
+  proc sendResolveTrigger*(feed: PlayerFeed, choices: seq[Choice]) =
+    ## Answers the waiting trigger's targets, in order.
+    var msg = %*{"type": "resolveTrigger"}
+    var picks = newJArray()
+    for choice in choices:
+      picks.add choiceToJson(choice)
+    msg["choices"] = picks
+    awmWsSend(($msg).cstring)
+
   proc sendEndTurn*(feed: PlayerFeed) =
     awmWsSend("{\"type\":\"endTurn\"}".cstring)

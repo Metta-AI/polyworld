@@ -72,6 +72,12 @@ python3 tests/test_server.py
   minions they attack from their owner's next turn, and their own on-play
   rules don't run. A card's later rules reach them (Rally buffs its own
   Footsoldiers).
+- Trinkets (Plan) stay in play on their owner's board but aren't minions:
+  they can't attack or be attacked, and minion targets and "all minions"
+  effects ignore them.
+- `on(nextTurn(...))` rules fire once, at the start of that player's next
+  turn after their draw, for the card's owner, if the card is still in
+  play. Drawing from an empty deck loses the game, as on a normal turn.
 - Cards with several targets (Duel) are aimed one target at a time. A
   fight is combat without an attack: both minions deal their power at
   once, Ranged applies, and it doesn't use up either minion's attack.
@@ -91,6 +97,7 @@ python3 tests/test_server.py
 | Warrior | Footsoldier | 6 | 1 | Minion | 1/2 | — |
 | Warrior | Commander | 4 | 5 | Minion | 2/3 | Summons 2 Footsoldiers |
 | Warrior | Rally | 3 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
-| Mage | Bouncer | 32 | 1 | Minion | 1/1 | Return a minion to owner's hand |
-| Mage | Oozification | 8 | 4 | Spell | — | Destroy a minion, then summon Oozes equal to its current toughness |
+| Mage | Bouncer | 24 | 1 | Minion | 1/1 | Return a minion to owner's hand |
+| Mage | Plan | 8 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
+| Mage | Oozification | 8 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
 | Mage | Ooze | — | 1 | Minion | 1/1 | — (only summoned, by Oozification) |

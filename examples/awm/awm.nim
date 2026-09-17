@@ -83,6 +83,10 @@ when not defined(headless):
       heroClass: HeroClass
       boardIndex: int  ## Live board index just before it was removed.
       atLunge: bool  ## Slain while attacking: held at `lungePoint`.
+      held: bool  ## Its death's beat hasn't played yet: it stays put.
+      bouncing: bool
+        ## Not slain: a bounced card holding its slot until its beat, when it
+        ## flies to hand instead of the discard pile.
       lungePoint: Vec3
 
     SolidRenderer = object
@@ -574,7 +578,7 @@ when not defined(headless):
         card.kind == Minion and currentToughness >= 0
       imageKey =
         if hidden or card.name.len == 0: CardBackKey
-        else: sk.bakedCardImage(card, showStats = not liveStats)
+        else: sk.bakedCardImage(card)
       brightness = if hidden or enabled: 1.0'f32 else: 0.68'f32
     var corners: array[4, Vec3]
     for i in 0 ..< corners.len:
@@ -655,12 +659,16 @@ when not defined(headless):
       game: GameState,
       playerIndex: int,
       cameraSide: float32,
-      hidden = true
+      hidden = true,
+      handIndex = -1
   ) =
+    ## Flies a card from the deck to `handIndex` (default: the last slot).
     if game.players[playerIndex].hand.len == 0:
       return
     let
-      destinationIndex = game.players[playerIndex].hand.high
+      destinationIndex =
+        if handIndex in 0 ..< game.players[playerIndex].hand.len: handIndex
+        else: game.players[playerIndex].hand.high
       sourcePose = stackTopPose(
         deckPose(playerIndex),
         game.players[playerIndex].deck.len + 1
@@ -686,10 +694,7 @@ when not defined(headless):
       before, after: GameState, cameraSide: float32) =
     ## The server and local bot use the same card movement as human input.
     if after.turnNumber != before.turnNumber:
-      let owner = after.currentPlayer
-      if after.players[owner].deck.len < before.players[owner].deck.len:
-        animations.addDrawAnimation(after, owner, cameraSide,
-          hidden = owner != activeCameraPlayer)
+      # Draws animate from their DrawVfx events.
       return
     let owner = before.currentPlayer
     let oldPlayer = before.players[owner]
@@ -703,30 +708,20 @@ when not defined(headless):
           playedIndex = i
           break
       let source = handPoses(owner, oldPlayer.hand.len, cameraSide)[playedIndex]
+      # Only the card that left the hand flies from it; minions its rules
+      # summoned enter after it and appear on their own beat.
       for i, minion in newPlayer.board:
         if not before.minionLocation(minion.id).found:
           animations.add newCardAnimation(minion.card, newPlayer.heroClass,
-            source, boardPoses(owner, newPlayer.board.len)[i],
+            source, boardPoses(owner, i + 1)[i],
             suppressBoardId = minion.id)
+          break
       if newPlayer.discardPile.len > oldPlayer.discardPile.len and
           newPlayer.hand.len < oldPlayer.hand.len:
         animations.add newCardAnimation(newPlayer.discardPile[^1],
           newPlayer.heroClass, source,
           stackTopPose(discardPose(owner), newPlayer.discardPile.len),
           suppressDiscardOwner = owner)
-    for targetOwner in 0 ..< PlayerCount:
-      let oldTarget = before.players[targetOwner]
-      let newTarget = after.players[targetOwner]
-      for i, minion in oldTarget.board:
-        if not after.minionLocation(minion.id).found and
-            newTarget.hand.len > 0 and newTarget.hand[^1] == minion.card:
-          animations.add newCardAnimation(minion.card, newTarget.heroClass,
-            boardPoses(targetOwner, oldTarget.board.len)[i],
-            handPoses(targetOwner, newTarget.hand.len, cameraSide)[^1],
-            arcHeight = 1.15'f32, suppressHandOwner = targetOwner,
-            suppressHandIndex = newTarget.hand.high, duration = 0.82'f32,
-            trackingTarget = creatureChoice(targetOwner, minion.id),
-            hidden = targetOwner != activeCameraPlayer)
 
   proc animationPose(animation: CardAnimation): CardPose =
     let
@@ -777,6 +772,22 @@ when not defined(headless):
     for animation in animations:
       if animation.suppressHandOwner == playerIndex and
           animation.suppressHandIndex == cardIndex:
+        return true
+
+  proc queuedDraw(queued: openArray[VisualEvent], owner, index: int): bool =
+    ## A card still on its way to the hand (drawn or bounced) whose beat
+    ## hasn't played yet stays out of the hand.
+    for event in queued:
+      if event.target.owner == owner and
+          ((event.kind == DrawVfx and event.boardIndex == index) or
+            (event.kind == BounceVfx and event.handIndex == index)):
+        return true
+
+  proc queuedSummon(queued: openArray[VisualEvent], minionId: int): bool =
+    ## A summoned minion whose beat hasn't played yet stays off the board.
+    for event in queued:
+      if event.kind == SummonVfx and event.target.kind == CreatureChoice and
+          event.target.creatureId == minionId:
         return true
 
   proc discardCardsSuppressed(
@@ -832,11 +843,15 @@ when not defined(headless):
       return
     (true, ray.origin + ray.direction * distance)
 
-  proc mouseHitsCard(
+  proc mouseCardOffset(
       window: Window,
       viewProjection: Mat4,
       pose: CardPose
-  ): bool =
+  ): float32 =
+    ## How far the mouse's point on the card is from the card's centre, or
+    ## -1 when the mouse isn't over the card. Crowded boards overlap, so the
+    ## closest card is the one under the mouse.
+    result = -1
     let
       ray = mouseRay(window, viewProjection)
       normal = pose.cardNormal()
@@ -849,8 +864,16 @@ when not defined(headless):
     let local = pose.inverseCardVector(
       ray.origin + ray.direction * distance - pose.position
     )
-    abs(local.x) <= CardWidth * 0.5'f32 and
-      abs(local.z) <= CardDepth * 0.5'f32
+    if abs(local.x) <= CardWidth * 0.5'f32 and
+        abs(local.z) <= CardDepth * 0.5'f32:
+      result = sqrt(local.x * local.x + local.z * local.z)
+
+  proc mouseHitsCard(
+      window: Window,
+      viewProjection: Mat4,
+      pose: CardPose
+  ): bool =
+    mouseCardOffset(window, viewProjection, pose) >= 0
 
   proc mouseOverBoard(
       window: Window,
@@ -917,6 +940,10 @@ when not defined(headless):
         closestDistanceSquared = distanceSquared
         result = wanted
 
+  var hiddenSummons: array[PlayerCount, int]
+    ## Summoned minions per side whose beat hasn't played yet. They're the
+    ## last cards on that board and take no room until they appear.
+
   proc boardSlots(
       dying: openArray[DyingMinion],
       owner,
@@ -925,8 +952,9 @@ when not defined(headless):
     ## Presented board order: live indices 0 ..< liveCount, with each dying
     ## minion (as -1 - its index in `dying`) back where it stood. Re-inserting
     ## the newest first undoes the removals in reverse, so every slot lands
-    ## exactly where it was.
-    for i in 0 ..< liveCount:
+    ## exactly where it was. Summons still waiting for their beat are left
+    ## out, so the cards already shown don't shift before they appear.
+    for i in 0 ..< max(0, liveCount - hiddenSummons[owner]):
       result.add i
     for i in countdown(dying.high, 0):
       if dying[i].target.owner == owner:
@@ -1146,8 +1174,12 @@ when not defined(headless):
       hoverIndex: int,
       hidden: bool,
       dying: openArray[DyingMinion] = [],
-      canPlayCards = true
+      canPlayCards = true,
+      discardFlights: openArray[CardAnimation] = [],
+      queued: openArray[VisualEvent] = []
   ) =
+    ## The large preview of the hovered card: in hand, on the board, or on
+    ## top of a discard pile.
     if hidden:
       return
     var
@@ -1155,22 +1187,55 @@ when not defined(headless):
       power = -1
       toughness = -1
       lost: set[Keyword]
+      onBoard = false
+      inDiscard = false
       found = false
     let player = game.players[game.currentPlayer]
     if hoverIndex >= 0 and hoverIndex < player.hand.len and
-        not animations.handCardSuppressed(game.currentPlayer, hoverIndex):
+        not animations.handCardSuppressed(game.currentPlayer, hoverIndex) and
+        not queued.queuedDraw(game.currentPlayer, hoverIndex):
       card = player.hand[hoverIndex]
       found = true
     else:
+      # One card: the closest under the mouse. Its stats come from it alone,
+      # never left over from another card the mouse also touches.
+      var nearest = high(float32)
       for owner in 0 ..< PlayerCount:
         for i, minion in game.players[owner].board:
-          if not animations.boardCardSuppressed(minion.id) and
-              mouseHitsCard(window, viewProjection,
-                dying.liveBoardPose(owner, i, game.players[owner].board.len)):
-            card = minion.card
+          if animations.boardCardSuppressed(minion.id) or
+              queued.queuedSummon(minion.id):
+            continue
+          let offset = mouseCardOffset(window, viewProjection,
+            dying.liveBoardPose(owner, i, game.players[owner].board.len))
+          if offset < 0 or offset >= nearest:
+            continue
+          nearest = offset
+          card = minion.card
+          onBoard = true
+          found = true
+          if card.kind == Minion:
             power = minion.power
             toughness = minion.currentToughness
             lost = minion.lostKeywords
+          else:
+            power = -1
+            toughness = -1
+            lost = {}
+      if not found:
+        # The visible top of a discard pile, matching how the pile is drawn:
+        # cards still flying there or still dying on the board aren't shown.
+        for owner in 0 ..< PlayerCount:
+          let pile = game.players[owner].discardPile
+          var hiddenCards = animations.discardCardsSuppressed(owner) +
+            discardFlights.discardCardsSuppressed(owner)
+          for slain in dying:
+            if slain.target.owner == owner and not slain.bouncing:
+              inc hiddenCards
+          let shown = pile.len - hiddenCards
+          if shown > 0 and mouseHitsCard(window, viewProjection,
+              stackTopPose(discardPose(owner), shown)):
+            card = pile[shown - 1]
+            inDiscard = true
             found = true
     when defined(takeScreenshot):
       if getEnv("AWM_DEMO_CARD_HOVER") == "1" and player.hand.len > 0:
@@ -1182,14 +1247,15 @@ when not defined(headless):
       height = max(120.0'f32, min(850.0'f32, hudSize(window).y - 360.0'f32))
       size = vec2(height * CardFaceWidth.float32 / CardFaceHeight.float32, height)
       origin = vec2(32, 220)
-      onBoard = toughness >= 0
-      imageKey = sk.bakedCardImage(card, showStats = not onBoard)
+      liveStats = toughness >= 0
+      imageKey = sk.bakedCardImage(card)
     sk.drawRect(origin + vec2(8, 12), size, rgbx(0, 0, 0, 165))
     sk.drawCardImage(imageKey, origin, size)
-    if onBoard:
+    if liveStats:
       sk.drawMinionOverlays(card, power, toughness, lost, origin, size)
     sk.drawLabel(
-      if toughness >= 0: "ON THE BATTLEFIELD"
+      if onBoard: "ON THE BATTLEFIELD"
+      elif inDiscard: "IN THE DISCARD PILE"
       elif card.energyCost > player.energy: "NOT ENOUGH ENERGY"
       elif canPlayCards: "CLICK THE CARD IN YOUR HAND TO PLAY"
       else: "IN HAND",
@@ -1294,6 +1360,7 @@ when not defined(headless):
       pendingCard: Card
       pendingChoices: seq[Choice]
       pendingPicks: seq[Choice]  ## Targets chosen so far for pendingCard.
+      pendingTrigger = false  ## Targeting answers a waiting trigger.
       animations: seq[CardAnimation]
       activeVfx: seq[ActiveVfx]
       # Visual seeds never advance the game's RNG. Captures can replay a cast.
@@ -1314,6 +1381,9 @@ when not defined(headless):
       attackPoint: Vec3
       dyingMinions: seq[DyingMinion]
       discardFlights: seq[CardAnimation]  # Never block input or bots.
+      queuedEvents: seq[VisualEvent]  ## Visual events waiting for their beat.
+      lastBeatWasDraw = false
+      lastDrawStart = 0.0'f32
       attackIndex = 0
       attackForward = true
       attackElapsed = 0.0'f32
@@ -1339,6 +1409,34 @@ when not defined(headless):
     proc humanTurn(): bool =
       sessionOptions.human and botVms[game.currentPlayer] == nil
 
+    proc presentedCardPose(target: Choice, slot, count: int): CardPose =
+      ## Where a targeted card is shown right now: its live slot, or the slot
+      ## it's held in while its death or bounce waits for its beat. Only if
+      ## it's neither does the slot it had when the event was recorded count.
+      let location = game.minionLocation(target.creatureId)
+      if location.found:
+        return dyingMinions.liveBoardPose(location.player, location.index,
+          game.players[location.player].board.len)
+      for i, held in dyingMinions:
+        if held.target == target:
+          return dyingMinions.dyingPose(i,
+            game.players[target.owner].board.len)
+      boardPoses(target.owner, max(1, count))[clamp(slot, 0, max(0, count - 1))]
+
+    proc countHiddenSummons() =
+      hiddenSummons = default(array[PlayerCount, int])
+      for event in queuedEvents:
+        if event.kind == SummonVfx:
+          inc hiddenSummons[event.target.owner]
+
+    proc presentationIdle(): bool =
+      ## Nothing is animating and no visual beat is still waiting to play.
+      animations.len == 0 and activeVfx.len == 0 and queuedEvents.len == 0
+
+    proc humanActs(): bool =
+      ## The human must act now: on their turn, or answering their trigger.
+      sessionOptions.human and botVms[game.actingPlayer()] == nil
+
     proc attackPointFor(target: Choice): Vec3 =
       ## Where an attacker lunges. Captured when the attack starts, because a
       ## slain defender leaves the board halfway through the animation.
@@ -1361,7 +1459,7 @@ when not defined(headless):
     proc dyingDiscards(owner: int): int =
       ## Slain cards already in the discard pile but still shown on the board.
       for dying in dyingMinions:
-        if dying.target.owner == owner:
+        if dying.target.owner == owner and not dying.bouncing:
           inc result
 
     proc handVisible(owner: int): bool =
@@ -1444,6 +1542,17 @@ when not defined(headless):
           )
         ]
         game.nextMinionId = 3
+        # AWM_DEMO_ENEMY_BOARD: that many enemy cards, alternating Snipers
+        # (which die to 1 damage) and Bears.
+        let enemyCards = parseInt(getEnv("AWM_DEMO_ENEMY_BOARD", "0"))
+        if enemyCards > 0:
+          game.players[1].board.setLen(0)
+          for i in 0 ..< enemyCards:
+            let card =
+              if i mod 2 == 0: baseCard("sniper-2") else: Warrior.classCard()
+            game.players[1].board.add MinionState(id: 10 + i, owner: 1,
+              card: card, currentToughness: card.toughness)
+          game.nextMinionId = 10 + enemyCards
         statusMessage =
           if creatureTargetDemo:
             "Demo board: Bouncer can target any minion, including itself."
@@ -1487,29 +1596,10 @@ when not defined(headless):
             )
             statusMessage = "Demo animation: Bolt moves to discard."
         elif getEnv("AWM_DEMO_BOUNCE_ANIMATION") == "1":
-          let
-            sourcePose = boardPoses(1, game.players[1].board.len)[0]
-            bouncedCard = game.players[1].board[0].card
           if game.runMinionRules(
               Mage.classCard(),
               creatureChoice(1, 2)
           ):
-            let destinationIndex = game.players[1].hand.high
-            animations.add newCardAnimation(
-              bouncedCard,
-              game.players[1].heroClass,
-              sourcePose,
-              handPoses(
-                1,
-                game.players[1].hand.len,
-                1.0'f32
-              )[destinationIndex],
-              arcHeight = 1.15'f32,
-              suppressHandOwner = 1,
-              suppressHandIndex = destinationIndex,
-              duration = 0.82'f32,
-              trackingTarget = creatureChoice(1, 2)
-            )
             statusMessage = "Demo animation: Bear returns to hand."
 
         if getEnv("AWM_DEMO_CARD_SET") == "1":
@@ -1567,13 +1657,60 @@ when not defined(headless):
           if game.playCard(0, creatureChoice(1, 2)):
             statusMessage = "Demo: Tactician."
         if getEnv("AWM_DEMO_OOZIFICATION") == "1":
-          # Oozification destroys the enemy Bear (toughness 2): two Oozes.
+          # Oozification destroys the enemy Bear (toughness 2): its owner
+          # gets two Oozes.
+          # AWM_DEMO_OOZE_TARGET picks which enemy card (see
+          # AWM_DEMO_ENEMY_BOARD).
           animations.setLen(0)
+          let targetIndex = parseInt(getEnv("AWM_DEMO_OOZE_TARGET", "0"))
           game.players[0].hand = @[baseCard("oozification-4")]
           game.players[0].energy = 4
           game.players[0].totalEnergy = 4
-          if game.playCard(0, creatureChoice(1, 2)):
+          let targetId = game.players[1].board[targetIndex].id
+          if game.playCard(0, creatureChoice(1, targetId)):
             statusMessage = "Demo: Oozification."
+        if getEnv("AWM_DEMO_PLAN") == "1":
+          # Plan enters the board as a trinket and draws a card.
+          animations.setLen(0)
+          game.players[0].heroClass = Mage
+          game.players[0].hand = @[baseCard("plan-3")]
+          game.players[0].energy = 3
+          game.players[0].totalEnergy = 3
+          if game.playCard(0):
+            statusMessage = "Demo: Plan."
+        if getEnv("AWM_DEMO_SHARPSHOOTER_TARGET").len > 0:
+          # Sharpshooter enters and shoots that enemy card.
+          animations.setLen(0)
+          let index = parseInt(getEnv("AWM_DEMO_SHARPSHOOTER_TARGET"))
+          game.players[0].hand = @[baseCard("sharpshooter-3")]
+          game.players[0].energy = 3
+          game.players[0].totalEnergy = 3
+          if game.playCard(0,
+              creatureChoice(1, game.players[1].board[index].id)):
+            statusMessage = "Demo: Sharpshooter."
+        if getEnv("AWM_DEMO_PLAN_TRIGGER") == "1":
+          # Plan fires at the start of player 1's next turn: the turn draw,
+          # Plan's draw 0.25 s later, then Plan is destroyed.
+          animations.setLen(0)
+          game.players[0].heroClass = Mage
+          game.players[0].board.add MinionState(id: 3, owner: 0,
+            card: baseCard("plan-3"), enteredTurn: game.turnNumber)
+          game.nextMinionId = 4
+          game.finishTurn()
+          discard game.takeVisualEvents()
+          game.finishTurn()
+          statusMessage = "Demo: Plan's trigger."
+        if getEnv("AWM_DEMO_TRIGGER_TARGET") == "1":
+          # A trinket's trigger waits for player 1 to pick its target.
+          animations.setLen(0)
+          let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
+            class: some(Mage),
+            rules: rules(on(nextTurn(You), damage(1, target({Minion})))))
+          game.players[0].board.add MinionState(id: 3, owner: 0, card: snare,
+            enteredTurn: game.turnNumber - 2)
+          game.nextMinionId = 4
+          game.pendingTriggers = @[PendingTrigger(owner: 0, sourceId: 3,
+            trigger: 0)]
 
     window.onFrame = proc() =
       let dt = frameDelta(lastFrameTime)
@@ -1594,6 +1731,7 @@ when not defined(headless):
           selectedClass = playerClass
           game = newGame(playerClass, opponentClass, gameSeed())
           dyingMinions.setLen(0)
+          queuedEvents.setLen(0)
           discardFlights.setLen(0)
           phase = PlayGame
           animations.addDrawAnimation(game, game.currentPlayer,
@@ -1603,8 +1741,32 @@ when not defined(headless):
           botPlays = 0
           statusMessage = "Watching bot match..."
 
+      if phase == PlayGame and game.waitingTrigger and not pendingTargeting and
+          presentationIdle() and not attackActive and
+          not game.gameOver:
+        let waiting = game.waitingTriggerRules()
+        if humanActs():
+          pendingTargeting = true
+          pendingTrigger = true
+          pendingCard = waiting.card
+          pendingCardIndex = -1
+          pendingPicks.setLen(0)
+          pendingChoices = game.triggerChoices()
+          selectedAttacker = 0
+          statusMessage = &"{waiting.card.name}'s trigger needs a target."
+        else:
+          botWait -= dt
+          if botWait <= 0:
+            let before = game.copyGameState()
+            if game.applyBotAction(game.nextBotAction()):
+              animations.animateTransition(before, game,
+                cameraPlayer().seatSide())
+              statusMessage = &"{waiting.card.name}'s trigger resolves."
+            botWait = 1.2'f32
+
       if phase == PlayGame and botVms[game.currentPlayer] != nil and
-          animations.len == 0 and activeVfx.len == 0 and not attackActive and
+          not game.waitingTrigger and
+          presentationIdle() and not attackActive and
           not game.gameOver:
         botWait -= dt
         if botWait <= 0:
@@ -1713,11 +1875,12 @@ when not defined(headless):
           var boardChoices: seq[Choice]
           for owner in 0 ..< PlayerCount:
             for minion in game.players[owner].board:
-              if not animations.boardCardSuppressed(minion.id):
+              if not animations.boardCardSuppressed(minion.id) and
+                  not queuedEvents.queuedSummon(minion.id):
                 boardChoices.add creatureChoice(owner, minion.id)
           hoveredBoard = hoveredCreatureTarget(window, viewProjection,
             game, boardChoices, dyingMinions)
-        if humanTurn() and animations.len == 0 and activeVfx.len == 0 and
+        if humanTurn() and presentationIdle() and
             not pendingTargeting and not attackActive and not game.gameOver:
           if hoverIndex >= 0 and
               window.buttonPressed[MouseLeft] and
@@ -1729,7 +1892,7 @@ when not defined(headless):
               statusMessage =
                 &"Not enough energy to play {card.name}."
             elif card.needsChoice():
-              if card.kind == Minion:
+              if card.kind != Spell:
                 let
                   sourcePose = handPoses(
                     game.currentPlayer,
@@ -1738,10 +1901,12 @@ when not defined(headless):
                   )[hoverIndex]
                   minionId = game.playMinion(hoverIndex)
                 if minionId != 0:
-                  let destinationPose = boardPoses(
-                    game.currentPlayer,
-                    game.players[game.currentPlayer].board.len
-                  )[^1]
+                  # Its own slot, counting only the cards up to it: minions
+                  # its rules summon come after it and appear later.
+                  let
+                    playedIndex = game.minionLocation(minionId).index
+                    destinationPose = dyingMinions.liveBoardPose(
+                      game.currentPlayer, playedIndex, playedIndex + 1)
                   animations.add newCardAnimation(
                     card,
                     player.heroClass,
@@ -1755,7 +1920,8 @@ when not defined(headless):
                   pendingChoices = game.availableChoices(card)
                   hoverIndex = -1
                   if pendingChoices.selectableTargetCount() == 0:
-                    discard game.runMinionRules(card, NoTarget)
+                    discard game.runMinionRules(card, NoTarget,
+                      sourceId = minionId)
                     pendingChoices.setLen(0)
                     statusMessage =
                       &"{card.name} enters play without a target."
@@ -1786,14 +1952,16 @@ when not defined(headless):
                 currentSide
               )[hoverIndex]
               case card.kind
-              of Minion:
+              of Minion, Trinket:
                 let minionId = game.playMinion(hoverIndex)
                 if minionId != 0:
-                  discard game.runMinionRules(card)
-                  let destinationPose = boardPoses(
-                    game.currentPlayer,
-                    game.players[game.currentPlayer].board.len
-                  )[^1]
+                  discard game.runMinionRules(card, sourceId = minionId)
+                  # Its own slot, counting only the cards up to it: minions
+                  # its rules summon come after it and appear later.
+                  let
+                    playedIndex = game.minionLocation(minionId).index
+                    destinationPose = dyingMinions.liveBoardPose(
+                      game.currentPlayer, playedIndex, playedIndex + 1)
                   animations.add newCardAnimation(
                     card,
                     player.heroClass,
@@ -1855,7 +2023,7 @@ when not defined(headless):
                 window.buttonPressed[KeyEscape]):
             selectedAttacker = 0
             statusMessage = "Attack canceled."
-        elif humanTurn() and pendingTargeting and animations.len == 0 and
+        elif humanActs() and pendingTargeting and presentationIdle() and
             not game.gameOver:
           hoveredTarget = hoveredWorldTarget(
             window,
@@ -1864,10 +2032,18 @@ when not defined(headless):
             pendingChoices,
             dyingMinions
           )
-          let card = pendingCard
-          if window.buttonPressed[KeyEscape] or
+          let
+            card = pendingCard
+            pendingRules =
+              if pendingTrigger: game.waitingTriggerRules().rules
+              else: card.rules
+          if pendingTrigger and (window.buttonPressed[KeyEscape] or
+              window.buttonPressed[MouseRight]):
+            statusMessage =
+              &"{card.name}'s trigger can't be canceled: choose a target."
+          elif window.buttonPressed[KeyEscape] or
               window.buttonPressed[MouseRight]:
-            if card.kind == Minion:
+            if card.kind != Spell:
               discard game.runMinionRules(card, NoTarget)
               statusMessage =
                 &"{card.name}'s rule finishes without a target."
@@ -1880,48 +2056,26 @@ when not defined(headless):
               not finishRect(window).contains(sk.mousePos):
             var selectedChoice = hoveredTarget
             if selectedChoice.isCanceled and
-                card.kind == Minion and
+                card.kind != Spell and
                 hoverIndex < 0 and
                 mouseOverBoard(window, viewProjection) and
                 pendingChoices.choiceIsLegal(NoTarget):
               selectedChoice = NoTarget
             if not selectedChoice.isCanceled and
-                pendingPicks.len + 1 < card.targetCount():
+                pendingPicks.len + 1 < pendingRules.targetCount():
               # More targets to choose (Duel): keep the pick, offer the next.
               pendingPicks.add selectedChoice
               pendingChoices =
-                if card.kind == Minion:
+                if pendingTrigger:
+                  game.triggerChoices(pendingPicks)
+                elif card.kind != Spell:
                   game.availableChoices(card, pendingPicks)
                 else:
                   game.availableChoices(pendingCardIndex, pendingPicks)
               statusMessage =
                 &"Choose target {pendingPicks.len + 1} of " &
-                  &"{card.targetCount()} for {card.name}."
+                  &"{pendingRules.targetCount()} for {card.name}."
             elif not selectedChoice.isCanceled:
-              var
-                bounceFound = false
-                bounceOwner = -1
-                bounceHandCount = 0
-                bounceCard: Card
-                bounceClass: HeroClass
-                bounceSourcePose: CardPose
-              if selectedChoice.kind == CreatureChoice:
-                let location =
-                  game.minionLocation(selectedChoice.creatureId)
-                if location.found:
-                  bounceFound = true
-                  bounceOwner = location.player
-                  bounceHandCount =
-                    game.players[bounceOwner].hand.len
-                  bounceCard =
-                    game.players[bounceOwner].board[location.index].card
-                  bounceClass =
-                    game.players[bounceOwner].heroClass
-                  bounceSourcePose = dyingMinions.liveBoardPose(
-                    bounceOwner,
-                    location.index,
-                    game.players[bounceOwner].board.len
-                  )
               var
                 spellAnimation = false
                 spellSourcePose: CardPose
@@ -1939,36 +2093,12 @@ when not defined(headless):
                   currentSide
                 )[pendingCardIndex]
               let resolved =
-                if card.kind == Minion:
+                if pendingTrigger:
+                  game.resolvePendingTrigger(pendingPicks & selectedChoice)
+                elif card.kind != Spell:
                   game.runMinionRules(card, pendingPicks & selectedChoice)
                 else:
                   game.playCard(pendingCardIndex, pendingPicks & selectedChoice)
-              if resolved and bounceFound and
-                  not game.minionLocation(
-                    selectedChoice.creatureId
-                  ).found and
-                  game.players[bounceOwner].hand.len ==
-                    bounceHandCount + 1 and
-                  game.players[bounceOwner].hand[^1] == bounceCard:
-                let destinationIndex =
-                  game.players[bounceOwner].hand.high
-                let destinationPose = handPoses(
-                  bounceOwner,
-                  game.players[bounceOwner].hand.len,
-                  currentSide
-                )[destinationIndex]
-                animations.add newCardAnimation(
-                  bounceCard,
-                  bounceClass,
-                  bounceSourcePose,
-                  destinationPose,
-                  arcHeight = 1.15'f32,
-                  suppressHandOwner = bounceOwner,
-                  suppressHandIndex = destinationIndex,
-                  duration = 0.82'f32,
-                  trackingTarget = selectedChoice,
-                  hidden = not handVisible(bounceOwner)
-                )
               if resolved and spellAnimation:
                 let destinationPose = stackTopPose(
                   discardPose(game.currentPlayer),
@@ -1983,7 +2113,9 @@ when not defined(headless):
                 )
               if resolved:
                 statusMessage =
-                  if card.kind == Minion:
+                  if pendingTrigger:
+                    &"{card.name}'s trigger resolves."
+                  elif card.kind != Spell:
                     if selectedChoice.isNoTarget:
                       &"{card.name}'s rule finishes without a target."
                     else:
@@ -1993,6 +2125,7 @@ when not defined(headless):
               else:
                 statusMessage = &"{card.name} could not resolve."
               pendingTargeting = false
+              pendingTrigger = false
               pendingCardIndex = -1
               pendingChoices.setLen(0)
 
@@ -2019,17 +2152,21 @@ when not defined(headless):
           # The attacker left the board or can no longer attack.
           selectedAttacker = 0
       if humanTurn() and attackChoices.len > 0 and
-          not pendingTargeting and animations.len == 0 and activeVfx.len == 0:
+          not pendingTargeting and presentationIdle():
         attackHoverTarget = hoveredWorldTarget(window, viewProjection, game,
           attackChoices, dyingMinions)
 
       if phase == PlayGame:
+        # Visual events play beat by beat. A beat waits until the previous
+        # beats' animations and effects finish; a draw right after a draw
+        # only waits 0.25 s, so draws overlap. Until its beat plays, a slain
+        # card holds its place and a summoned or drawn card stays hidden.
         for event in game.takeVisualEvents():
           if event.kind == DeathVfx:
             var dying = DyingMinion(target: event.target, card: event.card,
               power: event.power,
               heroClass: game.players[event.target.owner].heroClass,
-              boardIndex: event.boardIndex)
+              boardIndex: event.boardIndex, held: true)
             if attackActive and attackIndex < attackSteps.len and
                 attackSteps[attackIndex] == event.target.creatureId:
               # A slain attacker stays where its lunge landed.
@@ -2037,16 +2174,87 @@ when not defined(headless):
               dying.lungePoint = attackLungePoint(dyingMinions.liveBoardPose(
                 event.target.owner, event.boardIndex, event.boardCount))
             dyingMinions.add dying
-            continue
-          let position =
-            if event.target.kind == HeroChoice:
-              avatarPosition(event.target.owner) + vec3(0, 1.25, 0)
+          elif event.kind == BounceVfx:
+            # Keep the card in its slot until its beat sends it home.
+            dyingMinions.add DyingMinion(target: event.target, card: event.card,
+              heroClass: game.players[event.target.owner].heroClass,
+              boardIndex: event.boardIndex, held: true, bouncing: true)
+          queuedEvents.add event
+        # Before any beat plays: VFX positions are fixed when they start, so
+        # the layout must already leave out summons that haven't appeared.
+        countHiddenSummons()
+        while queuedEvents.len > 0:
+          let beat = queuedEvents[0].beat
+          var
+            count = 0
+            drawOnly = true
+          while count < queuedEvents.len and queuedEvents[count].beat == beat:
+            if queuedEvents[count].kind != DrawVfx:
+              drawOnly = false
+            inc count
+          # A slain card whose death already played is part of that beat's
+          # animation until it has left the board for its discard pile.
+          var slainLeaving = discardFlights.len > 0
+          for dying in dyingMinions:
+            if not dying.held:
+              slainLeaving = true
+          let ready =
+            if drawOnly and lastBeatWasDraw:
+              animationTime - lastDrawStart >= 0.25'f32
             else:
-              dyingMinions.liveBoardPose(event.target.owner,
-                event.boardIndex, event.boardCount).position +
-                vec3(0, CardHeight, 0)
-          activeVfx.add newVfx(event.kind, event.target, position,
-            visualRng.rand(0x7fff_ffff))
+              animations.len == 0 and activeVfx.len == 0 and not slainLeaving
+          if not ready:
+            break
+          for event in queuedEvents[0 ..< count]:
+            case event.kind
+            of DrawVfx:
+              let owner = event.target.owner
+              animations.addDrawAnimation(game, owner,
+                cameraPlayer().seatSide(), hidden = not handVisible(owner),
+                handIndex = event.boardIndex)
+            of DeathVfx:
+              for dying in dyingMinions.mitems:
+                if dying.held and dying.target == event.target:
+                  dying.held = false
+                  break
+            of SummonVfx:
+              discard  # Leaving the queue is what reveals the minion.
+            of BounceVfx:
+              let
+                owner = event.target.owner
+                source = presentedCardPose(event.target, event.boardIndex,
+                  event.boardCount)
+              for i in 0 ..< dyingMinions.len:
+                if dyingMinions[i].bouncing and
+                    dyingMinions[i].target == event.target:
+                  dyingMinions.delete(i)
+                  break
+              var flight = newCardAnimation(event.card,
+                game.players[owner].heroClass, source,
+                handPoses(owner, game.players[owner].hand.len,
+                  cameraPlayer().seatSide())[
+                    min(event.handIndex, game.players[owner].hand.high)],
+                arcHeight = 1.15'f32, suppressHandOwner = owner,
+                suppressHandIndex = event.handIndex, duration = 0.82'f32,
+                trackingTarget = event.target,
+                hidden = not handVisible(owner))
+              # Its bubble (same beat) forms first, then rides along.
+              flight.elapsed = -0.2'f32
+              animations.add flight
+            else:
+              let position =
+                if event.target.kind == HeroChoice:
+                  avatarPosition(event.target.owner) + vec3(0, 1.25, 0)
+                else:
+                  presentedCardPose(event.target, event.boardIndex,
+                    event.boardCount).position + vec3(0, CardHeight, 0)
+              activeVfx.add newVfx(event.kind, event.target, position,
+                visualRng.rand(0x7fff_ffff))
+          queuedEvents = queuedEvents[count .. ^1]
+          lastBeatWasDraw = drawOnly
+          if drawOnly:
+            lastDrawStart = animationTime
+          countHiddenSummons()
         for effect in activeVfx.mitems:
           if effect.kind == BubbleVfx:
             for animation in animations:
@@ -2058,7 +2266,7 @@ when not defined(headless):
           for effect in activeVfx:
             if effect.target == dying.target:
               effectsPending = true
-          if not effectsPending:
+          if not effectsPending and not dying.held:
             let owner = dying.target.owner
             discardFlights.add newCardAnimation(dying.card, dying.heroClass,
               dyingMinions.dyingPose(i, game.players[owner].board.len),
@@ -2140,7 +2348,8 @@ when not defined(headless):
               attackerSelected =
                 playerIndex == game.currentPlayer and
                 minion.id == selectedAttacker
-            if animations.boardCardSuppressed(minion.id):
+            if animations.boardCardSuppressed(minion.id) or
+                queuedEvents.queuedSummon(minion.id):
               continue
             if attackActive and attackIndex < attackSteps.len and
                 attackSteps[attackIndex] == minion.id:
@@ -2171,7 +2380,8 @@ when not defined(headless):
             game.players[current].hand.len,
             currentSide
         ):
-          if animations.handCardSuppressed(current, i):
+          if animations.handCardSuppressed(current, i) or
+              queuedEvents.queuedDraw(current, i):
             continue
           let card = game.players[current].hand[i]
           solid.addCard(
@@ -2196,7 +2406,8 @@ when not defined(headless):
             game.players[opponent].hand.len,
             currentSide
         ):
-          if animations.handCardSuppressed(opponent, i):
+          if animations.handCardSuppressed(opponent, i) or
+              queuedEvents.queuedDraw(opponent, i):
             continue
           solid.addCard(
             cardSurfaces, sk,
@@ -2419,6 +2630,7 @@ when not defined(headless):
                 gameSeed()
               )
               dyingMinions.setLen(0)
+              queuedEvents.setLen(0)
               discardFlights.setLen(0)
               phase = PlayGame
               animations.addDrawAnimation(game, game.currentPlayer,
@@ -2464,6 +2676,8 @@ when not defined(headless):
           hoverIndex,
           false,
           dying = dyingMinions,
+          discardFlights = discardFlights,
+          queued = queuedEvents,
           canPlayCards = humanTurn()
         )
         drawDeckLabels(sk, window, game, viewProjection)
@@ -2472,6 +2686,10 @@ when not defined(headless):
             "Minions are attacking..."
           elif selectedAttacker != 0:
             "Click an enemy minion or hero to attack. Right-click cancels."
+          elif pendingTargeting and pendingTrigger:
+            "Select a highlighted target in the 3D world, or the empty board for none."
+          elif pendingTargeting and pendingCard.kind != Spell:
+            "Select a highlighted target in the 3D world. Right-click: no target."
           elif pendingTargeting:
             "Select a highlighted target in the 3D world. Right-click cancels."
           elif sessionOptions.human:
@@ -2492,17 +2710,14 @@ when not defined(headless):
             rgbx(179, 126, 46, 255),
             enabled =
               humanTurn() and
+              not game.waitingTrigger and
               not pendingTargeting and
               not attackActive and
               not game.gameOver and
-              animations.len == 0 and
-              activeVfx.len == 0
+              presentationIdle()
         ):
           selectedAttacker = 0
           game.finishTurn()
-          animations.addDrawAnimation(game, game.currentPlayer,
-            currentSide,
-            hidden = not handVisible(game.currentPlayer))
           botWait = 1.2'f32
           botPlays = 0
           statusMessage = "Your opponent is thinking..."
@@ -2513,27 +2728,36 @@ when not defined(headless):
         if pendingTargeting:
           let
             card = pendingCard
+            rules =
+              if pendingTrigger: game.waitingTriggerRules().rules
+              else: card.rules
+            step = pendingPicks.len
+            count = rules.targetCount()
+            # The rules' own text: "Choose a minion." for "Deal 1 damage to
+            # a minion."
+            prompt = rules.targetPrompt(card, step)
             accent =
-              game.players[game.currentPlayer].heroClass.classUiColor()
-            instruction =
-              if card.kind == Minion:
-                "Click a highlighted minion. Right-click or the empty board: no target."
-              elif card.targetCount() > 1:
-                &"Click a highlighted target ({pendingPicks.len + 1} of " &
-                  &"{card.targetCount()}). Right-click cancels."
+              game.players[game.actingPlayer()].heroClass.classUiColor()
+            progress = if count > 1: &" ({step + 1} of {count})" else: ""
+            source = if pendingTrigger: &"{card.name}'s trigger" else: card.name
+            hint =
+              if pendingTrigger:
+                "Click the empty board for no target."
+              elif card.kind != Spell:
+                "Right-click or the empty board: no target."
               else:
-                "Click a highlighted target. Right-click cancels."
+                "Right-click cancels."
             banner = UiRect(
               origin: vec2(
                 hudSize(window).x * 0.5'f32 - 430,
                 204
               ),
-              size: vec2(860, 84)
+              size: vec2(860, 112)
             )
           sk.drawRect(banner.origin, banner.size, rgbx(18, 21, 30, 244))
           sk.drawRect(banner.origin, vec2(banner.size.x, 5), accent)
           sk.drawLabel(
-            &"TARGETING {card.name}",
+            prompt.choose & progress,
             banner.origin + vec2(22, 10),
             vec2(banner.size.x - 44, 30),
             accent,
@@ -2541,10 +2765,18 @@ when not defined(headless):
             CenterAlign
           )
           sk.drawLabel(
-            instruction,
+            &"{source}: {prompt.rule}",
             banner.origin + vec2(22, 46),
             vec2(banner.size.x - 44, 28),
             rgbx(216, 220, 230, 255),
+            "Small",
+            CenterAlign
+          )
+          sk.drawLabel(
+            hint,
+            banner.origin + vec2(22, 76),
+            vec2(banner.size.x - 44, 28),
+            rgbx(160, 166, 180, 255),
             "Small",
             CenterAlign
           )
@@ -2582,8 +2814,7 @@ when not defined(headless):
             CenterAlign
           )
 
-        if game.gameOver and animations.len == 0 and
-            activeVfx.len == 0 and not attackActive:
+        if game.gameOver and presentationIdle() and not attackActive:
           let
             winnerAccent =
               game.players[game.winner].heroClass.classUiColor()
@@ -2631,7 +2862,7 @@ when not defined(headless):
           for owner, player in game.players:
             summary.add &" Player {owner + 1} {player.heroClass.className()}: life {player.life}, energy {player.energy}/{player.totalEnergy}, hand {player.hand.len}, board {player.board.len}, deck {player.deck.len}, discard {player.discardPile.len}."
           if humanTurn() and not pendingTargeting and
-              animations.len == 0 and activeVfx.len == 0:
+              presentationIdle():
             summary.add " Ready for your action."
         publishStatus(summary.cstring)
 
