@@ -37,7 +37,7 @@ stage_dir="$web_dir/assets"
 # unrelated Polyworld games' models are deliberately outside the package.
 mkdir -p "$stage_dir/polyworld_data/characters/mini_legion/human"
 mkdir -p "$stage_dir/polyworld_data/fonts" "$stage_dir/polyworld_data/themes"
-mkdir -p "$stage_dir/artwork/cards" "$stage_dir/artwork/vfx"
+mkdir -p "$stage_dir/polyworld_data/awm/cards" "$stage_dir/polyworld_data/awm/vfx"
 for character in archer footman mage; do
   cp "$data_dir/characters/mini_legion/human/$character.glb" \
     "$stage_dir/polyworld_data/characters/mini_legion/human/"
@@ -47,14 +47,14 @@ cp "$data_dir/characters/mini_legion/human/human_albedo.png" \
 for font in Rubik-Regular.ttf Rubik-Bold.ttf; do
   cp "$data_dir/fonts/$font" "$stage_dir/polyworld_data/fonts/"
 done
-cp -R "$data_dir/themes/editor" "$stage_dir/polyworld_data/themes/"
+cp -R "$data_dir/themes/main" "$stage_dir/polyworld_data/themes/"
 cp -R "$data_dir/ui" "$stage_dir/polyworld_data/"
 mkdir -p "$stage_dir/polyworld_data/icons"
 cp "$data_dir"/icons/*.png "$stage_dir/polyworld_data/icons/"
 for directory in art fonts frames icons; do
-  cp -R "$project_dir/artwork/cards/$directory" "$stage_dir/artwork/cards/"
+  cp -R "$data_dir/awm/cards/$directory" "$stage_dir/polyworld_data/awm/cards/"
 done
-cp -R "$project_dir/artwork/vfx/textures" "$stage_dir/artwork/vfx/"
+cp -R "$data_dir/awm/vfx/textures" "$stage_dir/polyworld_data/awm/vfx/"
 
 if [[ -d "$project_dir/players" ]]; then
   mkdir -p "$stage_dir/players"

@@ -2,7 +2,7 @@
 ## nim c -r --out:build/render-vfx tools/render_vfx.nim [--sequence]
 import std/[os, strformat]
 import opengl, pixie, vmath, windy
-import ../[awmcore, vfxrenderer]
+import ../[awmcore, paths, vfxrenderer]
 
 const
   Width = 1536
@@ -17,18 +17,19 @@ const
 
 let
   root = currentSourcePath().parentDir.parentDir
-  output = root / "artwork/vfx/previews"
+  artwork = artworkRoot()
+  output = artwork / "vfx/previews"
   frames = root / "build/vfx-gallery"
   sequence = "--sequence" in commandLineParams()
   window = newWindow("AWM — VFX review", ivec2(Width, Height))
 window.makeContextCurrent()
 loadExtensions()
-var renderer = initVfxRenderer(root / "artwork/vfx/textures")
+var renderer = initVfxRenderer(artwork / "vfx/textures")
 let
   eye = vec3(0, 4.2, 6.8)
   viewProjection = ortho(-2.65'f32, 2.65'f32, -2.45'f32, 2.45'f32,
     0.1'f32, 30.0'f32) * lookAt(eye, vec3(0, 0.62, 0), vec3(0, 1, 0))
-  font = readFont(root / "artwork/cards/fonts/Grenze-SemiBold.ttf")
+  font = readFont(artwork / "cards/fonts/Grenze-SemiBold.ttf")
 font.size = 29
 font.paint.color = parseHtmlColor("#e9c99b")
 createDir(output)

@@ -4,3 +4,6 @@ awm.atlas.png
 awm_*.png
 nimcache/
 build/
+
+# Source artwork and previews belong in the sibling polyworld_data repo.
+/artwork/
