@@ -141,7 +141,11 @@
       });
       Module.canvas.addEventListener('webglcontextlost', function(event) {
         event.preventDefault();
+        Module.onWebGLContextLost?.();
         fail('The graphics context was lost. Reload the page.');
+      });
+      Module.canvas.addEventListener('webglcontextrestored', function() {
+        Module.onWebGLContextRestored?.();
       });
     </script>
     {{{ SCRIPT }}}
