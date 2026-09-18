@@ -1,9 +1,98 @@
 import
-  std/[os, sets, strutils, tables],
-  chroma, gltf, vmath,
+  std/[os, random, sets, strutils, tables],
+  chroma, gltf, jsony, vmath,
   polyworld/[animblend, chargen], references, weights
 
 const AssetDir = ChargenLibrary
+
+proc testRandom() =
+  ## Checks tag parsing, filtered rolls, shared parts, and sparse libraries.
+  doAssert "{}".fromJson(PartItem).alignment == Both
+  for (value, expected) in [("both", Both), ("good", GoodOnly),
+                            ("evil", EvilOnly)]:
+    let item = ("{\"alignment\":\"" & value & "\"}").fromJson(PartItem)
+    doAssert item.alignment == expected
+  var failed = false
+  try:
+    discard "{\"alignment\":\"unknown\"}".fromJson(PartItem)
+  except JsonError:
+    failed = true
+  doAssert failed
+  let manifest = readManifest(AssetDir)
+  for alignment in [Both, GoodOnly, EvilOnly]:
+    var
+      rng = initRand(27)
+      matching = initRand(27)
+      seen: HashSet[string]
+      emptyOptional = false
+    for roll in 0 ..< 512:
+      let selection = manifest.randomSelection(rng, alignment)
+      doAssert selection == manifest.randomSelection(matching, alignment)
+      doAssert selection.len == manifest.categories.len
+      for i, category in manifest.categories:
+        let selected = selection[i]
+        if category.items.len > 0 and
+          category.key in ["Body", "Face", "Eyes", "Mouth"]:
+            doAssert selected >= 0
+        if selected < 0:
+          if category.items.len > 0:
+            emptyOptional = true
+          continue
+        let item = category.items[selected]
+        case alignment
+        of Both:
+          discard
+        of GoodOnly:
+          doAssert item.alignment != EvilOnly
+        of EvilOnly:
+          doAssert item.alignment != GoodOnly
+        seen.incl item.id
+    doAssert emptyOptional
+    for category in manifest.categories:
+      for item in category.items:
+        if alignment == Both or item.alignment in {Both, alignment}:
+          doAssert item.id in seen, "Unreachable random part: " & item.id
+        else:
+          doAssert item.id notin seen
+  let sparse = Manifest(categories: @[
+    Category(key: "Body", items: @[PartItem(name: "Shared")]),
+    Category(key: "Eyes", items: @[
+      PartItem(name: "Monster", alignment: EvilOnly)
+    ]),
+    Category(key: "Hair")
+  ])
+  var rng = initRand(1)
+  doAssert sparse.randomSelection(rng, GoodOnly) == @[0, -1, -1]
+  doAssert sparse.randomSelection(rng, EvilOnly) == @[0, 0, -1]
+
+proc testBeardChance() =
+  ## Keeps facial hair near fifty percent regardless of eligible style count.
+  for count in [0, 1, 16, 64]:
+    var category = Category(key: "Beard")
+    for i in 0 ..< count:
+      category.items.add PartItem(name: $i)
+    let manifest = Manifest(categories: @[category])
+    for alignment in [Both, GoodOnly, EvilOnly]:
+      var
+        rng = initRand(83)
+        present = 0
+      for roll in 0 ..< 4096:
+        let selected = manifest.randomSelection(rng, alignment)[0]
+        if selected >= 0:
+          doAssert selected < count
+          inc present
+      if count == 0:
+        doAssert present == 0
+      else:
+        doAssert present in 1843 .. 2253, $count & ": " & $present
+  let filtered = Manifest(categories: @[
+    Category(key: "Beard", items: @[
+      PartItem(name: "Evil beard", alignment: EvilOnly)
+    ])
+  ])
+  var rng = initRand(91)
+  for roll in 0 ..< 128:
+    doAssert filtered.randomSelection(rng, GoodOnly) == @[-1]
 
 proc testParts() =
   ## Checks face and ear choices while animations reset and blend the model.
@@ -43,6 +132,20 @@ proc testParts() =
       browColor
     doAssert nodes["Beard_01"].mesh.primitives[0].material.baseColorFactor ==
       beardColor
+  var untouched: seq[(Material, Color)]
+  for name, node in nodes:
+    if name notin manifest.skinNodes:
+      for primitive in node.mesh.primitives:
+        let material = primitive.material
+        untouched.add (material, material.baseColorFactor)
+  let custom = color(0.15, 0.65, 0.8, 1)
+  nodes.applySkin(manifest, custom)
+  for name in manifest.skinNodes:
+    for primitive in nodes[name].mesh.primitives:
+      doAssert primitive.material.baseColorFactor == custom
+  for (material, original) in untouched:
+    doAssert material.baseColorFactor == original
+  nodes.applySkin(manifest, manifest.defaultSkin)
   for name in ["Neutral", "Happy", "Angry", "Original2"]:
     let primitives = nodes["Eyes_" & name].mesh.primitives
     doAssert primitives.len == 1
@@ -121,7 +224,7 @@ proc testEyes() =
     manifest = readManifest(AssetDir)
     model = readCharacter(AssetDir, manifest)
   var textures = readEyeTextures(model.root, AssetDir, manifest)
-  doAssert textures.textures.len == 16
+  doAssert textures.textures.len == 31
   var
     shades: HashSet[uint8]
     protected, tinted, count = 0
@@ -153,7 +256,7 @@ proc testEyes() =
       for uv in primitive.uvs:
         doAssert uv.x >= -0.00001 and uv.x <= 1.00001
         doAssert uv.y >= -0.00001 and uv.y <= 1.00001
-  doAssert count == 16
+  doAssert count == 31
   doAssert protected > 100_000 and tinted > 10_000
   doAssert shades.len > 20, "Tinting must retain iris shading."
   textures.applyPupilTint(manifest.pupilColors[0].rgb)
@@ -161,7 +264,7 @@ proc testEyes() =
     for primitive in texture.primitives:
       doAssert primitive.material.baseColor.data == texture.art.data
   for node in model.root.walkNodes:
-    if node.mesh == nil or not node.name.startsWith("Eyes_Atlas"):
+    if node.mesh == nil or not node.name.startsWith("Eyes_"):
       continue
     for primitive in node.mesh.primitives:
       for i, ids in primitive.jointIds:
@@ -174,8 +277,10 @@ proc testMouths() =
   let model = readCharacter(AssetDir)
   var count = 0
   for node in model.root.walkNodes:
-    if node.mesh == nil or not node.name.startsWith("Mouth_Atlas"):
-      continue
+    if node.mesh == nil or
+      not (node.name.startsWith("Mouth_Atlas") or
+           node.name.startsWith("Mouth_Evil")):
+        continue
     inc count
     doAssert node.mesh.primitives.len == 1
     let
@@ -196,7 +301,7 @@ proc testMouths() =
       for j in 0 ..< 4:
         if primitive.jointWeights[i][j] > 0:
           doAssert node.skin.joints[ids[j].int].name == "Head"
-  doAssert count == 16
+  doAssert count == 32
 
 proc testBrows() =
   ## Checks separate eyebrow cutouts, isolated tint, and head weights.
@@ -541,6 +646,8 @@ if paramCount() > 0:
   testAssembly(paramStr(1))
 else:
   echo "Testing Chargen parts and animations"
+  testRandom()
+  testBeardChance()
   testAssembly(AssetDir)
   testParts()
   testEyes()

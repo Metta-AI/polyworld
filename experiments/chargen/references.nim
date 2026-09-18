@@ -70,8 +70,8 @@ proc randomize*(reference: Reference, rng: var Rand) =
     let chance =
       case category.key
       of "Eyes", "Mouth", "Brow", "Hair": 0.9
-      of "Beard", "Earring", "Eyewear": 0.25
-      of "Left hand": 0.5
+      of "Earring", "Eyewear": 0.25
+      of "Beard", "Left hand": 0.5
       else: 0.8
     reference.selection[i] =
       if rng.rand(1.0) < chance:

@@ -23,6 +23,8 @@ def checkPack(output, selected, report):
   expected = {clip['file'] for clip in manifest['clips']} | {manifest['rig']}
   for _, _, item in items.values():
     expected.update(item['files'])
+    original = json.loads((Library / (item['id'] + '.json')).read_text())
+    assert item.get('alignment', 'both') == original.get('alignment', 'both')
   assert {str(path.relative_to(output)) for path in output.rglob('*.glb')} == expected
   for atlas in report['atlases']:
     art = Image.open(output / atlas['art']).convert('RGBA')
@@ -51,7 +53,10 @@ def main():
   args = parser.parse_args()
   selected = ['body/base', 'heads/base', 'eyes/02_focused', 'eyes/04_calm',
               'eyes/06_fierce', 'eyes/original2', 'mouths/01_relaxed_smile',
-              'eyebrows/01_soft_arch', 'hair/01_french_crop', 'noses/tiny']
+              'eyebrows/01_soft_arch', 'hair/01_french_crop', 'noses/tiny',
+              'eyes/monster_07_cursed_goat', 'eyes/monster_15_pirate',
+              'mouths/evil_05_sewn_shut', 'mouths/evil_10_orc_roar',
+              'mouths/evil_15_vampire_hiss']
   with tempfile.TemporaryDirectory(prefix='packs-', dir=Root / 'tmp/chargen') as directory:
     output = Path(directory) / 'game'
     report = packLibrary(Library, output, selected, ['Idle', 'Walk', 'JumpStart'])

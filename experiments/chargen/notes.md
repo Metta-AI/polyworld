@@ -61,6 +61,10 @@ replaces that body geometry.
 
 Optional fields:
 
+- `alignment`: `"good"`, `"evil"`, or `"both"` (the default when omitted).
+  Good random includes good-only and shared parts. Evil random includes
+  evil-only and shared parts. Random includes everything. Hover over a selected
+  part's name to see its tag. Manual selection always allows every part.
 - `skinNodes`: Mesh names to tint with the selected skin color.
 - `hairShades`: Entries with `node`, `primitive`, and `shade` for hair tinting.
 - `texture`: The individual face PNG.
@@ -116,6 +120,16 @@ exported tint functions, as shown in `chargen.nim`.
 
 ## Rebuilding and checking
 
+The monster eyes and evil mouths use approved sheets under
+`source/eyes/monster_v1` and `source/mouths/evil_v1`. To repeat their cuts,
+run `python3 experiments/chargen/cut_faces.py` with Pillow and ImageMagick
+installed, then rebuild. The cutter records per-part projection data in
+`source/faces.json`. Corrected individual images in each sheet's `overrides`
+folder replace the matching cut by filename. This includes the goblin grin
+with the extra lower tooth removed.
+The insect eye cell is excluded from the humanoid library. Its position in
+the source sheet is retained, so the other part names keep their numbers.
+
 ```sh
 PYTHONDONTWRITEBYTECODE=1 \
   /Applications/Blender.app/Contents/MacOS/Blender --background \
@@ -134,7 +148,21 @@ GLB, and split runtime library. Use `CHARGEN_PYTHON` if Pillow is installed in a
 specific Python interpreter. `export_library.py` can rerun just the split and
 crop step from `tmp/chargen/character.glb`. Generated style files are replaced
 when rebuilding. Additional sidecars, color palettes, category defaults, and
-custom categories are retained. The procedural build replaces manual edits to
+custom categories are retained. Each part's `alignment` tag is also retained
+when its geometry is rebuilt or it is packed into a game-specific library.
+Edit that field in the part's JSON sidecar to retag it. Skin, hair, and eye
+color presets remain shared by both random buttons. For reproducible rolls,
+launch with `RANDOM_SEED=19 RANDOM_ALIGNMENT=good` (or `evil` or `both`).
+Random characters have a 50% chance of facial hair, independent of how many
+beard styles are available.
+
+Enable `Custom skin RGB` below the skin preset to edit red, green, and blue
+from 0 to 255. This affects skin meshes, including ears and nose, while eyes,
+mouths, eyebrows, and hair keep their own colors. Choosing a skin preset or
+randomizing restores a preset color. `SKIN_RGB=75,140,195` also sets a custom
+color when launching the viewer.
+
+The procedural build replaces manual edits to
 the authoring Blender file, as before.
 
 Renders, comparisons, build logs, and assembled intermediate exports belong in

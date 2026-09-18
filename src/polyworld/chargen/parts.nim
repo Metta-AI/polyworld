@@ -1,12 +1,18 @@
 import
-  std/[algorithm, os, sets, strutils, tables],
+  std/[algorithm, os, random, sets, strutils, tables],
   chroma, gltf, jsony
 
 type
   ChargenError* = object of CatchableError
 
+  PartAlignment* = enum
+    Both = "both"
+    GoodOnly = "good"
+    EvilOnly = "evil"
+
   PartItem* = object
     name*, color*: string
+    alignment*: PartAlignment
     style*: int
     nodes*, hides*: seq[string]
     id*, texture*, pupilMask*, tint*: string
@@ -129,18 +135,40 @@ proc defaultSelection*(manifest: Manifest): seq[int] =
   for category in manifest.categories:
     result.add category.selected
 
-proc applySkin*(nodes: Table[string, Node], manifest: Manifest, skin: int) =
-  ## Tints explicit skin meshes without depending on imported material names.
-  if skin < 0 or skin >= manifest.skins.len:
-    raise newException(ChargenError, "Skin choice is outside the palette.")
-  let tint = manifest.skins[skin].color
+proc randomSelection*(
+  manifest: Manifest,
+  rng: var Rand,
+  alignment = Both
+): seq[int] =
+  ## Rolls compatible parts and allows empty optional or unmatched slots.
+  for category in manifest.categories:
+    var choices: seq[int]
+    if category.key notin ["Body", "Face", "Eyes", "Mouth", "Beard"]:
+      choices.add -1
+    for i, item in category.items:
+      if alignment == Both or item.alignment in {Both, alignment}:
+        choices.add i
+    # Roll beard presence separately from the number of available styles.
+    result.add:
+      if choices.len == 0 or (category.key == "Beard" and rng.rand(1) == 0):
+        -1
+      else:
+        choices[rng.rand(choices.high)]
+
+proc applySkin*(nodes: Table[string, Node], manifest: Manifest, tint: Color) =
+  ## Applies a custom color only to the library's declared skin meshes.
   for name in manifest.skinNodes:
     if name notin nodes:
       raise newException(ChargenError, "Missing skin mesh: " & name)
     for primitive in nodes[name].mesh.primitives:
-      primitive.material.baseColorFactor = color(
-        tint[0], tint[1], tint[2], tint[3]
-      )
+      primitive.material.baseColorFactor = tint
+
+proc applySkin*(nodes: Table[string, Node], manifest: Manifest, skin: int) =
+  ## Applies a skin preset while preserving face and hair material colors.
+  if skin < 0 or skin >= manifest.skins.len:
+    raise newException(ChargenError, "Skin choice is outside the palette.")
+  let tint = manifest.skins[skin].color
+  nodes.applySkin(manifest, color(tint[0], tint[1], tint[2], tint[3]))
 
 proc partNodes*(root: Node): Table[string, Node] =
   ## Indexes mesh nodes while excluding identically named skeleton joints.
