@@ -6,7 +6,7 @@
 import
   std/[os, random, sets, strformat, strutils, tables, times],
   bumpy, chroma, gltf, silky, vmath,
-  polyworld/[animblend, toon], eyes, parts, references, weights
+  polyworld/[animblend, toon], brows, eyes, hairs, parts, references, weights
 
 when defined(takeScreenshot):
   import pixie
@@ -73,6 +73,8 @@ proc run() =
     toon = newToonContext()
     model = readGltfFile(AssetDir / manifest.model)
     nodes = partNodes(model.root)
+    hairMaterials = initHairMaterials(nodes, manifest)
+    browMaterials = initBrowMaterials(model.root)
     player = newClipPlayer(model.root)
   pbr.attachEnvironmentMap(loadDefaultEnvironmentMap())
   var
@@ -80,6 +82,9 @@ proc run() =
     pupil = pupilColor(getEnv("PUPIL", "Gray"))
     pupilTint = PupilColors[pupil].rgb
     customPupil = false
+    hair = hairColor(getEnv("HAIR_COLOR", "Chestnut"))
+    hairTint = HairColors[hair].rgb
+    matchBrows = getEnv("BROW_TINT", "Hair") != "White"
     weightPreview = initWeightPreview(model.root, AssetDir)
     selectedBone = weightPreview.boneIndex("LeftHand")
     showBones = false
@@ -306,6 +311,30 @@ proc run() =
       text category.key & ": " &
         (if selected < 0: "None" else: category.items[selected].name)
 
+  proc hairControls() =
+    ## Offers natural and vivid presets plus independent RGB hair sliders.
+    group "hair color":
+      box RowWidth, 34
+      layout LeftToRight
+      itemSpacing 5
+      button "<":
+        hair = (hair + HairColors.len - 1) mod HairColors.len
+        hairTint = HairColors[hair].rgb
+      button ">":
+        hair = (hair + 1) mod HairColors.len
+        hairTint = HairColors[hair].rgb
+      text "Color: " &
+        (if hairTint == HairColors[hair].rgb: HairColors[hair].name
+         else: "Custom")
+    for i, channel in ["Red", "Green", "Blue"]:
+      scrubber(
+        "Hair " & channel,
+        hairTint[i],
+        0.0'f,
+        1.0'f,
+        channel
+      )
+
   proc selectedPreset(index: int) =
     ## Applies the active model's preset and the shared animation.
     if editingOriginal:
@@ -383,6 +412,10 @@ proc run() =
           else:
             selection[i] = choice
             applyParts()
+        if not editingOriginal and category.key == "Hair":
+          hairControls()
+        if not editingOriginal and category.key == "Brow":
+          checkBox("Brows match hair color", matchBrows)
       if not editingOriginal:
         pupilControls()
         text "Clothing and props: not modeled yet."
@@ -611,6 +644,10 @@ proc run() =
     eyeTextures.applyPupilTint(pupilTint)
     if shading != Weights:
       applySkin()
+      hairMaterials.applyHairTint(hairTint)
+      browMaterials.applyBrowTint(
+        if matchBrows: hairTint else: WhiteBrows
+      )
     let
       aspect = window.size.x.float32 / max(window.size.y.float32, 1)
       view = cameraView()

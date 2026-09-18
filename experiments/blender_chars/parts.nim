@@ -31,11 +31,17 @@ type
     skin*: int
     parts*: seq[PresetPart]
 
+  HairShade* = object
+    node*: string
+    primitive*: int
+    shade*: float32
+
   Manifest* = object
     model*: string
     defaultSkin*: int
     base*: seq[string]
     skinNodes*: seq[string]
+    hairShades*: seq[HairShade]
     categories*: seq[Category]
     clips*: seq[ClipInfo]
     skins*: seq[Skin]

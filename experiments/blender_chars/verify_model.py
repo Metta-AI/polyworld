@@ -45,6 +45,10 @@ assert not bpy.data.objects["Nose_Tiny"].hide_get()
 assert all(item.hide_get() for item in items if item.name.startswith("Ears_"))
 assert not bpy.data.objects["Eyes_Atlas02"].hide_get()
 assert not bpy.data.objects["Mouth_Atlas01"].hide_get()
+assert not bpy.data.objects["Brow_Atlas01"].hide_get()
+assert len([item for item in items if item.name.startswith("Brow_Atlas")]) == 16
+assert not bpy.data.objects["Hair_01"].hide_get()
+assert len([item for item in items if item.name.startswith("Hair_")]) == 16
 for item in items:
   offsets[item.name] = offset
   offset += len(item.data.vertices)
@@ -57,12 +61,12 @@ for item in items:
   if item.name in bodyNames:
     assert len(boundary) == (96 if item.name == "Body" else 24), item.name
     boundaries[item.name] = boundary
-  elif item.name.startswith(("Eyes_", "Mouth_Atlas")):
+  elif item.name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")):
     assert len(boundary) == 72, item.name
     assert len(item.data.uv_layers) == 1, item.name
     textures = [node.image for node in item.data.materials[0].node_tree.nodes
                 if node.type == "TEX_IMAGE"]
-    expected = ((1254, 1254) if item.name.startswith(("Eyes_Atlas", "Mouth_Atlas"))
+    expected = ((1254, 1254) if item.name.startswith(("Eyes_Atlas", "Mouth_Atlas", "Brow_Atlas"))
                 else (1024, 512))
     assert len(textures) == 1 and tuple(textures[0].size) == expected
   else:
@@ -73,7 +77,7 @@ for item in items:
   for vertex in item.data.vertices:
     assert all(math.isfinite(value) for value in vertex.co)
     assert abs(sum(group.weight for group in vertex.groups) - 1) < 1e-5
-    if item.name.startswith(("Eyes_", "Mouth_", "Ears_", "Nose_")):
+    if item.name.startswith(("Eyes_", "Mouth_", "Brow_", "Ears_", "Nose_", "Hair_")):
       assert all(item.vertex_groups[group.group].name == "Head"
                  for group in vertex.groups)
   report["meshes"].append({"name": item.name, "closed": not boundary,
@@ -164,7 +168,7 @@ data = (Output / "character.glb").read_bytes()
 size = struct.unpack_from("<I", data, 12)[0]
 document = json.loads(data[20:20 + size])
 for node in document["nodes"]:
-  if node.get("name", "").startswith(("Eyes_", "Mouth_Atlas")) and "mesh" in node:
+  if node.get("name", "").startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")) and "mesh" in node:
     primitives = document["meshes"][node["mesh"]]["primitives"]
     assert len(primitives) == 1, node["name"]
     material = document["materials"][primitives[0]["material"]]
@@ -172,6 +176,22 @@ for node in document["nodes"]:
     assert "baseColorTexture" in material["pbrMetallicRoughness"]
     assert "KHR_materials_unlit" in material["extensions"]
 report["glbMeshes"] = len(document["meshes"])
+hairShades = {(item['node'], item['primitive']): item['shade']
+              for item in manifest['hairShades']}
+hairNodes = set()
+for node in document['nodes']:
+  if not node.get('name', '').startswith('Hair_') or 'mesh' not in node:
+    continue
+  hairNodes.add(node['name'])
+  for index, primitive in enumerate(document['meshes'][node['mesh']]['primitives']):
+    name = document['materials'][primitive['material']]['name']
+    key = (node['name'], index)
+    if name == 'Brown hair tie':
+      assert key not in hairShades
+    else:
+      assert hairShades[key] == {'Chestnut': 1, 'Chestnut light': 1.1,
+                                 'Chestnut shade': .9}[name]
+assert len(hairNodes) == 16
 report["glbTriangles"] = sum(
   document["accessors"][primitive["indices"]]["count"] // 3
   for mesh in document["meshes"] for primitive in mesh["primitives"]

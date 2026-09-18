@@ -1,0 +1,17 @@
+Generated with the built-in image_gen tool.
+
+WHITE-ON-PINK MASTER
+Use case: stylized-concept.
+Asset type: game facial decal texture atlas.
+Reference image: the attached sheet is a STYLE reference for chunky, angular low-poly cartoon eyebrow silhouettes, not a layout to copy.
+Create a NEW square 4 by 4 atlas containing exactly 16 distinct eyebrow PAIRS, one pair per equal cell (32 individual brows total). Make them original variations in the same simple bold graphic style as the reference.
+Solid pure white (#FFFFFF) eyebrows on perfectly flat bright magenta pink (#FF00FF). No other colors, no shading, no gradients, no outlines, no glow, no texture, no shadows.
+Each pair is horizontally centered in its invisible cell, with a clear gap between left and right eyebrow; all pairs occupy a consistent overall width with generous margins, fully isolated from neighboring cells. The two brows must be separate, not joined.
+Row 1: soft angular neutral arches; low straight confident brows; sharply slanted focused brows; broad heroic brows with a small outer kink.
+Row 2: thin skeptical brows with one subtly raised; rounded worried inner-high brows; wide surprised arches; flat heavy stern blocks with tapered outer tips.
+Row 3: thick expressive curved brows; compact triangular mischievous brows; bold bushy brows with 3 or 4 chunky notches; long slender sweeping brows.
+Row 4: short tidy brows with a small shaved slit in each; bold asymmetrical cocky brows; thick angular raised inner corners; tousled pointed brows with a few big graphic tufts.
+Keep every design cool and readable at game scale, made of clean simple filled silhouettes, not realistic hairs. Front-facing eyebrow pairs only. No eyes, heads, eyelids, mouths, skin, faces, numbers, labels, grid lines, borders, panels, watermark or text. The background must be uniform magenta across the entire square, including all empty spaces inside and between the eyebrow shapes.
+
+TRANSPARENT EXTRACTION
+Create a clean production-ready transparent PNG texture atlas from this reference. It must contain the exact same 4 by 4 arrangement of 16 pairs of white eyebrow silhouettes. Make ONLY the white eyebrow silhouettes opaque; every other pixel must be fully transparent. Perfectly clean flat white shapes with antialiased edges. No outlines, no pink, no gray, no grain, no dust, no speckles, no fringes, no drop shadows, no texture. Remove the pink backdrop completely and preserve all 16 designs and their positions. Preserve the clean graphic silhouette style. This is a game alpha decal atlas: no pixels outside the eyebrow silhouettes, no surrounding noise. Use genuine alpha transparency.

@@ -1,0 +1,319 @@
+{
+  "size": [
+    1254,
+    1254
+  ],
+  "columns": 4,
+  "rows": 4,
+  "brows": 16,
+  "art": "brows_4x4_transparent.png",
+  "pinkMaster": "../../../../../tmp/blender_chars/reference/brows_generated_v1/brows_4x4_pink.png",
+  "coordinates": "Top-left pixel origin. UV rectangles are normalized. Content bounds use alpha >= 0.5, matching the decal material.",
+  "notes": "Generated with built-in imagegen. White tintable eyebrow pairs; keep the texture unlit and separate from skin tint.",
+  "cells": [
+    {
+      "index": 1,
+      "name": "Soft arch",
+      "label": "01 Soft arch",
+      "row": 0,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.0,
+        0.25,
+        0.25
+      ],
+      "contentRect": [
+        25,
+        131,
+        289,
+        176
+      ]
+    },
+    {
+      "index": 2,
+      "name": "Confident",
+      "label": "02 Confident",
+      "row": 0,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.0,
+        0.5,
+        0.25
+      ],
+      "contentRect": [
+        347,
+        132,
+        593,
+        187
+      ]
+    },
+    {
+      "index": 3,
+      "name": "Focused",
+      "label": "03 Focused",
+      "row": 0,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.0,
+        0.75,
+        0.25
+      ],
+      "contentRect": [
+        664,
+        115,
+        903,
+        193
+      ]
+    },
+    {
+      "index": 4,
+      "name": "Heroic",
+      "label": "04 Heroic",
+      "row": 0,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.0,
+        1.0,
+        0.25
+      ],
+      "contentRect": [
+        965,
+        121,
+        1230,
+        187
+      ]
+    },
+    {
+      "index": 5,
+      "name": "Skeptical",
+      "label": "05 Skeptical",
+      "row": 1,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.25,
+        0.25,
+        0.5
+      ],
+      "contentRect": [
+        30,
+        424,
+        284,
+        477
+      ]
+    },
+    {
+      "index": 6,
+      "name": "Worried",
+      "label": "06 Worried",
+      "row": 1,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.25,
+        0.5,
+        0.5
+      ],
+      "contentRect": [
+        339,
+        415,
+        603,
+        499
+      ]
+    },
+    {
+      "index": 7,
+      "name": "Surprised",
+      "label": "07 Surprised",
+      "row": 1,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.25,
+        0.75,
+        0.5
+      ],
+      "contentRect": [
+        652,
+        404,
+        916,
+        484
+      ]
+    },
+    {
+      "index": 8,
+      "name": "Stern",
+      "label": "08 Stern",
+      "row": 1,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.25,
+        1.0,
+        0.5
+      ],
+      "contentRect": [
+        963,
+        432,
+        1231,
+        478
+      ]
+    },
+    {
+      "index": 9,
+      "name": "Bold curve",
+      "label": "09 Bold curve",
+      "row": 2,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.5,
+        0.25,
+        0.75
+      ],
+      "contentRect": [
+        22,
+        724,
+        291,
+        805
+      ]
+    },
+    {
+      "index": 10,
+      "name": "Mischievous",
+      "label": "10 Mischievous",
+      "row": 2,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.5,
+        0.5,
+        0.75
+      ],
+      "contentRect": [
+        358,
+        736,
+        583,
+        788
+      ]
+    },
+    {
+      "index": 11,
+      "name": "Bushy",
+      "label": "11 Bushy",
+      "row": 2,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.5,
+        0.75,
+        0.75
+      ],
+      "contentRect": [
+        643,
+        726,
+        925,
+        808
+      ]
+    },
+    {
+      "index": 12,
+      "name": "Sweeping",
+      "label": "12 Sweeping",
+      "row": 2,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.5,
+        1.0,
+        0.75
+      ],
+      "contentRect": [
+        955,
+        733,
+        1239,
+        801
+      ]
+    },
+    {
+      "index": 13,
+      "name": "Slit",
+      "label": "13 Slit",
+      "row": 3,
+      "column": 0,
+      "uvRect": [
+        0.0,
+        0.75,
+        0.25,
+        1.0
+      ],
+      "contentRect": [
+        31,
+        1052,
+        283,
+        1094
+      ]
+    },
+    {
+      "index": 14,
+      "name": "Cocky",
+      "label": "14 Cocky",
+      "row": 3,
+      "column": 1,
+      "uvRect": [
+        0.25,
+        0.75,
+        0.5,
+        1.0
+      ],
+      "contentRect": [
+        338,
+        1018,
+        603,
+        1102
+      ]
+    },
+    {
+      "index": 15,
+      "name": "Concerned",
+      "label": "15 Concerned",
+      "row": 3,
+      "column": 2,
+      "uvRect": [
+        0.5,
+        0.75,
+        0.75,
+        1.0
+      ],
+      "contentRect": [
+        648,
+        1024,
+        919,
+        1107
+      ]
+    },
+    {
+      "index": 16,
+      "name": "Tousled",
+      "label": "16 Tousled",
+      "row": 3,
+      "column": 3,
+      "uvRect": [
+        0.75,
+        0.75,
+        1.0,
+        1.0
+      ],
+      "contentRect": [
+        958,
+        1030,
+        1236,
+        1109
+      ]
+    }
+  ]
+}
