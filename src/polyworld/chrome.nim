@@ -1,7 +1,7 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, strutils, times],
+  std/[math, strutils, times, unicode],
   chroma, pixie, silky, vmath, windy,
   gameuis, inputs, profiles, quadterrain, rtscameras
 
@@ -27,6 +27,8 @@ const
     0.25'f32, 0.5'f32, 1.0'f32, 1.25'f32, 2.0'f32, 2.5'f32, 4.0'f32
   ]
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
+  HudReferenceSize* = vec2(1920, 1080)
+  HudDoubleScaleSize = HudReferenceSize * 2.0'f * 0.8'f
   HudDaySeconds* = 300'i32
     ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
@@ -40,6 +42,13 @@ const
   FpsNowSize = vec2(70, 22)
   FpsAvgSize = vec2(168, 22)
   FpsStdSize = vec2(148, 22)
+
+type
+  SparkStyle* = enum
+    Linear, Stepped
+  SparkSample* = object
+    tick*: int32
+    value*: int64
 
 var
   hudScratch*: string
@@ -56,6 +65,143 @@ var
   fpsNowText = "  0.00"
   fpsAvgText = "frame   0.00 ms"
   fpsStdText = "  0.00 ms std"
+
+proc sparkPoints*(
+    panel: GameUiPanel,
+    samples: openArray[SparkSample],
+    firstTick, lastTick: int32,
+    minimum, maximum: int64,
+    points: var seq[Vec2]
+) =
+  ## Maps samples into pixel buckets, retaining their ordered extrema.
+  points.setLen(0)
+  if panel.size.x <= 0 or panel.size.y <= 0:
+    return
+  let
+    duration = max(lastTick - firstTick, 1)
+    spread = max(maximum - minimum, 1)
+  var
+    bucket = -1
+    first, low, high, last: Vec2
+    lowIndex, highIndex, index: int
+  template flush() =
+    ## Emits the first point, ordered extrema, and final point per pixel.
+    if bucket >= 0:
+      points.add first
+      if lowIndex < highIndex:
+        if low != first:
+          points.add low
+        if high != low and high != first:
+          points.add high
+      else:
+        if high != first:
+          points.add high
+        if low != high and low != first:
+          points.add low
+      if points[^1] != last:
+        points.add last
+  for sample in samples:
+    if sample.tick < firstTick or sample.tick > lastTick:
+      continue
+    let
+      x = float32(sample.tick - firstTick) / float32(duration)
+      y = float32(clamp(sample.value, minimum, maximum) - minimum) /
+        float32(spread)
+      point = panel.origin + vec2(
+        x * panel.size.x,
+        (1 - y) * panel.size.y
+      )
+      next = int(x * panel.size.x)
+    if next != bucket:
+      flush()
+      bucket = next
+      first = point
+      low = point
+      high = point
+      lowIndex = index
+      highIndex = index
+    if point.y < low.y:
+      low = point
+      lowIndex = index
+    if point.y > high.y:
+      high = point
+      highIndex = index
+    last = point
+    inc index
+  flush()
+
+proc drawSparkline*(
+    sk: Silky,
+    panel: GameUiPanel,
+    samples: openArray[SparkSample],
+    firstTick, lastTick: int32,
+    minimum, maximum: int64,
+    color: ColorRGBX,
+    scratch: var seq[Vec2],
+    style = Linear,
+    thickness = 2.0'f,
+    lastRadius = 3.0'f
+) =
+  ## Draws a clipped sparkline with a circular marker on its final sample.
+  let
+    halfSize = max(min(panel.size.x, panel.size.y), 0) / 2
+    radius = min(max(lastRadius, 0), halfSize)
+    plot = GameUiPanel(
+      origin: panel.origin + vec2(radius),
+      size: max(panel.size - vec2(radius * 2), vec2(0))
+    )
+  sparkPoints(plot, samples, firstTick, lastTick, minimum, maximum, scratch)
+  if scratch.len == 0 or thickness <= 0:
+    return
+  let
+    white = sk.atlas.entries[WhiteTileKey]
+    uv = vec2(white.x.float32 + white.width.float32 / 2,
+      white.y.float32 + white.height.float32 / 2)
+    clipOrigin = max(panel.origin, sk.clipRect.xy)
+    clipEnd = min(panel.origin + panel.size, sk.clipRect.xy + sk.clipRect.wh)
+    clipSize = max(clipEnd - clipOrigin, vec2(0))
+  proc segment(first, last: Vec2) =
+    ## Expands one thick segment into two atlas-colored triangles.
+    let
+      delta = last - first
+      distance = length(delta)
+    if distance <= 0:
+      return
+    let
+      offset = vec2(-delta.y, delta.x) * (thickness / (2 * distance))
+      a = first - offset
+      b = first + offset
+      c = last + offset
+      d = last - offset
+    sk.drawTriangle(
+      [a, b, c], [uv, uv, uv], [color, color, color], clipOrigin, clipSize
+    )
+    sk.drawTriangle(
+      [a, c, d], [uv, uv, uv], [color, color, color], clipOrigin, clipSize
+    )
+  if scratch.len == 1:
+    segment(
+      scratch[0] - vec2(thickness / 2, 0),
+      scratch[0] + vec2(thickness / 2, 0)
+    )
+  for i in 1 ..< scratch.len:
+    case style
+    of Linear:
+      segment(scratch[i - 1], scratch[i])
+    of Stepped:
+      let corner = vec2(scratch[i].x, scratch[i - 1].y)
+      segment(scratch[i - 1], corner)
+      segment(corner, scratch[i])
+  if radius > 0:
+    sk.pushClipRect(rect(panel.origin, panel.size))
+    sk.drawRoundedImage(
+      WhiteTileKey,
+      scratch[^1] - vec2(radius),
+      vec2(radius * 2),
+      radius,
+      color
+    )
+    sk.popClipRect()
 
 proc addDigits(s: var string, value: int) =
   ## Appends an unsigned decimal value.
@@ -185,6 +331,24 @@ proc fitUiScale*(windowSize, contentSize: Vec2): float32 =
       need.x <= layoutSize.x and need.y <= layoutSize.y
   )
 
+proc gameUiScale*(windowSize: Vec2): float32 =
+  ## Uses the same crisp HUD breakpoints for every game window.
+  result = fitUiScale(
+    windowSize,
+    proc(layoutSize: Vec2): bool =
+      ## Checks both dimensions against the shared reference viewport.
+      layoutSize.x >= HudReferenceSize.x and
+        layoutSize.y >= HudReferenceSize.y,
+    UiCrispSteps
+  )
+  if windowSize.x >= HudDoubleScaleSize.x and
+    windowSize.y >= HudDoubleScaleSize.y:
+      result = max(result, 2.0'f)
+
+proc gameUiScale*(window: Window): float32 =
+  ## Uses the shared HUD breakpoints for the current drawable size.
+  gameUiScale(vec2(window.size.x.float32, window.size.y.float32))
+
 proc inset*(panel: GameUiPanel, margin: float32): GameUiPanel =
   ## Returns the rectangle inside a uniform panel margin.
   GameUiPanel(
@@ -313,6 +477,21 @@ proc drawLabel*(
     hAlign = align,
     vAlign = MiddleAlign
   )
+
+proc fittedLabel*(
+    sk: Silky,
+    value: string,
+    width: float32,
+    font = "Hud"
+): string =
+  ## Ellipsizes text to one line without splitting a UTF-8 character.
+  if sk.getTextSize(font, value).x <= width:
+    return value
+  for rune in value.runes:
+    let candidate = result & $rune
+    if sk.getTextSize(font, candidate & "...").x > width:
+      return result & "..."
+    result = candidate
 
 proc barPatch(size: Vec2, wanted: int): int =
   ## Returns a 9-patch border that still fits inside size.
@@ -645,7 +824,10 @@ proc mouseOverDebugMenu*(mouse: Vec2): bool =
     mouse.y >= state.pos.y and
     mouse.y <= state.pos.y + state.size.y
 
-proc drawDebugMenu*(sk: Silky, window: Window) =
+proc drawDebugMenu*(
+    sk: Silky, window: Window,
+    creepWaypoints: ptr bool = nil, waypointStatus = ""
+) =
   ## Draws the shared F1 debug window when it is open.
   noteFps()
   if not debugMenuOpen:
@@ -656,7 +838,7 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
       DebugWindowTitle,
       debugMenuOpen,
       DebugWindowOrigin,
-      DebugWindowSize
+      DebugWindowSize + vec2(0, if creepWaypoints == nil: 0 else: 62)
     ):
       group "fpsRow":
         box(
@@ -715,6 +897,10 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
       checkBox "Interpolation", interpolateVisuals
       checkBox "Show paths", showPaths
       checkBox "Show tiles", showTiles
+      if creepWaypoints != nil:
+        checkBox "Creep waypoints", creepWaypoints[]
+        text "creepWaypointStatus":
+          characters waypointStatus
   finally:
     sk.endDsl()
 

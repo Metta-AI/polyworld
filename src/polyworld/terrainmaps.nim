@@ -44,7 +44,8 @@ proc buildTerrainMap*(
   heightScale = 2.91'f,
   count = 1,
   chance = 0.4'f,
-  materialCount = SurfaceNames.len
+  materialCount = SurfaceNames.len,
+  groundMaterials: openArray[int] = []
 ): TerrainMap {.raises: [TerrainMapError].} =
   ## Builds visual material and splat buffers without changing game map data.
   if kindMaterials.len == 0 or not (patchSize > 0 and patchSize < Inf) or
@@ -63,6 +64,8 @@ proc buildTerrainMap*(
         layer.width > int.high div layer.depth or
         layer.tiles.len != layer.width * layer.depth:
           raise newException(TerrainMapError, "Invalid terrain layer size.")
+      if layerIndex == 0 and groundMaterials.len notin [0, layer.tiles.len]:
+        raise newException(TerrainMapError, "Invalid ground material count.")
       if layer.water:
         continue
       var
@@ -74,7 +77,13 @@ proc buildTerrainMap*(
           x = i mod layer.width
           z = i div layer.width
         var material = kindMaterials[min(tile.kind.int, kindMaterials.high)]
-        if tile.exists and tile.kind == GrassTile:
+        if layerIndex == 0 and groundMaterials.len > 0:
+          let override = groundMaterials[i]
+          if override < -1 or override >= materialCount:
+            raise newException(TerrainMapError, "Unknown ground material.")
+          if override >= 0:
+            material = override
+        if tile.exists and material == GrassSurface:
           let
             heights = tile.tops.unpack()
             elevation = (heights[0] + heights[1] + heights[2] + heights[3]) /
@@ -90,8 +99,9 @@ proc buildTerrainMap*(
           )
         materials[i] = material
         surfaces[i] = SplatTile(
-          # Extra construction materials have no natural terrain stamps.
-          exists: tile.exists and material < SurfaceNames.len,
+          # Custom materials receive adjacent details without seeding stamps.
+          exists: tile.exists,
+          stamps: material < SurfaceNames.len,
           material: material,
           variants: 1,
           tops: tile.tops

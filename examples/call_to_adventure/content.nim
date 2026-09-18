@@ -8,7 +8,7 @@
 ## Actors refer to each other by `int32` id, never by pointer.
 
 import
-  polyworld/[bodies, cli, common, pathing, rngs]
+  polyworld/[bodies, cli, common, metrics, pathing, rngs]
 
 ## Shape of the world
 
@@ -426,6 +426,8 @@ type World* = ref object
   chat*: array[ChatLines, ChatLine]
   chatHead*: int32
   banked*: int32
+  bankedGold*: array[PartySize, int32]
+  returned*: array[PartySize, bool]
   phase*: Phase
   deepest*: int32
   respawnTicks*: int32
@@ -434,6 +436,7 @@ type World* = ref object
   outcome*: Outcome
   nextActorId*: int32
   nextItemId*: int32
+  stats*: CombatStats
 
 ## Small helpers on the types above
 

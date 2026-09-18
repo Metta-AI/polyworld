@@ -1,18 +1,19 @@
 ## Current-frame HUD rectangles, composed from fixed rows and columns.
 
 import
+  std/math,
   vmath,
   polyworld/[gameuis, stackpanels]
 
 const
   PanelScore* = vec2(298, 104)
-  PanelHeroes* = vec2(1051, 145)
+  PanelHeroes* = vec2(1090, 142)
   PanelClock* = vec2(128, 86)
   PanelMinimap* = vec2(256, 256)
   PanelDetails* = vec2(859, 242)
   PanelInventory* = vec2(252, 243)
-  HeroCardSize = vec2(78, 122)
-  HeroGap = 17.0'f
+  HeroCardSize = vec2(100, 126)
+  HeroGap = 4.0'f
   HeroTeamWidth = HeroCardSize.x * 5 + HeroGap * 4
 
 type
@@ -20,7 +21,7 @@ type
     icon*, caption*, time*: GameUiPanel
 
   HeroPanels* = object
-    portrait*, hp*, mana*: GameUiPanel
+    portrait*, name*, hp*, mana*: GameUiPanel
 
   DetailsPanels* = object
     portrait*, name*, class*, stats*: GameUiPanel
@@ -28,8 +29,20 @@ type
     abilities*: array[6, GameUiPanel]
 
   InventoryPanels* = object
-    title*, contents*, gold*: GameUiPanel
+    title*, shop*, contents*, gold*: GameUiPanel
     slots*: array[6, GameUiPanel]
+
+  ShopPanels* = object
+    panel*, heading*, catalog*, footer*: GameUiPanel
+    cards*: array[20, GameUiPanel]
+    compact*: bool
+
+proc scorePanel*(layout: GameUiLayout): GameUiPanel =
+  ## Moves the score below the hero roster when they cannot fit side by side.
+  let heroes = layout.panel(GameUiRegion.TopCenter, PanelHeroes)
+  result = layout.panel(GameUiRegion.TopLeft, PanelScore)
+  if result.overlaps(heroes, 48):
+    result.origin.y = heroes.origin.y + heroes.size.y + 48
 
 proc clockPanels*(panel: GameUiPanel): ClockPanels =
   ## Stacks the clock's icon and caption above its centered time.
@@ -41,17 +54,19 @@ proc clockPanels*(panel: GameUiPanel): ClockPanels =
   result.time = rows.takeRow(40)
 
 proc heroPanels*(panel: GameUiPanel): array[10, HeroPanels] =
-  ## Stacks two teams of five cards, each with a portrait and two meters.
-  var teams = panel.stack(LeftToRight, vec2(21, 10))
+  ## Stacks two teams of portraits, player names, and paired meters.
+  var teams = panel.stack(LeftToRight, vec2(12, 5))
   for team in 0 ..< 2:
-    var cards = teams.takeColumn(HeroTeamWidth, 91).stack(LeftToRight)
+    var cards = teams.takeColumn(HeroTeamWidth, 34).stack(LeftToRight)
     for slot in 0 ..< 5:
       var card = cards.take(HeroCardSize, HeroGap).stack(TopToBottom)
       let i = team * 5 + slot
-      result[i].portrait = card.takeRow(80, 9)
-      card.indent = 7
-      result[i].hp = card.take(vec2(64, 12), 9)
-      result[i].mana = card.take(vec2(64, 12))
+      card.indent = 14
+      result[i].portrait = card.take(vec2(72), 3)
+      card.indent = 0
+      result[i].name = card.takeRow(18)
+      result[i].hp = card.takeRow(16, 1)
+      result[i].mana = card.takeRow(16)
 
 proc detailsPanels*(panel: GameUiPanel): DetailsPanels =
   ## Gives the portrait, identity, meters, and ability groups their own stacks.
@@ -80,7 +95,31 @@ proc detailsPanels*(panel: GameUiPanel): DetailsPanels =
 proc inventoryPanels*(panel: GameUiPanel): InventoryPanels =
   ## Stacks the clickable title, two inventory rows, and currency footer.
   var rows = panel.stack(TopToBottom, vec2(14, 10))
-  result.title = rows.takeRow(28, 12)
+  var heading = rows.takeRow(28, 12).stack(LeftToRight)
+  result.title = heading.takeColumn(112, 4)
+  result.shop = heading.takeRest()
   result.contents = rows.takeRow(72 * 2 + 5, 1)
   result.gold = rows.takeRow(31)
   stackGrid(result.contents, vec2(72), 3, vec2(4, 5), result.slots)
+
+proc shopPanels*(size: Vec2): ShopPanels =
+  ## Fits all twenty items and the inventory into the full-screen shop.
+  result.compact = size.x < 1920 or size.y < 1080
+  let
+    margin = if result.compact: 16.0'f else: 24.0'f
+    gap = if result.compact: 12.0'f else: 20.0'f
+    gridGap = if result.compact: 12.0'f else: 16.0'f
+    footerHeight = if result.compact: 112.0'f else: 132.0'f
+  result.panel = GameUiPanel(
+    origin: vec2(margin),
+    size: vec2(floor(size.x), floor(size.y)) - vec2(margin * 2)
+  )
+  var rows = result.panel.stack(TopToBottom, vec2(margin))
+  result.heading = rows.takeRow(72, gap)
+  result.catalog = rows.takeRow(rows.remainingSpace.y - footerHeight, gap)
+  result.footer = rows.takeRest()
+  let cell = vec2(
+    floor((result.catalog.size.x - gridGap * 4) / 5),
+    floor((result.catalog.size.y - gridGap * 3) / 4)
+  )
+  stackGrid(result.catalog, cell, 5, vec2(gridGap), result.cards)

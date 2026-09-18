@@ -5,7 +5,7 @@
 ## This module must not import anything that returns a float.
 
 import
-  polyworld/[basic, bodies, fixed, hashes, pathing, profiles, rngs, tapes,
+  polyworld/[basic, bodies, fixed, hashes, metrics, pathing, profiles, rngs, tapes,
     visions],
   content,
   maps,
@@ -63,7 +63,7 @@ type
     blockedTicks*, repathCooldown*: int32
     carryGold*, carryWood*: int32
     orderFailed*: bool
-      ## Set when an order is abandoned. The overlord reads and clears it.
+      ## Set when an order fails. Cleared by the next accepted unit order.
     animation*: AnimationSlot
     animationTicks*: int32
     deathTicks*: int32
@@ -105,6 +105,7 @@ type
     index*: int32
 
   World* = ref object
+    stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
     tick*: int32
     rng*: Rng
@@ -128,6 +129,7 @@ type
     visionGeneration*: array[PlayerCount, uint32]    # HASH: derived
     explored*: array[PlayerCount, seq[uint8]]        # HASH: derived
   OverlordVm* = ref object
+    output*: PrintProc
     ## One compiled BASIC program for a player. Not simulation state.
     runtime*: Runtime
     ready*: bool
@@ -139,6 +141,8 @@ type
     ## One match session. World is the hashable sim; everything else is
     ## tape and agents. The generated map lives on `world.map`.
     world*: World
+    metrics*: MatchMetrics
+    history*: MetricHistory
     recorder*: ReplayRecorder
     replayData*: ReplayData
     replayPlayer*: ReplayPlayer
@@ -153,6 +157,13 @@ type
 ##
 ## Identifier ranges make the kind checkable before any array is touched, and
 ## the slot tables turn a valid identifier into an index in constant time.
+
+proc config*(game: Game): GameConfig =
+  ## Reads the match configuration owned by the live or loaded replay.
+  if game.recorder != nil:
+    game.recorder.data.config
+  else:
+    game.replayData.config
 
 proc unitIndex*(w: World, id: int32): int32 =
   ## Returns the index of a living unit, or -1.
@@ -970,7 +981,7 @@ proc razeBuilding(w: World, index: int32) =
   w.releaseFootprint(w.buildings[index].origin, w.buildings[index].side)
   w.recomputeFoodCap(owner)
 
-proc damageEntity*(w: World, id, amount: int32) =
+proc damageEntity*(w: World, id, amount: int32, attacker = -1'i32) =
   ## Applies damage and starts a death when something runs out of health.
   if id.isUnitId:
     let index = w.unitIndex(id)
@@ -979,6 +990,8 @@ proc damageEntity*(w: World, id, amount: int32) =
     w.units[index].hp -= amount
     if w.units[index].hp <= 0:
       w.units[index].hp = 0
+      if attacker >= 0 and attacker != w.units[index].owner:
+        w.stats.add(int(attacker), KillsMetric)
       w.killUnit(index)
     return
   let index = w.buildingIndex(id)
@@ -988,6 +1001,8 @@ proc damageEntity*(w: World, id, amount: int32) =
   w.buildings[index].hp -= amount
   if w.buildings[index].hp <= 0:
     w.buildings[index].hp = 0
+    if attacker >= 0 and attacker != w.buildings[index].owner:
+      w.stats.add(int(attacker), StructuresMetric)
     w.razeBuilding(index)
 
 proc acquireTarget(w: World, unit: Unit): int32 =
@@ -1328,7 +1343,7 @@ proc entityArmor(w: World, id: int32): int32 =
       return UnitTable[unit.owner][unit.kind].armor
   0
 
-proc applySplash(w: World, origin: Tile2, amount, skipId: int32) =
+proc applySplash(w: World, origin: Tile2, amount, skipId, attacker: int32) =
   ## Deals piercing splash to every neighbour of an impact tile.
   var hits: seq[int32]
   for unit in w.units:
@@ -1344,16 +1359,20 @@ proc applySplash(w: World, origin: Tile2, amount, skipId: int32) =
     if w.footprintDistance(origin, structure) == 1:
       hits.add structure.id
   for id in hits:
-    w.damageEntity(id, amount)
+    w.damageEntity(id, amount, attacker)
 
 proc strikeTarget(w: World, index: int32, target: int32) =
   ## Rolls miss, then applies piercing plus armor-reduced basic, then splash.
   let stats = UnitTable[w.units[index].owner][w.units[index].kind]
   if stats.missPercent > 0 and w.rng.chance(stats.missPercent):
     return
-  w.damageEntity(target, attackDamage(stats, w.entityArmor(target)))
+  w.damageEntity(
+    target, attackDamage(stats, w.entityArmor(target)), w.units[index].owner
+  )
   if stats.splash > 0:
-    w.applySplash(w.entityTile(target), stats.splash, target)
+    w.applySplash(
+      w.entityTile(target), stats.splash, target, w.units[index].owner
+    )
 
 proc handleCombat(w: World, index: int32) =
   ## Chases a target until it is in range, then swings on cooldown.
@@ -1580,7 +1599,7 @@ proc advanceBuilding(w: World, index: int32) =
           target = other.id
       if target != NoEntity:
         w.buildings[index].cooldown = stats.cooldownTicks
-        w.damageEntity(target, stats.damage)
+        w.damageEntity(target, stats.damage, w.buildings[index].owner)
 
 ## Tech and placement
 
@@ -1669,6 +1688,7 @@ proc applyMove*(w: World, player, unitId, x, y: int32): bool =
     return false
   if w.units[index].state == UnitInMine:
     return false
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].state = UnitMoving
   w.setGoal(index, tile2(x, y))
@@ -1682,6 +1702,7 @@ proc applyAttackMove*(w: World, player, unitId, x, y: int32): bool =
   if w.units[index].state == UnitInMine:
     return false
   let dest = tile2(x, y)
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].attackMove = true
   w.units[index].attackMoveGoal = dest
@@ -1703,6 +1724,7 @@ proc applyAttack*(w: World, player, unitId, targetId: int32): bool =
     else: w.buildingOwner(targetId)
   if owner == player or owner < 0:
     return false
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].state = UnitChasing
   w.units[index].targetId = targetId
@@ -1731,6 +1753,7 @@ proc applyHarvest*(w: World, player, unitId, target, isTree: int32): bool =
     if target < 0 or target >= GridCells or w.treeWood[target] <= 0:
       return false
 
+  w.units[index].orderFailed = false
   if isTree == 0:
     if carrying:
       w.units[index].sourceId = target
@@ -1807,6 +1830,7 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
     )
 
   let site = w.buildingIndex(siteId)
+  w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   if w.footprintGoal(index, w.buildings[site].origin, w.buildings[site].side):
     w.units[index].state = UnitToBuild
@@ -1851,6 +1875,7 @@ proc applyCancel*(w: World, player, entityId: int32): bool =
     let index = w.ownedUnit(player, entityId)
     if index < 0 or w.units[index].state == UnitInMine:
       return false
+    w.units[index].orderFailed = false
     w.units[index].clearOrder(false)
     return true
 
@@ -1890,31 +1915,31 @@ proc applyCancel*(w: World, player, entityId: int32): bool =
     w.buildings[index].trainTicks = 0
   true
 
-proc applyReplayAction*(w: World, action: ReplayAction) =
+proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
   ## Re-executes one recorded command through the same validators.
   let player = int32(action.playerId)
   case action.kind
   of ActionMove:
-    discard w.applyMove(player, action.entityId, action.first, action.second)
+    w.applyMove(player, action.entityId, action.first, action.second)
   of ActionAttackMove:
-    discard w.applyAttackMove(
+    w.applyAttackMove(
       player, action.entityId, action.first, action.second
     )
   of ActionAttack:
-    discard w.applyAttack(player, action.entityId, action.first)
+    w.applyAttack(player, action.entityId, action.first)
   of ActionHarvest:
-    discard w.applyHarvest(player, action.entityId, action.first,
+    w.applyHarvest(player, action.entityId, action.first,
       action.second)
   of ActionBuild:
-    discard w.applyBuild(player, action.entityId, action.first,
+    w.applyBuild(player, action.entityId, action.first,
       action.second, action.third)
   of ActionTrain:
-    discard w.applyTrain(player, action.entityId, action.first)
+    w.applyTrain(player, action.entityId, action.first)
   of ActionSetRally:
-    discard w.applySetRally(player, action.entityId, action.first,
+    w.applySetRally(player, action.entityId, action.first,
       action.second)
   of ActionCancel:
-    discard w.applyCancel(player, action.entityId)
+    w.applyCancel(player, action.entityId)
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
@@ -1932,6 +1957,7 @@ proc applyMove*(
   ## Walks a unit to a tile and records the command when accepted.
   result = game.world.applyMove(player, unitId, x, y)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionMove, player, unitId, x, y)
 
 proc applyAttackMove*(
@@ -1940,6 +1966,7 @@ proc applyAttackMove*(
   ## Attack-moves a unit and records the command when accepted.
   result = game.world.applyAttackMove(player, unitId, x, y)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionAttackMove, player, unitId, x, y)
 
 proc applyAttack*(
@@ -1948,6 +1975,7 @@ proc applyAttack*(
   ## Sends a unit after an enemy and records the command when accepted.
   result = game.world.applyAttack(player, unitId, targetId)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionAttack, player, unitId, targetId)
 
 proc applyHarvest*(
@@ -1956,6 +1984,7 @@ proc applyHarvest*(
   ## Puts a peon on a gold mine or a tree and records the command.
   result = game.world.applyHarvest(player, unitId, target, isTree)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionHarvest, player, unitId, target, isTree)
 
 proc applyBuild*(
@@ -1964,6 +1993,7 @@ proc applyBuild*(
   ## Starts a building and records the command when accepted.
   result = game.world.applyBuild(player, peonId, kindValue, x, y)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionBuild, player, peonId, kindValue, x, y)
 
 proc applyTrain*(
@@ -1972,6 +2002,7 @@ proc applyTrain*(
   ## Queues one unit and records the command when accepted.
   result = game.world.applyTrain(player, buildingId, kindValue)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionTrain, player, buildingId, kindValue)
 
 proc applySetRally*(
@@ -1980,6 +2011,7 @@ proc applySetRally*(
   ## Sets a rally point and records the command when accepted.
   result = game.world.applySetRally(player, buildingId, x, y)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionSetRally, player, buildingId, x, y)
 
 proc applyCancel*(
@@ -1988,6 +2020,7 @@ proc applyCancel*(
   ## Cancels an order and records the command when accepted.
   result = game.world.applyCancel(player, entityId)
   if result:
+    game.metrics.command(int(player), game.world.tick)
     game.record(ActionCancel, player, entityId)
 
 ## Canonical state hash
@@ -2093,6 +2126,7 @@ proc hashWorld(w: World): uint64 =
   for request in w.pathQueue:
     hash.addHashy(request.unitId)
     hash.mixTile(request.goal)
+  hash.addHashy(w.stats)
   uint64(hash)
 
 proc stateHash*(game: Game): uint64 =
@@ -2256,11 +2290,13 @@ proc clone*(world: World): World =
   ## Deep copy. Units are refs and must be cloned one by one.
   result = World()
   result[] = world[]
+  result.stats = world.stats.clone()
   result.units = cloneUnits(world.units)
 
 proc restore*(world: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
   world[] = snapshot[]
+  world.stats = snapshot.stats.clone()
   world.units = cloneUnits(snapshot.units)
 
 proc newWorld*(map: MapData, maximumTicks: int32): World =
@@ -2269,6 +2305,7 @@ proc newWorld*(map: MapData, maximumTicks: int32): World =
   result = World(
     tick: 0,
     winner: -1,
+    stats: newCombatStats(PlayerCount),
     maximumTicks: maximumTicks,
     map: map,
     blocker: newSeq[int32](GridCells),
@@ -2341,10 +2378,35 @@ proc newWorld*(map: MapData, maximumTicks: int32): World =
 
   result.rebuildVision()
 
+proc sampleMetrics*(game: Game, force = false) =
+  ## Samples deterministic world counters and independent VM telemetry.
+  if game.metrics == nil or game.world.stats == nil:
+    return
+  for slot, values in game.world.stats.values:
+    for kind in MetricKind:
+      game.metrics.set(slot, kind, values[kind])
+    game.metrics.set(slot, GoldMetric, game.world.players[slot].goldGathered)
+    game.metrics.set(slot, LossesMetric, game.world.players[slot].unitsLost)
+    var army = 0'i64
+    for unit in game.world.units:
+      if unit.owner == slot and unit.kind != PeonUnit and
+        unit.state != UnitDying and unit.hp > 0:
+          army += UnitTable[unit.owner][unit.kind].gold
+    game.metrics.set(slot, ArmyMetric, army)
+  game.history.capture(game.metrics, game.world.tick, force)
+
 proc newGame*(map: MapData, maximumTicks: int32): Game =
   ## Builds one match session around a fresh world.
   result = Game(
+    metrics: newMetrics(PlayerCount, TickRate),
     world: newWorld(map, maximumTicks),
     mapSeed: map.seed,
     maximumTicks: maximumTicks
   )
+  result.sampleMetrics(true)
+
+proc scores*(world: World): seq[int] =
+  ## Converts the existing winner into binary scores in platform slot order.
+  result.setLen(PlayerCount)
+  if world.winner >= 0:
+    result[world.winner] = 1

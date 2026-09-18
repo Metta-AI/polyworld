@@ -7,13 +7,16 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps as mapgen,
   sim,
   bots,
   controls,
   replays
+
+when defined(coworld):
+  import polyworld/coworld
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
@@ -76,7 +79,11 @@ proc parseGameOptions(): GameOptions =
     "a live match requires exactly two bots"
   )
 
-let options* = parseGameOptions()
+var options* =
+  when defined(coworld):
+    coworldOptions(2)
+  else:
+    parseGameOptions()
 
 var run*: Game
 
@@ -89,8 +96,8 @@ block:
     var replayData: ReplayData
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
-    mapSeed = replayData.header.setup.mapSeed
-    maximumTicks = int32(replayData.header.setup.maximumTicks)
+    mapSeed = replayData.config.seed
+    maximumTicks = replayData.config.maxTicks
     var gameMap: MapData
     profileBlock "map":
       gameMap = generateMap(mapSeed)
@@ -141,6 +148,11 @@ block:
         )
       ]
     ))
+    run.recorder.data.config =
+      when defined(coworld):
+        coworld.config
+      else:
+        localGameConfig(options, PlayerCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc decide(w: World) =
@@ -150,7 +162,8 @@ proc decide(w: World) =
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      w.applyReplayAction(action)
+      if w.applyReplayAction(action):
+        run.metrics.command(int(action.playerId), w.tick)
   else:
     flushPlayerCommands(run)
     runBotDecisions(run)
@@ -173,6 +186,8 @@ proc advanceGame*() =
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+  run.sampleMetrics(run.world.over or run.world.tick >= run.maximumTicks)
+  run.metrics.finishTick(run.world.tick)
 
 proc saveRecording*(path = options.recordPath) =
   ## Saves every recorded tick, keeping the original match setup.
@@ -182,6 +197,9 @@ proc saveRecording*(path = options.recordPath) =
   let directory = path.parentDir
   if directory.len > 0:
     createDir(directory)
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  run.recorder.data.metrics = run.history.replayMetrics()
   saveReplay(path, run.recorder.data)
 
 proc describeResult*(): string =
@@ -226,7 +244,8 @@ proc runHeadless*() =
     for player in 0'i32 ..< PlayerCount:
       let brain = run.brains[player]
       if brain.failed:
-        echo &"         script FAILED: {brain.lastError}"
+        when not defined(coworld):
+          echo &"         script FAILED: {brain.lastError}"
       else:
         echo &"         {brain.decisions} decisions, last used " &
           &"{brain.lastInstructions} instructions and {brain.lastWork} work"

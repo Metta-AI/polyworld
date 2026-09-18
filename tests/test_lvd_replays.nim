@@ -162,6 +162,18 @@ var invalid = decoded
 invalid.header.gameVersion = high(uint16)
 invalid.rejects("an unsupported game version")
 
+for version in 12'u16 .. 15'u16:
+  invalid = decoded
+  invalid.header.gameVersion = version
+  invalid.rejects("a replay using read-and-clear failure flags")
+  let old = encodeReplayFile(ReplayGame, version, invalid, MaxReplayBytes)
+  try:
+    discard decodeReplay(old)
+    doAssert false, "old simulation versions must fail before playback"
+  except ReplayError as error:
+    doAssert error.msg.contains("version " & $version)
+    doAssert error.msg.contains("expected 16")
+
 invalid = decoded
 invalid.header.setup.contentHash = 0
 invalid.rejects("a missing content fingerprint")
