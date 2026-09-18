@@ -98,7 +98,9 @@ proc readReference*(clips: seq[ClipInfo]): Reference =
   result.root = readGltfFile(OriginalPath).root
   result.nodes = partNodes(result.root)
   result.root.updateTransforms()
-  result.manifest.clips = clips
+  for clip in clips:
+    if clip.kind != "universal":
+      result.manifest.clips.add clip
   for name in source.body.skins:
     result.manifest.skins.add parts.Skin(name: name)
   result.manifest.categories = @[
@@ -168,10 +170,12 @@ proc readReference*(clips: seq[ClipInfo]): Reference =
     scale(vec3(factor)) * translate(vec3(0, -low, 0))
   result.clearParts()
   result.player = newClipPlayer(result.root)
-  for clip in clips:
+  for clip in result.manifest.clips:
     if result.player.clipIndex(clip.name) < 0:
       raise newException(ChargenError, "Original clip missing: " & clip.name)
-    result.player.setRule(clip.name, ClipRule(loop: clip.loop, next: clip.next))
+    result.player.setRule(clip.name, ClipRule(
+      loop: clip.loop, next: clip.next, hold: clip.hold
+    ))
 
 proc sync*(reference: Reference, player: ClipPlayer) =
   ## Aligns playback after seeking or first opening the original model.

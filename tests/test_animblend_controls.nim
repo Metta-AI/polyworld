@@ -2,6 +2,7 @@ import gltf, vmath
 import polyworld/animblend
 
 proc fixture(): tuple[root: Node, player: ClipPlayer] =
+  ## Makes two linear clips for deterministic playback checks.
   result.root = Node(visible: true, baseVisible: true,
     scale: vec3(1), baseScale: vec3(1), rot: quat(), baseRot: quat())
   for i in 0 .. 1:
@@ -63,5 +64,17 @@ block:
     f.player.play(0, fade = 1)
     f.player.update(0)
   doAssert length(shared.root.pos - isolated.root.pos) < 1e-6
+
+echo "Held actions stay at their last frame after a looping action"
+block:
+  let f = fixture()
+  f.player.setRule("clip1", ClipRule(loop: false, hold: true))
+  f.player.update(1)
+  f.player.play("clip1", 0)
+  f.player.update(25)
+  doAssert f.player.current == 1
+  doAssert f.root.pos.x == 30
+  f.player.update(10)
+  doAssert f.player.current == 1 and f.root.pos.x == 30
 
 echo "Animation playback control tests passed"

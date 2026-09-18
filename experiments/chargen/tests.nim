@@ -161,7 +161,9 @@ proc testParts() =
       doAssert not node.visible
   for clip in manifest.clips:
     doAssert player.clipIndex(clip.name) >= 0
-    player.setRule(clip.name, ClipRule(loop: clip.loop, next: clip.next))
+    player.setRule(clip.name, ClipRule(
+      loop: clip.loop, next: clip.next, hold: clip.hold
+    ))
   for category in manifest.categories:
     for item in category.items:
       manifest.selectPart(selection, category.key, item.name)
@@ -509,6 +511,53 @@ proc testWeights() =
   doAssert not hand.material.unlit
   doAssert eye.material.baseColorFactor == eyeTint
 
+proc testUniversal() =
+  ## Checks all imported clips, transition rules, and a free moving left hand.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    player = newClipPlayer(model.root)
+  doAssert manifest.defaultAnimation == "Walk_Loop"
+  var count = 0
+  for clip in manifest.clips:
+    player.setRule(clip.name, ClipRule(
+      loop: clip.loop, next: clip.next, hold: clip.hold
+    ))
+    if clip.kind == "universal":
+      inc count
+      doAssert player.clipIndex(clip.name) >= 0
+      if clip.next.len > 0:
+        doAssert player.clipIndex(clip.next) >= 0
+  doAssert count == 43
+  var hand: Node
+  for node in model.root.walkNodes:
+    if node.mesh == nil and node.name == "LeftHand":
+      hand = node
+  doAssert hand != nil
+  player.play("Walk_Loop", 0)
+  player.seek(0)
+  model.root.updateTransforms()
+  let before = hand.mat * vec3(0)
+  player.seek(0.66)
+  model.root.updateTransforms()
+  doAssert length(hand.mat * vec3(0) - before) > 0.1
+  for (first, next) in [
+    ("Jump_Start", "Jump_Loop"),
+    ("Sitting_Enter", "Sitting_Idle_Loop"),
+    ("Spell_Simple_Enter", "Spell_Simple_Idle_Loop")
+  ]:
+    player.play(first, 0)
+    player.update(10)
+    doAssert model.root.animations[player.current].name == next
+  player.play("Walk_Loop", 0)
+  player.play("Death01", 0)
+  player.update(10)
+  doAssert model.root.animations[player.current].name == "Death01"
+  player.play("Walk_Loop", 0)
+  player.play("Punch_Jab", 0)
+  player.update(10)
+  doAssert model.root.animations[player.current].name == "Walk_Loop"
+
 proc testReference() =
   ## Checks that comparison uses the real original rig and follows scrubbing.
   let
@@ -519,9 +568,11 @@ proc testReference() =
     originals = partNodes(reference.root)
   doAssert reference.root != model.root
   doAssert "Body_White_1" in originals and "Body" notin originals
-  doAssert reference.root.animations.len == manifest.clips.len
+  doAssert reference.root.animations.len == reference.manifest.clips.len
   for clip in manifest.clips:
-    player.setRule(clip.name, ClipRule(loop: clip.loop, next: clip.next))
+    player.setRule(clip.name, ClipRule(
+      loop: clip.loop, next: clip.next, hold: clip.hold
+    ))
   var wrist: Node
   for node in reference.root.walkNodes:
     if node.name == "QuickRigCharacter2_LeftHand":
@@ -534,6 +585,9 @@ proc testReference() =
     player.play(clip.name, 0)
     player.seek(0.17)
     reference.sync(player)
+    if clip.kind == "universal":
+      doAssert reference.player.current == -1
+      continue
     let original = reference.root.animations[reference.player.current]
     doAssert original.name == clip.name
     let expected =
@@ -648,6 +702,7 @@ else:
   echo "Testing Chargen parts and animations"
   testRandom()
   testBeardChance()
+  testUniversal()
   testAssembly(AssetDir)
   testParts()
   testEyes()

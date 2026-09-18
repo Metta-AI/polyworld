@@ -60,6 +60,7 @@ def exportLibrary():
     'defaultHairColor': 'Chestnut', 'defaultPupilColor': 'Gray',
     'base': manifest['base'], 'categories': [], 'clips': [],
     'clipSource': manifest['clipSource'], 'presets': manifest['presets'],
+    'defaultAnimation': manifest.get('defaultAnimation', 'Walk'),
   }
   if not (Library / 'colors/skin.json').exists():
     saveJson(Library / 'colors/skin.json', manifest['skins'])
@@ -123,7 +124,8 @@ def exportLibrary():
         metadata['files'].append(path)
       saveJson(metadataPath, metadata)
   for clip in manifest['clips']:
-    path = 'animations/' + slug(clip['name']) + '.glb'
+    folder = 'animations/universal/' if clip['kind'] == 'universal' else 'animations/'
+    path = folder + slug(clip['name']) + '.glb'
     part, partBytes = glbs.subset(document, binary, clips=[clip['name']])
     glbs.write(Library / path, part, partBytes)
     catalog['clips'].append(dict(clip, file=path))
@@ -142,6 +144,13 @@ def exportLibrary():
         for current in catalog['categories']:
           if current['key'] == category['key']:
             current['defaultItem'] = category.get('defaultItem', '')
+  for preset in catalog['presets']:
+    mapping = {'Base': ('Idle', 'Idle_Loop'), 'Happy': ('Walk', 'Walk_Loop'),
+               'Elf': ('Victory', 'Dance_Loop')}
+    if preset['name'] in mapping:
+      old, new = mapping[preset['name']]
+      if preset['pose'] == old and any(clip['name'] == new for clip in catalog['clips']):
+        preset['pose'] = new
   saveJson(Library / 'manifest.json', catalog)
   print('EXPORTED', len(model['meshes']), 'meshes and', len(catalog['clips']), 'clips to', Library)
 

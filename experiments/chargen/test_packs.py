@@ -19,7 +19,7 @@ def checkPack(output, selected, report):
   items = inventory(output, manifest)
   assert set(items) == set(selected)
   assert not (output / 'source').exists()
-  assert len(list((output / 'animations').glob('*.glb'))) == report['clips']
+  assert len(list((output / 'animations').rglob('*.glb'))) == report['clips']
   expected = {clip['file'] for clip in manifest['clips']} | {manifest['rig']}
   for _, _, item in items.values():
     expected.update(item['files'])
@@ -65,6 +65,17 @@ def main():
     assert len(report['atlases']) == 3
     if args.runtime_tests:
       subprocess.run([str(args.runtime_tests.resolve()), str(output)], check=True)
+    universal = Path(directory) / 'universal'
+    report = packLibrary(Library, universal, selected,
+                         ['Walk_Loop', 'Jump_Start', 'Death01'])
+    universalManifest = checkPack(universal, selected, report)
+    assert universalManifest['defaultAnimation'] == 'Walk_Loop'
+    assert {clip['name'] for clip in universalManifest['clips']} == {
+      'Walk_Loop', 'Jump_Start', 'Jump_Loop', 'Death01'}
+    assert next(clip for clip in universalManifest['clips']
+                if clip['name'] == 'Death01')['hold']
+    if args.runtime_tests:
+      subprocess.run([str(args.runtime_tests.resolve()), str(universal)], check=True)
     # A future torso can be added without changing the compiled inventory.
     document, binary = glbs.read(Library / 'body/body.glb')
     for node in document['nodes']:
