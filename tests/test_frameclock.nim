@@ -18,3 +18,17 @@ suite "frame clock":
     var clock: FrameClock
     check clock.dueSteps(25, 10, 2) == 2
     check clock.dueSteps(30, 10, 2) == 1
+
+  test "different display rates emit the same simulation time":
+    for fps in [24, 60, 144, 250]:
+      var clock = FrameClock(lastMillis: 1000)
+      var steps = 0
+      for frame in 1..fps * 60:
+        steps += clock.dueSteps(1000 + frame.int64 * 1000 div fps)
+      check steps == 600
+
+  test "long stalls discard whole-step debt but retain the remainder":
+    var clock: FrameClock
+    check clock.dueSteps(1073) == 10
+    check clock.dueSteps(1099) == 0
+    check clock.dueSteps(1100) == 1
