@@ -56,6 +56,9 @@ const
     "decisionPeriod"
   ]
 
+const HarvestLeadTiles = 3'i32
+  ## A smaller distance difference is still a competitive race.
+
 var
   activeGame: Game
   villagerDataIds: array[VillagerDataSlot, int32]
@@ -100,6 +103,31 @@ proc clampVeggie(value: int32): int32 =
   ## Folds any argument into the vegetable range so a bad index reads as
   ## zeroes instead of crashing the host.
   if value < 0 or value >= VeggieKinds: -1 else: value
+
+proc gardenOutpaced*(w: World, slot, garden: int32): bool =
+  ## Estimates losing races from grid distance and an opponent's gather order.
+  if garden < 0 or garden >= int32(GardenCount) or w.gardens[garden] < 0:
+    return false
+  let
+    goal = w.map.gardenTiles[garden]
+    distance = chebyshev(w.villagers[slot].tile, goal)
+  for other in w.villagers:
+    if other.slot != slot and other.inHouse < 0 and
+        other.order == GatherOrder and other.orderTarget == garden and
+        chebyshev(other.tile, goal) + HarvestLeadTiles <= distance:
+      return true
+
+proc nearestWinnableGarden*(w: World, slot: int32): int32 =
+  ## Finds the nearest stocked plot without a clearly leading competitor.
+  result = -1
+  var best = int32.high
+  for garden in 0'i32 ..< int32(GardenCount):
+    if w.gardens[garden] < 0:
+      continue
+    let distance = chebyshev(w.villagers[slot].tile, w.map.gardenTiles[garden])
+    if distance < best and not w.gardenOutpaced(slot, garden):
+      best = distance
+      result = garden
 
 proc buildVillagerHost*(slot: int32): Host =
   ## Builds the complete world-query and command interface for one villager.
@@ -155,6 +183,16 @@ proc buildVillagerHost*(slot: int32): Host =
         best = distance
         result = garden
   discard result.addFunction("nearestStockedGarden", 0, nearestStockedProc, 40)
+
+  let nearestWinnableProc: HostProc = proc(
+      arguments: openArray[int32]): int32 =
+    game.nearestWinnableGarden(slot)
+  discard result.addFunction("nearestWinnableGarden", 0, nearestWinnableProc, 400)
+
+  let gardenOutpacedProc: HostProc = proc(
+      arguments: openArray[int32]): int32 =
+    int32(game.gardenOutpaced(slot, arguments[0]))
+  discard result.addFunction("gardenOutpaced", 1, gardenOutpacedProc, 20)
 
   ## The other villagers. A villager inside a house reads as standing on
   ## that house's doorstep.
@@ -213,6 +251,32 @@ proc buildVillagerHost*(slot: int32): Host =
     else: game.occupants(arguments[0])
   discard result.addFunction("occupants", 1, occupantsProc, 6)
 
+  let talkingToProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    let other = arguments[0]
+    if not validSlot(other) or game.villagers[other].order != TalkOrder: -1
+    else: game.villagers[other].orderTarget
+  discard result.addFunction("talkingTo", 1, talkingToProc, 3)
+
+  let availableProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    let other = arguments[0]
+    int32(validSlot(other) and game.villagers[other].inHouse < 0 and
+      game.villagers[other].order in {NoOrder, MoveOrder, TalkOrder})
+  discard result.addFunction("socialAvailable", 1, availableProc, 3)
+
+  let inConversationProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(validSlot(arguments[0]) and int(arguments[0]) in game.socialGroup(slot))
+  discard result.addFunction("inMyConversation", 1, inConversationProc, 100)
+
+  let sameConversationProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(validSlot(arguments[0]) and validSlot(arguments[1]) and
+      int(arguments[1]) in game.socialGroup(arguments[0]))
+  discard result.addFunction("sameConversation", 2, sameConversationProc, 100)
+
+  let groupSizeProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    if not validSlot(arguments[0]): 0
+    else: int32(game.socialGroup(arguments[0]).card)
+  discard result.addFunction("socialGroupSize", 1, groupSizeProc, 100)
+
   ## Geometry.
   let distToProc: HostProc = proc(arguments: openArray[int32]): int32 =
     max(abs(arguments[0] - int32(me.tile.x)),
@@ -236,6 +300,10 @@ proc buildVillagerHost*(slot: int32): Host =
   let gatherProc: HostProc = proc(arguments: openArray[int32]): int32 =
     int32(activeGame.applyGather(slot, arguments[0]))
   discard result.addFunction("gather", 1, gatherProc, 400)
+
+  let talkProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(activeGame.applyTalk(slot, arguments[0]))
+  discard result.addFunction("talk", 1, talkProc, 200)
 
   let inviteProc: HostProc = proc(arguments: openArray[int32]): int32 =
     int32(activeGame.applyInvite(slot, arguments[0]))

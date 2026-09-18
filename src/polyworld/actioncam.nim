@@ -1,10 +1,11 @@
-## Shared action camera. Games note scored interests; this module holds a
-## shot until something clearly better appears, and eases there in wall-clock
-## time so playback speed does not whip the view around.
+## Shared camera controls with legacy interests and an opt-in subject director.
 
 import
   std/math,
-  vmath
+  vmath,
+  directors
+
+export directors
 
 const
   SwitchMargin = 1.6'f32
@@ -33,6 +34,9 @@ type
     expireTick: int32
   ActionCam* = ref object
     enabled*: bool
+    subjectMode*: bool
+    director*: Director
+    manualPanel*: bool
     tight*: float32
       ## Zero frames more of the map; one zooms into the hottest point.
     followRate*: float32
@@ -86,11 +90,15 @@ proc initActionCam*(
     zoomRate = 1.0'f32,
     holdSeconds = 2.8'f32,
     mapSpan = 128.0'f32,
-    closeScale = CloseScale
+    closeScale = CloseScale,
+    subjectMode = false,
+    defaultDistance = 40.0'f
 ): ActionCam =
   ## Creates an action camera that starts on with game-specific zoom limits.
   result = ActionCam()
   result.enabled = true
+  result.subjectMode = subjectMode
+  result.director = initDirector(defaultDistance)
   result.minDistance = minDistance
   result.maxDistance = max(maxDistance, minDistance)
   result.tight = clamp(tight, 0.0'f32, 1.0'f32)
@@ -103,16 +111,48 @@ proc initActionCam*(
 proc takeManual*(cam: var ActionCam) =
   ## Drops action cam so a pan, zoom, or selection owns the view.
   cam.enabled = false
+  if cam.subjectMode:
+    cam.director.reset()
+    cam.locked = false
 
 proc toggle*(cam: var ActionCam, followSelection: var bool) =
   ## Turns action cam on or off and drops selection follow when enabling.
   cam.enabled = not cam.enabled
+  if cam.subjectMode:
+    cam.director.reset()
+    cam.locked = false
   if cam.enabled:
     followSelection = false
     cam.locked = false
     cam.lockId = 0
     cam.jumped = false
     cam.ignoreRadius = 0
+
+proc resetDirector*(cam: ActionCam, preserveFinal = false) =
+  ## Invalidates viewer subjects and events after a seek or replay loop.
+  if cam.subjectMode:
+    cam.director.reset(preserveFinal)
+    cam.locked = false
+
+proc direct*(cam: ActionCam, target: var Vec3,
+    distance: var float32, dt: float32, complete, repeating: bool,
+    aspect: float32, lift = 0.25'f) =
+  ## Runs the opt-in subject director without affecting legacy interests.
+  if not cam.subjectMode:
+    return
+  cam.director.lift = lift
+  let viewport = max(
+    cam.director.distance * 0.828427'f * min(aspect, 1.0'f), 1
+  )
+  cam.director.advance(
+    dt, cam.enabled, complete, repeating, cam.manualPanel, viewport
+  )
+  cam.locked = cam.director.locked
+  cam.lockId = cam.director.subject.id
+  cam.lockTarget = cam.director.subject.position
+  cam.lockDistance = cam.director.distance
+  if cam.enabled:
+    cam.director.follow(target, distance, dt)
 
 proc beginFrame*(cam: var ActionCam, tick: int32) =
   ## Drops interests whose tick lifetime has ended.

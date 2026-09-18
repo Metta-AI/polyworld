@@ -85,26 +85,41 @@ proc fbx2gltfBinary*(): string =
       fpUserRead, fpUserWrite, fpUserExec,
       fpGroupRead, fpGroupExec, fpOthersRead, fpOthersExec})
 
-proc convertCommand(binary, fbxPath, outBase: string): string =
-  quoteShell(binary) & " --binary --input " & quoteShell(fbxPath) &
+proc convertCommand(
+  binary, fbxPath, outBase: string,
+  frameRate: int
+): string =
+  ## Selects an explicit bake rate so callers can preserve authored key times.
+  if frameRate notin [24, 30, 60]:
+    raise newException(ConversionError, "Unsupported bake rate: " & $frameRate)
+  quoteShell(binary) & " --binary --anim-framerate bake" & $frameRate &
+    " --input " & quoteShell(fbxPath) &
     " --output " & quoteShell(outBase)
 
-proc convert*(binary, fbxPath, outBase: string): string =
+proc convert*(
+  binary, fbxPath, outBase: string,
+  frameRate = 24
+): string =
   ## Converts one FBX; returns the .glb path.
-  let (output, code) = execCmdEx(convertCommand(binary, fbxPath, outBase))
+  let (output, code) = execCmdEx(
+    convertCommand(binary, fbxPath, outBase, frameRate)
+  )
   if code != 0:
     raise newException(
       ConversionError, "FBX2glTF failed on " & fbxPath & ":\n" & output)
   outBase & ".glb"
 
 proc convertAll*(
-    binary: string, jobs: seq[(string, string)], parallel: int
+  binary: string,
+  jobs: seq[(string, string)],
+  parallel: int,
+  frameRate = 24
 ): seq[string] =
   ## Converts many (fbx, outBase) pairs at once; returns the .glb paths in
   ## the same order. FBX2glTF is where the time goes, so this is the fan-out.
   var commands: seq[string]
   for (fbxPath, outBase) in jobs:
-    commands.add(convertCommand(binary, fbxPath, outBase))
+    commands.add(convertCommand(binary, fbxPath, outBase, frameRate))
     result.add(outBase & ".glb")
   var failures: seq[string]
   proc afterRun(idx: int, p: Process) =

@@ -19,12 +19,15 @@ const
   VillagerBodyRadius = 0.22'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx
+  TalkCircleRadius = 1.5'fx
+  TalkCircleRotations = 8
+  TalkApproachSamples = 16
   GestureTicks = TickRate
     ## How long a gather or wave pose is held before idling again.
 
 type
   OrderKind* = enum
-    NoOrder, MoveOrder, GatherOrder, EnterOrder
+    NoOrder, MoveOrder, GatherOrder, EnterOrder, TalkOrder
 
   Villager* = ref object
     slot*: int32
@@ -34,6 +37,8 @@ type
     inHouse*: int32                   # HASH: include, house id or -1 outdoors
     order*: OrderKind                 # HASH: include
     orderTarget*: int32               # HASH: include, garden or house id
+    talkCircle*: bool                 # HASH: include
+    talkCenter*, talkPosition*: FixedVec2 # HASH: include
     goal*: Tile2                      # HASH: include
     hasGoal*: bool                    # HASH: include
     path*: seq[Tile2]                 # HASH: include
@@ -51,6 +56,7 @@ type
     hostingTonight*: bool             # HASH: include
     acceptedHost*: int32              # HASH: include, slot or -1
     inviteFrom*: array[VillagerCount, bool]  # HASH: include
+    curfewMissed*: bool              # HASH: include, cleared each morning
     lastGained*: int32                # HASH: include, points from last tally
     animation*: AnimationSlot         # HASH: include, viewer parity
     animationTicks*: int32            # HASH: include
@@ -62,6 +68,14 @@ type
     pantry*: int32
       ## Items on the table before anyone ate.
     hostPoints*: int32
+
+  DinnerBite* = object
+    veggie*, points*: int32
+
+  DailyReport* = object
+    startingScore*, dinnerHost*, hostingPoints*, penalty*: int32
+    bites*: array[int(BiteRounds), DinnerBite]
+    biteCount*: int
 
   PathRequest* = object
     slot*: int32
@@ -81,6 +95,7 @@ type
     villagers*: array[VillagerCount, Villager]  # HASH: include; refs
     gardens*: array[GardenCount, int8]  # HASH: include, veggie kind or -1
     pathQueue*: seq[PathRequest]      # HASH: include
+    dailyReports*: array[VillagerCount, DailyReport] # HASH: excluded, derived presentation data.
     lastTally*: array[VillagerCount, DinnerReport]  # HASH: include
     map*: MapData                     # HASH: derived, fixed at generation
 
@@ -222,6 +237,9 @@ proc clearOrder(v: Villager, failed: bool) =
   ## Drops whatever the villager was doing and returns to idle.
   v.order = NoOrder
   v.orderTarget = 0
+  v.talkCircle = false
+  v.talkCenter = FixedVec2Zero
+  v.talkPosition = FixedVec2Zero
   v.hasGoal = false
   v.blockedTicks = 0
   v.clearPath()
@@ -395,6 +413,22 @@ proc advanceVillager(w: World, slot: int32) =
       v.animation = GatherAnimation
       v.animationTicks = 0
       return
+  of TalkOrder:
+    let other = w.villagers[v.orderTarget]
+    if other.inHouse >= 0 or chebyshev(v.tile, other.tile) > TalkRadius or
+        other.order in {GatherOrder, EnterOrder} or
+        (other.order != TalkOrder and v.animationTicks >= TalkReplyTicks):
+      v.clearOrder(false)
+    else:
+      if v.talkCircle and length(v.talkPosition - v.body.pos) > PathArrive:
+        w.steerVillager(slot, v.talkPosition - v.body.pos)
+      else:
+        if v.animation == WalkAnimation:
+          v.animation = IdleAnimation
+        let toward = (if v.talkCircle: v.talkCenter else: other.body.pos) - v.body.pos
+        if toward != FixedVec2Zero:
+          turnToward(v.body.facing, angle(toward), BodyTurnRate)
+    return
   of EnterOrder:
     let house = v.orderTarget
     if chebyshev(v.tile, w.doorOf(house)) <= DoorRadius:
@@ -410,28 +444,35 @@ proc advanceVillager(w: World, slot: int32) =
 ## the pantry feeds host and visitors alike for three bite rounds. A first
 ## taste of a vegetable scores triple. Hosting empties the pantry.
 
-proc chooseBite(pantry: array[VeggieKinds, int16],
-    eaten: array[VeggieKinds, bool]): int32 =
-  ## Picks the vegetable one diner bites: the best-stocked kind this diner
-  ## has never tasted, falling back to the best-stocked kind at all. Ties go
-  ## to the lowest index, so the draw needs no randomness.
-  result = -1
-  var best = 0'i16
+proc chooseBite*(pantry: array[VeggieKinds, int16],
+    eaten: array[VeggieKinds, bool], rng: var Rng): int32 =
+  ## Chooses uniformly among untasted types, otherwise among remaining items.
+  var
+    wanted: array[VeggieKinds, int32]
+    wantedCount = 0'i32
+    total = 0'i32
   for veggie in 0 ..< VeggieKinds:
-    if pantry[veggie] > best and not eaten[veggie]:
-      best = pantry[veggie]
-      result = int32(veggie)
-  if result >= 0:
-    return
+    total += int32(pantry[veggie])
+    if pantry[veggie] > 0 and not eaten[veggie]:
+      wanted[wantedCount] = int32(veggie)
+      inc wantedCount
+  if wantedCount > 0:
+    return wanted[rng.below(wantedCount)]
+  if total <= 0:
+    return -1
+  var pick = rng.below(total)
   for veggie in 0 ..< VeggieKinds:
-    if pantry[veggie] > best:
-      best = pantry[veggie]
-      result = int32(veggie)
+    if pick < int32(pantry[veggie]):
+      return int32(veggie)
+    pick -= int32(pantry[veggie])
+  -1
 
 proc runDinnerTally*(w: World) {.measure.} =
   ## Scores every house at 18:00.
-  for v in w.villagers:
+  for slot, v in w.villagers:
     v.lastGained = 0
+    w.dailyReports[slot] = DailyReport(
+      startingScore: v.score, dinnerHost: NoHouse)
   for house in 0 ..< VillagerCount:
     var report = DinnerReport()
     let host = w.villagers[house]
@@ -445,6 +486,9 @@ proc runDinnerTally*(w: World) {.measure.} =
       report.visitors = int32(diners.len - 1)
       report.pantry = host.carriedTotal()
       report.hostPoints = report.pantry * report.visitors
+      w.dailyReports[house].hostingPoints = report.hostPoints
+      for diner in diners:
+        w.dailyReports[diner].dinnerHost = int32(house)
       host.score += report.hostPoints
       host.lastGained += report.hostPoints
 
@@ -456,13 +500,17 @@ proc runDinnerTally*(w: World) {.measure.} =
         for round in 0 ..< BiteRounds:
           for diner in diners:
             let eater = w.villagers[diner]
-            let veggie = chooseBite(host.inventory, eater.eaten)
+            let veggie = chooseBite(host.inventory, eater.eaten, w.rng)
             if veggie < 0:
               break feeding
             dec host.inventory[veggie]
             let points =
               if eater.eaten[veggie]: RepeatVeggiePoints
               else: NewVeggiePoints
+            let daily = addr w.dailyReports[diner]
+            daily.bites[daily.biteCount] = DinnerBite(
+              veggie: veggie, points: points)
+            inc daily.biteCount
             eater.eaten[veggie] = true
             eater.score += points
             eater.lastGained += points
@@ -486,6 +534,9 @@ proc startDay(w: World) =
   for slot in 0 ..< VillagerCount:
     let v = w.villagers[slot]
     v.inHouse = NoHouse
+    v.curfewMissed = false
+    w.dailyReports[slot] = DailyReport(
+      startingScore: v.score, dinnerHost: NoHouse)
     v.hostingTonight = false
     v.acceptedHost = NoVillager
     for other in 0 ..< VillagerCount:
@@ -498,7 +549,15 @@ proc startDay(w: World) =
   w.pathQueue.setLen(0)
 
 proc startScoreScreen(w: World) =
-  ## Freezes the village for the standings screen between days.
+  ## Applies curfew before sending everyone home for the standings screen.
+  for slot in 0 ..< VillagerCount:
+    let v = w.villagers[slot]
+    v.curfewMissed = v.inHouse != int32(slot)
+    if v.curfewMissed:
+      v.score -= CurfewPenalty
+      w.dailyReports[slot].penalty = CurfewPenalty
+    w.stepInside(int32(slot), int32(slot))
+  w.pathQueue.setLen(0)
   w.phase = ScorePhase
   w.phaseTicks = ScoreScreenTicks
 
@@ -536,6 +595,108 @@ proc applyGather*(w: World, player, garden: int32): bool =
   v.order = GatherOrder
   v.orderTarget = garden
   w.setGoal(player, w.map.gardenTiles[garden])
+  true
+
+proc socialGroup*(w: World, slot: int32): set[0 .. VillagerCount - 1] =
+  ## Includes everyone connected by an active conversation, in either direction.
+  result.incl int(slot)
+  var changed = true
+  while changed:
+    changed = false
+    for v in w.villagers:
+      if v.order != TalkOrder:
+        continue
+      let
+        member = int(v.slot)
+        partner = int(v.orderTarget)
+      if member in result or partner in result:
+        let before = result.card
+        result.incl member
+        result.incl partner
+        changed = changed or result.card != before
+
+proc arrangeConversation(w: World, group: set[0 .. VillagerCount - 1]) =
+  ## Gives consenting participants stable, nearby places around a shared center.
+  var
+    members: seq[int32]
+    center = FixedVec2Zero
+  for slot in group:
+    let v = w.villagers[slot]
+    if v.order == TalkOrder:
+      members.add int32(slot)
+      center += v.body.pos
+  if members.len < 3:
+    return
+  center = center / fixed(int32(members.len))
+  var
+    bestCost = int64.high
+    bestCenter: FixedVec2
+    best, chosen, points: array[int(TalkGroupLimit), FixedVec2]
+  proc clearApproach(start, finish: FixedVec2): bool =
+    ## Checks body clearance along the short move into the circle.
+    for step in 0 .. TalkApproachSamples:
+      let pos = start + (finish - start) * fixed(int32(step)) / fixed(TalkApproachSamples)
+      for dx in [-VillagerBodyRadius, VillagerBodyRadius]:
+        for dy in [-VillagerBodyRadius, VillagerBodyRadius]:
+          let (x, y) = cell(pos + fixedVec2(dx, dy))
+          if not w.terrainOpen(x, y):
+            return false
+    true
+  proc assign(index, used: int, cost: int64) =
+    ## Chooses the seating permutation with the least total movement.
+    if cost >= bestCost:
+      return
+    if index == members.len:
+      bestCost = cost
+      best = chosen
+      return
+    for seat in 0 ..< members.len:
+      if (used and (1 shl seat)) != 0:
+        continue
+      let start = w.villagers[members[index]].body.pos
+      if not clearApproach(start, points[seat]):
+        continue
+      chosen[index] = points[seat]
+      assign(index + 1, used or (1 shl seat),
+        cost + lengthSquared(points[seat] - start))
+  for (dx, dy) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]:
+    let candidateCenter = center + fixedVec2(fixed(int32(dx)), fixed(int32(dy)))
+    for rotation in 0 ..< TalkCircleRotations:
+      for seat in 0 ..< members.len:
+        let heading = FixedTau * fixed(int32(seat)) / fixed(int32(members.len)) +
+          FixedTau * fixed(int32(rotation)) / fixed(TalkCircleRotations)
+        points[seat] = candidateCenter + direction(heading) * TalkCircleRadius
+      let before = bestCost
+      assign(0, 0, 0)
+      if bestCost < before:
+        bestCenter = candidateCenter
+  if bestCost == int64.high:
+    return
+  for index, slot in members:
+    let v = w.villagers[slot]
+    v.talkCircle = true
+    v.talkCenter = bestCenter
+    v.talkPosition = best[index]
+
+proc applyTalk*(w: World, player, target: int32): bool =
+  ## Offers or joins a small conversation without controlling the other villager.
+  if not w.commandsOpen or not validSlot(player) or not validSlot(target) or
+      player == target:
+    return false
+  let
+    v = w.villagers[player]
+    other = w.villagers[target]
+  if v.inHouse >= 0 or other.inHouse >= 0 or
+      other.order in {GatherOrder, EnterOrder} or
+      chebyshev(v.tile, other.tile) > TalkRadius or
+      (w.socialGroup(player) + w.socialGroup(target)).card > TalkGroupLimit:
+    return false
+  v.clearOrder(false)
+  v.order = TalkOrder
+  v.orderTarget = target
+  w.arrangeConversation(w.socialGroup(player))
+  v.animation = WaveAnimation
+  v.animationTicks = 0
   true
 
 proc applyInvite*(w: World, player, target: int32): bool =
@@ -645,6 +806,8 @@ proc applyReplayAction*(w: World, action: ReplayAction) =
     discard w.applyExitHouse(player)
   of ActionStop:
     discard w.applyStop(player)
+  of ActionTalk:
+    discard w.applyTalk(player, action.first)
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
@@ -669,6 +832,12 @@ proc applyGather*(game: Game, player, garden: int32): bool =
   result = game.world.applyGather(player, garden)
   if result:
     game.record(ActionGather, player, garden)
+
+proc applyTalk*(game: Game, player, target: int32): bool =
+  ## Records an accepted conversation offer or response.
+  result = game.world.applyTalk(player, target)
+  if result:
+    game.record(ActionTalk, player, target)
 
 proc applyInvite*(game: Game, player, target: int32): bool =
   ## Invites a villager and records the command when accepted.
@@ -740,6 +909,11 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(v.inHouse)
     hash.addHashy(int32(v.order.ord))
     hash.addHashy(v.orderTarget)
+    hash.addHashy(v.talkCircle)
+    hash.addHashy(int32(v.talkCenter.x))
+    hash.addHashy(int32(v.talkCenter.y))
+    hash.addHashy(int32(v.talkPosition.x))
+    hash.addHashy(int32(v.talkPosition.y))
     hash.mixTile(v.goal)
     hash.addHashy(v.hasGoal)
     hash.addHashy(v.path.len)
@@ -758,6 +932,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(v.acceptedHost)
     for invited in v.inviteFrom:
       hash.addHashy(invited)
+    hash.addHashy(v.curfewMissed)
     hash.addHashy(v.lastGained)
     hash.addHashy(int32(v.animation.ord))
     hash.addHashy(v.animationTicks)
