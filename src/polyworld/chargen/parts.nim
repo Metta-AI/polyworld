@@ -17,6 +17,7 @@ type
     style*: int
     nodes*, hides*: seq[string]
     id*, texture*, pupilMask*, tint*: string
+    attachmentBone*: string
     files*, skinNodes*: seq[string]
     hairShades*: seq[HairShade]
     hatShades*: seq[HairShade]
@@ -43,6 +44,7 @@ type
   Preset* = object
     name*, pose*: string
     group*, hairColor*, pupilColor*, hatColor*: string
+    lineupHidden*: bool
     skin*: int
     parts*: seq[PresetPart]
 

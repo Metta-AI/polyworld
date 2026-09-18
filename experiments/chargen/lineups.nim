@@ -53,7 +53,7 @@ proc readLineup*(
     if node.mesh == nil:
       joints[node.name] = node
   for preset in manifest.presets:
-    if preset.group != group:
+    if preset.group != group or preset.lineupHidden:
       continue
     let
       inventory = manifest.presetManifest(preset)

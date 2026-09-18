@@ -405,7 +405,12 @@ remain separate.
 ## Gota heroes
 
 Use `Gota presets` or `Gnome presets` near the top of the Character panel to
-open the ten hero or nine gnome choices. Clicking a name loads the complete
+open the Gota or nine gnome choices. Gota includes the ten heroes and two creeps.
+Blue Creep uses Base body and face, 01 Bright eyes, and skin RGB 59, 147, 184.
+Purple Creep uses skin RGB 131, 16, 159, 02 Focused eyes, pure red pupils,
+Evil 13 Vampire smirk, and Elf ears. Both creeps have no clothing or hair and
+are omitted from the ten-hero lineup.
+Clicking a name loads the complete
 outfit, skin, eye and hair colors, and pose. Clicking the group button again
 closes its list. Enable `Ten Gota heroes` in the animation panel to view the
 whole roster. Launch their 5 by 2 lineup with:
@@ -417,7 +422,8 @@ GOTA_LINEUP=1 nim r experiments/chargen/chargen.nim
 Each hero has independent Foot, Leg, Belt, Chest and Headgear parts. The Demon
 Hunter blindfold occupies Headgear. Capes belong to Chest. Some heroes also
 have fitted variations of existing hair and beards. The new clothing uses
-solid colors without image textures and includes no weapons or props. Faces
+solid colors without image textures. Weapons use the Left hand, Right hand
+and Back slots and load automatically with the Gota presets. Faces
 reuse the existing eyes, mouth, brows, nose and head. The Lich and Death Knight
 are humans with pale and dark skin respectively. The cast uses varied human
 skin tones and character-specific eye shapes. The Demon Hunter retains
@@ -454,7 +460,43 @@ python3 "$CHARGEN_SCRIPTS/gallery_gota.py"
 The isolated builders do not rewrite the shared `source/character.blend`.
 Run them after rebuilding the base library. `verify_gota.py` audits the actual
 selected GLB triangles, finite geometry, normalized weights, rig transforms,
-five clothing slots, and absence of clothing textures. Current totals range
-from 12,257 to 17,675 triangles, below the 20,000 limit for every hero. Runtime
+five clothing slots, and absence of clothing textures. Character bodies and
+clothing remain below 20,000 triangles; equipment is audited separately
+against its 5,000-triangle budget. Runtime
 reviews include front, back, walking and crouching poses. The ordinary Chargen
 tests also check Gota budgets, skin restoration, and shared lineup animation.
+
+## Gota equipment
+
+The ten hero presets now equip swords, shields, a bow and arrow, light and
+heavy quivers, staffs, magical orbs, paired daggers, a crossbow, a censer,
+and paired axes. Use the Left hand, Right hand and Back pickers to change or
+remove them. Creeps and gnome presets retain their own empty equipment slots.
+Equipment has rigid weights on the matching hand, forearm, or upper spine,
+so it follows the shared animation rig without deforming its shapes.
+
+Every item and each complete equipment set is below 5,000 exported triangles.
+The editable source is `source/gota/weapons/equipment.blend`. Independent
+GLBs and sidecars live in `props/left`, `props/right`, and `clothing/backs`.
+Materials use solid colors, smooth normals on curved surfaces, and modest
+emission on magical orbs and crystals. Shields have rear grips. The crossbow
+has a top-facing string ribbon and an underside trigger.
+
+Rebuild and audit the equipment with:
+
+```sh
+blender -b --python-exit-code 1 \
+  --python "$CHARGEN_SCRIPTS/build_gota_weapons.py"
+python3 "$CHARGEN_SCRIPTS/verify_gota_weapons.py"
+nim c -d:release -o:tmp/chargen/gota/render_gota \
+  experiments/chargen/render_gota.nim
+python3 "$CHARGEN_SCRIPTS/review_gota_weapons.py" --render
+python3 "$CHARGEN_SCRIPTS/review_gota_weapons.py" --render --lit
+```
+
+`source/gota/weapons/index.html` contains actual runtime captures, individual
+item views, walking and crouching reviews, GLB links, and polygon counts.
+The `--lit` review adds soft lighting and a slight angle to reveal real depth.
+Curved silhouettes use sampled profiles, blades have raised ridges, and
+orb and crystal faces retain broad facets without textures.
+The separate equipment registration survives subsequent hero rebuilds.

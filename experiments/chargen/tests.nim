@@ -962,7 +962,7 @@ proc testReference() =
       doAssert player.fading == reference.player.fading
 
 proc testGota() =
-  ## Checks all hero budgets, modular skin restoration, and shared animation.
+  ## Checks hero budgets, creep presets, skin restoration, and animation.
   let
     manifest = readManifest(AssetDir)
     model = readCharacter(AssetDir, manifest)
@@ -974,7 +974,7 @@ proc testGota() =
     selection = manifest.defaultSelection()
     count = 0
   for preset in manifest.presets:
-    if preset.group != "Gota":
+    if preset.group != "Gota" or preset.lineupHidden:
       continue
     inc count
     manifest.applyPreset(selection, preset)
@@ -984,13 +984,33 @@ proc testGota() =
     doAssert not nodes["Body"].visible
     doAssert not nodes["GotaFoot.Left"].visible
     doAssert not nodes["GotaFoot.Right"].visible
-    var triangles = 0
+    var triangles, equipmentTriangles = 0
     for node in nodes.values:
       if node.visible:
         for primitive in node.mesh.primitives:
-          triangles +=
+          let total =
             (primitive.indices16.len + primitive.indices32.len) div 3
-    doAssert triangles > 0 and triangles < 20_000, preset.name
+          triangles += total
+          if node.name.startsWith("GotaWeapon_"):
+            equipmentTriangles += total
+    let characterTriangles = triangles - equipmentTriangles
+    doAssert characterTriangles > 0 and characterTriangles < 20_000,
+      preset.name
+    doAssert equipmentTriangles > 0 and equipmentTriangles < 5_000, preset.name
+    for i, category in manifest.categories:
+      if selection[i] < 0:
+        continue
+      let item = category.items[selection[i]]
+      if item.attachmentBone.len == 0:
+        continue
+      doAssert category.key in ["Left hand", "Right hand", "Back"]
+      for name in item.nodes:
+        let node = nodes[name]
+        doAssert node.visible
+        for primitive in node.mesh.primitives:
+          for vertex in 0 ..< primitive.points.len:
+            doAssert abs(node.influence(primitive, vertex,
+              item.attachmentBone) - 1) < 0.0001
     for key in ["Foot", "Leg", "Belt", "Chest", "Headgear"]:
       var present = false
       for choice in preset.parts:
@@ -1004,6 +1024,48 @@ proc testGota() =
     doAssert nodes["GotaFoot.Left"].visible
     doAssert nodes["GotaFoot.Right"].visible
   doAssert count == 10
+  var creepCount = 0
+  for preset in manifest.presets:
+    if preset.group != "Gota" or
+      preset.name notin ["Blue Creep", "Purple Creep"]:
+        continue
+    let purple = preset.name == "Purple Creep"
+    inc creepCount
+    doAssert preset.lineupHidden
+    manifest.applyPreset(selection, preset)
+    nodes.applySelection(manifest, selection)
+    doAssert nodes["Body"].visible
+    doAssert not nodes["GotaSkinUpper"].visible
+    for name, node in nodes:
+      if name.startsWith("GotaWeapon_"):
+        doAssert not node.visible
+    for i, category in manifest.categories:
+      case category.key
+      of "Body", "Face":
+        doAssert category.items[selection[i]].name == "Base"
+      of "Eyes":
+        doAssert category.items[selection[i]].name ==
+          (if purple: "02 Focused" else: "01 Bright")
+      of "Mouth":
+        if purple:
+          doAssert category.items[selection[i]].name == "Evil 13 Vampire smirk"
+        else:
+          doAssert selection[i] == -1
+      of "Ears":
+        if purple:
+          doAssert category.items[selection[i]].name == "Elf"
+        else:
+          doAssert selection[i] == -1
+      else:
+        doAssert selection[i] == -1, category.key
+    let rgb = if purple: [131, 16, 159] else: [59, 147, 184]
+    for i, value in rgb:
+      doAssert abs(manifest.skins[preset.skin].color[i] * 255 -
+        value.float32) < 0.001
+    if purple:
+      let pupil = manifest.pupilColors.colorIndex(preset.pupilColor)
+      doAssert manifest.pupilColors[pupil].rgb == [1'f, 0'f, 0'f]
+  doAssert creepCount == 2
   for clip in ["A_TPose", "Walk_Loop", "Crouch_Fwd_Loop"]:
     player.play(clip, 0)
     player.seek(0.35)
