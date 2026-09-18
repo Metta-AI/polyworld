@@ -87,8 +87,10 @@ proc readLineup*(
         actor.joints.add (joints[node.name], node)
     let index = result.len
     actor.transform = translate(vec3(
-      (index mod 3 - 1).float32 * 3.45,
-      (2 - index div 3).float32 * 4.05,
+      if group == "Gota": (index mod 5 - 2).float32 * 3.7
+      else: (index mod 3 - 1).float32 * 3.45,
+      if group == "Gota": (1 - index div 5).float32 * 4.1
+      else: (2 - index div 3).float32 * 4.05,
       0
     ))
     result.add actor

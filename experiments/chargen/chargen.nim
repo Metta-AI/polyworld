@@ -110,6 +110,7 @@ proc run() =
     originalOutfit = getEnv("ORIGINAL_OUTFIT", "0") == "1"
     reference: Reference
     lineup: seq[LineupActor]
+    lineupGroup = "Gnomes"
     showLineup = false
     selection = manifest.defaultSelection()
     shading = Toon
@@ -130,8 +131,10 @@ proc run() =
     ]
     customSkin = false
     presetIndex = 0
+    presetGroup = ""
     randomTitle = ""
     hasGnomes = false
+    hasGota = false
     hasGnomeParts = false
     speed = 1.0'f
     fade = 0.20'f
@@ -148,6 +151,8 @@ proc run() =
   for preset in manifest.presets:
     if preset.group == "Gnomes":
       hasGnomes = true
+    if preset.group == "Gota":
+      hasGota = true
   for category in manifest.categories:
     for item in category.items:
       if item.alignment == GnomeOnly:
@@ -229,23 +234,26 @@ proc run() =
     playClip(preset.pose, fade)
 
   proc frameLineup() =
-    ## Frames nine T poses in a grid with room for the controls panel.
+    ## Frames the selected lineup with room for the controls panel.
     yaw = 0
     pitch = 0
-    distance = 14.5
-    target = vec3(2.5, 5.94, 0)
+    distance = if lineupGroup == "Gota": 22.0 else: 14.5
+    target =
+      if lineupGroup == "Gota": vec3(3.2, 3.7, 0)
+      else: vec3(2.5, 5.94, 0)
     focusBone = false
 
   proc gnomePose() =
     ## Uses the T pose clip when shipped, otherwise the rig's bind pose.
     playClip(if player.clipIndex("A_TPose") >= 0: "A_TPose" else: "", 0)
 
-  proc setLineup(enabled: bool) =
-    ## Opens the gnome color study while sharing the normal pose controls.
+  proc setLineup(enabled: bool, group = "Gnomes") =
+    ## Opens a preset group while sharing the normal pose controls.
     showLineup = enabled
     if enabled:
-      if lineup.len == 0:
-        lineup = readLineup(directory, manifest, model.root, "Gnomes")
+      if lineup.len == 0 or lineupGroup != group:
+        lineup = readLineup(directory, manifest, model.root, group)
+      lineupGroup = group
       compareOriginal = false
       editingOriginal = false
       showParts = false
@@ -384,6 +392,8 @@ proc run() =
 
   if getEnv("GNOME_LINEUP", "0") == "1":
     setLineup(true)
+  if getEnv("GOTA_LINEUP", "0") == "1":
+    setLineup(true, "Gota")
 
   proc mouseOverUi(): bool =
     ## Prevents camera gestures from starting over either controls panel.
@@ -610,6 +620,24 @@ proc run() =
                   selection[i] = -1
               applyParts()
       if not editingOriginal:
+        group "preset groups":
+          box RowWidth, 34
+          layout LeftToRight
+          itemSpacing 4
+          if hasGota:
+            button "Gota presets":
+              presetGroup =
+                if presetGroup == "Gota": "" else: "Gota"
+          if hasGnomes:
+            button "Gnome presets":
+              presetGroup =
+                if presetGroup == "Gnomes": "" else: "Gnomes"
+        if presetGroup.len > 0:
+          for i, preset in manifest.presets:
+            if preset.group == presetGroup:
+              button preset.name:
+                loadPreset(i)
+                presetGroup = ""
         group "aligned random":
           box RowWidth, 34
           layout LeftToRight
@@ -776,13 +804,20 @@ proc run() =
           scrubber("rim", rimStrength, 0.0'f, 1.0'f, "")
 
       if hasGnomes:
-        let previousLineup = showLineup
-        checkBox("Nine gnomes", showLineup)
-        if showLineup != previousLineup:
-          setLineup(showLineup)
+        var enabled = showLineup and lineupGroup == "Gnomes"
+        let previous = enabled
+        checkBox("Nine gnomes", enabled)
+        if enabled != previous:
+          setLineup(enabled)
+      if hasGota:
+        var enabled = showLineup and lineupGroup == "Gota"
+        let previous = enabled
+        checkBox("Ten Gota heroes", enabled)
+        if enabled != previous:
+          setLineup(enabled, "Gota")
       if showLineup:
-        text "Shared face kit, nine color presets"
-        button "Gnome T pose":
+        text lineupGroup & " character lineup"
+        button "Lineup T pose":
           gnomePose()
           frameLineup()
       let previousComparison = compareOriginal
