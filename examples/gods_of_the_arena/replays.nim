@@ -12,7 +12,7 @@ const
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 41'u16
+  ReplayGameVersion* = 42'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -47,6 +47,7 @@ type
     tick*: uint32
     heroId*: int32
     kind*: uint8
+    slot*: int32
     first*: int32
     second*: int32
 
@@ -92,7 +93,9 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionBuyItem and
       action.kind != ActionUseItem and
       action.kind != ActionAttackMove and
-      action.kind notin ActionCastTarget .. ActionManualSpells:
+      action.kind != ActionCastTarget and
+      action.kind != ActionCastPoint and
+      action.kind != ActionManualSpells:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
 
@@ -102,12 +105,10 @@ proc recordCast*(
     heroId, slot, first, second: int32,
     ground: bool
 ) =
-  ## Records a spell slot and object or ground aim in the existing payload.
-  if slot < 0 or slot > HeroAbilitySlot.high.ord:
-    fail("spell slot is invalid")
+  ## Records every submitted cast, including invalid signed slot arguments.
   recorder.record ReplayAction(
     tick: tick, heroId: heroId,
-    kind: (if ground: ActionCastPoint else: ActionCastTarget) + uint8(slot),
+    kind: (if ground: ActionCastPoint else: ActionCastTarget), slot: slot,
     first: first, second: second
   )
 
@@ -247,7 +248,9 @@ proc validate*(data: ReplayData) =
         action.kind != ActionBuyItem and
         action.kind != ActionUseItem and
         action.kind != ActionAttackMove and
-        action.kind notin ActionCastTarget .. ActionManualSpells:
+        action.kind != ActionCastTarget and
+        action.kind != ActionCastPoint and
+        action.kind != ActionManualSpells:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:

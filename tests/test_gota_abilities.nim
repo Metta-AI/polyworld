@@ -2,6 +2,10 @@ import
   polyworld/[metrics, pathing],
   ../examples/gods_of_the_arena/[content, sim]
 
+when not defined(replayEvents):
+  static:
+    doAssert not compiles(World().events)
+
 proc itemWorld(): World =
   ## Creates visible targets without running navigation or bot decisions.
   result = World(
