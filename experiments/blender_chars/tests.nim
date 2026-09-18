@@ -1,7 +1,7 @@
 import
   std/[os, sets, strutils, tables],
   chroma, gltf, vmath,
-  polyworld/animblend, eyes, parts, references, weights
+  polyworld/animblend, brows, eyes, hairs, parts, references, weights
 
 const AssetDir = currentSourcePath().parentDir / "assets"
 
@@ -18,9 +18,13 @@ proc testParts() =
   doAssert nodes["Head"].visible
   doAssert nodes["Eyes_Atlas02"].visible
   doAssert nodes["Mouth_Atlas01"].visible
+  doAssert nodes["Brow_Atlas01"].visible
+  doAssert nodes["Hair_01"].visible
   let
     eyeColor = nodes["Eyes_Atlas02"].mesh.primitives[0].material.baseColorFactor
     mouthColor = nodes["Mouth_Atlas01"].mesh.primitives[0].material.baseColorFactor
+    hairColor = nodes["Hair_01"].mesh.primitives[0].material.baseColorFactor
+    browColor = nodes["Brow_Atlas01"].mesh.primitives[0].material.baseColorFactor
   for skin in 0 ..< manifest.skins.len:
     nodes.applySkin(manifest, skin)
     let tint = manifest.skins[skin].color
@@ -31,6 +35,10 @@ proc testParts() =
       eyeColor
     doAssert nodes["Mouth_Atlas01"].mesh.primitives[0].material.baseColorFactor ==
       mouthColor
+    doAssert nodes["Hair_01"].mesh.primitives[0].material.baseColorFactor ==
+      hairColor
+    doAssert nodes["Brow_Atlas01"].mesh.primitives[0].material.baseColorFactor ==
+      browColor
   for name in ["Neutral", "Happy", "Angry", "Original2"]:
     let primitives = nodes["Eyes_" & name].mesh.primitives
     doAssert primitives.len == 1
@@ -185,6 +193,137 @@ proc testMouths() =
         if primitive.jointWeights[i][j] > 0:
           doAssert node.skin.joints[ids[j].int].name == "Head"
   doAssert count == 16
+
+proc testBrows() =
+  ## Checks eyebrow cutouts, atlas selection, isolated tint, and head weights.
+  let
+    model = readGltfFile(AssetDir / "character.glb")
+    nodes = partNodes(model.root)
+    brows = initBrowMaterials(model.root)
+    protected = ["Head", "Eyes_Atlas02", "Mouth_Atlas01", "Hair_01"]
+  var originals: seq[Color]
+  for name in protected:
+    originals.add nodes[name].mesh.primitives[0].material.baseColorFactor
+  for tint in [WhiteBrows, HairColors[0].rgb, HairColors[22].rgb]:
+    brows.applyBrowTint(tint)
+    var count = 0
+    for node in model.root.walkNodes:
+      if node.mesh == nil or not node.name.startsWith("Brow_Atlas"):
+        continue
+      inc count
+      doAssert node.mesh.primitives.len == 1
+      let
+        index = node.name["Brow_Atlas".len .. ^1].parseInt - 1
+        column = index mod 4
+        row = index div 4
+        primitive = node.mesh.primitives[0]
+        material = primitive.material
+      doAssert material.unlit
+      doAssert material.alphaMode == MaskAlphaMode
+      doAssert material.baseColorFactor == color(tint[0], tint[1], tint[2], 1)
+      doAssert not material.baseColorPlaceholder
+      doAssert material.baseColor.width == 1254
+      doAssert material.baseColor.height == 1254
+      doAssert material.baseColor.data[0].a == 0
+      for uv in primitive.uvs:
+        doAssert uv.x > column.float32 / 4
+        doAssert uv.x < (column + 1).float32 / 4
+        doAssert uv.y > row.float32 / 4
+        doAssert uv.y < (row + 1).float32 / 4
+      for i, ids in primitive.jointIds:
+        for j in 0 ..< 4:
+          if primitive.jointWeights[i][j] > 0:
+            doAssert node.skin.joints[ids[j].int].name == "Head"
+    doAssert count == 16
+    for i, name in protected:
+      doAssert nodes[name].mesh.primitives[0].material.baseColorFactor ==
+        originals[i]
+
+proc testHair() =
+  ## Checks all hair meshes follow the head and remain independently shaded.
+  let model = readGltfFile(AssetDir / "character.glb")
+  var count = 0
+  for node in model.root.walkNodes:
+    if node.mesh == nil or not node.name.startsWith("Hair_"):
+      continue
+    inc count
+    doAssert node.skin != nil
+    for primitive in node.mesh.primitives:
+      doAssert not primitive.material.unlit
+      doAssert primitive.jointIds.len == primitive.jointWeights.len
+      doAssert primitive.jointIds.len > 0
+      for i, ids in primitive.jointIds:
+        var total = 0.0'f
+        for j in 0 ..< 4:
+          let weight = primitive.jointWeights[i][j]
+          total += weight
+          if weight > 0:
+            doAssert node.skin.joints[ids[j].int].name == "Head"
+        doAssert abs(total - 1) < 0.00001
+  doAssert count == 16
+
+proc testHairColors() =
+  ## Verifies tint isolation and restores custom shades after weight mode.
+  let
+    manifest = readManifest(AssetDir)
+    model = readGltfFile(AssetDir / manifest.model)
+    nodes = partNodes(model.root)
+    hair = initHairMaterials(nodes, manifest)
+    head = nodes["Head"].mesh.primitives[0].material
+    eyes = nodes["Eyes_Atlas02"].mesh.primitives[0].material
+    mouth = nodes["Mouth_Atlas01"].mesh.primitives[0].material
+    headTint = head.baseColorFactor
+    eyeTint = eyes.baseColorFactor
+    mouthTint = mouth.baseColorFactor
+  var
+    untouched: seq[Material]
+    originalTints: seq[Color]
+    hairNodes: HashSet[string]
+  for surface in manifest.hairShades:
+    hairNodes.incl surface.node
+  doAssert hairNodes.len == 16
+  for node in model.root.walkNodes:
+    if node.mesh == nil or not node.name.startsWith("Hair_"):
+      continue
+    for i, primitive in node.mesh.primitives:
+      var tinted = false
+      for surface in manifest.hairShades:
+        if surface.node == node.name and surface.primitive == i:
+          tinted = true
+      if not tinted:
+        untouched.add primitive.material
+        originalTints.add primitive.material.baseColorFactor
+  doAssert untouched.len > 0
+  for preset in HairColors:
+    doAssert HairColors[hairColor(preset.name.toUpperAscii())] == preset
+    hair.applyHairTint(preset.rgb)
+    for surface in manifest.hairShades:
+      let material = nodes[surface.node].mesh.primitives[
+        surface.primitive
+      ].material
+      doAssert material.baseColorFactor == color(
+        clamp(preset.rgb[0] * surface.shade, 0, 1),
+        clamp(preset.rgb[1] * surface.shade, 0, 1),
+        clamp(preset.rgb[2] * surface.shade, 0, 1),
+        1
+      )
+    doAssert head.baseColorFactor == headTint
+    doAssert eyes.baseColorFactor == eyeTint
+    doAssert mouth.baseColorFactor == mouthTint
+    for i, material in untouched:
+      doAssert material.baseColorFactor == originalTints[i]
+  var preview = initWeightPreview(model.root, AssetDir)
+  let
+    selected = preview.boneIndex("Head")
+    custom = [0.16'f, 0.73'f, 0.42'f]
+  hair.applyHairTint(custom)
+  preview.updateWeights(true, selected)
+  preview.updateWeights(false, selected)
+  hair.applyHairTint(custom)
+  for primitive in nodes["Hair_01"].mesh.primitives:
+    doAssert primitive.material.baseColorFactor ==
+      color(custom[0], custom[1], custom[2], 1)
+    doAssert not primitive.material.unlit
 
 proc testOutfits() =
   ## Checks future clothing colors and replacement meshes without new assets.
@@ -344,6 +483,9 @@ echo "Testing Blender character parts and animations"
 testParts()
 testEyes()
 testMouths()
+testBrows()
+testHair()
+testHairColors()
 testOutfits()
 testWeights()
 testReference()

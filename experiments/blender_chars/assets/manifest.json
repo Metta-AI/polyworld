@@ -469,14 +469,208 @@
       ]
     },
     {
-      "key": "Hair",
-      "selected": -1,
-      "items": []
+      "key": "Brow",
+      "selected": 0,
+      "items": [
+        {
+          "name": "01 Soft arch",
+          "nodes": [
+            "Brow_Atlas01"
+          ]
+        },
+        {
+          "name": "02 Confident",
+          "nodes": [
+            "Brow_Atlas02"
+          ]
+        },
+        {
+          "name": "03 Focused",
+          "nodes": [
+            "Brow_Atlas03"
+          ]
+        },
+        {
+          "name": "04 Heroic",
+          "nodes": [
+            "Brow_Atlas04"
+          ]
+        },
+        {
+          "name": "05 Skeptical",
+          "nodes": [
+            "Brow_Atlas05"
+          ]
+        },
+        {
+          "name": "06 Worried",
+          "nodes": [
+            "Brow_Atlas06"
+          ]
+        },
+        {
+          "name": "07 Surprised",
+          "nodes": [
+            "Brow_Atlas07"
+          ]
+        },
+        {
+          "name": "08 Stern",
+          "nodes": [
+            "Brow_Atlas08"
+          ]
+        },
+        {
+          "name": "09 Bold curve",
+          "nodes": [
+            "Brow_Atlas09"
+          ]
+        },
+        {
+          "name": "10 Mischievous",
+          "nodes": [
+            "Brow_Atlas10"
+          ]
+        },
+        {
+          "name": "11 Bushy",
+          "nodes": [
+            "Brow_Atlas11"
+          ]
+        },
+        {
+          "name": "12 Sweeping",
+          "nodes": [
+            "Brow_Atlas12"
+          ]
+        },
+        {
+          "name": "13 Slit",
+          "nodes": [
+            "Brow_Atlas13"
+          ]
+        },
+        {
+          "name": "14 Cocky",
+          "nodes": [
+            "Brow_Atlas14"
+          ]
+        },
+        {
+          "name": "15 Concerned",
+          "nodes": [
+            "Brow_Atlas15"
+          ]
+        },
+        {
+          "name": "16 Tousled",
+          "nodes": [
+            "Brow_Atlas16"
+          ]
+        }
+      ]
     },
     {
-      "key": "Brow",
-      "selected": -1,
-      "items": []
+      "key": "Hair",
+      "selected": 0,
+      "items": [
+        {
+          "name": "01 French crop",
+          "nodes": [
+            "Hair_01"
+          ]
+        },
+        {
+          "name": "02 Bowl cut",
+          "nodes": [
+            "Hair_02"
+          ]
+        },
+        {
+          "name": "03 Flat top",
+          "nodes": [
+            "Hair_03"
+          ]
+        },
+        {
+          "name": "04 Clustered afro",
+          "nodes": [
+            "Hair_04"
+          ]
+        },
+        {
+          "name": "05 Twist crop",
+          "nodes": [
+            "Hair_05"
+          ]
+        },
+        {
+          "name": "06 Asymmetric bob",
+          "nodes": [
+            "Hair_06"
+          ]
+        },
+        {
+          "name": "07 Dutch braid",
+          "nodes": [
+            "Hair_07"
+          ]
+        },
+        {
+          "name": "08 Braided bun",
+          "nodes": [
+            "Hair_08"
+          ]
+        },
+        {
+          "name": "09 Twin braids",
+          "nodes": [
+            "Hair_09"
+          ]
+        },
+        {
+          "name": "10 Blunt bob",
+          "nodes": [
+            "Hair_10"
+          ]
+        },
+        {
+          "name": "11 Wavy panels",
+          "nodes": [
+            "Hair_11"
+          ]
+        },
+        {
+          "name": "12 Wolf cut",
+          "nodes": [
+            "Hair_12"
+          ]
+        },
+        {
+          "name": "13 Pixie",
+          "nodes": [
+            "Hair_13"
+          ]
+        },
+        {
+          "name": "14 Low ponytail",
+          "nodes": [
+            "Hair_14"
+          ]
+        },
+        {
+          "name": "15 Swept locs",
+          "nodes": [
+            "Hair_15"
+          ]
+        },
+        {
+          "name": "16 Side braid",
+          "nodes": [
+            "Hair_16"
+          ]
+        }
+      ]
     },
     {
       "key": "Beard",
@@ -1050,6 +1244,93 @@
           "item": "Elf"
         }
       ]
+    }
+  ],
+  "hairShades": [
+    {
+      "node": "Hair_01",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_02",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_03",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_04",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_05",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_05",
+      "primitive": 1,
+      "shade": 1.1
+    },
+    {
+      "node": "Hair_06",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_07",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_08",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_09",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_10",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_11",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_12",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_13",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_14",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_15",
+      "primitive": 0,
+      "shade": 1.0
+    },
+    {
+      "node": "Hair_16",
+      "primitive": 0,
+      "shade": 1.0
     }
   ]
 }

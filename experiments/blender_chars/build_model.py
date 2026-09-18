@@ -2,6 +2,7 @@
 
 import json
 import math
+import struct
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ Reference = Preview / "reference/01_base_body.png"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.dont_write_bytecode = True
 from retarget import FrameRate, retarget
+from hairs import Names as HairNames, buildHair
 
 Tau = math.tau
 Output.mkdir(parents=True, exist_ok=True)
@@ -502,6 +504,40 @@ def makeMouth(name):
   return facePart("Mouth_" + name, shapes)
 
 
+def makeBrowTexture(cell):
+  """Project a white tintable eyebrow pair onto the forehead and head rig."""
+  name = "Brow_Atlas" + str(cell["index"]).zfill(2)
+  left, top, right, bottom = cell["contentRect"]
+  left, top, right, bottom = left - 2, top - 2, right + 2, bottom + 2
+  width, height = (right - left) * .0026, (bottom - top) * .0026
+  columns, rows = 24, 12
+  vertices, faces, weights, uvs = [], [], [], []
+  for row in range(rows + 1):
+    z = 2.555 - height / 2 + height * row / rows
+    for column in range(columns + 1):
+      x = -width / 2 + width * column / columns
+      x += .035 * max(-1, min(1, x / .06))
+      hit = headSurface.ray_cast(Vector((x, -2, z)), Vector((0, 1, 0)))
+      assert hit[0] is not None, (name, x, z)
+      vertices.append((x, hit[0].y - .009, z))
+      weights.append({"Head": 1})
+      uvs.append(((left + (right - left) * column / columns) /
+                  browAtlas["size"][0],
+                  1 - (bottom - (bottom - top) * row / rows) /
+                  browAtlas["size"][1]))
+  for row in range(rows):
+    for column in range(columns):
+      index = row * (columns + 1) + column
+      faces.append((index, index + 1, index + columns + 2,
+                    index + columns + 1))
+  item = meshObject(name, vertices, faces, weights)
+  layer = item.data.uv_layers.new(name="Brow projection")
+  for loop in item.data.loops:
+    layer.data[loop.index].uv = uvs[loop.vertex_index]
+  applyFaceTexture(item, Output / "brows/generated_v1" / browAtlas["art"])
+  return item
+
+
 def makeEar(kind, side, sign):
   """Create a detachable closed ear with a raised rim and recessed bowl."""
   if kind == "Round":
@@ -635,7 +671,11 @@ items.extend(makeEyes(name) for name in eyeNames)
 mouthAtlas = json.loads((Output / "mouths/generated_v1/atlas.json").read_text())
 items.extend(makeMouthTexture(cell) for cell in mouthAtlas["cells"])
 items.extend(makeMouth(name) for name in ["Smile", "Neutral", "Open"])
-defaultNames = baseNames + ["Eyes_Atlas02", "Mouth_Atlas01", "Nose_Tiny"]
+browAtlas = json.loads((Output / "brows/generated_v1/atlas.json").read_text())
+items.extend(makeBrowTexture(cell) for cell in browAtlas["cells"])
+items.extend(buildHair(character))
+defaultNames = baseNames + ["Eyes_Atlas02", "Mouth_Atlas01", "Brow_Atlas01",
+                            "Nose_Tiny", "Hair_01"]
 defaultItems = [item for item in items if item.name in defaultNames]
 for item in items:
   item.hide_render = item.name not in defaultNames
@@ -645,7 +685,7 @@ for item in items:
   modifier = item.modifiers.new("Shared humanoid rig", "ARMATURE")
   modifier.object = rig
   item.parent = rig
-  if not item.name.startswith(("Eyes_", "Mouth_Atlas")):
+  if not item.name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")):
     addUv(item)
   for vertex in item.data.vertices:
     total = sum(group.weight for group in vertex.groups)
@@ -796,6 +836,14 @@ manifest = {
       {"name": name, "nodes": ["Ears_" + name + "_" + side
                                for side in ["Left", "Right"]]}
       for name in ["Round", "Elf"]]},
+    {"key": "Brow", "selected": 0, "items": [
+      {"name": cell["label"],
+       "nodes": ["Brow_Atlas" + str(cell["index"]).zfill(2)]}
+      for cell in browAtlas["cells"]]},
+    {"key": "Hair", "selected": 0, "items": [
+      {"name": str(i + 1).zfill(2) + " " + name,
+       "nodes": ["Hair_" + str(i + 1).zfill(2)]}
+      for i, name in enumerate(HairNames)]},
   ],
   "clipSource": "modular_chars: RPG Tiny Hero Duo SwordAndShield and Layer Lab poses",
   "clips": sourceClips,
@@ -809,8 +857,21 @@ manifest = {
       {"category": "Ears", "item": "Elf"}]},
   ],
 }
-for name in ["Hair", "Brow", "Beard", "Earring", "Eyewear", "Headgear",
+for name in ["Beard", "Earring", "Eyewear", "Headgear",
              "Chest", "Back", "Hand", "Leg", "Foot", "Left hand", "Right hand"]:
   manifest["categories"].append({"key": name, "selected": -1, "items": []})
+data = (Output / "character.glb").read_bytes()
+size = struct.unpack_from("<I", data, 12)[0]
+document = json.loads(data[20:20 + size])
+shades = {'Chestnut': 1.0, 'Chestnut light': 1.1, 'Chestnut shade': .9}
+manifest['hairShades'] = []
+for node in document['nodes']:
+  if not node.get('name', '').startswith('Hair_') or 'mesh' not in node:
+    continue
+  for index, primitive in enumerate(document['meshes'][node['mesh']]['primitives']):
+    material = document['materials'][primitive['material']]['name']
+    if material in shades:
+      manifest['hairShades'].append({'node': node['name'], 'primitive': index,
+                                     'shade': shades[material]})
 (Output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print("MODEL_REPORT", json.dumps(report))
