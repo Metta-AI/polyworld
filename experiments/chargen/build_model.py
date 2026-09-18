@@ -24,6 +24,7 @@ from retarget import FrameRate, retarget
 from universal import retargetUniversal
 from hairs import Names as HairNames, buildHair
 from beards import Names as BeardNames, buildBeards
+from clothes import buildClothes, clothingParts
 
 Tau = math.tau
 Output.mkdir(parents=True, exist_ok=True)
@@ -721,6 +722,7 @@ imageFaceNames = {spec["node"] for spec in imageFaces}
 items.extend(makeImageFace(spec) for spec in imageFaces)
 items.extend(buildHair(character))
 items.extend(buildBeards(character))
+items.extend(buildClothes(character, bodyParts))
 defaultNames = baseNames + ["Eyes_Atlas02", "Mouth_Atlas01", "Brow_Atlas01",
                             "Nose_Tiny", "Hair_01"]
 defaultItems = [item for item in items if item.name in defaultNames]
@@ -925,6 +927,9 @@ for spec in imageFaces:
 for name in ["Earring", "Eyewear", "Headgear",
              "Chest", "Back", "Hand", "Leg", "Foot", "Left hand", "Right hand"]:
   manifest["categories"].append({"key": name, "selected": -1, "items": []})
+for key, part in clothingParts():
+  next(category for category in manifest['categories']
+       if category['key'] == key)['items'].append(part)
 data = (Preview / "character.glb").read_bytes()
 size = struct.unpack_from("<I", data, 12)[0]
 document = json.loads(data[20:20 + size])

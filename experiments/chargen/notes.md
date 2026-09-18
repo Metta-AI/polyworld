@@ -19,8 +19,9 @@ The default library is `../polyworld_data/characters/chargen`. Set
 | `eyes` | One PNG, iris mask, GLB surface, and JSON sidecar per generated pair |
 | `mouths`, `eyebrows` | One PNG, GLB surface, and JSON sidecar per generated style |
 | `colors` | Editable skin, hair, and eye preset lists |
-| `clothing/torsos`, `clothing/backs`, `clothing/gloves` | Future clothing parts |
-| `clothing/pants`, `clothing/boots`, `hats` | Future clothing parts |
+| `clothing/torsos` | Eight simple medieval shirts, tunics, and a leather jerkin |
+| `clothing/pants`, `clothing/boots` | Four trouser styles and four boot styles |
+| `clothing/backs`, `clothing/gloves`, `hats` | Future clothing parts |
 | `earrings`, `eyewear`, `props/left`, `props/right` | Future accessories |
 | `rig` | Shared humanoid skeleton and bone preview metadata |
 | `animations` | One GLB per animation clip |
@@ -71,12 +72,44 @@ Optional fields:
 - `pupilMask`: A matching PNG whose red channel controls iris tinting.
 - `tint`: Use `"hair"` for a white eyebrow decal.
 - `style` and `color`: Group clothing color variants for the color picker.
+- `singleFile`: Keep a garment's mesh sections together when rebuilding its GLB.
 
 Put texture references in the glTF material as well as the sidecar. Face
 materials use an unlit alpha cutout. New face GLBs use UVs within their own PNG;
 the packer remaps these when building an atlas. New categories can be registered
 by adding a `key`, `directory`, and optional `defaultItem` to the root manifest.
 Restart the utility after adding files.
+
+## Body-derived clothing
+
+The `Chest`, `Leg`, and `Foot` pickers now include the 16 approved medieval
+clothing designs. Shirts and trousers are cut from the actual body surface and
+offset outward. Boots also use the existing foot geometry. Cuts interpolate
+the original bone weights. Extruded tunic hems sample nearby body weights so
+they follow the hips and upper legs. Open necklines, cuffs, and hems have a
+thin modeled rim. The body remains smooth shaded.
+
+Each complete garment ships as one GLB and one sidecar. Trousers have seamless
+internal mesh sections at the four boot heights. Boot sidecars hide the lower
+sections covered by their shafts and the bare feet. Removing boots restores
+those sections. This uses the existing `hides` selection mechanism and works
+in selective game exports too. No animation clips or original kit meshes are
+changed. The clothes are skinned meshes, without cloth simulation.
+
+To rebuild only clothing while retaining the current body and animations:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 \
+  /Applications/Blender.app/Contents/MacOS/Blender --background \
+  --python experiments/chargen/build_clothes.py
+```
+
+`clothes.py` is also part of the full model build. `render_clothes.py` and
+`clothing_sheets.py` produce the matching front/back contact sheet under
+`tmp/chargen/clothing_reviews`. `verify_clothes.py` checks weights and topology
+and records sampled body clearance for inspecting extreme poses. Numeric
+clearance alone is not a collision test because nearby body regions overlap
+in bent poses. Check the actual rendered outfits when changing their fit.
 
 ## Shipping selected parts
 

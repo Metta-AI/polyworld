@@ -107,9 +107,10 @@ def exportLibrary():
           texture = identity + '.png'
           shutil.copy2(Source / 'eyes' / (node.removeprefix('Eyes_') + '.png'), Library / texture)
           metadata['texture'] = texture
-      for node in item['nodes']:
-        filename = identity if len(item['nodes']) == 1 else folder + '/' + slug(node)
-        part, partBytes = glbs.subset(document, binary, meshes=[node])
+      groups = [item['nodes']] if item.get('singleFile') else [[node] for node in item['nodes']]
+      for nodes in groups:
+        filename = identity if len(groups) == 1 else folder + '/' + slug(nodes[0])
+        part, partBytes = glbs.subset(document, binary, meshes=nodes)
         if texture is not None:
           assert len(part['images']) == 1
           part['images'] = [{'uri': Path(texture).name}]
@@ -118,7 +119,7 @@ def exportLibrary():
             left, top, right, bottom = crop
             partBytes = glbs.remapUvs(part, partBytes, lambda u, v: (
               (u * width - left) / (right - left), (v * height - top) / (bottom - top)))
-          part, partBytes = glbs.subset(part, partBytes, meshes=[node])
+          part, partBytes = glbs.subset(part, partBytes, meshes=nodes)
         path = filename + '.glb'
         glbs.write(Library / path, part, partBytes)
         metadata['files'].append(path)

@@ -96,7 +96,7 @@ proc run() =
     weightPreview = initWeightPreview(model.root, directory)
     selectedBone = weightPreview.boneIndex("LeftHand")
     showBones = false
-    wireframe = true
+    wireframe = false
     boneLabels = false
     restWrist = false
     focusBone = false
@@ -287,7 +287,7 @@ proc run() =
   if focusBone:
     distance = envNumber("CAM_DIST", 1.6)
   restWrist = getEnv("REST_WRIST", "0") != "0"
-  wireframe = getEnv("WIREFRAME", "1") != "0"
+  wireframe = getEnv("WIREFRAME", if shading == Weights: "1" else: "0") != "0"
   if reference != nil:
     reference.sync(player)
 
@@ -508,7 +508,15 @@ proc run() =
             chooseSkin(choice)
         if not editingOriginal:
           skinControls()
+      var categoryOrder: seq[int]
       for i, category in source.categories:
+        if category.key in ["Chest", "Leg", "Foot"]:
+          categoryOrder.add i
+      for i, category in source.categories:
+        if category.key notin ["Chest", "Leg", "Foot"]:
+          categoryOrder.add i
+      for i in categoryOrder:
+        let category = source.categories[i]
         if category.items.len == 0:
           continue
         var choice =
@@ -528,7 +536,7 @@ proc run() =
           text "Beard uses hair color."
       if not editingOriginal:
         pupilControls()
-        text "Clothing and props: not modeled yet."
+        text "Props: not modeled yet."
       button "Reset parts":
         if editingOriginal:
           reference.clearParts()
@@ -598,6 +606,7 @@ proc run() =
         radioButton("Normal", shading, Clay)
         radioButton("Toon", shading, Toon)
         radioButton("Weights", shading, Weights)
+      checkBox("Polygon overlay (V)", wireframe)
       checkBox("MSAA 4x", msaa)
       if shading == Toon:
         group "palette":
@@ -661,8 +670,6 @@ proc run() =
       text &"Cross-fade: {fade:.2f}s"
       scrubber("fade", fade, 0.0'f, 1.0'f, "")
       checkBox("Bones overlay", showBones)
-      if shading == Weights:
-        checkBox("Mesh edges", wireframe)
       if shading == Weights or showBones:
         group "bone choice":
           box RowWidth, 36
@@ -747,6 +754,8 @@ proc run() =
     if window.buttonPressed[KeyW]:
       shading = if shading == Weights: Clay else: Weights
       showBones = shading == Weights
+    if window.buttonPressed[KeyV]:
+      wireframe = not wireframe
     if window.buttonPressed[KeyB]:
       showBones = not showBones
     if window.buttonPressed[KeyF]:
@@ -805,6 +814,12 @@ proc run() =
     pbr.useShadows = false
     pbr.drawSkybox = false
     pbr.vsync = true
+    toon.view = view
+    toon.proj = projection
+    toon.transform = modelTransform
+    toon.cameraPosition = eye
+    toon.lightDirection = pbr.sunLightDirection
+    toon.rimColor = color(1, 1, 1, if rimLight: rimStrength else: 0)
     renderer.beginFrame(window, window.size)
     renderer.clearScreen(color(0.07, 0.08, 0.11, 1))
     if msaa:
@@ -818,22 +833,8 @@ proc run() =
         pbr.draw(reference.root)
         pbr.transform = modelTransform
       pbr.draw(model.root)
-      if shading == Weights and wireframe:
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
-        glEnable(GL_POLYGON_OFFSET_LINE)
-        glPolygonOffset(-1, -1)
-        pbr.tint = color(0.10, 0.13, 0.20, 1)
-        pbr.draw(model.root)
-        glDisable(GL_POLYGON_OFFSET_LINE)
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
     of Toon:
       toon.drawBackground()
-      toon.view = view
-      toon.proj = projection
-      toon.transform = modelTransform
-      toon.cameraPosition = eye
-      toon.lightDirection = pbr.sunLightDirection
-      toon.rimColor = color(1, 1, 1, if rimLight: rimStrength else: 0)
       toon.unlitNodes.clear()
       for name in nodes.keys:
         if name.startsWith("Eyes_") or
@@ -851,6 +852,19 @@ proc run() =
         toon.draw(reference.root)
         toon.transform = modelTransform
       toon.draw(model.root)
+    if wireframe:
+      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+      glEnable(GL_POLYGON_OFFSET_LINE)
+      glPolygonOffset(-1, -1)
+      toon.tint = color(0, 0, 0, 1)
+      if compareOriginal:
+        toon.transform = reference.transform
+        toon.draw(reference.root)
+        toon.transform = modelTransform
+      toon.draw(model.root)
+      toon.tint = color(1, 1, 1, 1)
+      glDisable(GL_POLYGON_OFFSET_LINE)
+      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
     renderer.endFrame()
     glDisable(GL_DEPTH_TEST)
     glDisable(GL_CULL_FACE)
