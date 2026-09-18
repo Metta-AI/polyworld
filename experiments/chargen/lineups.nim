@@ -3,12 +3,28 @@ import
   gltf, vmath,
   polyworld/chargen
 
+const CreepStrikeTime* = 19'f / 30
+
 type
+  LineupView* = enum
+    FrontView, SideView, TopView
+
   LineupActor* = object
     name*: string
     root*: Node
     transform*: Mat4
     joints: seq[tuple[source, target: Node]]
+
+proc poseCreeps*(actors: var seq[LineupActor], view = FrontView) =
+  ## Keeps both creep poses side by side while exposing the same view angle.
+  let rotation =
+    case view
+    of FrontView: mat4()
+    of SideView: rotateY(-PI.float32 / 2)
+    of TopView: rotateX(PI.float32 / 2)
+  for i, actor in actors.mpairs:
+    actor.transform = translate(vec3((i.float32 - 0.5) * 3.8, 1.7, 0)) *
+      rotation * translate(vec3(0, -1.7, 0))
 
 proc presetManifest*(manifest: Manifest, preset: Preset): Manifest =
   ## Keeps only the parts needed by one preset and omits animation copies.
@@ -53,7 +69,11 @@ proc readLineup*(
     if node.mesh == nil:
       joints[node.name] = node
   for preset in manifest.presets:
-    if preset.group != group or preset.lineupHidden:
+    if group == "Creeps":
+      if preset.group != "Gota" or
+        preset.name notin ["Blue Creep", "Purple Creep"]:
+          continue
+    elif preset.group != group or preset.lineupHidden:
       continue
     let
       inventory = manifest.presetManifest(preset)
@@ -94,6 +114,8 @@ proc readLineup*(
       0
     ))
     result.add actor
+  if group == "Creeps":
+    result.poseCreeps()
 
 proc sync*(actors: openArray[LineupActor]) =
   ## Copies the evaluated pose, including cross-fades and scrubbing, once.

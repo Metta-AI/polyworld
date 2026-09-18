@@ -70,6 +70,47 @@ proc attachPart*(root: Node, directory, path: string) =
     part.parent.nodes.add part.node
   root.updateTransforms()
 
+proc rotateAttachment(root: Node, item: PartItem) =
+  ## Rotates rigid equipment about its grip in the glTF bind-space axes.
+  if item.attachmentRotation == [0'f, 0'f, 0'f]:
+    return
+  if item.attachmentBone.len == 0:
+    raise newException(ChargenError, "Missing attachment bone: " & item.name)
+  let
+    pivot = vec3(
+      item.attachmentPivot[0],
+      item.attachmentPivot[1],
+      item.attachmentPivot[2]
+    )
+    angles = vec3(
+      item.attachmentRotation[0],
+      item.attachmentRotation[1],
+      item.attachmentRotation[2]
+    ) * (PI.float32 / 180)
+    offset = translate(pivot) * rotateZ(angles.z) * rotateY(angles.y) *
+      rotateX(angles.x) * translate(-pivot)
+    nodes = partNodes(root)
+  for name in item.nodes:
+    if name notin nodes or nodes[name].skin == nil:
+      raise newException(ChargenError, "Missing attachment mesh: " & name)
+    let node = nodes[name]
+    var socket = -1
+    for i, joint in node.skin.joints:
+      if joint.name == item.attachmentBone:
+        socket = i
+    if socket < 0:
+      raise newException(ChargenError, "Unknown attachment bone: " & item.name)
+    for primitive in node.mesh.primitives:
+      for vertex, weights in primitive.jointWeights:
+        for i in 0 ..< 4:
+          if weights[i] > 0.0001 and
+            primitive.jointIds[vertex][i].int != socket:
+              raise newException(
+                ChargenError, "Attachment must be rigid: " & item.name
+              )
+    node.skin.inverseBindMatrices[socket] =
+      node.skin.inverseBindMatrices[socket] * offset
+
 proc readCharacter*(directory: string, manifest: Manifest): GltfFile =
   ## Assembles the library's selected inventory around a single animated rig.
   result = readModel(directory, manifest.rig)
@@ -81,6 +122,7 @@ proc readCharacter*(directory: string, manifest: Manifest): GltfFile =
         if path notin loaded:
           result.root.attachPart(directory, path)
           loaded.incl path
+      result.root.rotateAttachment(item)
   for spec in manifest.clips:
     let source = readModel(directory, spec.file)
     if source.root.animations.len != 1 or

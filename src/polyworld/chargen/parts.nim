@@ -18,6 +18,7 @@ type
     nodes*, hides*: seq[string]
     id*, texture*, pupilMask*, tint*: string
     attachmentBone*: string
+    attachmentPivot*, attachmentRotation*: array[3, float32]
     files*, skinNodes*: seq[string]
     hairShades*: seq[HairShade]
     hatShades*: seq[HairShade]

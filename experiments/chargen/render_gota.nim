@@ -4,13 +4,14 @@ import
   polyworld/[animblend, chargen, toon], lineups
 
 proc run() =
-  ## Renders a preset and its clothing or equipment in both views.
+  ## Renders a preset with isolated clothing, equipment, or head details.
   let
     directory = getEnv("CHARGEN_LIBRARY", ChargenLibrary)
     output = getEnv("REVIEW_OUTPUT", "tmp/chargen/gota/review")
     manifest = readManifest(directory)
     presetName = getEnv("REVIEW_PRESET", manifest.presets[0].name)
     equipment = getEnv("REVIEW_EQUIPMENT", "0") == "1"
+    headOnly = getEnv("REVIEW_HEAD", "0") == "1"
     smoothLighting = getEnv("REVIEW_PBR", "0") == "1"
     angle = parseFloat(getEnv("REVIEW_ANGLE", "0")).float32
   var
@@ -59,13 +60,22 @@ proc run() =
   var
     original: Table[string, bool]
     categories: seq[string]
-  for key in (if equipment: @["Left hand", "Right hand", "Back"]
+  for key in (if headOnly: @["Headgear"]
+              elif equipment: @["Left hand", "Right hand", "Back"]
               else: @["Foot", "Leg", "Belt", "Chest", "Headgear"]):
     for category in inventory.categories:
       if category.key == key and category.items.len > 0:
         categories.add key
+  var headNodes: HashSet[string]
+  if headOnly:
+    for category in inventory.categories:
+      if category.key in ["Headgear", "Face", "Hair", "Beard", "Eyes",
+                          "Mouth", "Nose", "Ears", "Brow"]:
+        for item in category.items:
+          for name in item.nodes:
+            headNodes.incl name
   for name, node in nodes:
-    original[name] = node.visible
+    original[name] = node.visible and (not headOnly or name in headNodes)
   for category in inventory.categories:
     if category.key in ["Eyes", "Mouth", "Brow"]:
       for item in category.items:
@@ -114,6 +124,10 @@ proc run() =
       center = vec3(0, 1.7, 0)
       height = 3.8'f
       width = if equipment: 3.7'f else: 3.1'f
+    if headOnly:
+      center = vec3(0, 2.63, 0)
+      height = 1.9
+      width = 2.0
     if frame >= 3:
       var
         low = vec3(100, 100, 100)

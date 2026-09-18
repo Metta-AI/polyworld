@@ -19,6 +19,7 @@ const
   TempDir = ExperimentDir.parentDir.parentDir / "tmp/chargen"
   AtlasPath = TempDir / "viewer.atlas.png"
   RowWidth = 320
+  AnimationFrameRate = 30
 
 type
   Shading = enum
@@ -181,6 +182,17 @@ proc run() =
       reference.player.play(name, duration)
     player.paused = false
 
+  proc clipPosition(): float32 =
+    ## Returns the displayed clip time, wrapping only looping animations.
+    if player.current < 0:
+      return 0
+    let clip = model.root.animations[player.current]
+    result = min(player.currentTime, clip.duration)
+    for spec in manifest.clips:
+      if spec.name == clip.name and spec.loop and clip.duration > 0:
+        result = player.currentTime -
+          floor(player.currentTime / clip.duration) * clip.duration
+
   proc prepareComparison() =
     ## Loads the original once and frames both independently skinned models.
     if reference == nil:
@@ -237,10 +249,17 @@ proc run() =
     ## Frames the selected lineup with room for the controls panel.
     yaw = 0
     pitch = 0
-    distance = if lineupGroup == "Gota": 22.0 else: 14.5
-    target =
-      if lineupGroup == "Gota": vec3(3.2, 3.7, 0)
-      else: vec3(2.5, 5.94, 0)
+    case lineupGroup
+    of "Gota":
+      distance = 22
+      target = vec3(3.2, 3.7, 0)
+    of "Creeps":
+      distance = 7.5
+      target = vec3(1.6, 1.7, 0)
+      lineup.poseCreeps()
+    else:
+      distance = 14.5
+      target = vec3(2.5, 5.94, 0)
     focusBone = false
 
   proc gnomePose() =
@@ -261,7 +280,12 @@ proc run() =
       restWrist = false
       shading = Toon
       frameLineup()
-      gnomePose()
+      if group == "Creeps":
+        playClip("Sword_Attack", 0)
+        player.seek(CreepStrikeTime)
+        player.paused = true
+      else:
+        gnomePose()
     else:
       showParts = true
       yaw = 0.22
@@ -394,6 +418,8 @@ proc run() =
     setLineup(true)
   if getEnv("GOTA_LINEUP", "0") == "1":
     setLineup(true, "Gota")
+  if getEnv("CREEP_REVIEW", "0") == "1":
+    setLineup(true, "Creeps")
 
   proc mouseOverUi(): bool =
     ## Prevents camera gestures from starting over either controls panel.
@@ -816,8 +842,19 @@ proc run() =
         checkBox("Ten Gota heroes", enabled)
         if enabled != previous:
           setLineup(enabled, "Gota")
+        button "Creep sword pose":
+          setLineup(true, "Creeps")
       if showLineup:
         text lineupGroup & " character lineup"
+        if lineupGroup == "Creeps":
+          group "creep views":
+            box RowWidth, 36
+            layout LeftToRight
+            itemSpacing 5
+            for view, label in ["Front", "Side", "Top"]:
+              button label:
+                frameLineup()
+                lineup.poseCreeps(LineupView(view))
         button "Lineup T pose":
           gnomePose()
           frameLineup()
@@ -845,17 +882,34 @@ proc run() =
         button "Bind pose":
           playClip("", fade)
       if player.current >= 0:
-        let clip = model.root.animations[player.current]
+        let
+          clip = model.root.animations[player.current]
+          lastFrame = round(clip.duration * AnimationFrameRate).int
         text "Playing: " & clip.name
-        var position = min(player.currentTime, clip.duration)
-        for spec in manifest.clips:
-          if spec.name == clip.name and spec.loop and clip.duration > 0:
-            position = player.currentTime -
-              floor(player.currentTime / clip.duration) * clip.duration
-        let previous = position
-        text &"Time: {position:.2f} / {clip.duration:.2f}s"
+        var
+          position = clipPosition()
+          frame = clamp(round(position * AnimationFrameRate).int, 0, lastFrame)
+          stepped = false
+        let
+          previous = position
+          previousFrame = frame
+        text &"Frame: {frame} / {lastFrame} (30 fps, starts at 0)"
+        scrubber("animation frame", frame, 0, lastFrame, "Frame " & $frame)
+        group "frame steps":
+          box RowWidth, 36
+          layout LeftToRight
+          itemSpacing 5
+          button "Previous frame":
+            frame = max(0, frame - 1)
+            stepped = true
+          button "Next frame":
+            frame = min(lastFrame, frame + 1)
+            stepped = true
+        if frame != previousFrame or stepped:
+          position = min(frame.float32 / AnimationFrameRate, clip.duration)
+        text &"Time: {position:.3f} / {clip.duration:.3f}s"
         scrubber("time", position, 0.0'f, clip.duration, "")
-        if position != previous:
+        if position != previous or stepped:
           player.paused = true
           player.seek(position)
           if reference != nil:
@@ -1094,6 +1148,15 @@ proc run() =
     glDisable(GL_BLEND)
     glDisable(GL_MULTISAMPLE)
     sk.beginUi(window, window.size)
+    if showLineup and lineupGroup == "Creeps" and player.current >= 0:
+      let
+        clip = model.root.animations[player.current]
+        frame = round(clipPosition() * AnimationFrameRate).int
+        lastFrame = round(clip.duration * AnimationFrameRate).int
+        title = &"{clip.name}  |  Frame {frame} / {lastFrame}"
+      discard sk.drawText(
+        sk.textStyle, title, vec2(24, 24), rgbx(235, 241, 249, 255)
+      )
     if compareOriginal:
       let originalTitle =
         if reference.player.current < 0:
