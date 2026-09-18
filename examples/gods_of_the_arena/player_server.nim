@@ -81,7 +81,7 @@ when isMainModule:
     port: 8080,
     bot: repo / "examples/gods_of_the_arena/players/base.bas",
     opponent: repo / "examples/gods_of_the_arena/players/base.bas",
-    policy: repo / "examples/gods_of_the_arena/players/hero.bas",
+    policy: repo / "examples/gods_of_the_arena/players/neural.bas",
     config: repo / "examples/gods_of_the_arena/presets/saved.json",
     maxTicks: 28_800,
     seed: 0
