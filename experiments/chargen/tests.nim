@@ -464,6 +464,45 @@ proc testOutfits() =
   nodes.applySelection(manifest, [-1])
   doAssert nodes["Body"].visible and not nodes["Shirt"].visible
 
+proc testClothing() =
+  ## Checks garment swaps, boot tucking, and restoration across live animation.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    nodes = partNodes(model.root)
+    player = newClipPlayer(model.root)
+  var selection = manifest.defaultSelection()
+  for category in manifest.categories:
+    if category.key == "Chest":
+      doAssert category.items.len == 8
+    if category.key in ["Leg", "Foot"]:
+      doAssert category.items.len == 4
+  for category in manifest.categories:
+    if category.key != "Leg":
+      continue
+    for pants in category.items:
+      manifest.selectPart(selection, "Leg", pants.name)
+      for slot in manifest.categories:
+        if slot.key != "Foot":
+          continue
+        for boots in slot.items:
+          manifest.selectPart(selection, "Foot", boots.name)
+          nodes.applySelection(manifest, selection)
+          for clip in ["Walk_Loop", "Jog_Fwd_Loop", "Crouch_Fwd_Loop"]:
+            player.play(clip, 0)
+            player.seek(0.3)
+            for name in pants.nodes:
+              doAssert nodes[name].visible == (name notin boots.hides)
+            doAssert not nodes["Foot.Left"].visible
+            doAssert not nodes["Foot.Right"].visible
+            doAssert nodes["Body"].visible
+          manifest.selectPart(selection, "Foot", "None")
+          nodes.applySelection(manifest, selection)
+          player.seek(0.6)
+          for name in pants.nodes:
+            doAssert nodes[name].visible
+          doAssert nodes["Foot.Left"].visible and nodes["Foot.Right"].visible
+
 proc testWeights() =
   ## Checks runtime bone attachments and reversible weight preview colors.
   let
@@ -712,6 +751,7 @@ else:
   testHair("Beard_")
   testHairColors()
   testOutfits()
+  testClothing()
   testWeights()
   testReference()
   echo "Chargen tests passed"

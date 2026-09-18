@@ -76,6 +76,19 @@ def main():
                 if clip['name'] == 'Death01')['hold']
     if args.runtime_tests:
       subprocess.run([str(args.runtime_tests.resolve()), str(universal)], check=True)
+    clothing = Path(directory) / 'clothing'
+    outfit = ['body/base', 'heads/base', 'clothing/torsos/05_belted_ochre_tunic',
+              'clothing/pants/10_loose_blue_breeches',
+              'clothing/boots/14_tan_cuff_boots']
+    report = packLibrary(Library, clothing, outfit, ['Walk_Loop'])
+    checkPack(clothing, outfit, report)
+    assert len(list((clothing / 'clothing').rglob('*.glb'))) == 3
+    trousers = json.loads((clothing / 'clothing/pants/10_loose_blue_breeches.json').read_text())
+    boots = json.loads((clothing / 'clothing/boots/14_tan_cuff_boots.json').read_text())
+    assert len(trousers['files']) == 1 and len(trousers['nodes']) == 5
+    assert set(trousers['nodes']) & set(boots['hides'])
+    if args.runtime_tests:
+      subprocess.run([str(args.runtime_tests.resolve()), str(clothing)], check=True)
     # A future torso can be added without changing the compiled inventory.
     document, binary = glbs.read(Library / 'body/body.glb')
     for node in document['nodes']:
