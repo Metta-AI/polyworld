@@ -9,6 +9,7 @@ type
     Both = "both"
     GoodOnly = "good"
     EvilOnly = "evil"
+    GnomeOnly = "gnome"
 
   PartItem* = object
     name*, color*: string
@@ -160,12 +161,22 @@ proc randomSelection*(
 ): seq[int] =
   ## Rolls compatible parts and allows empty optional or unmatched slots.
   for category in manifest.categories:
-    var choices: seq[int]
-    if category.key notin ["Body", "Face", "Eyes", "Mouth", "Beard"]:
-      choices.add -1
+    var choices, gnomes: seq[int]
     for i, item in category.items:
-      if alignment == Both or item.alignment in {Both, alignment}:
+      if alignment == GnomeOnly:
+        if item.alignment == GnomeOnly:
+          gnomes.add i
+        elif item.alignment in {Both, GoodOnly}:
+          choices.add i
+      elif alignment == Both or item.alignment in {Both, alignment}:
         choices.add i
+    if gnomes.len > 0:
+      choices = gnomes
+    let required = category.key in ["Body", "Face", "Eyes", "Mouth"] or
+      (alignment == GnomeOnly and category.key in
+        ["Nose", "Ears", "Headgear", "Chest", "Leg", "Foot"])
+    if not required and category.key != "Beard":
+      choices.add -1
     # Roll beard presence separately from the number of available styles.
     result.add:
       if choices.len == 0 or (category.key == "Beard" and rng.rand(1) == 0):

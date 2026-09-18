@@ -130,7 +130,9 @@ proc run() =
     ]
     customSkin = false
     presetIndex = 0
+    randomTitle = ""
     hasGnomes = false
+    hasGnomeParts = false
     speed = 1.0'f
     fade = 0.20'f
     yaw = 0.22'f
@@ -146,6 +148,10 @@ proc run() =
   for preset in manifest.presets:
     if preset.group == "Gnomes":
       hasGnomes = true
+  for category in manifest.categories:
+    for item in category.items:
+      if item.alignment == GnomeOnly:
+        hasGnomeParts = true
 
   for clip in manifest.clips:
     if player.clipIndex(clip.name) < 0:
@@ -205,6 +211,7 @@ proc run() =
   proc loadPreset(index: int) =
     ## Loads an outfit and its suggested animation.
     presetIndex = index
+    randomTitle = ""
     let preset = manifest.presets[index]
     manifest.applyPreset(selection, preset)
     clothes.applyClothPreset(preset)
@@ -256,14 +263,39 @@ proc run() =
 
   proc randomize(alignment = Both) =
     ## Rolls compatible parts plus skin, hair, and pupil color presets.
-    if manifest.skins.len > 0:
-      chooseSkin(rng.rand(manifest.skins.high))
+    if showLineup:
+      setLineup(false)
+    randomTitle =
+      case alignment
+      of Both: "Random"
+      of GoodOnly: "Good random"
+      of EvilOnly: "Evil random"
+      of GnomeOnly: "Random gnome"
+    var outfits: seq[Preset]
+    if alignment == GnomeOnly:
+      for preset in manifest.presets:
+        if preset.group == "Gnomes":
+          outfits.add preset
+    if outfits.len > 0:
+      let outfit = outfits[rng.rand(outfits.high)]
+      chooseSkin(outfit.skin)
+      clothes.applyClothPreset(outfit)
+      hair = manifest.hairColors.colorIndex(
+        outfits[rng.rand(outfits.high)].hairColor
+      )
+      pupil = manifest.pupilColors.colorIndex(
+        outfits[rng.rand(outfits.high)].pupilColor
+      )
+    else:
+      if manifest.skins.len > 0:
+        chooseSkin(rng.rand(manifest.skins.high))
+      clothes.applyClothPreset(Preset())
+      hair = rng.rand(manifest.hairColors.high)
+      pupil = rng.rand(manifest.pupilColors.high)
     selection = manifest.randomSelection(rng, alignment)
     hat = rng.rand(manifest.hatColors.high)
     hatTint = manifest.hatColors[hat].rgb
-    hair = rng.rand(manifest.hairColors.high)
     hairTint = manifest.hairColors[hair].rgb
-    pupil = rng.rand(manifest.pupilColors.high)
     pupilTint = manifest.pupilColors[pupil].rgb
     customPupil = false
     applyParts()
@@ -282,6 +314,7 @@ proc run() =
       of "both": Both
       of "good": GoodOnly
       of "evil": EvilOnly
+      of "gnome": GnomeOnly
       else:
         raise newException(ChargenError, "Unknown RANDOM_ALIGNMENT.")
     randomize(alignment)
@@ -463,9 +496,10 @@ proc run() =
           sk.tooltipAnchor = titleRect
           let label =
             case category.items[selected].alignment
-            of Both: "Good and evil random"
-            of GoodOnly: "Good random only"
+            of Both: "Shared random part"
+            of GoodOnly: "Good and gnome random"
             of EvilOnly: "Evil random only"
+            of GnomeOnly: "Gnome random only"
           tooltip label
 
   proc hairControls() =
@@ -547,6 +581,11 @@ proc run() =
       let source = if editingOriginal: reference.manifest else: manifest
       if source.presets.len > 0:
         let choice = if editingOriginal: reference.preset else: presetIndex
+        text:
+          if not editingOriginal and randomTitle.len > 0:
+            randomTitle
+          else:
+            source.presets[choice].name
         group "preset":
           box RowWidth, 34
           layout LeftToRight
@@ -556,7 +595,6 @@ proc run() =
               source.presets.len)
           button ">":
             selectedPreset((choice + 1) mod source.presets.len)
-          text source.presets[choice].name
           button "Random":
             if editingOriginal:
               reference.randomize(rng)
@@ -580,6 +618,9 @@ proc run() =
             randomize(GoodOnly)
           button "Evil random":
             randomize(EvilOnly)
+        if hasGnomeParts:
+          button "Random gnome":
+            randomize(GnomeOnly)
       if source.skins.len > 0:
         var
           choice = if editingOriginal: reference.skin else: skin

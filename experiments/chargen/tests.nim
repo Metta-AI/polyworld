@@ -9,7 +9,7 @@ proc testRandom() =
   ## Checks tag parsing, filtered rolls, shared parts, and sparse libraries.
   doAssert "{}".fromJson(PartItem).alignment == Both
   for (value, expected) in [("both", Both), ("good", GoodOnly),
-                            ("evil", EvilOnly)]:
+                            ("evil", EvilOnly), ("gnome", GnomeOnly)]:
     let item = ("{\"alignment\":\"" & value & "\"}").fromJson(PartItem)
     doAssert item.alignment == expected
   var failed = false
@@ -43,9 +43,11 @@ proc testRandom() =
         of Both:
           discard
         of GoodOnly:
-          doAssert item.alignment != EvilOnly
+          doAssert item.alignment in {Both, GoodOnly}
         of EvilOnly:
-          doAssert item.alignment != GoodOnly
+          doAssert item.alignment in {Both, EvilOnly}
+        of GnomeOnly:
+          doAssert false, "Gnome rolls have separate checks."
         seen.incl item.id
     doAssert emptyOptional
     for category in manifest.categories:
@@ -64,6 +66,47 @@ proc testRandom() =
   var rng = initRand(1)
   doAssert sparse.randomSelection(rng, GoodOnly) == @[0, -1, -1]
   doAssert sparse.randomSelection(rng, EvilOnly) == @[0, 0, -1]
+  doAssert sparse.randomSelection(rng, GnomeOnly) == @[0, -1, -1]
+
+proc testGnomeRandom() =
+  ## Checks gnome features, shared clothing, tag isolation, and reachability.
+  let manifest = readManifest(AssetDir)
+  var
+    rng = initRand(71)
+    matching = initRand(71)
+    seen: HashSet[string]
+  for roll in 0 ..< 1024:
+    let selection = manifest.randomSelection(rng, GnomeOnly)
+    doAssert selection == manifest.randomSelection(matching, GnomeOnly)
+    for i, category in manifest.categories:
+      let selected = selection[i]
+      if category.key in ["Body", "Face", "Eyes", "Mouth", "Nose", "Ears",
+                         "Headgear", "Chest", "Leg", "Foot"]:
+        doAssert selected >= 0
+      if selected < 0:
+        continue
+      let item = category.items[selected]
+      doAssert item.alignment != EvilOnly
+      if category.key in ["Nose", "Ears", "Eyes", "Beard", "Headgear"]:
+        doAssert item.alignment == GnomeOnly
+      seen.incl item.id
+  for category in manifest.categories:
+    var exclusive = false
+    for item in category.items:
+      if item.alignment == GnomeOnly:
+        exclusive = true
+      if item.name.startsWith("Gnome "):
+        if item.id.startsWith("clothing/"):
+          doAssert item.alignment == GoodOnly
+        else:
+          doAssert item.alignment == GnomeOnly
+    for item in category.items:
+      let eligible =
+        if exclusive:
+          item.alignment == GnomeOnly
+        else:
+          item.alignment in {Both, GoodOnly}
+      doAssert (item.id in seen) == eligible, item.id
 
 proc testBeardChance() =
   ## Keeps facial hair near fifty percent regardless of eligible style count.
@@ -72,7 +115,7 @@ proc testBeardChance() =
     for i in 0 ..< count:
       category.items.add PartItem(name: $i)
     let manifest = Manifest(categories: @[category])
-    for alignment in [Both, GoodOnly, EvilOnly]:
+    for alignment in [Both, GoodOnly, EvilOnly, GnomeOnly]:
       var
         rng = initRand(83)
         present = 0
@@ -480,7 +523,7 @@ proc testClothing() =
     if category.key == "Leg":
       doAssert category.items.len == 5
     if category.key == "Foot":
-      doAssert category.items.len == 4
+      doAssert category.items.len == 5
   for category in manifest.categories:
     if category.key != "Leg":
       continue
@@ -589,7 +632,7 @@ proc testGarments() =
             if primitive.jointWeights[i][j] > 0:
               doAssert ids[j].int < node.skin.joints.len
           doAssert abs(total - 1) < 0.00001
-  doAssert count == 8
+  doAssert count == 9
   doAssert clothes.len == 6
   var preset = Preset()
   for i, cloth in clothes:
@@ -634,6 +677,11 @@ proc testGnomes() =
     player = newClipPlayer(model.root)
     actors = readLineup(AssetDir, manifest, model.root, "Gnomes")
   doAssert actors.len == 9
+  var skins: HashSet[int]
+  for preset in manifest.presets:
+    if preset.group == "Gnomes":
+      skins.incl preset.skin
+  doAssert skins.len == 9
   var joints: Table[string, Node]
   for node in model.root.walkNodes:
     if node.mesh == nil:
@@ -924,6 +972,7 @@ if paramCount() > 0:
 else:
   echo "Testing Chargen parts and animations"
   testRandom()
+  testGnomeRandom()
   testBeardChance()
   testUniversal()
   testAssembly(AssetDir)
