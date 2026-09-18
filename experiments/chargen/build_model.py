@@ -25,6 +25,9 @@ from universal import retargetUniversal
 from hairs import Names as HairNames, buildHair
 from beards import Names as BeardNames, buildBeards
 from clothes import buildClothes, clothingParts
+from gnomes import buildGnomes, gnomeParts, gnomePresets
+from hats import buildHats, hatParts
+from garments import buildGarments, garmentParts
 
 Tau = math.tau
 Output.mkdir(parents=True, exist_ok=True)
@@ -723,6 +726,9 @@ items.extend(makeImageFace(spec) for spec in imageFaces)
 items.extend(buildHair(character))
 items.extend(buildBeards(character))
 items.extend(buildClothes(character, bodyParts))
+items.extend(buildGarments(character))
+items.extend(buildGnomes(character, head))
+items.extend(buildHats(character))
 defaultNames = baseNames + ["Eyes_Atlas02", "Mouth_Atlas01", "Brow_Atlas01",
                             "Nose_Tiny", "Hair_01"]
 defaultItems = [item for item in items if item.name in defaultNames]
@@ -925,15 +931,37 @@ for spec in imageFaces:
     part["pupilMask"] = spec["pupilMask"]
   category["items"].append(part)
 for name in ["Earring", "Eyewear", "Headgear",
-             "Chest", "Back", "Hand", "Leg", "Foot", "Left hand", "Right hand"]:
+             "Chest", "Jacket", "Belt", "Suspenders", "Back", "Hand", "Leg",
+             "Foot", "Left hand", "Right hand"]:
   manifest["categories"].append({"key": name, "selected": -1, "items": []})
-for key, part in clothingParts():
+for key, part in clothingParts() + garmentParts():
   next(category for category in manifest['categories']
        if category['key'] == key)['items'].append(part)
+for key, part in gnomeParts() + hatParts():
+  part = dict(part, singleFile=True,
+              alignment='good' if key == 'Eyes' else 'both')
+  next(category for category in manifest['categories']
+       if category['key'] == key)['items'].append(part)
+  manifest['skinNodes'].extend(part.get('skinNodes', []))
+manifest['presets'].extend(gnomePresets())
 data = (Preview / "character.glb").read_bytes()
 size = struct.unpack_from("<I", data, 12)[0]
 document = json.loads(data[20:20 + size])
-shades = {'Chestnut': 1.0, 'Chestnut light': 1.1, 'Chestnut shade': .9}
+for category in manifest['categories']:
+  if category['key'] not in ['Chest', 'Jacket', 'Belt', 'Suspenders', 'Leg', 'Foot']:
+    continue
+  for part in category['items']:
+    part['clothShades'] = []
+    for node in document['nodes']:
+      if node.get('name') not in part['nodes'] or 'mesh' not in node:
+        continue
+      for i, primitive in enumerate(document['meshes'][node['mesh']]['primitives']):
+        name = document['materials'][primitive['material']].get('name', '')
+        if name.endswith(' fabric') or name.endswith(' edging'):
+          part['clothShades'].append(dict(node=node['name'], primitive=i,
+            shade=1.14 if name.endswith(' edging') else 1))
+shades = {'Chestnut': 1.0, 'Chestnut light': 1.1, 'Chestnut shade': .9,
+          'Gnome beard white': 1.0}
 manifest['hairShades'] = []
 for node in document['nodes']:
   if not node.get('name', '').startswith(('Hair_', 'Beard_')) or 'mesh' not in node:
@@ -943,6 +971,13 @@ for node in document['nodes']:
     if material in shades:
       manifest['hairShades'].append({'node': node['name'], 'primitive': index,
                                      'shade': shades[material]})
+manifest['hatShades'] = []
+for node in document['nodes']:
+  if not node.get('name', '').startswith('Hat_') or 'mesh' not in node:
+    continue
+  for index, primitive in enumerate(document['meshes'][node['mesh']]['primitives']):
+    if document['materials'][primitive['material']]['name'] == 'Gnome hat tint':
+      manifest['hatShades'].append(dict(node=node['name'], primitive=index, shade=1))
 (Output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print("MODEL_REPORT", json.dumps(report))
 

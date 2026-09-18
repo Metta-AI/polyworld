@@ -18,6 +18,8 @@ type
     id*, texture*, pupilMask*, tint*: string
     files*, skinNodes*: seq[string]
     hairShades*: seq[HairShade]
+    hatShades*: seq[HairShade]
+    clothShades*: seq[HairShade]
 
   Category* = object
     key*: string
@@ -35,9 +37,11 @@ type
 
   PresetPart* = object
     category*, item*: string
+    rgb*: seq[float32]
 
   Preset* = object
     name*, pose*: string
+    group*, hairColor*, pupilColor*, hatColor*: string
     skin*: int
     parts*: seq[PresetPart]
 
@@ -54,6 +58,8 @@ type
     model*: string
     version*: int
     rig*, skeleton*, skinPalette*, hairPalette*, pupilPalette*: string
+    hatPalette*, defaultHatColor*: string
+    hatColors*: seq[ColorPreset]
     hairColors*, pupilColors*: seq[ColorPreset]
     defaultHairColor*, defaultPupilColor*: string
     defaultAnimation*: string
@@ -61,6 +67,7 @@ type
     base*: seq[string]
     skinNodes*: seq[string]
     hairShades*: seq[HairShade]
+    hatShades*: seq[HairShade]
     categories*: seq[Category]
     clips*: seq[ClipInfo]
     skins*: seq[Skin]
@@ -85,6 +92,15 @@ proc readManifest*(directory: string): Manifest =
       fromJson(seq[ColorPreset])
     result.pupilColors = readFile(directory.assetPath(result.pupilPalette)).
       fromJson(seq[ColorPreset])
+    if result.hatPalette.len > 0:
+      result.hatColors = readFile(directory.assetPath(result.hatPalette)).
+        fromJson(seq[ColorPreset])
+      if result.hatColors.len == 0:
+        raise newException(ChargenError, "Hat palette cannot be empty.")
+    else:
+      result.hatColors = @[ColorPreset(name: "White", rgb: [1'f, 1'f, 1'f])]
+    if result.defaultHatColor.len == 0:
+      result.defaultHatColor = result.hatColors[0].name
     if result.skins.len == 0 or result.hairColors.len == 0 or
       result.pupilColors.len == 0:
         raise newException(ChargenError, "Character palettes cannot be empty.")
@@ -114,6 +130,7 @@ proc readManifest*(directory: string): Manifest =
         category.items.add item
         result.skinNodes.add item.skinNodes
         result.hairShades.add item.hairShades
+        result.hatShades.add item.hatShades
       if category.defaultItem.len > 0 and category.selected < 0:
         raise newException(
           ChargenError, "Missing default part: " & category.defaultItem

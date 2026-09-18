@@ -2,9 +2,9 @@
 
 import
   std/os,
-  chargen/[brows, eyes, hairs, models, parts]
+  chargen/[brows, clothes, eyes, hairs, models, parts]
 
-export brows, eyes, hairs, models, parts
+export brows, clothes, eyes, hairs, models, parts
 
 const ChargenLibrary* =
   when defined(emscripten):

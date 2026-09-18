@@ -63,6 +63,7 @@ for category, part in clothingParts():
   glbs.write(Library / (identity + '.glb'), mesh, data)
   metadata = dict(part, id=identity, files=[identity + '.glb'],
                   skinNodes=[], hairShades=[],
+                  clothShades=previous.get('clothShades', []),
                   alignment=previous.get('alignment', 'both'))
   path.parent.mkdir(parents=True, exist_ok=True)
   path.write_text(json.dumps(metadata, indent=2) + '\n')

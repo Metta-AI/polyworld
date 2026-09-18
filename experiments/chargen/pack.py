@@ -193,7 +193,10 @@ def packLibrary(source, output, partIds=None, clipNames=None, atlas=True):
     stage = Path(temporary) / 'library'
     stage.mkdir()
     transforms, atlases = makeAtlases(source, stage, parts) if atlas else ({}, [])
-    for field in ['rig', 'skeleton', 'skinPalette', 'hairPalette', 'pupilPalette']:
+    fields = ['rig', 'skeleton', 'skinPalette', 'hairPalette', 'pupilPalette']
+    if manifest.get('hatPalette'):
+      fields.append('hatPalette')
+    for field in fields:
       copyAsset(source, stage, manifest[field])
     for clip in manifest['clips']:
       copyModel(source, stage, clip['file'])
