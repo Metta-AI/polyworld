@@ -101,22 +101,36 @@ proc steer*(
     speed, turnRate: Fixed,
     walkable: Walkable
 ) =
-  ## Turns toward an offset and walks along facing when the turn is small.
+  ## Finishes turning, then advances toward the waypoint without overshoot.
   if toward == FixedVec2Zero:
     return
   let want = angle(toward)
   turnToward(body.facing, want, turnRate)
-  if abs(shortestTurn(body.facing, want)) <= FixedHalfPi:
-    slide(body.pos, direction(body.facing) * speed, walkable)
+  if shortestTurn(body.facing, want) != FixedZero or speed <= FixedZero:
+    return
+  # Walking along an unfinished turn can orbit a nearby waypoint forever.
+  # Use the exact offset so rounded headings cannot miss the final step.
+  slide(
+    body.pos,
+    desiredStep(FixedVec2Zero, toward, speed, FixedZero),
+    walkable
+  )
+
+proc needsSeparation*(a, b: Body): bool {.inline.} =
+  ## Rejects non-overlapping and coincident circles without a square root.
+  let
+    need = int64(int32(a.radius + b.radius))
+    squared = lengthSquared(b.pos - a.pos)
+  need > 0 and squared > 0 and squared < need * need
 
 proc separatePair*(a, b: var Body, walkable: Walkable) =
   ## Pushes two overlapping circles apart and clamps both to walkable ground.
+  if not needsSeparation(a, b):
+    return
   let
     offset = b.pos - a.pos
     dist = length(offset)
     need = a.radius + b.radius
-  if dist == FixedZero or dist >= need:
-    return
   let
     oldA = a.pos
     oldB = b.pos

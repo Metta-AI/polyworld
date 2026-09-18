@@ -23,6 +23,8 @@ type
     first*, count*: int
   SplatTile* = object
     exists*: bool
+    stamps*: bool = true
+      ## Seeds brushes here; existing neighbors can receive them either way.
     material*: int
     variants*: int
     tops*: array[4, int16]
@@ -80,7 +82,7 @@ proc generateSplats*(
     owners: seq[int]
   result.spans = newSeq[SplatSpan](tiles.len)
   for i, tile in tiles:
-    if not tile.exists:
+    if not tile.exists or not tile.stamps:
       continue
     for j in 0 ..< count:
       let

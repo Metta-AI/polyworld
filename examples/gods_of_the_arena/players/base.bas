@@ -3,6 +3,17 @@
 ' Read-only host data:
 '   selfId, selfTeam, selfClass, selfX, selfY, selfHp, selfMaxHp
 '   selfMana, selfMaxMana, selfGold, selfLevel, worldTick
+'   selfLayer, mapWidth, mapHeight, mapLayers.
+'
+' Terrain queries use global tile coordinates on selfLayer:
+'   terrainKind(x, y), terrainWalkable(x, y), terrainHeight(x, y)
+'   terrainWaterDepth(x, y).
+' Each also has an At(x, y, layer) version, such as terrainKindAt(x, y, layer).
+' Layers: GroundLayer = 0, RedFortLayer = 1, BlueFortLayer = 2, WaterLayer = 3.
+' Kinds: TerrainNone = 0, TerrainGrass = 1, TerrainRoad = 2, TerrainRock = 3,
+'   TerrainTrees = 4, TerrainMarsh = 5, TerrainWall = 6, TerrainWater = 7.
+' These names are read-only constants. Heights and depths use 1/8-tile units.
+' Invalid or absent tiles return 0. Queries reveal static terrain through fog.
 '
 ' World functions use a temporary object index from 0 to objectCount() - 1:
 '   objectId(index), objectKind(index), objectTeam(index), objectClass(index)
@@ -15,9 +26,9 @@
 '   11 dagger, 12 wand, 13 sword, 14 bow, 15 pauldrons, 16 armor,
 '   17 staff, 18 axe, 19 crossbow, 20 spellbook
 '
-' Object kinds are 1 = fort, 2 = hero, 3 = footman, and 4 = tower.
+' Object kinds are 1 = god, 2 = hero, 3 = footman, 4 = tower, and 5 = barracks.
 ' Towers become attackable outer first, then inner, then gate.
-' The enemy fort becomes attackable after one lane is cleared.
+' Clearing a lane exposes the two god guards. Both must fall to hurt the god.
 ' Hero classes are stable integer values from 0 to 9. Non-heroes use -1.
 ' Actions return 1 when accepted and 0 when rejected:
 '   walkTo(x, y), attackTarget(objectId), buyItem(itemId), useItem(slot)

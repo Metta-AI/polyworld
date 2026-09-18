@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GOTA | Hero statistics</title>
+  <style>
+    @font-face {font-family:Rubik;src:url("@@font@@");font-weight:400}
+    @font-face {font-family:Rubik;src:url("@@bold@@");font-weight:700}
+    :root {--display:700 32px/1.15 Rubik,sans-serif;--heading:700 20px/1.3 Rubik,sans-serif;--body:400 14px/1.5 Rubik,sans-serif;--strong:700 14px/1.5 Rubik,sans-serif;--caption:400 12px/1.5 Rubik,sans-serif;--bg:#0c1014;--panel:#16181e;--well:#101216;--gold:#f7dd8f;--gold-dim:#c4a45a;--red:#e05053;--blue:#659aff;--green:#6ad36a;--xp:#b889f6;--text:#eef0f4;--muted:#a6aebf;--line:rgba(247,221,143,.15)}
+    * {box-sizing:border-box}
+    body {margin:0;background:radial-gradient(1100px 550px at 20% -100px,#203e622f,transparent),radial-gradient(900px 600px at 100% 45%,#6b29301a,transparent),var(--bg);color:var(--text);font:var(--body)}
+    a {color:var(--gold);text-decoration:none} a:hover {text-decoration:underline}
+    button,input,select {font:inherit;color:inherit}
+    button,select {cursor:pointer}
+    button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible {outline:2px solid var(--gold);outline-offset:4px}
+    button {background:transparent;border:0} button:hover {color:var(--gold)}
+    .wrap {width:min(1380px,calc(100% - 64px));margin:auto}
+    .mast {display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:22px 0 16px;gap:24px}
+    .logo {width:180px;height:auto;display:block}
+    .mast nav {display:flex;align-items:center;gap:28px;color:var(--muted)}
+    .mast nav a {color:var(--muted)} .mast nav a:first-child {color:var(--gold)}
+    .label {letter-spacing:.17em;text-transform:uppercase;color:var(--muted)}
+    .kicker {color:var(--gold);letter-spacing:.24em;text-transform:uppercase;}
+    h1 {line-height:1.1;margin:10px 0 12px;letter-spacing:-.04em}
+    h2 {margin:0;letter-spacing:-.02em} h3 {margin:0}
+    p {margin:8px 0;color:var(--muted)}
+    .heading {display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:32px 0 26px}
+    .heading.profile {padding:14px 0 20px}
+    .heading.profile h1,.heading.profile .kicker {display:none}
+    .status {display:inline-flex;align-items:center;gap:7px;padding:7px 10px;background:#6ad36a0a;border:1px solid #6ad36a35;color:var(--green);border-radius:5px;white-space:nowrap}
+    .status i {width:6px;height:6px;background:currentColor;border-radius:50%}
+    .facts {display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+    .fact,.panel {background:linear-gradient(150deg,#1b1e26,#14171d);border:1px solid var(--line);border-radius:10px}
+    .fact {padding:19px 22px;display:flex;align-items:center;gap:16px}
+    .fact img {width:30px;height:30px;object-fit:contain;opacity:.85}
+    .fact b {display:block;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+    .fact small {color:var(--muted);}
+    .insight {display:flex;gap:15px;border-left:3px solid var(--gold-dim);background:#f7dd8f08;padding:14px 18px;margin-bottom:26px;border-radius:0 7px 7px 0;color:#d2c9b2;}
+    .insight b {color:var(--gold)} .insight p {margin:0;color:inherit}
+    .toolbar {display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:16px;flex-wrap:wrap}
+    .controls {display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input,select,.outline {border:1px solid #ffffff20;background:var(--well);padding:10px 12px;border-radius:6px;}
+    input {width:200px} input::placeholder {color:#7f889b}
+    select {max-width:300px}
+    .scope {display:flex;align-items:center;gap:10px}
+    .scroll {overflow-x:auto}
+    table {border-collapse:collapse;width:100%;white-space:nowrap;font-variant-numeric:tabular-nums}
+    th {text-align:right;color:var(--muted);background:#ffffff03;letter-spacing:.035em}
+    th,td {padding:12px 15px;border-bottom:1px solid #ffffff06;text-align:right}
+    th:first-child,td:first-child {text-align:left}
+    th button {padding:4px 0;color:inherit} th button.active {color:var(--gold)}
+    tbody tr:hover {background:#ffffff05}
+    tr:last-child td {border-bottom:0}
+    .hero-link {display:flex;align-items:center;gap:13px;min-width:205px;color:var(--text);}
+    .thumb {width:39px;height:48px;border-radius:5px;object-fit:cover;border:1px solid #ffffff15}
+    .hero-link small {display:block;color:var(--muted);margin-top:3px}
+    .blue {color:var(--blue)} .red {color:var(--red)} .green {color:var(--green)} .gold {color:var(--gold)} .xp {color:var(--xp)}
+    .tinybar {height:3px;width:78px;background:#ffffff0c;margin:6px 0 0 auto;border-radius:3px;overflow:hidden}
+    .tinybar i {display:block;height:100%;background:var(--blue)} .tinybar.redbar i {background:var(--red)}
+    .table-note {padding:12px 16px;color:var(--muted);border-top:1px solid #ffffff06}
+    .section-title {display:flex;justify-content:space-between;align-items:center;margin:28px 0 14px;gap:20px}
+    .roster {display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+    .roster a {overflow:hidden;position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);transition:transform .15s}
+    .roster a:hover {transform:translateY(-4px);text-decoration:none;border-color:var(--gold-dim)}
+    .roster img {display:block;width:100%;aspect-ratio:1.25;object-fit:cover;object-position:center 27%}
+    .roster .caption {padding:12px 14px}
+    .roster strong {display:block} .roster small {color:var(--muted)}
+    .roster .rate {position:absolute;right:9px;top:9px;background:#0c1014e0;padding:3px 7px;border:1px solid #ffffff20;border-radius:4px;}
+    .hero-banner {display:flex;gap:26px;padding:26px;margin-bottom:18px;position:relative;overflow:hidden}
+    .large-portrait {width:154px;height:196px;object-fit:cover;border-radius:7px;border:1px solid var(--gold-dim);flex-shrink:0}
+    .hero-banner h1 {margin-top:8px}
+    .hero-bio {flex:1}.hero-banner .facts {margin-top:18px;margin-bottom:0;gap:8px}
+    .hero-banner .fact {padding:11px 13px;background:#0c101488;border-color:#ffffff08;display:block}
+
+    .detail-grid {display:grid;grid-template-columns:1.3fr 1fr;gap:18px}
+    .pad {padding:22px}
+    .metric-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
+    .metric {padding:14px;background:var(--well);border:1px solid #ffffff06;border-radius:7px}
+    .metric b {display:block;margin:4px 0}.metric small {color:var(--muted);}
+    .metric img {width:20px;height:20px;vertical-align:middle;margin-right:5px}
+    .rankline {display:flex;justify-content:space-between;margin-top:17px;gap:20px}
+    .track {height:7px;background:#ffffff08;border-radius:4px;overflow:hidden;margin-top:7px}
+    .track i {display:block;height:100%;background:var(--xp);border-radius:4px}
+    .bars {display:flex;align-items:end;gap:7px;height:155px;margin-top:18px;padding-top:12px}
+    .hist-col {flex:1;height:100%;display:flex;flex-direction:column;justify-content:end;align-items:center;gap:5px;color:var(--muted);}
+    .hist-col i {background:linear-gradient(0deg,#7552a9,var(--xp));width:100%;min-height:1px;border-radius:3px 3px 0 0}
+    .hist-col b {color:var(--text)}
+    .outcomes {display:flex;height:12px;border-radius:4px;overflow:hidden;margin:16px 0 10px;background:#ffffff08}
+    .outcomes .win {background:var(--green)} .outcomes .loss {background:var(--red)} .outcomes .draw {background:#7e889e}
+    .legend {display:flex;gap:18px;color:var(--muted);flex-wrap:wrap}
+    .legend b {color:var(--text)}
+    .empty {padding:30px;color:var(--muted);text-align:center}
+    details {margin:28px 0;border-top:1px solid var(--line);padding:18px 0}
+    summary {cursor:pointer;color:var(--gold);}
+    .methods {columns:2;column-gap:40px;margin-top:14px;}
+    .methods p {break-inside:avoid;margin:0 0 13px}
+    footer {display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:20px 0 32px;color:var(--muted);gap:20px}
+    .back {display:inline-block;margin-bottom:18px}
+    [hidden] {display:none!important}
+    @media(max-width:1000px) {.wrap{width:calc(100% - 32px)}.roster{grid-template-columns:repeat(5,1fr)}.hero-banner .facts{grid-template-columns:repeat(2,1fr)}.detail-grid{grid-template-columns:1fr}.mast nav{gap:15px}.metric-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:660px) {.logo{width:160px}.mast nav{display:none}.heading{display:block;padding-top:24px}.heading .status{margin-top:12px}.facts{grid-template-columns:repeat(2,1fr)}.fact{padding:14px;gap:10px}.roster{grid-template-columns:repeat(2,1fr)}.hero-banner{padding:16px;gap:16px;align-items:flex-start}.large-portrait{width:94px;height:125px}.hero-banner .facts{grid-template-columns:repeat(2,1fr)}.hero-banner .fact{padding:8px}.metric-grid{grid-template-columns:repeat(2,1fr)}.scope{width:100%;justify-content:space-between}.methods{columns:1}.toolbar{align-items:flex-start}.controls{width:100%}.controls input{flex:1;min-width:120px}footer{display:block}.pad{padding:17px}}
+    /* Five shared type styles keep labels and table text readable. */
+    body,input,button,select,td,.outline,.controls,.rankline {
+      font:var(--body);
+    }
+    h1,.hero-banner h1 {font:var(--display)}
+    h2,.fact b,.metric b,.hero-banner .fact b {font:var(--heading)}
+    h3,b,strong,.hero-link,.roster strong,.hero-link span,.insight b {
+      font:var(--strong);
+    }
+    small,.small,.label,.kicker,.status,.mast nav,.mast nav a,th,
+    th button,.table-note,.hero-link small,.hero-link small span,
+    .fact small,.hero-banner .fact small,.roster small,.roster .rate,
+    .metric small,.legend,.legend b,.hist-col,.hist-col b,.hist-col span,
+    .methods,.methods p,footer,footer a,.back,summary {
+      font:var(--caption);
+      letter-spacing:normal;
+    }
+    .label,.kicker {letter-spacing:.09em}
+    .insight,.insight p {font:var(--body)}
+    .metric-grid {grid-template-columns:repeat(2,1fr)}
+    .metric b {margin:6px 0}
+    th,td {padding:13px 15px}
+    @media(max-width:660px) {
+      .hero-banner h1 {font:var(--heading)}
+      .hero-banner .fact small {font:var(--caption)}
+      .hero-banner .facts {grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="mast">
+      <a href="#" aria-label="GOTA statistics home"><img class="logo" src="@@logo@@" alt="Gods of the Arena"></a>
+      <nav aria-label="Primary"><a href="#">Hero statistics</a><a href="#methods">Methodology</a><span class="label">Hero balance</span></nav>
+    </header>
+    <div class="heading">
+      <div><div class="kicker">League intelligence / Replay analysis</div><h1 id="page-title">The arena, by the numbers.</h1><p id="window" class="small"></p></div>
+      <span class="status" id="verification"><i></i><span></span></span>
+    </div>
+    <div class="toolbar">
+      <div class="controls"><span class="kicker" id="view-label">All heroes</span></div>
+      <label class="scope"><span class="label">Game version</span><select id="version" aria-label="Game version"></select></label>
+    </div>
+    <div id="overview"></div>
+    <div id="detail" hidden></div>
+    <details id="methods"><summary>How to read these statistics</summary>
+      <div class="methods">
+        <p><b>Scope.</b> Retained GOTA competition rounds with match completion timestamps inside the displayed analysis window. A game counts once; each hero appearance contributes one final stat row. Only aggregate hero statistics are embedded. Open this page directly in a browser with its adjacent hero_assets folder. No server is needed.</p>
+        <p><b>Verification.</b> Every included replay reproduces every recorded simulation hash, reaches the recorded final tick, and matches all league seat scores. Incomplete and unsupported replays do not contribute zero-valued observations.</p>
+        <p><b>Win rate.</b> Wins divided by appearances. Time-limit draws count as non-wins. Fixed faction lineups mean the same five heroes share each result. This measures faction outcomes, not the causal strength of individual heroes.</p>
+        <p><b>Economy.</b> Level and XP are final values. XP is lifetime earned XP, not the remainder toward the next level. Gold earned is cumulative rewards, excluding starting gold and including gold already spent. GPM and XPM divide total rewards by total hero-minutes.</p>
+        <p><b>Combat.</b> K/D/A are separate per-game averages. KDA ratio uses total kills plus assists divided by deaths, with a denominator of one if there are no deaths. Assists follow the game's ten-second damage window. Damage and healing are not instrumented and are not shown as zero.</p>
+        <p><b>Interpretation.</b> Roles, player strength, repeated policies, game length, and team composition affect these numbers. Compare versions separately. Descriptive 95% Wilson intervals assume independent games; repeated matchups may make them too narrow. No hero tier or nerf verdict is inferred from faction win rate.</p>
+      </div>
+    </details>
+    <footer><span id="footer-stats"></span><span>Static hero report · Works offline</span></footer>
+  </div>
+  <script id="report-data" type="application/json">@@data@@</script>
+  <script>
+    'use strict';
+    const data = JSON.parse(document.getElementById('report-data').textContent);
+    const summary = data.summary;
+    const $ = id => document.getElementById(id);
+    const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const number = (value, digits=0) => Number(value).toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits});
+    const percent = value => number(value * 100,1) + '%';
+    const teamName = team => team === 'RedTeam' ? 'Red faction' : team === 'BlueTeam' ? 'Blue faction' : 'Mixed factions';
+    const teamColor = team => team === 'RedTeam' ? 'red' : 'blue';
+    const link = name => '#hero=' + data.catalog[name].slug;
+    const date = value => new Date(value).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
+    const kda = row => [row.avg_kills,row.avg_deaths,row.avg_assists].map(v => number(v,1)).join(' / ');
+    let sortKey = 'avg_xp', descending = true, query = '', faction = '';
+    function scope() {
+      return $('version').value === 'all' ? summary : summary.versions.find(v => v.version === $('version').value);
+    }
+    function rows() {
+      return scope().heroes;
+    }
+    function selectedHero() {
+      const slug = new URLSearchParams(location.hash.slice(1)).get('hero');
+      return Object.values(data.catalog).find(c => c.slug === slug);
+    }
+    function fact(value, label, sub, icon) {
+      return `<div class="fact">${icon ? `<img src="${icon}" alt="">` : ''}<div><b>${value}</b><span class="label">${label}</span>${sub ? `<br><small>${sub}</small>` : ''}</div></div>`;
+    }
+    function insight() {
+      if (!summary.fixed_faction_lineups) return '';
+      const recent = summary.versions.at(-1);
+      return `<div class="insight"><span class="gold">◈</span><p><b>Faction results, individual performance.</b> Each faction uses a fixed set of five heroes, so teammates share a win rate. Use XP, economy, and K/D/A to investigate heroes. ${summary.versions.length > 1 ? `The latest version has <b>${number(recent.games)} games</b>; switch versions before drawing balance conclusions.` : ''}</p></div>`;
+    }
+    function overview() {
+      const list = rows();
+      const selected = scope();
+      $('overview').innerHTML = `<div class="facts">${fact(number(selected.games),'Matches analyzed','One result per game','@@kills@@')}${fact(number(list.length),'Heroes','Fixed faction lineups','@@hero@@')}${fact(number(list.reduce((count,row)=>count+row.appearances,0)),'Hero appearances','Final hero statistics','@@xp@@')}${fact(number(selected.avg_minutes,1)+' min','Average duration','Recorded game time','@@gold@@')}</div>${insight()}
+        <div class="toolbar"><div><h2>Hero performance</h2><p class="small">Final averages per appearance. Select a hero to explore its report.</p></div><div class="controls"><input id="search" aria-label="Search heroes" placeholder="Search heroes" value="${escape(query)}"><select id="faction" aria-label="Faction"><option value="">All factions</option><option value="BlueTeam">Blue faction</option><option value="RedTeam">Red faction</option></select><button class="outline" id="export">Export CSV ↓</button></div></div>
+        <div class="panel"><div class="scroll"><table id="hero-table"><thead></thead><tbody></tbody></table></div><div class="table-note">Gold earned excludes starting gold. K / D / A are separate averages. Click a column heading to sort.</div></div>
+        <div class="section-title"><h2>Explore the roster</h2><span class="label">10 individual hero reports</span></div><div class="roster">${list.map(row => `<a href="${link(row.hero)}"><img src="${data.catalog[row.hero].portrait}" alt="${escape(row.hero)}" loading="lazy"><span class="rate ${teamColor(row.team)}">${percent(row.win_rate)} WR</span><div class="caption"><strong>${escape(row.hero)}</strong><small>${number(row.avg_xp)} XP · ${number(row.avg_gold)} gold</small></div></a>`).join('')}</div>`;
+      $('faction').value = faction;
+      $('search').addEventListener('input',event => {query=event.target.value;renderTable();});
+      $('faction').addEventListener('change',event => {faction=event.target.value;renderTable();});
+      $('export').addEventListener('click',() => exportRows(filteredRows(),'gota-heroes.csv'));
+      renderTable();
+    }
+    function filteredRows() {
+      return rows().filter(row => row.hero.toLowerCase().includes(query.toLowerCase()) && (!faction || row.team === faction)).sort((a,b) => {
+        const comparison = sortKey === 'hero' ? a.hero.localeCompare(b.hero) : a[sortKey]-b[sortKey];
+        return (descending ? -comparison : comparison) || a.hero.localeCompare(b.hero);
+      });
+    }
+    function renderTable() {
+      const columns = [['hero','Hero'],['games','Games'],['win_rate','Win rate'],['avg_level','Level'],['avg_xp','XP'],['avg_kills','K / D / A'],['avg_gold','Gold earned'],['gold_per_minute','GPM'],['xp_per_minute','XPM']];
+      $('hero-table').querySelector('thead').innerHTML = '<tr>'+columns.map(([key,label]) => `<th scope="col" aria-sort="${key===sortKey ? (descending?'descending':'ascending'):'none'}"><button data-sort="${key}" class="${key===sortKey?'active':''}">${label} ${key===sortKey?(descending?'↓':'↑'):'↕'}</button></th>`).join('')+'</tr>';
+      $('hero-table').querySelector('tbody').innerHTML = filteredRows().map(row => `<tr><td><a class="hero-link" href="${link(row.hero)}"><img class="thumb" src="${data.catalog[row.hero].portrait}" alt=""><span>${escape(row.hero)}<small><span class="${teamColor(row.team)}">${teamName(row.team)}</span></small></span></a></td><td>${number(row.games)}</td><td><span class="${teamColor(row.team)}">${percent(row.win_rate)}</span><div class="tinybar ${row.team==='RedTeam'?'redbar':''}"><i style="width:${row.win_rate*100}%"></i></div></td><td>${number(row.avg_level,2)}</td><td class="xp">${number(row.avg_xp)}</td><td>${kda(row)}</td><td class="gold">${number(row.avg_gold)}</td><td>${number(row.gold_per_minute,1)}</td><td>${number(row.xp_per_minute,1)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">No heroes match these filters.</td></tr>';
+      $('hero-table').querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click',() => {descending=sortKey===button.dataset.sort?!descending:true;sortKey=button.dataset.sort;renderTable();}));
+    }
+    function metric(value,label,sub,color='') {
+      return `<div class="metric"><span class="label">${label}</span><b class="${color}">${value}</b><small>${sub}</small></div>`;
+    }
+    function detail(hero) {
+      const row = rows().find(r => r.hero === hero.name);
+      if (!row) {$('detail').innerHTML='<p class="empty">No verified appearances for this hero in the selected version.</p>';return;}
+      const ci = row.win_rate_ci95;
+      $('detail').innerHTML = `<a class="back" href="#">← All hero statistics</a><div class="panel hero-banner"><img class="large-portrait" src="${hero.portrait}" alt="${escape(hero.name)}"><div class="hero-bio"><span class="kicker ${teamColor(row.team)}">${teamName(row.team)}</span><h1>${escape(hero.name)}</h1><p>${escape(hero.role)}</p><div class="facts">${fact(number(row.games),'Games','')}${fact(percent(row.win_rate),'Win rate',ci?`95% interval ${percent(ci[0])}–${percent(ci[1])}`:'')}${fact(number(row.avg_level,2),'Avg final level','')}${fact(number(row.avg_minutes,1)+' min','Avg duration','')}</div></div></div>${insight()}
+        <div id="hero-panel"></div>`;
+      const bins = row.level_bins;
+      const maximum = Math.max(1,...bins);
+      const rank = key => [...rows()].sort((a,b)=>b[key]-a[key]).findIndex(r=>r.hero===hero.name)+1;
+      $('hero-panel').innerHTML = `<div class="detail-grid"><div class="panel pad"><h2>Economy & combat</h2><p class="small">End-of-game averages across ${number(row.appearances)} appearances.</p><div class="metric-grid">${metric(number(row.avg_xp),'XP earned',number(row.xp_per_minute,1)+' XP / minute','xp')}${metric(number(row.avg_gold),'Gold earned',number(row.gold_per_minute,1)+' gold / minute','gold')}${metric(number(row.avg_banked_gold),'Unspent gold','Average final balance')}${metric(kda(row),'Kills / deaths / assists','Three per-game averages')}${metric(number(row.kda_ratio,2),'KDA ratio','(Total kills + assists) / deaths')}${metric(number(row.avg_minutes,1)+' min','Game duration','Average recorded match length')}</div><div class="section-title"><h3>Among the ten heroes</h3><span class="label">Descriptive ranks</span></div>${[['avg_xp','Lifetime XP','var(--xp)'],['avg_gold','Gold earned','var(--gold)'],['avg_kills','Hero kills','var(--red)']].map(([key,label,color])=>`<div class="rankline"><span>${label}</span><b>#${rank(key)} of ${rows().length} · ${number(row[key],1)}</b></div><div class="track"><i style="width:${row[key]/Math.max(1,...rows().map(r=>r[key]))*100}%;background:${color}"></i></div>`).join('')}<p class="small" style="margin-top:17px">Role and player skill influence these ranks. High farming or kill totals are leads for testing, not proof of excess strength.</p></div>
+        <div><div class="panel pad"><h2>Match outcomes</h2><div class="outcomes"><i class="win" style="width:${row.wins/row.appearances*100}%"></i><i class="loss" style="width:${row.losses/row.appearances*100}%"></i><i class="draw" style="width:${row.draws/row.appearances*100}%"></i></div><div class="legend"><span><b class="green">${row.wins}</b> wins</span><span><b class="red">${row.losses}</b> losses</span><span><b>${row.draws}</b> draws</span></div><p class="small">Win rate includes time-limit draws as non-wins.</p></div><div class="panel pad" style="margin-top:18px"><h2>Final level distribution</h2><p class="small">Number of appearances in each level range.</p><div class="bars">${bins.map((n,i)=>`<div class="hist-col" title="Levels ${i*2+1}–${i*2+2}: ${n} appearances"><b>${n||''}</b><i style="height:${n/maximum*108}px"></i><span>${i*2+1}–${i*2+2}</span></div>`).join('')}</div></div></div></div>
+        <div class="section-title"><h2>Performance by game version</h2><span class="label">Entire analysis window</span></div><div class="panel scroll"><table><thead><tr><th>Version</th><th>Games</th><th>Win rate</th><th>Level</th><th>XP</th><th>K / D / A</th><th>Gold earned</th></tr></thead><tbody>${summary.versions.map(v=>{const h=v.heroes.find(r=>r.hero===hero.name);return h?`<tr><td>${escape(v.version)}</td><td>${h.games}</td><td>${percent(h.win_rate)}</td><td>${number(h.avg_level,2)}</td><td class="xp">${number(h.avg_xp)}</td><td>${kda(h)}</td><td class="gold">${number(h.avg_gold)}</td></tr>`:'';}).join('')}</tbody></table></div>`;
+    }
+    function exportRows(rows,filename) {
+      if(!rows.length)return;
+      const fields=Object.keys(rows[0]).filter(key=>!Array.isArray(rows[0][key]));
+      const cell=value=>'"'+String(value??'').replace(/"/g,'""')+'"';
+      const csv=[fields.join(','),...rows.map(row=>fields.map(key=>cell(row[key])).join(','))].join('\n');
+      const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+      const anchor=document.createElement('a');anchor.href=url;anchor.download=filename;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }
+    function render() {
+      const hero=selectedHero();
+      document.querySelector('.heading').classList.toggle('profile',!!hero);
+      $('overview').hidden=!!hero;$('detail').hidden=!hero;
+      $('view-label').textContent=hero?'Hero report / '+hero.name:'All heroes';
+      $('page-title').textContent=hero?'Every hero has a story.':'The arena, by the numbers.';
+      document.title=(hero?hero.name+' | ':'')+'GOTA hero statistics';
+      hero?detail(hero):overview();
+    }
+    $('version').innerHTML=`<option value="all">All versions · ${number(summary.verified_games)} games</option>`+[...summary.versions].reverse().map((v,i)=>`<option value="${escape(v.version)}">${escape(v.version)}${i===0?' · Latest':''} · ${number(v.games)} games</option>`).join('');
+    $('version').addEventListener('change',render);
+    $('window').textContent=`${date(summary.start)} → ${date(summary.end)}, ${new Date(summary.end).getFullYear()} · America/Los_Angeles · Completed league games`;
+    $('verification').querySelector('span').textContent=summary.excluded_count?`${number(summary.verified_games)} verified · ${number(summary.excluded_count)} excluded`:`All ${number(summary.verified_games)} replays verified`;
+    if(summary.excluded_count)$('verification').style.color='var(--gold)';
+    $('footer-stats').textContent=`${number(summary.verified_games)} verified matches · ${number(summary.hero_appearances)} hero appearances · ${number(summary.excluded_count)} excluded`;
+    window.addEventListener('hashchange',()=>{render();if(selectedHero())window.scrollTo({top:0,behavior:'instant'});});
+    render();
+  </script>
+</body>
+</html>

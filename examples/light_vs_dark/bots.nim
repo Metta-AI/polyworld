@@ -11,9 +11,12 @@
 ## kill things, and it is where fog of war is applied.
 
 import
-  polyworld/[basic, profiles],
+  polyworld/[metrics, basic, profiles],
   content,
   sim
+
+when defined(coworld):
+  import polyworld/coworld
 
 const
   ObservedBuilding* = 1'i32
@@ -506,15 +509,14 @@ proc buildOverlordHost*(playerId: int32): Host =
   discard result.addFunction("cancel", 1, cancelProc, 40)
 
   let orderFailedProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Reads and clears the flag, so one failure is reported exactly once.
+    ## Reads the failure flag without changing the recorded world state.
     let index = game.unitIndex(arguments[0])
     if index < 0:
       return 0
     let unit = game.units[index]
     if unit.owner != playerId:
       return 0
-    result = int32(unit.orderFailed)
-    unit.orderFailed = false
+    int32(unit.orderFailed)
   discard result.addFunction("orderFailed", 1, orderFailedProc, 4)
 
 ## Lifecycle
@@ -525,9 +527,14 @@ proc loadBots*(game: Game, sources: array[PlayerCount, string]) =
   let schema = buildOverlordHost(0)
   var bound = false
   for player in 0'i32 ..< PlayerCount:
-    if sources[player].len == 0:
-      continue
-    let program = compile(sources[player], schema, limits)
+    when not defined(coworld):
+      if sources[player].len == 0:
+        continue
+    let program =
+      when defined(coworld):
+        compilePlayer(sources[player], schema, limits, int(player))
+      else:
+        compile(sources[player], schema, limits)
     game.brains[player] = OverlordVm(
       runtime: initRuntime(program, buildOverlordHost(player), limits),
       ready: true
@@ -535,6 +542,8 @@ proc loadBots*(game: Game, sources: array[PlayerCount, string]) =
     if not bound:
       bindOverlordData(program)
       bound = true
+    when defined(coworld):
+      game.brains[player].output = playerPrinter(int(player))
 
 proc runDecision(game: Game, player: int32) =
   ## Runs one player's script for one decision.
@@ -578,15 +587,22 @@ proc runDecision(game: Game, player: int32) =
       ids[DataDecisionPeriod],
       DecisionTicks
     )
-    discard game.brains[player].runtime.run()
+    discard game.brains[player].runtime.run(game.brains[player].output)
     inc game.brains[player].decisions
   except BasicError as error:
     game.brains[player].failed = true
     game.brains[player].lastError = error.msg
-    echo "player ", player, " BASIC error: ", error.msg
+    when defined(coworld):
+      playerError(int(player), error.msg)
+    else:
+      echo "player ", player, " BASIC error: ", error.msg
   game.brains[player].lastWork = game.brains[player].runtime.workUsed
   game.brains[player].lastInstructions =
     game.brains[player].runtime.instructionsUsed
+  game.metrics.decision(
+    int(player), game.world.tick, game.brains[player].lastInstructions,
+    overlordLimits().maxInstructions
+  )
 
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every player's script for this decision tick.

@@ -3,16 +3,51 @@
 import
   std/[os, strformat, strutils]
 
-proc setupEmscripten*(exampleDir: string) =
+proc setupEmscripten*(exampleDir: string, game = "") =
   ## Configures the wasm backend and writes the bundle next to the game.
   when defined(emscripten):
     let
       repoDir = exampleDir / ".." / ".."
-      dataDir = repoDir / ".." / "polyworld_data"
+      dataDir = getEnv("POLYWORLD_DATA", repoDir / ".." / "polyworld_data")
       outputDir = exampleDir / "emscripten"
-      shellFile = repoDir / "src" / "polyworld" / "emscripten.html"
+      shellTemplate = repoDir / "src" / "polyworld" /
+        (if defined(replayViewer): "replay.html" else: "emscripten.html")
+      shellFile = outputDir / "shell.html"
+    let preJs =
+      if defined(replayViewer):
+        ""
+      else:
+        "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
+    var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_data")
+    var logo = ""
     if not dirExists(outputDir):
       mkDir(outputDir)
+    if game.len > 0:
+      let
+        variant = if defined(webPng): "png" else: "ktx2"
+        cache = repoDir / "tmp" / "webassets" / (game & "-" & variant)
+        packer = cache / ("pack_assets" & ExeExt)
+        options = if defined(webPng): " -d:webPng" else: ""
+      if not dirExists(cache):
+        mkDir(cache)
+      exec quoteShell(getCurrentCompilerExe()) & " c --hints:off" & options &
+        " --nimcache:" & quoteShell(cache / "nimcache") &
+        " -o:" & quoteShell(packer) & " " &
+        quoteShell(exampleDir / "pack_assets.nim")
+      exec quoteShell(packer) & " " & quoteShell(dataDir) &
+        " " & quoteShell(cache)
+      let
+        logoFile = outputDir / "loading-logo.png"
+        logoData = readFile(cache / "loading-logo.png")
+      if not fileExists(logoFile) or readFile(logoFile) != logoData:
+        writeFile(logoFile, logoData)
+      logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
+        "width=\"320\" height=\"240\" src=\"loading-logo.png\" " &
+        "fetchpriority=\"high\">"
+      preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_data")
+    let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
+    if not fileExists(shellFile) or readFile(shellFile) != shell:
+      writeFile(shellFile, shell)
     switch("nimcache", outputDir / "tmp")
     switch("threads", "off")
     --os:linux
@@ -28,7 +63,6 @@ proc setupEmscripten*(exampleDir: string) =
       --clang.linkerexe:emcc
       --clang.cpp.exe:emcc
       --clang.cpp.linkerexe:emcc
-    --listCmd
     --gc:arc
     --exceptions:goto
     --define:noSignalHandler
@@ -41,11 +75,12 @@ proc setupEmscripten*(exampleDir: string) =
       "passL",
       (&"""
       -o {outputDir / projectName()}.html
-      --preload-file {dataDir}@/polyworld_data
-      --pre-js {repoDir / "src" / "polyworld" / "webinputs.js"}
+      {preload}
+      {preJs}
       --shell-file {shellFile}
       -s ASYNCIFY
       -s FETCH
+      -s EXIT_RUNTIME=1
       -s USE_WEBGL2=1
       -s MAX_WEBGL_VERSION=2
       -s MIN_WEBGL_VERSION=1

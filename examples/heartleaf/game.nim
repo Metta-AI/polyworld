@@ -13,7 +13,9 @@ import
   sim,
   bots,
   controls,
-  replays
+  replays, seeking
+
+var startupTarget*: SeekTarget
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
@@ -27,6 +29,8 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
   --record PATH    Record this game to a replay file.
   --days N         Days in the week (default 7).
   --seed N         Map seed (default 2026).
+  --seek-tick N    Fast-forward to an absolute tick (zero is initial state).
+  --seek-event S   Fast-forward to day:N:morning|dinner|scorecard.
   --play=false     Start the graphical transport paused.
   --speed N        Graphical start speed: 1, 2, 4, or 16.
   --windowSize WxH Graphical window, such as 800x400.
@@ -54,6 +58,11 @@ proc parseGameOptions(): (GameOptions, int32) =
       discard
     else:
       case argument
+      of "--seek-tick", "--seek-event":
+        if startupTarget.kind != NoSeek:
+          fail("only one startup seek target is allowed")
+        startupTarget = parseSeekTarget(argument,
+          arguments.argumentValue(index, argument))
       of "--days":
         dayCount = parsePositiveInt32(
           arguments.argumentValue(index, "--days"), "--days")
@@ -70,6 +79,8 @@ proc parseGameOptions(): (GameOptions, int32) =
     VillagerCount,
     "a live game requires exactly nine bots"
   )
+  if startupTarget.kind != NoSeek and options.playerSlot > 0:
+    fail("startup seeking requires a replay or nine scripted bots")
   (options, dayCount)
 
 let
@@ -126,7 +137,11 @@ block:
       mapHash: gameMap.hash,
       contentHash: contentHash()
     ))
+    run.recorder.data.config = localGameConfig(options, VillagerCount)
+    run.recorder.data.config.dayCount = dayCount
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
+
+startupTarget.validate(run.world.dayCount, run.maximumTicks)
 
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
@@ -158,6 +173,18 @@ proc advanceGame*() =
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+
+proc seekStartup*(afterTick: proc() {.closure.} = nil) =
+  if startupTarget.kind == NoSeek:
+    return
+  while not startupTarget.reached(run.world):
+    if run.world.over or run.world.tick >= run.maximumTicks:
+      fail("seek target was not reached before this recording ended")
+    advanceGame()
+    if afterTick != nil:
+      afterTick()
+  if run.hashCheck.mismatches > 0:
+    fail("replay diverged while seeking")
 
 proc saveRecording*(path = options.recordPath) =
   ## Saves every recorded tick, keeping the original match setup.
@@ -195,7 +222,9 @@ proc runHeadless*() =
   defer:
     finishGameProfile()
   let started = epochTime()
-  while run.world.tick < run.maximumTicks and not run.world.over:
+  seekStartup()
+  while startupTarget.kind == NoSeek and
+      run.world.tick < run.maximumTicks and not run.world.over:
     advanceGame()
     if profileShouldDump(run.world.tick):
       finishGameProfile()
@@ -221,6 +250,24 @@ proc runHeadless*() =
   echo "  ", describeResult()
   echo &"  {pathSearches} path searches, {pathExpansions} expansions"
 
+  if startupTarget.kind != NoSeek:
+    echo &"  destination: tick {run.world.tick}, day {run.world.day}, {run.world.phase}"
+    for slot, report in run.world.dailyReports:
+      var eating = ""
+      for bite in 0 ..< report.biteCount:
+        let food = report.bites[bite]
+        eating.add &" {VeggieNames[food.veggie]} +{food.points}"
+      let tally =
+        if run.world.phase == DaytimePhase: DinnerReport()
+        else: run.world.lastTally[slot]
+      echo &"  {VillagerNames[slot]}: hosting {report.hostingPoints}" &
+        &" ({tally.pantry} veg x {tally.visitors} guests)," &
+        &" eating [{eating}], curfew -{report.penalty}," &
+        &" today {run.world.villagers[slot].score - report.startingScore}," &
+        &" total {run.world.villagers[slot].score}"
+    if not run.replayMode:
+      saveRecording()
+    return
   if run.replayMode:
     if not run.replayPlayer.finished:
       echo "error: the replay still had commands left to run"

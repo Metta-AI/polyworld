@@ -3,13 +3,15 @@
 import
   std/os,
   polyworld/pathing,
-  polyworld/tapes,
+  polyworld/[tapes, metrics],
   content
 
 const
   ReplayGame* = "call_to_adventure"
-  ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 14'u16
+  ReplayFormatVersion* = 3'u16
+  ## This client supports only this gameplay version. Bump it when rules change.
+  ## Older replays use their archived client; never add compatibility branches.
+  ReplayGameVersion* = 21'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionPickupTarget* = 3'u8
@@ -31,29 +33,30 @@ type
       ## Use and drop use `first` as the inventory slot.
 
   ReplayHeader* = TapeHeader[Setup]
-  ReplayData* = ActionTape[Setup, ReplayAction]
-  ReplayRecorder* = TapeRecorder[Setup, ReplayAction]
-  ReplayPlayer* = TapePlayer[Setup, ReplayAction]
+  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics]
+  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics]
+  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics]
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Call to Adventure replay error.
   raise newException(ReplayError, message)
 
 proc initReplayData*(setup: Setup): ReplayData =
-  ## Creates an empty replay with a versioned deterministic setup.
-  initActionTape[Setup, ReplayAction](
+  ## Creates a replay containing the match setup, config, and action tape.
+  result.header = initActionTape[Setup, ReplayAction](
     setup,
     ReplayFormatVersion,
     ReplayGameVersion
+  ).header
+  result.config = GameConfig(
+    seed: setup.seed,
+    maxTicks: int32(setup.maximumTicks),
+    players: unnamedPlayers(PartySize)
   )
 
 proc initReplayRecorder*(setup: Setup): ReplayRecorder =
-  ## Creates an in-memory bot-command recorder.
-  initTapeRecorder[Setup, ReplayAction](
-    setup,
-    ReplayFormatVersion,
-    ReplayGameVersion
-  )
+  ## Creates an in-memory recorder owning the complete replay data.
+  ReplayRecorder(data: initReplayData(setup))
 
 proc recordAction*(
     recorder: ReplayRecorder,
@@ -125,6 +128,10 @@ proc validateAction(action: ReplayAction, setup: Setup) =
 
 proc validate*(data: ReplayData) =
   ## Validates versions, setup, commands, and per-tick hash coverage.
+  data.config.validateConfig(PartySize)
+  if data.config.seed != data.header.setup.seed or
+    data.config.maxTicks != int32(data.header.setup.maximumTicks):
+      fail("replay configuration does not match its simulation setup")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion
@@ -142,19 +149,22 @@ proc validate*(data: ReplayData) =
       fail("replay actions move backward in time")
     action.validateAction(data.header.setup)
     lastTick = action.tick
+  try:
+    data.metrics.validate(
+      data.config.players.len,
+      int32(data.header.setup.tickRate),
+      data.hashes.len
+    )
+  except MetricsError as error:
+    fail(error.msg)
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes one validated replay using the shared Flatty envelope.
+  ## Encodes a validated recording for this client's gameplay version.
   data.validate()
-  encodeReplayFile(
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Decodes and validates one replay buffer.
+  ## Rejects other gameplay versions before decoding the recording.
   result = decodeReplayFile(
     ReplayGame,
     ReplayGameVersion,
@@ -165,29 +175,24 @@ proc decodeReplay*(bytes: string): ReplayData =
   result.validate()
 
 proc saveReplay*(path: string, data: ReplayData) =
-  ## Creates the parent directory and writes one complete replay file.
-  data.validate()
-  let directory = path.parentDir
-  if directory.len > 0:
-    createDir(directory)
-  saveReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  ## Creates the parent directory and saves the complete recording.
+  if path.len == 0:
+    fail("replay output path is empty")
+  let bytes = encodeReplay(data)
+  try:
+    let directory = path.parentDir
+    if directory.len > 0:
+      createDir(directory)
+    writeFile(path, bytes)
+  except IOError, OSError:
+    fail("cannot save replay: " & getCurrentExceptionMsg())
 
 proc loadReplay*(path: string): ReplayData =
-  ## Loads one complete Call to Adventure replay file.
-  result = loadReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    ReplayData,
-    MaxReplayBytes
-  )
-  result.validate()
+  ## Loads one recording with its complete match configuration and metrics.
+  try:
+    result = decodeReplay(readFile(path))
+  except IOError, OSError:
+    fail("cannot load replay: " & getCurrentExceptionMsg())
 
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Creates a playback cursor over validated commands.
