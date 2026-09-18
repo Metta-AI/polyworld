@@ -136,6 +136,15 @@ body-derived weights. Lapels, cuffs, pockets, buttons, and brass buckles are
 small mesh details. The bib works best over `Gnome tucked shirt` so its straps
 meet the waistband instead of hanging over a loose hem.
 
+The `Belt` picker offers `None`, `Simple leather belt`, and `Gnome buckle belt`.
+The simple belt was detached from the green tabard and ochre tunic, which now
+contain only their fabric. Belts have their own GLBs, rig weights, and leather
+color controls; swapping or removing one does not replace the body, shirt,
+or trousers. Buckles retain their metal color. `build_belts.py` migrates an
+older Blender source without regenerating other parts, and `buildClothes`
+keeps belts separate on subsequent builds. The two renamed tunics retain
+their existing asset IDs and filenames.
+
 Gnomes 05 and 07 share the fuller long coat with broad lapels and a gently
 flared hem, colored gray and blue respectively. Gnome 06 wears taller boots
 with V-shaped cuffs and contrasting brown piping. The boots hide the feet
@@ -350,6 +359,35 @@ Run `python3 "$CHARGEN_SCRIPTS/count_polygons.py"` for per-gnome triangle,
 vertex, and material primitive counts. The Markdown and JSON reports go to
 `tmp/chargen/polygons`. Counts resolve preset visibility masks and include
 covered surfaces that still render.
+
+Runtime exports use `optimizations.py` to keep the nine gnome presets below
+15,000 rendered triangles each. The editable `source/character.blend` retains
+its full geometry. Clothing loses redundant inward lining but keeps its outer
+surface and opening rims. Hems, cuffs, creases, wrist seams, the coat's belt
+clearance, and the fancy boot shafts retain extra support geometry. Trouser
+and shorts exteriors retain their original vertices and weights. Hands,
+beards, and face projection grids are also reduced. Body and hat meshes are
+unchanged. This budget applies to the nine presets, not every possible random
+combination of parts.
+
+Re-export optimized runtime assets without regenerating the Blender model:
+
+```sh
+blender -b --python-exit-code 1 --python "$CHARGEN_SCRIPTS/optimize_model.py"
+python3 "$CHARGEN_SCRIPTS/verify_geometry.py"
+```
+
+The verifier checks skin weights, finite geometry, normals, and preset budgets.
+With `--baseline /path/to/earlier/character.glb`, it also checks unchanged
+meshes, wrist boundaries, rig bindings, and animation keys. The ordinary model,
+clothing, gnome, hat, and animation builders use the same export reduction.
+Per-mesh before/after counts accompany assembled exports as `.geometry.json`.
+
+`render_garments.nim` accepts `CHARGEN_LIBRARY` and `REVIEW_OUTPUT` for separate
+before/after libraries and render folders. Set `REVIEW_PBR=1` for smooth
+lighting or `REVIEW_HANDS=1` for hand closeups. Each run captures front, side,
+back, walking, and crouching views. This reduction's comparisons are kept in
+`tmp/chargen/optimization`.
 
 Enable `Custom skin RGB` below the skin preset to edit red, green, and blue
 from 0 to 255. This affects skin meshes, including ears and nose, while eyes,

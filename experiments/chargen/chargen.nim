@@ -647,10 +647,11 @@ proc run() =
         if not editingOriginal:
           skinControls()
       var categoryOrder: seq[int]
-      for i, category in source.categories:
-        if category.key in ["Headgear", "Chest", "Jacket", "Belt",
-                           "Suspenders", "Leg", "Foot"]:
-          categoryOrder.add i
+      for key in ["Headgear", "Chest", "Belt", "Jacket",
+                  "Suspenders", "Leg", "Foot"]:
+        for i, category in source.categories:
+          if category.key == key:
+            categoryOrder.add i
       for i, category in source.categories:
         if category.key notin ["Headgear", "Chest", "Jacket", "Belt",
                               "Suspenders", "Leg", "Foot"]:
@@ -671,7 +672,8 @@ proc run() =
         if not editingOriginal and category.key == "Headgear":
           hatControls()
         if not editingOriginal:
-          clothControls(category.key)
+          if choice >= 0:
+            clothControls(category.key)
         if not editingOriginal and category.key == "Hair":
           hairControls()
         if not editingOriginal and category.key == "Brow":

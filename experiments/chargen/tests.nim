@@ -550,6 +550,51 @@ proc testClothing() =
             doAssert nodes[name].visible
           doAssert nodes["Foot.Left"].visible and nodes["Foot.Right"].visible
 
+proc testBelts() =
+  ## Checks independent belt swaps, recoloring, and removal during animation.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    nodes = partNodes(model.root)
+    player = newClipPlayer(model.root)
+  var selection = manifest.defaultSelection()
+  manifest.selectPart(selection, "Chest", "03 Green tabard")
+  manifest.selectPart(selection, "Leg", "09 Brown trousers")
+  for name in ["Clothing_03", "Clothing_05"]:
+    for primitive in nodes[name].mesh.primitives:
+      doAssert primitive.material.name notin [
+        "Clothing belt leather", "Clothing simple buckles"
+      ]
+  for (belt, visible) in [
+    ("Simple leather belt", "Belt_Simple"),
+    ("Gnome buckle belt", "Gnome_Belt"),
+    ("None", "")
+  ]:
+    manifest.selectPart(selection, "Belt", belt)
+    nodes.applySelection(manifest, selection)
+    player.play("Walk_Loop", 0)
+    player.seek(0.35)
+    doAssert nodes["Body"].visible
+    doAssert nodes["Clothing_03"].visible
+    doAssert nodes["Clothing_09"].visible
+    for name in ["Belt_Simple", "Gnome_Belt"]:
+      doAssert nodes[name].visible == (name == visible)
+  let
+    shirtColor = nodes["Clothing_03"].mesh.primitives[0].material.baseColorFactor
+    buckleColor = nodes["Belt_Simple"].mesh.primitives[1].material.baseColorFactor
+  var clothes = initClothMaterials(nodes, manifest)
+  for cloth in clothes.mitems:
+    if cloth.category == "Belt":
+      cloth.enabled = true
+      cloth.tint = [0.2'f, 0.3'f, 0.4'f]
+  clothes.applyClothTint()
+  doAssert nodes["Belt_Simple"].mesh.primitives[0].material.baseColorFactor ==
+    color(0.2, 0.3, 0.4, 1)
+  doAssert nodes["Belt_Simple"].mesh.primitives[1].material.baseColorFactor ==
+    buckleColor
+  doAssert nodes["Clothing_03"].mesh.primitives[0].material.baseColorFactor ==
+    shirtColor
+
 proc testHats() =
   ## Checks head attachment, hair hiding, and isolated hat recoloring.
   let
@@ -985,6 +1030,7 @@ else:
   testHairColors()
   testOutfits()
   testClothing()
+  testBelts()
   testHats()
   testGarments()
   testGnomes()
