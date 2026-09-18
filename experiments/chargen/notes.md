@@ -500,3 +500,50 @@ The `--lit` review adds soft lighting and a slight angle to reveal real depth.
 Curved silhouettes use sampled profiles, blades have raised ridges, and
 orb and crystal faces retain broad facets without textures.
 The separate equipment registration survives subsequent hero rebuilds.
+
+## Gota hood fit
+
+Crossbowman, Lich, and Warlock use rounded skull shells with open, folded
+front curtains and separate lower points. The Ranger hood remains unchanged.
+Head clearance applies above the jaw so the lower fabric can hang freely.
+The ivory and gold edging follows the full cloth hem.
+
+`source/gota/hoods/index.html` compares the original concepts and before/after
+front, side, and back captures. The head review renderer supports
+`REVIEW_HEAD=1`, `REVIEW_ANGLE`, and `REVIEW_PBR=1`. Regenerate the final
+comparison with `review_gota_hoods.py --stage after --render`.
+
+## Creep sword grips
+
+Blue Creep equips the Vanguard sword and Purple Creep equips the Death
+Knight sword. Both default to Sword_Idle. The Animations panel has a
+"Creep sword pose" button that freezes both at frame 19 (0.633 seconds)
+in Sword_Attack, with Front, Side, and Top buttons and the playback scrubber.
+Start directly in this review with `CREEP_REVIEW=1`.
+The integer frame slider and Previous/Next frame buttons pause playback
+at exact exported 30 fps samples. Frame numbers start at zero; Sword_Attack
+runs from frame 0 through 46. The creep view also displays the current frame
+above the models, even when the controls panel is scrolled.
+
+Rigid equipment sidecars support `attachmentPivot` in glTF Y-up bind space
+and `attachmentRotation` in XYZ degrees, applied X then Y then Z about that
+grip before skinning. The two swords use pivot `[-1.13, 1.73, 0.025]` and
+rotation `[55.4, -22.7, 72.6]`. They retain the same hand attachment point through
+the entire attack. No animation, weapon geometry, or other prop is changed.
+
+The socket test samples all 47 exported attack frames for grip drift.
+Frame 19 uses the user's marked elbow-to-grip line as its blade direction.
+This follows the extended arm instead of aiming at a fixed world axis.
+The test checks that alignment at frame 19 and through frames 14 to 23.
+These checks do not validate collisions or finger deformation.
+
+Regenerate the frozen views and grip close-ups with:
+
+```sh
+nim c -o:tmp/chargen/render_swords experiments/chargen/render_swords.nim
+python3 "$CHARGEN_SCRIPTS/review_gota_swords.py"
+```
+
+`source/gota/swords/index.html` contains front, side, and top views at
+wind-up, strike, and follow-through, including neighboring frames 18 and 20,
+plus the previous socket comparison.

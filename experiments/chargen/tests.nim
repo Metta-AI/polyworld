@@ -1038,7 +1038,11 @@ proc testGota() =
     doAssert not nodes["GotaSkinUpper"].visible
     for name, node in nodes:
       if name.startsWith("GotaWeapon_"):
-        doAssert not node.visible
+        let expected =
+          if purple: "GotaWeapon_death_knight_right_hand"
+          else: "GotaWeapon_vanguard_knight_right_hand"
+        doAssert node.visible == (name == expected)
+    doAssert preset.pose == "Sword_Idle"
     for i, category in manifest.categories:
       case category.key
       of "Body", "Face":
@@ -1056,6 +1060,9 @@ proc testGota() =
           doAssert category.items[selection[i]].name == "Elf"
         else:
           doAssert selection[i] == -1
+      of "Right hand":
+        doAssert category.items[selection[i]].name ==
+          (if purple: "Death Knight sword" else: "Vanguard sword")
       else:
         doAssert selection[i] == -1, category.key
     let rgb = if purple: [131, 16, 159] else: [59, 147, 184]
@@ -1066,6 +1073,10 @@ proc testGota() =
       let pupil = manifest.pupilColors.colorIndex(preset.pupilColor)
       doAssert manifest.pupilColors[pupil].rgb == [1'f, 0'f, 0'f]
   doAssert creepCount == 2
+  let creeps = readLineup(AssetDir, manifest, model.root, "Creeps")
+  doAssert creeps.len == 2
+  doAssert creeps[0].name == "Blue Creep"
+  doAssert creeps[1].name == "Purple Creep"
   for clip in ["A_TPose", "Walk_Loop", "Crouch_Fwd_Loop"]:
     player.play(clip, 0)
     player.seek(0.35)
@@ -1078,6 +1089,64 @@ proc testGota() =
             if source.mesh == nil and source.name == node.name:
               doAssert node.pos == source.pos
               doAssert node.rot == source.rot
+
+proc testSwordSockets() =
+  ## Checks fixed grips and arm alignment at the reported attack frame.
+  let manifest = readManifest(AssetDir)
+  for preset in manifest.presets:
+    if preset.name notin ["Blue Creep", "Purple Creep"]:
+      continue
+    var inventory = manifest.presetManifest(preset)
+    for clip in manifest.clips:
+      if clip.name == "Sword_Attack":
+        inventory.clips.add clip
+    let
+      model = readCharacter(AssetDir, inventory)
+      player = newClipPlayer(model.root)
+      nodes = partNodes(model.root)
+    for category in inventory.categories:
+      if category.key != "Right hand":
+        continue
+      let
+        item = category.items[0]
+        original = readGltfFile(AssetDir / item.files[0])
+        raw = partNodes(original.root)[item.nodes[0]]
+        sword = nodes[item.nodes[0]]
+        pivot = vec3(-1.13, 1.73, 0.025)
+        tip = pivot + vec3(0, 1.25, 0)
+      var
+        socket = -1
+        elbow: Node
+      for node in model.root.walkNodes:
+        if node.name == "RightForeArm":
+          elbow = node
+      doAssert elbow != nil
+      for i, joint in sword.skin.joints:
+        if joint.name == item.attachmentBone:
+          socket = i
+      doAssert socket >= 0
+      player.play("Sword_Attack", 0)
+      for frame in 0 .. 46:
+        player.seek(frame.float32 / 30)
+        model.root.updateTransforms()
+        let
+          hand = sword.skin.joints[socket].mat
+          before = hand * raw.skin.inverseBindMatrices[socket]
+          after = hand * sword.skin.inverseBindMatrices[socket]
+          grip = after * pivot
+        doAssert length(before * pivot - grip) < 0.0001,
+          "Sword grip moved away from its hand socket."
+        if frame in 14 .. 23:
+          let
+            arm = normalize(grip - elbow.mat * vec3(0, 0, 0))
+            blade = normalize(after * tip - grip)
+            alignment = dot(arm, blade)
+          doAssert alignment > 0.995,
+            "The blade must continue along the extended arm."
+          if frame == 19:
+            doAssert alignment > 0.99999,
+              "Frame 19 must follow the elbow-to-grip guide."
+      echo preset.name, " frame 19: arm alignment and fixed grip verified."
 
 proc testAssembly(directory: string) =
   ## Verifies independent meshes and clips share the same live skeleton.
@@ -1157,6 +1226,7 @@ else:
   testGarments()
   testGnomes()
   testGota()
+  testSwordSockets()
   testWeights()
   testReference()
   echo "Chargen tests passed"
