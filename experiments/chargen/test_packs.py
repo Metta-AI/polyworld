@@ -89,6 +89,31 @@ def main():
     assert set(trousers['nodes']) & set(boots['hides'])
     if args.runtime_tests:
       subprocess.run([str(args.runtime_tests.resolve()), str(clothing)], check=True)
+    gnomes = Path(directory) / 'gnomes'
+    face = ['body/base', 'heads/base', 'eyes/gnome_kind',
+            'noses/gnome_bulb', 'ears/gnome_cups', 'beards/gnome_pointed',
+            'eyebrows/01_soft_arch', 'mouths/01_relaxed_smile',
+            'hats/gnome_mushroom', 'hats/gnome_folded', 'hats/gnome_feather']
+    face += ['clothing/jackets/gnome_jacket',
+             'clothing/jackets/gnome_long_coat', 'clothing/jackets/gnome_vest',
+             'clothing/pants/gnome_shorts', 'clothing/belts/gnome_buckle_belt',
+             'clothing/suspenders/gnome_suspenders',
+             'clothing/suspenders/gnome_bib', 'clothing/torsos/gnome_tucked_shirt',
+             'clothing/torsos/07_blue_linen_shirt',
+             'clothing/pants/09_brown_trousers',
+             'clothing/boots/16_folded_travel_boots']
+    report = packLibrary(Library, gnomes, face, ['A_TPose', 'Walk_Loop'])
+    gnomeManifest = checkPack(gnomes, face, report)
+    assert (gnomes / gnomeManifest['hatPalette']).is_file()
+    assert len(list((gnomes / 'hats').glob('*.glb'))) == 3
+    for item in inventory(gnomes, gnomeManifest).values():
+      if item[0] == 'Headgear':
+        assert len(item[2]['hatShades']) == 1
+      if item[0] in ['Jacket', 'Belt', 'Suspenders']:
+        assert item[2]['clothShades']
+    assert len(report['atlases']) == 3
+    if args.runtime_tests:
+      subprocess.run([str(args.runtime_tests.resolve()), str(gnomes)], check=True)
     # A future torso can be added without changing the compiled inventory.
     document, binary = glbs.read(Library / 'body/body.glb')
     for node in document['nodes']:

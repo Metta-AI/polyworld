@@ -20,6 +20,8 @@ Folders = {
   'Beard': 'beards', 'Earring': 'earrings', 'Eyewear': 'eyewear',
   'Headgear': 'hats', 'Chest': 'clothing/torsos', 'Back': 'clothing/backs',
   'Hand': 'clothing/gloves', 'Leg': 'clothing/pants', 'Foot': 'clothing/boots',
+  'Jacket': 'clothing/jackets', 'Belt': 'clothing/belts',
+  'Suspenders': 'clothing/suspenders',
   'Left hand': 'props/left', 'Right hand': 'props/right',
 }
 
@@ -56,6 +58,7 @@ def exportLibrary():
   catalog = {
     'version': 2, 'rig': 'rig/humanoid.glb', 'skeleton': 'rig/skeleton.json',
     'skinPalette': 'colors/skin.json', 'hairPalette': 'colors/hair.json',
+    'hatPalette': 'colors/hats.json', 'defaultHatColor': 'Red',
     'pupilPalette': 'colors/eyes.json', 'defaultSkin': manifest['defaultSkin'],
     'defaultHairColor': 'Chestnut', 'defaultPupilColor': 'Gray',
     'base': manifest['base'], 'categories': [], 'clips': [],
@@ -82,7 +85,8 @@ def exportLibrary():
       metadata = dict(item, id=identity, files=[],
                       alignment=alignment,
                       skinNodes=[name for name in item['nodes'] if name in manifest['skinNodes']],
-                      hairShades=[shade for shade in manifest['hairShades'] if shade['node'] in item['nodes']])
+                      hairShades=[shade for shade in manifest['hairShades'] if shade['node'] in item['nodes']],
+                      hatShades=[shade for shade in manifest.get('hatShades', []) if shade['node'] in item['nodes']])
       if category['key'] == 'Brow':
         metadata['tint'] = 'hair'
       crop, texture = None, None
@@ -134,7 +138,8 @@ def exportLibrary():
   if previousPath.exists():
     previous = json.loads(previousPath.read_text())
     for field in ['defaultSkin', 'skinPalette', 'hairPalette', 'pupilPalette',
-                  'defaultHairColor', 'defaultPupilColor', 'base', 'presets']:
+                  'defaultHairColor', 'defaultPupilColor', 'hatPalette',
+                  'defaultHatColor', 'base', 'presets']:
       if field in previous:
         catalog[field] = previous[field]
     known = {category['key'] for category in catalog['categories']}

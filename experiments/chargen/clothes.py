@@ -275,7 +275,7 @@ def block(center, size, weights):
   return result
 
 
-def buckle(surface, height, width=.052, tall=.044):
+def buckle(surface, height, width=.052, tall=.044, bar=.007):
   """Place a simple open buckle on the garment rather than guessing its depth."""
   nearest = min((record for face in surface for record in face),
                 key=lambda record: record[0].x ** 2 +
@@ -284,9 +284,9 @@ def buckle(surface, height, width=.052, tall=.044):
   weights = nearest[2]
   result = []
   for z in [height - tall / 2, height + tall / 2]:
-    result += block(Vector((0, y, z)), (width, .012, .007), weights)
+    result += block(Vector((0, y, z)), (width, .012, bar), weights)
   for x in [-width / 2, width / 2]:
-    result += block(Vector((x, y, height)), (.007, .012, tall), weights)
+    result += block(Vector((x, y, height)), (bar, .012, tall), weights)
   return result
 
 

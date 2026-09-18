@@ -1,7 +1,7 @@
 import
   std/[os, random, sets, strutils, tables],
   chroma, gltf, jsony, vmath,
-  polyworld/[animblend, chargen], references, weights
+  polyworld/[animblend, chargen], references, weights, lineups
 
 const AssetDir = ChargenLibrary
 
@@ -215,6 +215,8 @@ proc testParts() =
   for preset in manifest.presets:
     manifest.applyPreset(selection, preset)
     nodes.applySelection(manifest, selection)
+  manifest.selectPart(selection, "Ears", "Elf")
+  nodes.applySelection(manifest, selection)
   doAssert nodes["Ears_Elf_Left"].visible
   manifest.applyPreset(selection, manifest.presets[0])
   nodes.applySelection(manifest, selection)
@@ -226,7 +228,7 @@ proc testEyes() =
     manifest = readManifest(AssetDir)
     model = readCharacter(AssetDir, manifest)
   var textures = readEyeTextures(model.root, AssetDir, manifest)
-  doAssert textures.textures.len == 31
+  doAssert textures.textures.len == 32
   var
     shades: HashSet[uint8]
     protected, tinted, count = 0
@@ -258,7 +260,7 @@ proc testEyes() =
       for uv in primitive.uvs:
         doAssert uv.x >= -0.00001 and uv.x <= 1.00001
         doAssert uv.y >= -0.00001 and uv.y <= 1.00001
-  doAssert count == 31
+  doAssert count == 32
   doAssert protected > 100_000 and tinted > 10_000
   doAssert shades.len > 20, "Tinting must retain iris shading."
   textures.applyPupilTint(manifest.pupilColors[0].rgb)
@@ -369,7 +371,7 @@ proc testHair(prefix: string) =
           if weight > 0:
             doAssert node.skin.joints[ids[j].int].name == "Head"
         doAssert abs(total - 1) < 0.00001
-  doAssert count == 16
+  doAssert count == (if prefix == "Beard_": 18 else: 16)
 
 proc testHairColors() =
   ## Verifies tint isolation and restores custom shades after weight mode.
@@ -390,7 +392,7 @@ proc testHairColors() =
     hairNodes: HashSet[string]
   for surface in manifest.hairShades:
     hairNodes.incl surface.node
-  doAssert hairNodes.len == 32
+  doAssert hairNodes.len == 34
   for i in 1 .. 16:
     let suffix = align($i, 2, '0')
     doAssert "Hair_" & suffix in hairNodes
@@ -474,8 +476,10 @@ proc testClothing() =
   var selection = manifest.defaultSelection()
   for category in manifest.categories:
     if category.key == "Chest":
-      doAssert category.items.len == 8
-    if category.key in ["Leg", "Foot"]:
+      doAssert category.items.len == 9
+    if category.key == "Leg":
+      doAssert category.items.len == 5
+    if category.key == "Foot":
       doAssert category.items.len == 4
   for category in manifest.categories:
     if category.key != "Leg":
@@ -502,6 +506,181 @@ proc testClothing() =
           for name in pants.nodes:
             doAssert nodes[name].visible
           doAssert nodes["Foot.Left"].visible and nodes["Foot.Right"].visible
+
+proc testHats() =
+  ## Checks head attachment, hair hiding, and isolated hat recoloring.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    nodes = partNodes(model.root)
+    hats = initHatMaterials(nodes, manifest)
+  var
+    tinted: seq[Material]
+    fixed: seq[(Material, Color)]
+    selection = manifest.defaultSelection()
+    count = 0
+    whiteSpots = 0
+  for surface in manifest.hatShades:
+    tinted.add nodes[surface.node].mesh.primitives[surface.primitive].material
+  doAssert tinted.len == 6
+  for name, node in nodes:
+    for primitive in node.mesh.primitives:
+      if primitive.material notin tinted:
+        fixed.add (primitive.material, primitive.material.baseColorFactor)
+    if not name.startsWith("Hat_"):
+      continue
+    inc count
+    for primitive in node.mesh.primitives:
+      if primitive.material.unlit:
+        doAssert name == "Hat_Mushroom"
+        doAssert primitive.material.baseColorFactor == color(1, 1, 1, 1)
+        doAssert primitive.material notin tinted
+        inc whiteSpots
+      for i, ids in primitive.jointIds:
+        var total = 0.0'f
+        for j in 0 ..< 4:
+          total += primitive.jointWeights[i][j]
+          if primitive.jointWeights[i][j] > 0:
+            doAssert node.skin.joints[ids[j].int].name == "Head"
+        doAssert abs(total - 1) < 0.00001
+  doAssert count == 6
+  doAssert whiteSpots == 1
+  for preset in manifest.hatColors:
+    hats.applyHatTint(preset.rgb)
+    for material in tinted:
+      doAssert material.baseColorFactor ==
+        color(preset.rgb[0], preset.rgb[1], preset.rgb[2], 1)
+    for (material, original) in fixed:
+      doAssert material.baseColorFactor == original
+  for category in manifest.categories:
+    if category.key != "Headgear":
+      continue
+    for item in category.items:
+      manifest.selectPart(selection, "Headgear", item.name)
+      nodes.applySelection(manifest, selection)
+      doAssert nodes[item.nodes[0]].visible
+      doAssert not nodes["Hair_01"].visible
+  manifest.selectPart(selection, "Headgear", "None")
+  nodes.applySelection(manifest, selection)
+  doAssert nodes["Hair_01"].visible
+
+proc testGarments() =
+  ## Verifies garment attachment, per-slot tinting, and fixed detail colors.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    nodes = partNodes(model.root)
+  var
+    clothes = initClothMaterials(nodes, manifest)
+    originals: seq[(Material, Color)]
+    fabrics: seq[Material]
+    count = 0
+  for node in nodes.values:
+    for primitive in node.mesh.primitives:
+      originals.add (primitive.material, primitive.material.baseColorFactor)
+    if node.name.startsWith("Gnome_"):
+      inc count
+      for primitive in node.mesh.primitives:
+        doAssert not primitive.material.unlit
+        for i, ids in primitive.jointIds:
+          var total = 0.0'f
+          for j in 0 ..< 4:
+            total += primitive.jointWeights[i][j]
+            if primitive.jointWeights[i][j] > 0:
+              doAssert ids[j].int < node.skin.joints.len
+          doAssert abs(total - 1) < 0.00001
+  doAssert count == 8
+  doAssert clothes.len == 6
+  var preset = Preset()
+  for i, cloth in clothes:
+    preset.parts.add PresetPart(
+      category: cloth.category,
+      rgb: @[0.1'f * (i + 1).float32, 0.2'f, 0.4'f]
+    )
+  clothes.applyClothPreset(preset)
+  for category in manifest.categories:
+    for item in category.items:
+      for shade in item.clothShades:
+        let material = nodes[shade.node].mesh.primitives[shade.primitive].material
+        fabrics.add material
+        for part in preset.parts:
+          if part.category == category.key:
+            doAssert material.baseColorFactor == color(
+              part.rgb[0] * shade.shade,
+              part.rgb[1] * shade.shade,
+              part.rgb[2] * shade.shade,
+              1
+            )
+  for (material, original) in originals:
+    if material notin fabrics:
+      doAssert material.baseColorFactor == original
+  clothes.applyClothPreset(Preset())
+  for (material, original) in originals:
+    doAssert material.baseColorFactor == original
+  var rejected = false
+  try:
+    clothes.applyClothPreset(Preset(parts: @[
+      PresetPart(category: "Jacket", rgb: @[0.5'f])
+    ]))
+  except ChargenError:
+    rejected = true
+  doAssert rejected
+
+proc testGnomes() =
+  ## Checks shared features, independent colors, and exact lineup pose copying.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    player = newClipPlayer(model.root)
+    actors = readLineup(AssetDir, manifest, model.root, "Gnomes")
+  doAssert actors.len == 9
+  var joints: Table[string, Node]
+  for node in model.root.walkNodes:
+    if node.mesh == nil:
+      joints[node.name] = node
+  for actor in actors:
+    let nodes = partNodes(actor.root)
+    doAssert nodes.len >= 19
+    doAssert actor.root.animations.len == 0
+    for name in ["Eyes_Gnome", "Nose_Gnome", "Ears_Gnome_Left",
+                 "Ears_Gnome_Right", "Beard_Gnome",
+                 "Beard_Gnome_Moustache", "Brow_Atlas01"]:
+      doAssert nodes[name].visible
+      for primitive in nodes[name].mesh.primitives:
+        for i, ids in primitive.jointIds:
+          for j in 0 ..< 4:
+            if primitive.jointWeights[i][j] > 0:
+              doAssert nodes[name].skin.joints[ids[j].int].name == "Head"
+  let
+    first = partNodes(actors[0].root)
+    second = partNodes(actors[1].root)
+    third = partNodes(actors[2].root)
+  doAssert first["Beard_Gnome"].mesh.primitives[0].material !=
+    second["Beard_Gnome"].mesh.primitives[0].material
+  doAssert first["Eyes_Gnome"].mesh.primitives[0].material.baseColor.data !=
+    third["Eyes_Gnome"].mesh.primitives[0].material.baseColor.data
+  for clip in ["A_TPose", "Walk_Loop", "Dance_Loop", "Jump_Start"]:
+    player.play(clip, 0.2)
+    for time in [0.0'f, 0.1'f, 0.45'f]:
+      player.update(time)
+      actors.sync()
+      for actor in actors:
+        for node in actor.root.walkNodes:
+          if node.mesh == nil:
+            doAssert node.pos == joints[node.name].pos
+            doAssert node.rot == joints[node.name].rot
+            doAssert node.scale == joints[node.name].scale
+    player.seek(0.25)
+    actors.sync()
+    for actor in actors:
+      for node in actor.root.walkNodes:
+        if node.mesh == nil:
+          doAssert node.rot == joints[node.name].rot
+  let original = manifest.defaultSelection()
+  for preset in manifest.presets:
+    if preset.group == "Gnomes":
+      discard manifest.presetManifest(preset)
+  doAssert manifest.defaultSelection() == original
 
 proc testWeights() =
   ## Checks runtime bone attachments and reversible weight preview colors.
@@ -722,7 +901,12 @@ proc testAssembly(directory: string) =
     nodes.applySkin(manifest, i)
   let
     hair = initHairMaterials(nodes, manifest)
+    hats = initHatMaterials(nodes, manifest)
     brows = initBrowMaterials(model.root, manifest)
+  hats.applyHatTint(manifest.hatColors[0].rgb)
+  var clothes = initClothMaterials(nodes, manifest)
+  for preset in manifest.presets:
+    clothes.applyClothPreset(preset)
   var eyes = readEyeTextures(model.root, directory, manifest)
   hair.applyHairTint(manifest.hairColors[0].rgb)
   brows.applyBrowTint(manifest.hairColors[0].rgb)
@@ -752,6 +936,9 @@ else:
   testHairColors()
   testOutfits()
   testClothing()
+  testHats()
+  testGarments()
+  testGnomes()
   testWeights()
   testReference()
   echo "Chargen tests passed"

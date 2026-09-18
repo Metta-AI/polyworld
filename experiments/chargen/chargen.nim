@@ -6,7 +6,7 @@
 import
   std/[os, random, sets, strformat, strutils, tables, times],
   bumpy, chroma, gltf, silky, vmath,
-  polyworld/[animblend, chargen, toon], references, weights
+  polyworld/[animblend, chargen, toon], references, weights, lineups
 
 when defined(takeScreenshot):
   import pixie
@@ -78,16 +78,22 @@ proc run() =
     model = readCharacter(directory, manifest)
     nodes = partNodes(model.root)
     hairMaterials = initHairMaterials(nodes, manifest)
+    hatMaterials = initHatMaterials(nodes, manifest)
     browMaterials = initBrowMaterials(model.root, manifest)
     player = newClipPlayer(model.root)
   pbr.attachEnvironmentMap(loadDefaultEnvironmentMap())
   var
+    clothes = initClothMaterials(nodes, manifest)
     eyeTextures = readEyeTextures(model.root, directory, manifest)
     pupil = manifest.pupilColors.colorIndex(
       getEnv("PUPIL", manifest.defaultPupilColor)
     )
     pupilTint = manifest.pupilColors[pupil].rgb
     customPupil = false
+    hat = manifest.hatColors.colorIndex(
+      getEnv("HAT_COLOR", manifest.defaultHatColor)
+    )
+    hatTint = manifest.hatColors[hat].rgb
     hair = manifest.hairColors.colorIndex(
       getEnv("HAIR_COLOR", manifest.defaultHairColor)
     )
@@ -103,6 +109,8 @@ proc run() =
     compareOriginal = getEnv("COMPARE_ORIGINAL", "0") == "1"
     originalOutfit = getEnv("ORIGINAL_OUTFIT", "0") == "1"
     reference: Reference
+    lineup: seq[LineupActor]
+    showLineup = false
     selection = manifest.defaultSelection()
     shading = Toon
     palette = 0
@@ -122,6 +130,7 @@ proc run() =
     ]
     customSkin = false
     presetIndex = 0
+    hasGnomes = false
     speed = 1.0'f
     fade = 0.20'f
     yaw = 0.22'f
@@ -133,6 +142,10 @@ proc run() =
     panning = false
     rng = initRand(19)
     lastFrameTime = epochTime()
+
+  for preset in manifest.presets:
+    if preset.group == "Gnomes":
+      hasGnomes = true
 
   for clip in manifest.clips:
     if player.clipIndex(clip.name) < 0:
@@ -194,15 +207,60 @@ proc run() =
     presetIndex = index
     let preset = manifest.presets[index]
     manifest.applyPreset(selection, preset)
+    clothes.applyClothPreset(preset)
     chooseSkin(clamp(preset.skin, 0, max(0, manifest.skins.high)))
     applyParts()
+    if preset.hatColor.len > 0:
+      hat = manifest.hatColors.colorIndex(preset.hatColor)
+      hatTint = manifest.hatColors[hat].rgb
+    if preset.hairColor.len > 0:
+      hair = manifest.hairColors.colorIndex(preset.hairColor)
+      hairTint = manifest.hairColors[hair].rgb
+    if preset.pupilColor.len > 0:
+      pupil = manifest.pupilColors.colorIndex(preset.pupilColor)
+      pupilTint = manifest.pupilColors[pupil].rgb
     playClip(preset.pose, fade)
+
+  proc frameLineup() =
+    ## Frames nine T poses in a grid with room for the controls panel.
+    yaw = 0
+    pitch = 0
+    distance = 14.5
+    target = vec3(2.5, 5.94, 0)
+    focusBone = false
+
+  proc gnomePose() =
+    ## Uses the T pose clip when shipped, otherwise the rig's bind pose.
+    playClip(if player.clipIndex("A_TPose") >= 0: "A_TPose" else: "", 0)
+
+  proc setLineup(enabled: bool) =
+    ## Opens the gnome color study while sharing the normal pose controls.
+    showLineup = enabled
+    if enabled:
+      if lineup.len == 0:
+        lineup = readLineup(directory, manifest, model.root, "Gnomes")
+      compareOriginal = false
+      editingOriginal = false
+      showParts = false
+      showBones = false
+      restWrist = false
+      shading = Toon
+      frameLineup()
+      gnomePose()
+    else:
+      showParts = true
+      yaw = 0.22
+      pitch = 0.08
+      distance = 5.8
+      target = vec3(0, 1.52, 0)
 
   proc randomize(alignment = Both) =
     ## Rolls compatible parts plus skin, hair, and pupil color presets.
     if manifest.skins.len > 0:
       chooseSkin(rng.rand(manifest.skins.high))
     selection = manifest.randomSelection(rng, alignment)
+    hat = rng.rand(manifest.hatColors.high)
+    hatTint = manifest.hatColors[hat].rgb
     hair = rng.rand(manifest.hairColors.high)
     hairTint = manifest.hairColors[hair].rgb
     pupil = rng.rand(manifest.pupilColors.high)
@@ -291,6 +349,9 @@ proc run() =
   if reference != nil:
     reference.sync(player)
 
+  if getEnv("GNOME_LINEUP", "0") == "1":
+    setLineup(true)
+
   proc mouseOverUi(): bool =
     ## Prevents camera gestures from starting over either controls panel.
     for state in subWindowStates.values:
@@ -322,7 +383,11 @@ proc run() =
       target -= right * delta.x * scale
       target.y += delta.y * scale
     if not overUi and window.scrollDelta.y != 0:
-      distance = clamp(distance * pow(0.92'f, window.scrollDelta.y), 0.6, 12)
+      distance = clamp(
+        distance * pow(0.92'f, window.scrollDelta.y),
+        0.6,
+        if showLineup: 20.0 else: 12.0
+      )
 
   proc cameraView(): Mat4 =
     ## Builds a view matrix around the character's center.
@@ -427,6 +492,26 @@ proc run() =
         channel
       )
 
+  proc hatControls() =
+    ## Tints the hat fabric while retaining fixed-color ornament materials.
+    group "hat color":
+      box RowWidth, 34
+      layout LeftToRight
+      itemSpacing 5
+      button "<":
+        hat = (hat + manifest.hatColors.len - 1) mod manifest.hatColors.len
+        hatTint = manifest.hatColors[hat].rgb
+      button ">":
+        hat = (hat + 1) mod manifest.hatColors.len
+        hatTint = manifest.hatColors[hat].rgb
+      text "Hat: " &
+        (if hatTint == manifest.hatColors[hat].rgb:
+          manifest.hatColors[hat].name
+        else:
+          "Custom")
+    for i, channel in ["Red", "Green", "Blue"]:
+      scrubber("Hat " & channel, hatTint[i], 0.0'f, 1.0'f, channel)
+
   proc selectedPreset(index: int) =
     ## Applies the active model's preset and the shared animation.
     if editingOriginal:
@@ -434,6 +519,18 @@ proc run() =
       playClip(reference.manifest.presets[index].pose, fade)
     else:
       loadPreset(index)
+
+  proc clothControls(category: string) =
+    ## Edits a garment slot's fabric without tinting its metal details.
+    for cloth in clothes.mitems:
+      if cloth.category != category:
+        continue
+      checkBox("Custom " & category & " color", cloth.enabled)
+      if cloth.enabled:
+        for i, channel in ["Red", "Green", "Blue"]:
+          scrubber(
+            category & " " & channel, cloth.tint[i], 0.0'f, 1.0'f, channel
+          )
 
   proc partsPanel() =
     ## Keeps the complete part browser available during side-by-side playback.
@@ -510,10 +607,12 @@ proc run() =
           skinControls()
       var categoryOrder: seq[int]
       for i, category in source.categories:
-        if category.key in ["Chest", "Leg", "Foot"]:
+        if category.key in ["Headgear", "Chest", "Jacket", "Belt",
+                           "Suspenders", "Leg", "Foot"]:
           categoryOrder.add i
       for i, category in source.categories:
-        if category.key notin ["Chest", "Leg", "Foot"]:
+        if category.key notin ["Headgear", "Chest", "Jacket", "Belt",
+                              "Suspenders", "Leg", "Foot"]:
           categoryOrder.add i
       for i in categoryOrder:
         let category = source.categories[i]
@@ -528,6 +627,10 @@ proc run() =
           else:
             selection[i] = choice
             applyParts()
+        if not editingOriginal and category.key == "Headgear":
+          hatControls()
+        if not editingOriginal:
+          clothControls(category.key)
         if not editingOriginal and category.key == "Hair":
           hairControls()
         if not editingOriginal and category.key == "Brow":
@@ -547,7 +650,9 @@ proc run() =
       text "Scroll: zoom. P: parts. A: controls."
       button "Reset camera":
         focusBone = false
-        if compareOriginal:
+        if showLineup:
+          frameLineup()
+        elif compareOriginal:
           prepareComparison()
         else:
           yaw = 0.22
@@ -605,7 +710,8 @@ proc run() =
         layout LeftToRight
         radioButton("Normal", shading, Clay)
         radioButton("Toon", shading, Toon)
-        radioButton("Weights", shading, Weights)
+        if not showLineup:
+          radioButton("Weights", shading, Weights)
       checkBox("Polygon overlay (V)", wireframe)
       checkBox("MSAA 4x", msaa)
       if shading == Toon:
@@ -626,9 +732,21 @@ proc run() =
           text &"Rim strength: {rimStrength:.2f}"
           scrubber("rim", rimStrength, 0.0'f, 1.0'f, "")
 
+      if hasGnomes:
+        let previousLineup = showLineup
+        checkBox("Nine gnomes", showLineup)
+        if showLineup != previousLineup:
+          setLineup(showLineup)
+      if showLineup:
+        text "Shared face kit, nine color presets"
+        button "Gnome T pose":
+          gnomePose()
+          frameLineup()
       let previousComparison = compareOriginal
       checkBox("Side by side with original", compareOriginal)
       if compareOriginal and not previousComparison:
+        showLineup = false
+        showParts = true
         prepareComparison()
       elif not compareOriginal and previousComparison:
         editingOriginal = false
@@ -669,7 +787,8 @@ proc run() =
       scrubber("speed", speed, 0.0'f, 3.0'f, "")
       text &"Cross-fade: {fade:.2f}s"
       scrubber("fade", fade, 0.0'f, 1.0'f, "")
-      checkBox("Bones overlay", showBones)
+      if not showLineup:
+        checkBox("Bones overlay", showBones)
       if shading == Weights or showBones:
         group "bone choice":
           box RowWidth, 36
@@ -751,14 +870,14 @@ proc run() =
       showParts = not showParts
     if window.buttonPressed[KeyA]:
       showAnimations = not showAnimations
-    if window.buttonPressed[KeyW]:
+    if window.buttonPressed[KeyW] and not showLineup:
       shading = if shading == Weights: Clay else: Weights
       showBones = shading == Weights
     if window.buttonPressed[KeyV]:
       wireframe = not wireframe
-    if window.buttonPressed[KeyB]:
+    if window.buttonPressed[KeyB] and not showLineup:
       showBones = not showBones
-    if window.buttonPressed[KeyF]:
+    if window.buttonPressed[KeyF] and not showLineup:
       focusBone = true
       distance = 1.6
     player.timeScale = speed
@@ -772,6 +891,8 @@ proc run() =
       else:
         mat4()
     model.root.updateTransforms(modelTransform)
+    if showLineup:
+      lineup.sync()
     if reference != nil:
       reference.player.paused = player.paused
       reference.player.timeScale = speed
@@ -786,13 +907,21 @@ proc run() =
     if shading != Weights:
       applySkin()
       hairMaterials.applyHairTint(hairTint)
+      hatMaterials.applyHatTint(hatTint)
+      clothes.applyClothTint()
       browMaterials.applyBrowTint(
         if matchBrows: hairTint else: WhiteBrows
       )
     let
       aspect = window.size.x.float32 / max(window.size.y.float32, 1)
       view = cameraView()
-      projection = perspective(45.0'f, aspect, 0.02'f, 100.0'f)
+      projection =
+        if showLineup:
+          let halfHeight = distance * 0.44'f
+          ortho(-halfHeight * aspect, halfHeight * aspect,
+            -halfHeight, halfHeight, 0.02'f, 100.0'f)
+        else:
+          perspective(45.0'f, aspect, 0.02'f, 100.0'f)
       forward = normalize(target - eye)
       right = normalize(cross(forward, vec3(0, 1, 0)))
       up = cross(right, forward)
@@ -832,7 +961,12 @@ proc run() =
         pbr.transform = reference.transform
         pbr.draw(reference.root)
         pbr.transform = modelTransform
-      pbr.draw(model.root)
+      if showLineup:
+        for actor in lineup:
+          pbr.transform = actor.transform
+          pbr.draw(actor.root)
+      else:
+        pbr.draw(model.root)
     of Toon:
       toon.drawBackground()
       toon.unlitNodes.clear()
@@ -851,7 +985,12 @@ proc run() =
         toon.transform = reference.transform
         toon.draw(reference.root)
         toon.transform = modelTransform
-      toon.draw(model.root)
+      if showLineup:
+        for actor in lineup:
+          toon.transform = actor.transform
+          toon.draw(actor.root)
+      else:
+        toon.draw(model.root)
     if wireframe:
       glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
       glEnable(GL_POLYGON_OFFSET_LINE)
@@ -861,7 +1000,12 @@ proc run() =
         toon.transform = reference.transform
         toon.draw(reference.root)
         toon.transform = modelTransform
-      toon.draw(model.root)
+      if showLineup:
+        for actor in lineup:
+          toon.transform = actor.transform
+          toon.draw(actor.root)
+      else:
+        toon.draw(model.root)
       toon.tint = color(1, 1, 1, 1)
       glDisable(GL_POLYGON_OFFSET_LINE)
       glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
@@ -899,7 +1043,8 @@ proc run() =
         weightPreview.bones[selectedBone].name
       )
     ui:
-      partsPanel()
+      if not showLineup:
+        partsPanel()
       animationsPanel()
     sk.endUi()
     when defined(takeScreenshot):

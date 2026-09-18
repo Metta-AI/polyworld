@@ -19,9 +19,12 @@ The default library is `../polyworld_data/characters/chargen`. Set
 | `eyes` | One PNG, iris mask, GLB surface, and JSON sidecar per generated pair |
 | `mouths`, `eyebrows` | One PNG, GLB surface, and JSON sidecar per generated style |
 | `colors` | Editable skin, hair, and eye preset lists |
-| `clothing/torsos` | Eight simple medieval shirts, tunics, and a leather jerkin |
-| `clothing/pants`, `clothing/boots` | Four trouser styles and four boot styles |
-| `clothing/backs`, `clothing/gloves`, `hats` | Future clothing parts |
+| `clothing/torsos` | Eight medieval tops and a tucked shirt |
+| `clothing/pants`, `clothing/boots` | Four trousers, cuffed shorts, and four boots |
+| `clothing/jackets` | Open jacket, long coat, and vest |
+| `clothing/belts`, `clothing/suspenders` | Buckle belt, suspenders, and overall bib |
+| `hats` | Six recolorable gnome hats, each in its own GLB |
+| `clothing/backs`, `clothing/gloves` | Future clothing parts |
 | `earrings`, `eyewear`, `props/left`, `props/right` | Future accessories |
 | `rig` | Shared humanoid skeleton and bone preview metadata |
 | `animations` | One GLB per animation clip |
@@ -36,6 +39,101 @@ The master face sheets remain in `source` for authoring. Runtime face images are
 individual transparent cutouts. Eyes and mouths remain unlit. Iris masks tint
 only the iris, preserving the white and dark details. White eyebrows follow the
 hair color unless the viewer's white eyebrow option is selected.
+
+## Shared gnome features
+
+Select `Gnome 01` through `Gnome 09` in the preset picker, or enable
+`Nine gnomes` in the animation panel. `Gnome T pose` restores the reference
+layout. The normal animation, scrub, pause, shading, and polygon controls also
+work on the lineup. Each model copies the main skeleton's evaluated pose, so
+cross-fades and scrubbing stay synchronized without loading nine clip sets.
+
+These presets share `Gnome kind` eyes, `Gnome bulb` nose, `Gnome cups` ears,
+`Gnome pointed` beard with moustache, and the existing `01 Soft arch` brows.
+The nine presets vary the hair, iris, and hat colors and choose from six hat
+styles. Their outfits layer new outerwear over the existing shirts and trousers.
+Presets can optionally
+specify `hairColor`, `pupilColor`, and `hatColor` by palette name. `group`
+identifies a lineup's presets.
+
+Launch directly into the lineup with:
+
+```sh
+GNOME_LINEUP=1 nim r experiments/chargen/chargen.nim
+```
+
+The generated eye source and prompt are in `source/gnomes`. The iris has a
+subtle gray gradient; the tint mask preserves white sclera, black pupils,
+highlights, and the upper eyelid stroke. Regenerate the cutout and add the
+facial geometry to the master Blender file without rebuilding other parts:
+
+```sh
+python3 experiments/chargen/cut_gnomes.py
+blender -b --python-exit-code 1 --python experiments/chargen/build_gnomes.py
+```
+
+The full `build_model.py` pipeline also includes these shared parts. The
+additive builder refreshes the assembled verification export, while runtime
+parts remain separate files in `eyes`, `noses`, `ears`, and `beards`.
+
+## Gnome hats
+
+The `Headgear` picker offers pointed, folded, wide-brimmed, mushroom, leaf, and
+feather hats. The last two reuse the pointed and folded crown designs with
+simple decorations. All six follow the head bone and hide the current scalp
+hairstyles while equipped. Removing a hat restores the selected hair.
+
+Hat palette buttons and RGB sliders recolor only the surfaces listed in each
+part's `hatShades`. Mushroom spots and lining, green leaves, and blue/cream
+feathers retain their colors. The palette lives in `colors/hats.json`; custom
+libraries without a hat palette still load normally. Set `HAT_COLOR=Blue` at
+launch to choose a palette color. The nine gnome presets select their own
+hat colors.
+
+Hat fabric and mushroom caps use smooth normals, preserving edges at sharp
+folds and rims. Mushroom spots have their own pure white unlit material, so
+normal boundaries and toon lighting cannot break their color into facets.
+The cream lining remains a separate shaded material.
+
+Rebuild the hats in the master Blender file and export their individual GLBs:
+
+```sh
+blender -b --python-exit-code 1 --python experiments/chargen/build_hats.py
+nim r experiments/chargen/render_hats.nim
+```
+
+The renderer writes front, side, and back review sheets to `tmp/chargen/hats`.
+The full `build_model.py` pipeline includes the hats too. Game packs can ship
+any subset of the six GLBs, keeping the same shared skeleton and animations.
+
+## Gnome clothing
+
+The `Jacket`, `Belt`, and `Suspenders` slots layer independently over `Chest`
+and `Leg`. The eight new parts are an open jacket, long coat, vest, cuffed
+shorts, buckle belt, suspenders, overall bib, and tucked shirt. They reuse
+outer fabric from the existing long-sleeved shirt and trousers, preserving
+body-derived weights. Lapels, cuffs, pockets, buttons, and brass buckles are
+small mesh details. The bib works best over `Gnome tucked shirt` so its straps
+meet the waistband instead of hanging over a loose hem.
+
+Each part is a separate GLB in its part folder. `clothShades` identifies the
+fabric primitives to tint; fixed metal, boot soles, and contrasting trim keep
+their colors. A preset part can include `rgb: [r, g, b]` in the zero-to-one
+range. Enable `Custom <slot> color` in the viewer to adjust that slot's RGB.
+Games can use `initClothMaterials`, `applyClothPreset`, and `applyClothTint`.
+
+```sh
+blender -b --python-exit-code 1 --python experiments/chargen/build_garments.py
+nim r experiments/chargen/render_garments.nim
+CLOTHING_DETAILS=1 nim r experiments/chargen/render_garments.nim
+blender -b --python-exit-code 1 --python experiments/chargen/verify_garments.py
+```
+
+Review sheets and geometry/posed-clearance diagnostics go in
+`tmp/chargen/garments`. The detail sheets hide heads and outerwear to expose
+bib and suspender fit. The complete model builder includes these garments.
+The nine presets retain the current body proportions and use simplified
+outfits rather than all decorative details from the concept.
 
 ## Adding a part
 
