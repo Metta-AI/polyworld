@@ -509,6 +509,43 @@ def makeMouth(name):
   return facePart("Mouth_" + name, shapes)
 
 
+def makeImageFace(spec):
+  """Project an individual face cutout onto the head with local texture UVs."""
+  pixelWidth, pixelHeight = spec["size"]
+  eyes = spec["category"] == "Eyes"
+  scale = .0026 if eyes else min(.0016, .17 / pixelHeight)
+  width, height = pixelWidth * scale, pixelHeight * scale
+  if eyes:
+    white = spec["scleraRect"]
+    centerZ = 2.315 - (pixelHeight / 2 - (white[1] + white[3]) / 2) * scale
+  else:
+    centerZ = min(2.115, 2.165 - height / 2)
+  columns, rows = 24, 12
+  vertices, faces, weights, uvs = [], [], [], []
+  for row in range(rows + 1):
+    z = centerZ - height / 2 + height * row / rows
+    for column in range(columns + 1):
+      x = -width / 2 + width * column / columns
+      if eyes:
+        x += .045 * max(-1, min(1, x / .06))
+      hit = headSurface.ray_cast(Vector((x, -2, z)), Vector((0, 1, 0)))
+      assert hit[0] is not None, (spec["node"], x, z)
+      vertices.append((x, hit[0].y - .007, z))
+      weights.append({"Head": 1})
+      uvs.append((column / columns, row / rows))
+  for row in range(rows):
+    for column in range(columns):
+      index = row * (columns + 1) + column
+      faces.append((index, index + 1, index + columns + 2,
+                    index + columns + 1))
+  item = meshObject(spec["node"], vertices, faces, weights)
+  layer = item.data.uv_layers.new(name="Face projection")
+  for loop in item.data.loops:
+    layer.data[loop.index].uv = uvs[loop.vertex_index]
+  applyFaceTexture(item, Library / spec["texture"])
+  return item
+
+
 def makeBrowTexture(cell):
   """Project a white tintable eyebrow pair onto the forehead and head rig."""
   name = "Brow_Atlas" + str(cell["index"]).zfill(2)
@@ -678,6 +715,9 @@ items.extend(makeMouthTexture(cell) for cell in mouthAtlas["cells"])
 items.extend(makeMouth(name) for name in ["Smile", "Neutral", "Open"])
 browAtlas = json.loads((Output / "brows/generated_v1/atlas.json").read_text())
 items.extend(makeBrowTexture(cell) for cell in browAtlas["cells"])
+imageFaces = json.loads((Output / "faces.json").read_text())
+imageFaceNames = {spec["node"] for spec in imageFaces}
+items.extend(makeImageFace(spec) for spec in imageFaces)
 items.extend(buildHair(character))
 items.extend(buildBeards(character))
 defaultNames = baseNames + ["Eyes_Atlas02", "Mouth_Atlas01", "Brow_Atlas01",
@@ -691,7 +731,8 @@ for item in items:
   modifier = item.modifiers.new("Shared humanoid rig", "ARMATURE")
   modifier.object = rig
   item.parent = rig
-  if not item.name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")):
+  if (item.name not in imageFaceNames and
+      not item.name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas"))):
     addUv(item)
   for vertex in item.data.vertices:
     total = sum(group.weight for group in vertex.groups)
@@ -867,6 +908,14 @@ manifest = {
       {"category": "Ears", "item": "Elf"}]},
   ],
 }
+for spec in imageFaces:
+  category = next(category for category in manifest["categories"]
+                  if category["key"] == spec["category"])
+  part = {"name": spec["name"], "nodes": [spec["node"]],
+          "texture": spec["texture"]}
+  if "pupilMask" in spec:
+    part["pupilMask"] = spec["pupilMask"]
+  category["items"].append(part)
 for name in ["Earring", "Eyewear", "Headgear",
              "Chest", "Back", "Hand", "Leg", "Foot", "Left hand", "Right hand"]:
   manifest["categories"].append({"key": name, "selected": -1, "items": []})

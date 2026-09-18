@@ -111,6 +111,12 @@ proc run() =
     msaa = true
     rimStrength = 0.6'f
     skin = manifest.defaultSkin
+    skinRgb = [
+      manifest.skins[skin].color[0] * 255,
+      manifest.skins[skin].color[1] * 255,
+      manifest.skins[skin].color[2] * 255
+    ]
+    customSkin = false
     presetIndex = 0
     speed = 1.0'f
     fade = 0.20'f
@@ -156,28 +162,34 @@ proc run() =
 
   proc applySkin() =
     ## Recolors the body and detachable ears without tinting face materials.
-    nodes.applySkin(manifest, skin)
+    if customSkin:
+      nodes.applySkin(manifest, color(
+        skinRgb[0] / 255, skinRgb[1] / 255, skinRgb[2] / 255, 1
+      ))
+    else:
+      nodes.applySkin(manifest, skin)
+
+  proc chooseSkin(index: int) =
+    ## Restores a preset and seeds its RGB values for further editing.
+    skin = index
+    customSkin = false
+    for i in 0 ..< 3:
+      skinRgb[i] = manifest.skins[skin].color[i] * 255
 
   proc loadPreset(index: int) =
     ## Loads an outfit and its suggested animation.
     presetIndex = index
     let preset = manifest.presets[index]
     manifest.applyPreset(selection, preset)
-    skin = clamp(preset.skin, 0, max(0, manifest.skins.high))
+    chooseSkin(clamp(preset.skin, 0, max(0, manifest.skins.high)))
     applyParts()
     playClip(preset.pose, fade)
 
-  proc randomize() =
-    ## Rolls parts and color presets while retaining the body and face.
+  proc randomize(alignment = Both) =
+    ## Rolls compatible parts plus skin, hair, and pupil color presets.
     if manifest.skins.len > 0:
-      skin = rng.rand(manifest.skins.high)
-    for i, category in manifest.categories:
-      if category.items.len == 0:
-        selection[i] = -1
-      elif category.key in ["Body", "Face", "Eyes", "Mouth"]:
-        selection[i] = rng.rand(category.items.high)
-      else:
-        selection[i] = rng.rand(category.items.len) - 1
+      chooseSkin(rng.rand(manifest.skins.high))
+    selection = manifest.randomSelection(rng, alignment)
     hair = rng.rand(manifest.hairColors.high)
     hairTint = manifest.hairColors[hair].rgb
     pupil = rng.rand(manifest.pupilColors.high)
@@ -194,7 +206,27 @@ proc run() =
     loadPreset(index)
   if existsEnv("RANDOM_SEED"):
     rng = initRand(envInteger("RANDOM_SEED", 19))
-    randomize()
+    let alignment =
+      case getEnv("RANDOM_ALIGNMENT", "both")
+      of "both": Both
+      of "good": GoodOnly
+      of "evil": EvilOnly
+      else:
+        raise newException(ChargenError, "Unknown RANDOM_ALIGNMENT.")
+    randomize(alignment)
+  if existsEnv("SKIN_RGB"):
+    let channels = getEnv("SKIN_RGB").split(',')
+    if channels.len != 3:
+      raise newException(ChargenError, "SKIN_RGB needs three values, 0 to 255.")
+    for i, channel in channels:
+      try:
+        let value = channel.strip().parseFloat.float32
+        if not (value >= 0 and value <= 255):
+          raise newException(ValueError, "Channel outside 0 to 255.")
+        skinRgb[i] = value
+      except ValueError:
+        raise newException(ChargenError, "Invalid SKIN_RGB: " & channel)
+    customSkin = true
   for category in manifest.categories:
     let setting = category.key.toUpperAscii().replace(" ", "_")
     if existsEnv(setting):
@@ -306,6 +338,19 @@ proc run() =
       for i, channel in ["Red", "Green", "Blue"]:
         scrubber(channel, pupilTint[i], 0.0'f, 1.0'f, "")
 
+  proc skinControls() =
+    ## Offers live RGB skin editing using familiar zero-to-255 channels.
+    checkBox("Custom skin RGB", customSkin)
+    if customSkin:
+      for i, channel in ["Red", "Green", "Blue"]:
+        scrubber(
+          "Skin " & channel,
+          skinRgb[i],
+          0.0'f,
+          255.0'f,
+          channel & ": " & $(skinRgb[i] + 0.5).int
+        )
+
   proc partPicker(category: Category, selected: var int): bool =
     ## Draws the same style and color controls for either model's parts.
     group "part " & category.key:
@@ -325,8 +370,23 @@ proc run() =
         button "Color":
           category.cycleColor(selected)
           result = true
-      text category.key & ": " &
-        (if selected < 0: "None" else: category.items[selected].name)
+      let
+        title = category.key & ": " &
+          (if selected < 0: "None" else: category.items[selected].name)
+        titleSize = sk.getTextSize(sk.textStyle, title)
+        titleRect = rect(sk.placedAt(titleSize), titleSize)
+      text title
+      if selected >= 0 and not editingOriginal and
+        sk.mousePos.overlaps(titleRect) and
+        sk.mousePos.overlaps(sk.clipRect) and
+        sk.mouseIdleTime >= sk.tooltipThreshold:
+          sk.tooltipAnchor = titleRect
+          let label =
+            case category.items[selected].alignment
+            of Both: "Good and evil random"
+            of GoodOnly: "Good random only"
+            of EvilOnly: "Evil random only"
+          tooltip label
 
   proc hairControls() =
     ## Offers natural and vivid colors shared by scalp and facial hair.
@@ -399,24 +459,40 @@ proc run() =
                 if category.key notin ["Body", "Face"]:
                   selection[i] = -1
               applyParts()
+      if not editingOriginal:
+        group "aligned random":
+          box RowWidth, 34
+          layout LeftToRight
+          itemSpacing 4
+          button "Good random":
+            randomize(GoodOnly)
+          button "Evil random":
+            randomize(EvilOnly)
       if source.skins.len > 0:
-        var choice = if editingOriginal: reference.skin else: skin
-        let previous = choice
+        var
+          choice = if editingOriginal: reference.skin else: skin
+          changed = false
         group "skin":
           box RowWidth, 34
           layout LeftToRight
           itemSpacing 4
           button "<":
             choice = (choice + source.skins.len - 1) mod source.skins.len
+            changed = true
           button ">":
             choice = (choice + 1) mod source.skins.len
-          text "Skin: " & source.skins[choice].name
-        if choice != previous:
+            changed = true
+          text "Skin: " &
+            (if customSkin and not editingOriginal: "Custom"
+             else: source.skins[choice].name)
+        if changed:
           if editingOriginal:
             reference.skin = choice
             reference.applyParts()
           else:
-            skin = choice
+            chooseSkin(choice)
+        if not editingOriginal:
+          skinControls()
       for i, category in source.categories:
         if category.items.len == 0:
           continue

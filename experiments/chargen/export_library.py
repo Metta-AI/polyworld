@@ -73,7 +73,13 @@ def exportLibrary():
     })
     for item in category['items']:
       identity = folder + '/' + slug(item['name'])
+      metadataPath = Library / (identity + '.json')
+      previous = json.loads(metadataPath.read_text()) if metadataPath.exists() else {}
+      alignment = previous.get('alignment', item.get('alignment', 'both'))
+      if alignment not in ['good', 'evil', 'both']:
+        raise ValueError('Invalid part alignment: ' + identity)
       metadata = dict(item, id=identity, files=[],
+                      alignment=alignment,
                       skinNodes=[name for name in item['nodes'] if name in manifest['skinNodes']],
                       hairShades=[shade for shade in manifest['hairShades'] if shade['node'] in item['nodes']])
       if category['key'] == 'Brow':
@@ -81,7 +87,11 @@ def exportLibrary():
       crop, texture = None, None
       if len(item['nodes']) == 1:
         node = item['nodes'][0]
-        if category['key'] in atlases and '_Atlas' in node:
+        if item.get('texture'):
+          texture = item['texture']
+          if not (Library / texture).is_file():
+            raise FileNotFoundError('Missing face texture: ' + texture)
+        elif category['key'] in atlases and '_Atlas' in node:
           atlas, art, mask = atlases[category['key']]
           cell = atlas['cells'][int(node.rsplit('Atlas', 1)[1]) - 1]
           left, top, right, bottom = cell['contentRect']
@@ -111,7 +121,7 @@ def exportLibrary():
         path = filename + '.glb'
         glbs.write(Library / path, part, partBytes)
         metadata['files'].append(path)
-      saveJson(Library / (identity + '.json'), metadata)
+      saveJson(metadataPath, metadata)
   for clip in manifest['clips']:
     path = 'animations/' + slug(clip['name']) + '.glb'
     part, partBytes = glbs.subset(document, binary, clips=[clip['name']])

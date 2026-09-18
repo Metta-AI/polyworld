@@ -34,6 +34,8 @@ def bounds(vertices):
 
 bpy.ops.wm.open_mainfile(filepath=str(Output / "character.blend"))
 manifest = json.loads((Output / "manifest.json").read_text())
+imageFaces = {spec["node"]: tuple(spec["size"])
+              for spec in json.loads((Output / "faces.json").read_text())}
 rig = bpy.data.objects["CharacterRig"]
 items = [item for item in bpy.data.objects if item.type == "MESH"]
 report = {"meshes": [], "bones": len(rig.data.bones), "motion": {}}
@@ -65,14 +67,15 @@ for item in items:
   if item.name in bodyNames:
     assert len(boundary) == (96 if item.name == "Body" else 24), item.name
     boundaries[item.name] = boundary
-  elif item.name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")):
+  elif item.name in imageFaces or item.name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")):
     assert len(boundary) == 72, item.name
     assert len(item.data.uv_layers) == 1, item.name
     textures = [node.image for node in item.data.materials[0].node_tree.nodes
                 if node.type == "TEX_IMAGE"]
     expected = ((1254, 1254) if item.name.startswith(("Eyes_Atlas", "Mouth_Atlas", "Brow_Atlas"))
                 else (1024, 512))
-    assert len(textures) == 1 and tuple(textures[0].size) == expected
+    expected = imageFaces.get(item.name, expected)
+    assert len(textures) == 1 and tuple(textures[0].size) == expected, item.name
   else:
     assert not boundary, item.name
   mesh.free()
@@ -172,7 +175,8 @@ data = (Preview / "character.glb").read_bytes()
 size = struct.unpack_from("<I", data, 12)[0]
 document = json.loads(data[20:20 + size])
 for node in document["nodes"]:
-  if node.get("name", "").startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas")) and "mesh" in node:
+  name = node.get("name", "")
+  if (name in imageFaces or name.startswith(("Eyes_", "Mouth_Atlas", "Brow_Atlas"))) and "mesh" in node:
     primitives = document["meshes"][node["mesh"]]["primitives"]
     assert len(primitives) == 1, node["name"]
     material = document["materials"][primitives[0]["material"]]
