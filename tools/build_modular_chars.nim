@@ -307,7 +307,8 @@ proc build(source, clipSource, outDir: string, skipClips: bool, jobs: int) =
       conversions.add((clipSource / (spec.stem & ".fbx"), tmp / ("clip_" & spec.name)))
     for n in 1 .. PoseCount:
       conversions.add((source / (PoseFbx % [$n]), tmp / ("pose_" & $n)))
-  let converted = convertAll(binary, conversions, jobs)
+  # These clips are authored at 30 fps; 24 fps truncates their final key.
+  let converted = convertAll(binary, conversions, jobs, frameRate = 30)
 
   let base = readGlb(converted[0])
   let doc = base.doc

@@ -3,16 +3,13 @@
 import
   std/[math, os, strutils, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  common, player
+  actioncam, assets, player
+
+when defined(emscripten):
+  {.emit: "#include <emscripten.h>".}
 
 const
   DefaultWindowSize* = ivec2(1280, 800)
-  DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
-  BoldFontPath* = DataRoot & "/fonts/Rubik-Bold.ttf"
-  MonoFontPath* = DataRoot & "/fonts/OverpassMono-Regular.ttf"
-  MainThemeDir* = DataRoot & "/themes/main/"
-  UiDir* = DataRoot & "/ui/"
-  IconDir* = DataRoot & "/icons/"
   HudIconSize = 64
   SplashName* = "logo"
   SplashSeconds* = 3.0
@@ -22,6 +19,48 @@ type Splash* = object
   ## Wall-clock start of one loading splash.
   startedAt*: float64
   name*: string
+
+type ViewingClock* = object
+  last: float64
+  hidden: bool
+
+proc viewingDelta*(clock: var ViewingClock, window: Window): float32 =
+  ## Measures visible wall time without counting time spent in hidden tabs.
+  var
+    now = epochTime()
+    hidden = false
+  when defined(emscripten):
+    {.emit: """
+    `now` = EM_ASM_DOUBLE({
+      if (!Module.directorClock) {
+        var c = Module.directorClock = {};
+        c.hidden = document.hidden;
+        c.last = performance.now();
+        c.elapsed = 0;
+        c.sample = function() {
+          var now = performance.now();
+          if (!c.hidden) c.elapsed += now - c.last;
+          c.last = now;
+          c.hidden = document.hidden;
+        };
+        document.addEventListener('visibilitychange', c.sample);
+      }
+      Module.directorClock.sample();
+      return Module.directorClock.elapsed / 1000;
+    });
+    `hidden` = EM_ASM_INT({ return document.hidden ? 1 : 0; });
+    """.}
+  else:
+    when compiles(window.minimized):
+      hidden = window.minimized
+    when compiles(window.visible):
+      hidden = hidden or not window.visible
+  if clock.last > 0 and not hidden and not clock.hidden:
+    result = max(now - clock.last, 0).float32
+  clock.last = now
+  clock.hidden = hidden
+  when defined(takeScreenshot):
+    result = 1.0'f / 60
 
 proc damping*(rate, dt: float32): float32 =
   ## Returns a frame-rate-independent exponential easing fraction.
@@ -99,16 +138,15 @@ proc initGameWindow*(
     title,
     atlasPath: string,
     size = DefaultWindowSize,
-    vsync = true
+    vsync = true,
+    msaa = msaaDisabled
 ): (Window, Silky) =
   ## Creates the spectator window, GL context, and Silky atlas client.
-  let window = newWindow(title, size, vsync = vsync)
+  let window = newWindow(title, size, vsync = vsync, msaa = msaa)
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
   sk.applyThemePatches()
-  window.onRune = proc(rune: Rune) =
-    sk.inputRunes.add(rune)
   (window, sk)
 
 proc drawSplash*(
@@ -249,3 +287,40 @@ proc captureScreenshot*(
     quit(0)
   else:
     discard (window, frame, waitFrames, defaultPath)
+
+proc reportReplayFrame*(tick, mismatches: int32) =
+  ## Reports browser readiness and divergence after presenting a game frame.
+  when defined(emscripten):
+    {.emit: """
+    EM_ASM({
+      if (Module.polyworldFrame) Module.polyworldFrame($0, $1);
+    }, `tick`, `mismatches`);
+    """.}
+
+proc reportDirectorFrame*(cam: ActionCam, transport: Player,
+    distance: float32, mismatches: int32) =
+  ## Exposes viewer diagnostics only in browser acceptance test builds.
+  when defined(emscripten) and defined(directorProbe):
+    let
+      enabled = cam.enabled
+      locked = cam.locked
+      id = cam.director.subject.id
+      floor = cam.director.subject.floor
+      time = cam.director.time
+      overview = cam.director.overview
+      finalResults = cam.director.finalResults
+      playing = transport.playing
+      seeking = transport.targetTick >= 0
+      tick = transport.tick
+      speed = transport.speed
+    {.emit: """
+    EM_ASM({
+      Module.directorProbe = (Object.freeze({
+        enabled: !!$0, locked: !!$1, id: $2, floor: $3, time: $4,
+        overview: !!$5, finalResults: !!$6, playing: !!$7,
+        seeking: !!$8, tick: $9, speed: $10, distance: $11, mismatches: $12
+      }));
+    }, `enabled`, `locked`, `id`, `floor`, `time`, `overview`,
+      `finalResults`, `playing`, `seeking`, `tick`, `speed`, `distance`,
+      `mismatches`);
+    """.}

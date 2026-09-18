@@ -4,7 +4,11 @@
 ## remaining slots in order.
 
 import
-  cli
+  std/strutils,
+  cli, configs
+
+when defined(coworld):
+  import coworld
 
 type
   ControllerKind* = enum
@@ -27,6 +31,27 @@ proc isPlayerIndex*(playerSlot: int32, index: int): bool =
   ## Returns whether this 0-based index is the human slot.
   playerSlot > 0 and index == playerSlot - 1
 
+proc localGameConfig*(options: GameOptions, slotCount: int): GameConfig =
+  ## Builds the match config with names derived only from local bot files.
+  let kinds = controllerKinds(slotCount, options.playerSlot)
+  result = GameConfig(
+    seed: options.seed,
+    maxTicks: options.maximumTicks,
+    spawnIntervalTicks: options.spawnIntervalTicks,
+    playerSlot: options.playerSlot,
+    players: unnamedPlayers(slotCount)
+  )
+  var next = 0
+  for group in options.botGroups:
+    let name = group.path[group.path.rfind({'/', '\\'}) + 1 .. ^1]
+    for _ in 0 ..< group.count:
+      while next < kinds.len and kinds[next] == PlayerController:
+        inc next
+      if next >= kinds.len:
+        fail("too many bots to expand")
+      result.players[next].name = PlayerConfig(name: name).displayName(next)
+      inc next
+
 proc expandBotSources*(
     groups: openArray[BotGroup],
     kinds: openArray[ControllerKind]
@@ -35,7 +60,11 @@ proc expandBotSources*(
   result.setLen(kinds.len)
   var next = 0
   for group in groups:
-    let source = readFile(group.path)
+    let source =
+      when defined(coworld):
+        readPlayerSource(group.path)
+      else:
+        readFile(group.path)
     for _ in 0 ..< group.count:
       while next < kinds.len and kinds[next] == PlayerController:
         inc next
@@ -43,6 +72,7 @@ proc expandBotSources*(
         fail("too many bots to expand")
       result[next] = source
       inc next
-  for i, kind in kinds:
-    if kind == BotController and result[i].len == 0:
-      fail("bot files do not fill every slot")
+  when not defined(coworld):
+    for i, kind in kinds:
+      if kind == BotController and result[i].len == 0:
+        fail("bot files do not fill every slot")

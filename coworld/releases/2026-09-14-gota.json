@@ -1,0 +1,166 @@
+{
+  "date": "2026-09-14",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "version": "2026.9.14.1",
+  "source_commit": "f346f932803787ac3cb218a85394b62969e9098f",
+  "asset_commit": "d5cc92d3bb476edc148bc8df0324fe3e95d8fba6",
+  "dependencies_sha256": "efa2ddd0c3f2639ca8dc6c4b11ef951f890c9d816b811559af0834c065e3f413",
+  "coworld_id": "cow_7181f2f4-a201-4fb6-9ae2-2e17aacee4f1",
+  "previous_coworld_id": "cow_85e4271c-738d-46bc-9628-314ac46c894a",
+  "canonical": true,
+  "manifest_hash": "sha256:6d3ce52b25b997fb74c40bd2caeec846a337dd4deaafd795d83df4d861af6840",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:50045c0eebf442a43607b732cf8f92edb7939cb2dcb9137344f446f4a59a3be6",
+  "viewer_bundle": "sha256:78fd3f112495109ffddf472965dcc9855320e64b83061d236c119fdbc5932070",
+  "viewer_files": {
+    "index.html": {
+      "bytes": 4671,
+      "sha256": "6033b700ae5be7b998a561198a478dc70f1dcdffba87813701611f2f72a55da2"
+    },
+    "gota.wasm": {
+      "bytes": 9662822,
+      "sha256": "de3b0f37f9acd59be0147d592b6a0e75fa504a31be0f040c3acf7e1033f36c44"
+    },
+    "loading-logo.png": {
+      "bytes": 138624,
+      "sha256": "978ce63fe97fbf4852d58ed43372918f50fa62ca1b20e680dbf10f4792c3c3a1"
+    },
+    "gota.js": {
+      "bytes": 341280,
+      "sha256": "e95ff71c8d9d6adbc3261f790b1c7c908578284694fbea69e018bbeb8f5dd6ef"
+    },
+    "gota.data": {
+      "bytes": 20738319,
+      "sha256": "69a5501fd2fc89c5d44050128973bef97ceff7fd28255820cb5662281430b324"
+    }
+  },
+  "map_preset": {
+    "seed": 54,
+    "high_size": 511,
+    "castle_size": 295,
+    "road_width": 62,
+    "road_wobble": 73,
+    "lake_width": 80,
+    "lake_wobble": 30,
+    "camp_radius": 36,
+    "stem_length": 50,
+    "jungle_roads": 32,
+    "camp_scatter": 35,
+    "lake_crossings": 4,
+    "camps_touch_roads": true
+  },
+  "map_hash": "BF880859",
+  "checks": {
+    "nim_check": "Passed for tests/tests.nim using locked dependencies.",
+    "asset_pack_tests": "Passed, including image size caps and unchanged source images.",
+    "native_and_web_builds": "Passed.",
+    "local_certification_steps_passed": 10,
+    "local_softmax_stack": "Not run. Its inactive development environment required a full Nix toolchain rebuild. Local Docker certification and browser verification passed before hosted certification and smoke validation.",
+    "hosted_certification": {
+      "coworld_id": "cow_7181f2f4-a201-4fb6-9ae2-2e17aacee4f1",
+      "state": "certified",
+      "certified": true,
+      "contract_version": "main-45cb9c25ff75",
+      "certification_job_id": "a0432ba2-697b-4f57-9f52-f2f602b31420",
+      "failed_step": null,
+      "failure": null,
+      "transcript_summary": [
+        {
+          "id": "matriculate",
+          "status": "pass"
+        },
+        {
+          "id": "source-resolves",
+          "status": "pass"
+        },
+        {
+          "id": "images-reachable",
+          "status": "pass"
+        },
+        {
+          "id": "fixture-conforms",
+          "status": "pass"
+        },
+        {
+          "id": "smoke-episode",
+          "status": "pass"
+        },
+        {
+          "id": "results-conform",
+          "status": "pass"
+        },
+        {
+          "id": "replay-present",
+          "status": "pass"
+        },
+        {
+          "id": "replay-loadable",
+          "status": "pass"
+        },
+        {
+          "id": "players-run",
+          "status": "pass"
+        },
+        {
+          "id": "supporting-roles",
+          "status": "pass"
+        }
+      ],
+      "completed_at": "2026-09-14T17:27:33.693679Z"
+    },
+    "hosted_smoke_episodes": [
+      {
+        "id": "ereq_971e4bcf-2832-4f6a-95b8-30bc522c40ee",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_d65db802-6214-413e-9669-ddc2d321b51e",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_df1dd4d8-c77e-4308-9496-beada037aef4",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_ed950fcf-1dfe-44a9-b119-5d44f7e3dcb4",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_f5dcdfcf-48c6-48ba-826b-5b4da87f4a5e",
+        "status": "completed",
+        "error": null
+      }
+    ],
+    "browser": "The packaged viewer and deployed viewer rendered and played the new map. No errors were reported in the deployed viewer console. The public league page embedded the new release for round 256.",
+    "league_match_preset": "The league-targeted acceptance match and round 256 expose the exact saved map preset in their game configuration."
+  },
+  "acceptance_experience_id": "xreq_371aeb63-598e-4b82-8ec2-fce262c12075",
+  "acceptance_status": "completed",
+  "forced_round": {
+    "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+    "round_id": "round_0b1ac889-a9b5-46af-9fc6-89720ee7d779",
+    "round_number": 256,
+    "status": "completed",
+    "episodes_completed": 12,
+    "episodes_failed": 0,
+    "episode_request_ids": [
+      "ereq_76640e16-07de-4000-916b-5f5f927d2564",
+      "ereq_fe22aabe-d96f-49cc-aa20-b0693c89c1b1",
+      "ereq_2c9d97b0-bcc0-4eef-9703-bb7c0db5d50e",
+      "ereq_774f297f-c26c-47c8-8acb-a83bb7ff8944",
+      "ereq_7916607e-be68-4942-87d5-8fd6b66cbac9",
+      "ereq_4f712331-c73b-40c7-84f4-f1baf2f8c347",
+      "ereq_79c4032f-1c92-45c5-8be1-12971e72d820",
+      "ereq_248357a8-d115-4f51-8408-e23ffe6ef96f",
+      "ereq_cba95fe8-a028-4c94-b44e-20beb523c26b",
+      "ereq_8c477c46-342e-4362-9082-a93276d2dd57",
+      "ereq_be4c9b8b-eaa8-4c9c-a28c-8097794e8f77",
+      "ereq_c72e89d4-ff9e-4f5c-a515-4904f2812c6d"
+    ],
+    "all_episodes_use_release": true,
+    "replay_url": "https://softmax.com/gods-of-the-arena?e=84be6bb2-14c3-427e-9852-4ce6981dbf6d"
+  }
+}

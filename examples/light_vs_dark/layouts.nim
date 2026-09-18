@@ -5,7 +5,7 @@ import
   polyworld/[gameuis, stackpanels]
 
 const
-  PanelScore* = vec2(298, 104)
+  PanelScore* = vec2(298, 156)
   PanelResources* = vec2(432, 56)
   PanelMinimap* = vec2(282, 320)
   PanelSelection* = vec2(364, 225)

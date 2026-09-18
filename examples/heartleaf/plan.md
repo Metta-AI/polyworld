@@ -11,7 +11,7 @@ borrowed from the 2D game of the same name; the code is not.
 ## The game
 
 A game is a week. Days run 9:00 to 21:00 on an accelerated clock (one real
-second is three game minutes, a day is four real minutes). Every morning
+second is four game minutes, a day is three real minutes). Every morning
 each of the 27 garden plots grows one of 24 vegetables; gathering a plot
 takes everything it holds and the plot stays bare until tomorrow.
 
@@ -22,10 +22,16 @@ valid when the owner is inside their own house with at least one visitor:
   host and visitors alike for three bite rounds — one bite per diner per
   round, in one seating order shuffled by the world rng.
 - A bite of a vegetable the diner has **never tasted this week is worth 3**;
-  a repeat is worth 1. The draw itself is deterministic: the best-stocked
-  untasted kind, then the best-stocked kind, ties to the lowest index.
+  a repeat is worth 1. Each bite chooses uniformly among untasted types,
+  or among remaining individual items when all available types were tasted.
+  The simulation RNG makes both choices reproducible.
 - Hosting **empties the pantry**. Guests eat for free.
 - Anyone alone, or outdoors, scores nothing that night.
+
+At 21:00, every villager outside their own house loses three points,
+including visitors inside another house. Scores can go negative. Everyone
+is then sent home for the score screen; the next morning starts at their
+own doorstep.
 
 Inventories persist across days and are cleared only by hosting; the tasted
 list persists all week. Highest cumulative score after the last score
@@ -41,6 +47,31 @@ Houses have no interiors. Entering removes the villager's body from the
 map — occupants show as portrait icons floating over the roof — and exiting
 puts it back on the doorstep.
 
+## Demo camera
+
+The spectator starts at a fixed distance of 40, following the outdoor
+villager nearest the town centre. It stays with that villager through
+gathering, walking, and conversation, framing their house while indoors.
+Each shot lasts at least 60 real seconds. Three seconds
+idle or indoors allow a handoff after that minimum; at 90 seconds, any
+activity permits a handoff. The next outdoor villager is the least recently
+followed, with distance and slot breaking ties. Members of the current
+conversation are excluded from automatic handoffs; if nobody outside the
+group is available, the current shot continues. With nobody else outdoors,
+the camera stays put. Focus changes snap immediately to the next subject.
+
+The camera tracks the same interpolated position used to draw the gnome,
+centred at body height, without additional camera damping or a speed cap.
+Zooming adjusts the distance without leaving demo following or restarting
+the shot. Shot timing uses real seconds at every playback speed. Pausing freezes automatic tracking and shot timers. Seeking snaps
+to the selected subject at the restored position. Pan, minimap input,
+and clicking a villager take manual control; C or the camera button resume
+the demo by snapping to a selected or nearby outdoor villager, preserving
+zoom. Clicking any speed button, including the already selected speed,
+recentres the manual or last demo subject without changing camera ownership
+or restarting the shot. Manual villager following also tracks body position
+without lag. The human-player action camera remains unchanged.
+
 ## The map
 
 `maps.nim` generates the village with integers from one seed: a gentle
@@ -48,9 +79,17 @@ meadow pressed flat inside the village ring, nine houses on a jittered
 ring of unit-circle points around a round paved plaza with a one-tile
 dirt apron and a blocked three-by-three well footprint at its centre,
 five-by-five house footprints, two-wide dirt roads from every door to the plaza plus a
-one-wide ring path, three garden plots in the grass near each house, and
+one-wide neighborhood links, three garden plots in the grass near each house, and
 a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
+
+Neighborhood links use a deterministic cardinal route search within four
+tiles of the rectangle between neighboring doors. Existing streets cost less
+than fresh paving, and new paving close to a street costs extra. This favors
+shared streets over narrow parallel routes while keeping links local rather
+than sending every neighbor trip through the plaza. The wide plaza spokes
+use doglegs; doors within four tiles of a central axis join that street
+before the long leg so they do not create a parallel approach to the plaza.
 
 ## What is different from the other examples
 
@@ -68,13 +107,49 @@ props bake exactly once.
 
 ## The scripted villager
 
-`players/base.bas` plays the known-strong plan from the original game:
-gather all day, then loiter on the plaza, wandering to random spots and
-pausing for random spells like a village square; three villagers are due to host each night by rotation
+`players/base.bas` chooses the nearest crop it can plausibly win. Another
+outdoor villager counts as a competitor only while gathering that same plot;
+a lead of at least three grid tiles makes the race a clear loss. Ties and
+smaller leads remain competitive. Active gatherers reconsider clear losses
+every two seconds, keeping their target otherwise. Walking villagers also
+check for newly winnable crops, without inventory caps or harvesting breaks.
+These are grid-distance estimates, not exact path travel times.
+
+When no crop looks winnable, the bot looks for nearby company. A conversation
+is an explicit, replayed `talk` action: the caller stops and greets a neighbor,
+who can choose to answer. Participants face their conversation partner and
+show the greeting indicator while talking. Groups of three or four arrange
+around a shared center and face inward. Positions are assigned when members
+join, minimizing travel and checking body clearance along the approach;
+they stay fixed while the group settles. If no nearby clear circle fits,
+participants keep their current positions. An unanswered offer ends after
+two seconds. Conversations do not create dinner invitations or change scores.
+
+A conversation can include up to four connected participants, including
+joining existing pairs or trios. Each bot leaves after its own twelve to
+twenty-four-second stay and walks at least seven tiles away before accepting
+another conversation. It remembers every recent group member for forty-five
+to seventy-five seconds, including when choosing another group to visit. Harvesting a winnable
+crop, dinner, and curfew override socializing.
+
+Social approaches prefer available neighbors within fourteen tiles, widening
+the search to sixty-four tiles after twenty seconds alone. They stop
+if the target becomes busy, departs, or the group fills. Longer walks have
+a social destination; otherwise free-time walks remain short and within
+eight tiles of the local area, with five-to-ten-second rests and no immediate
+backtracking. Groups of four are allowed; larger nearby crowds encourage
+moving on. Stalled walks are retried after two seconds without progress.
+No generated dialogue or LLM calls are involved.
+
+Three villagers are due to host each night by rotation
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing
 within three tiles; guests walk to the nearest due host; everyone budgets
 about two game minutes per tile plus a half-hour margin and never stands
-outside at six.
+outside at six. After dinner they collect leftovers, then return to their
+own house before curfew using the same travel margin and a 20:00 latest
+departure. Once heading home, they stay committed until the next morning.
+House approaches are retried after two seconds without meaningful tile
+progress, allowing recovery from a stuck approach.
 
 ## Determinism notes
 
@@ -82,8 +157,7 @@ outside at six.
   and clear, so a live game and its replay legitimately differ there while
   the simulation itself stays bit-exact. This showed up as 41k hash
   mismatches on the very first record/replay run.
-- The dinner shuffle is the only rng the tally consumes; the bite draw is
-  deterministic so the divergence surface stays small.
+- Dinner seating and bite selection use the deterministic world RNG.
 - The 17:59 door crush is real: nine bodies shove on one doorstep, so
   `enterHouse` accepts from a king-move of one around the door tile and
   `tests/test_hlf_sim.nim` sends all nine through one door.
@@ -104,8 +178,8 @@ two things at startup, on the CPU, from nothing but the seed and the map:
   of every road and plaza tile. Both carry a little low-frequency wobble
   so no edge is a ruler line. House pads join that mask as rounded squares:
   solid cobble beneath each building, then ragged whole-stone dropout over
-  dirt into grass, merging directly into the doorway road. Gardens remain
-  dirt-only mask regions.
+  dirt into grass, merging directly into the doorway road. Gardens do not
+  add soil to the ground mask.
 
 A curb of larger cut stones rings the plaza. It is a second, cleaner
 sheet sampled in polar coordinates around the plaza centre, one stone row
@@ -147,10 +221,11 @@ magenta ground that shows any hole in a house.
 
 ## Crops
 
-A stocked plot grows one toon kit plant, drawn textured per frame so it
-can appear and vanish as villagers gather; a bare plot is a tilled dirt
-patch that fades into the grass through the ground mask, a shade darker
-than the roads. Neither kit has a literal lettuce or corn, so the
+Every plot has a permanent Meadow flower pot, varying among three shapes.
+A stocked pot grows one toon kit plant, drawn textured per frame above the
+soil opening so it can appear and vanish as villagers gather. Harvested pots
+remain visible on the surrounding grass; plots add no dark terrain tint or
+dirt mask. Neither kit has a literal lettuce or corn, so the
 twenty-four kinds share plants by silhouette, grassy stalks, root tops, a
 bush, seedling leaves, broad leaves, and a wheat clump, and a tint per
 kind tells them apart. The old village-pack farm building is gone.
@@ -169,12 +244,22 @@ into the terrain mesh once with the houses.
   third entrance.
 - Houses: a mailbox beside the door, flower pots flanking it, five
   flower beds and two bushes in the yard.
-- Gardens: flowers beside some plots.
+- Gardens: permanent pots at every plot, with flowers beside some plots.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.
+- Meadow: each eight-by-eight tile area gets up to three low plants,
+  spreading bushes, flowers, and tufts between the town roads as well as
+  outside the houses. Only the actual plaza and local road, crop, and
+  doorway clearances are excluded. At most 243 low plants and five medium
+  rocks cover the meadow, with up to six trees spaced twelve tiles
+  apart and set back from roads. Alternating sectors have small trees
+  (2.4 tiles tall) and medium trees (4.2 tiles tall), at most three of each.
 - Outskirts: small rocks at the feet of the forest trees and the odd
   medium one.
+- Forest floor: low bushes and grass tufts bridge the outer meadow and
+  forest clearings. Three bands each sample four locations per side,
+  adding at most 96 props between radii 36 and 58.
 
 Every height and probability is a const at the top of `decor.nim`. The
 loader keeps only the named nodes from each kit and draws them textured,
@@ -217,3 +302,51 @@ nim r tests/test_hlf_replays.nim
 ```bash
 nim r tests/test_hlf_sim.nim
 ```
+
+## Spectator scorecards and startup seeking
+
+After curfew, the scorecard shows all nine gnomes. Dinner identifies each
+host (with bonus points and the stocked-vegetables-times-visitors calculation)
+or guest (with their host's name); no dinner role is shown as `-`.
+Curfew shows only `-` or `-3`. The other columns show each dinner bite and its points, curfew penalties, daily gains,
+and cumulative totals. Hosting, eating, curfew, and totals reveal together
+by column over three seconds. A first taste is remembered across the match.
+Vegetable names identify each bite; the asset collection has no individual
+vegetable HUD sprites.
+
+Normal viewing spends ten real seconds on each scorecard regardless of the
+selected playback speed. Pause holds it for inspection; the reveal can finish
+while paused. Next morning skips the remaining countdown. The final night
+shows final results for the same ten seconds, then file replays loop by
+default. Disable the transport's loop control to retain the final standings.
+
+Startup seeking runs normal simulation as fast as possible, verifies replay
+hashes, and does not render intermediate world frames. Asset loading and
+simulation still take time. Specify one absolute tick (zero is initial state)
+or a day-qualified event. Morning lands after initialization, dinner after
+the tally, and scorecard after curfew penalties. `--play=false` pauses at the
+destination; otherwise playback continues there.
+
+```sh
+# Open the third nightly scorecard, paused.
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:3:scorecard --play=false
+
+# Open final results for the bundled seven-day replay.
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:7:scorecard --play=false
+
+# Inspect an exact tick, or another event.
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-tick 4320 --play=false
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:2:dinner --play=false
+
+# Run current scripted bots directly to a scorecard.
+nim r examples/heartleaf/heartleaf.nim --seed 1988 --bot examples/heartleaf/players/base.bas:9 --seek-event day:1:scorecard --play=false
+
+# Inspect the same destination without opening a window; print scores and exit.
+nim r -d:headless examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:3:scorecard
+```
+
+Seeking requires a replay or all scripted villagers; it rejects human-player
+runs and unavailable destinations. Headless seeking stops at the destination,
+prints all nine breakdowns, and writes the partial recording if requested.
+New report fields are derived during simulation and checkpointed without
+changing replay hashes or format.
