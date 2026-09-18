@@ -217,34 +217,78 @@
       color: #fff;
       text-shadow: 0 1px 2px #000, 0 0 8px rgba(0,0,0,0.9);
     }
-    .abilities { display: grid; gap: 8px; }
-    .ability {
+    .abilities {
       display: grid;
-      grid-template-columns: 72px 54px 1fr;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
-      align-items: center;
+    }
+    .ability {
+      min-width: 0;
+      padding: 14px;
       background: var(--well);
+      border: 1px solid rgba(255,255,255,0.07);
       border-radius: 12px;
-      padding: 8px;
-      border: 1px solid rgba(255,255,255,0.05);
     }
-    .ability img {
-      width: 72px;
-      height: 72px;
-      border-radius: 10px;
+    .ability-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 16px;
     }
+    .ability-art { position: relative; flex: 0 0 64px; }
+    .ability-art img { width: 64px; height: 64px; border-radius: 10px; }
     .key {
-      width: 42px;
-      height: 42px;
-      border-radius: 10px;
+      position: absolute;
+      right: -4px;
+      bottom: -4px;
       display: grid;
       place-items: center;
-      font-weight: 700;
+      width: 25px;
+      height: 25px;
+      border: 1px solid var(--gold-dim);
+      border-radius: 7px;
       background: #2a2418;
       color: var(--gold);
-      border: 1px solid var(--gold-dim);
+      font: 700 12px Rubik, sans-serif;
     }
-    .ability h4 { margin: 0 0 4px; font-size: 16px; }
+    .footprint { display: flex; align-items: center; gap: 6px; }
+    .footprint svg {
+      flex: 0 0 34px;
+      width: 34px;
+      height: 40px;
+      fill: rgba(196,164,90,0.24);
+      stroke: var(--gold-dim);
+      stroke-width: 1.8;
+      stroke-linejoin: round;
+    }
+    .footprint .icon-line { fill: none; }
+    .footprint .icon-core { fill: var(--gold); stroke: none; }
+    .footprint span { display: block; color: var(--muted); font-size: 10px; }
+    .footprint b { display: block; margin-top: 3px; font-size: 12px; }
+    .ability h4 { margin: 0 0 5px; min-height: 38px; font-size: 16px; line-height: 1.2; }
+    .cast-type { margin: 0 0 12px; color: var(--gold); font-size: 12px; }
+    .ability-stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 8px;
+      margin: 0 0 14px;
+      padding: 12px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .ability-stats dt { margin: 0 0 4px; color: var(--muted); font-size: 11px; }
+    .ability-stats dd { margin: 0; font-size: 13px; line-height: 1.4; }
+    .ability-charges { display: flex; align-items: center; gap: 8px; }
+    .ability-charge-pips { display: inline-flex; gap: 4px; }
+    .ability-charge-pips > span {
+      display: block;
+      width: 11px;
+      height: 11px;
+      border: 1px solid var(--gold-dim);
+      border-radius: 50%;
+      background: var(--gold);
+    }
     .meta {
       display: flex;
       flex-wrap: wrap;
@@ -289,20 +333,39 @@
       font-weight: 700;
     }
     .bonus { font-size: 13px; color: #d7dbe4; margin: 0; }
-    footer {
-      padding: 28px 0 48px;
-      color: var(--muted);
-      font-size: 13px;
-    }
     @media (max-width: 980px) {
-      .facts, .split, .shop, .hero-head, .stats { grid-template-columns: 1fr 1fr; }
+      .facts, .split, .shop, .stats { grid-template-columns: 1fr 1fr; }
+      .abilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 640px) {
       header.top { display: none; }
-      .facts, .split, .shop, .lanes, .hero-head, .stats, .ability {
+      .facts, .split, .shop, .lanes, .hero-head, .stats {
         grid-template-columns: 1fr;
       }
     }
+
+    @media (max-width: 540px) {
+      .abilities { grid-template-columns: 1fr; }
+      .ability h4 { min-height: 0; }
+    }
+
+    .spell-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .spell-rule { background: #111c2a; border: 1px solid #354458; border-radius: 12px; padding: 18px; }
+    .spell-rule h3 { margin-top: 0; }
+    .charge-demo { background: #111c2a; border: 1px solid #354458; border-radius: 12px; padding: 20px; margin: 20px 0; }
+    .charge-demo button { background: #305274; color: #fff; border: 1px solid #7594b1; padding: 10px 14px; border-radius: 8px; margin: 4px; cursor: pointer; font: inherit; }
+    .charge-demo button:disabled { opacity: .45; cursor: default; }
+    .charge-demo output { display: block; min-height: 56px; margin: 12px 0; font-variant-numeric: tabular-nums; }
+    .charge-pips { display: flex; gap: 8px; margin: 12px 0; }
+    .charge-pips span { width: 28px; height: 28px; border: 2px solid #b3c5d7; border-radius: 50%; background: #caa965; }
+    .charge-pips span.empty { background: #182131; }
+    .api-section h3 { margin-top: 24px; }
+    .api-table { overflow-wrap: anywhere; }
+    .api-table th:first-child, .api-table td:first-child { width: 38%; }
+    .api-table td { vertical-align: top; }
+    .spell-table { width: 100%; border-collapse: collapse; }
+    .spell-table th, .spell-table td { text-align: left; padding: 10px; border-bottom: 1px solid #354458; }
+    @media (max-width: 850px) { .spell-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -315,20 +378,23 @@
         <a href="#arena">Arena</a>
         <a href="#heroes">Heroes</a>
         <a href="#shop">Shop</a>
+        <a href="#casting">Casting</a>
+        <a href="#controls">Controls</a>
+        <a href="#basic">BASIC</a>
       </nav>
     </div>
   </header>
 
   <main class="wrap">
     <p class="lede">
-      Two gods sit in opposite-corner forts. Three lanes, a river, a bridge,
-      and a jungle of pine stand between them. Ten heroes, footmen, and
-      towers fight until one god falls.
+      Two gods sit in opposite-corner forts. Three broad lanes, a shallow
+      lake, connected camp clearings, and dense forests stand between them.
+      Ten heroes, footmen, and towers fight until one god falls.
     </p>
 
     <section class="facts">
       <div class="fact"><img src="../../../../polyworld_data/icons/champion.png" alt=""><div><b>10</b><span>HEROES</span></div></div>
-      <div class="fact"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>18</b><span>TOWERS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>22</b><span>TOWERS</span></div></div>
       <div class="fact"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>3</b><span>LANES</span></div></div>
       <div class="fact"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>20</b><span>MAX LEVEL</span></div></div>
       <div class="fact"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>20</b><span>SHOP ITEMS</span></div></div>
@@ -340,10 +406,17 @@
       <div class="split">
         <div>
           <p>
-            Gods of the Arena is a deterministic 5v5 lane battler. Blue brings
-            the living roster. Red brings the undead and warband. Each side
-            starts with five heroes, three barracks, six lane towers, and a
-            fort that holds the god.
+            Gods of the Arena is a 5v5 lane battler. Red brings
+            the living roster. Blue brings the undead warband. Each side
+            starts with five heroes, six barracks, nine lane towers,
+            two god guards, and a god to defend.
+          </p>
+          <p>
+            The 128 by 128 arena uses the map editor's saved seed 54 preset.
+            Blue starts in the southwest and Red in the northeast. Roads
+            carve the forest and cross cliffs at short ramps. Each fort has
+            three exits, two barracks per exit, and a separate walled spawn.
+            Match seeds control gameplay randomness without changing this layout.
           </p>
           <p>
             Footmen spawn two per lane every ten seconds and march until they
@@ -352,18 +425,20 @@
             Heroes grow to level 20, then spend gold in a six-slot inventory.
           </p>
           <p>
-            Outer towers fall first, then inner, then the gate. A god becomes
-            attackable after one of its lanes is cleared. The first fort to
-            reach zero health loses.
+            Outer towers fall first, then inner, then the gate. Clearing a
+            lane exposes the two level-3 towers guarding that team's god.
+            Both guards must fall before the god can take any damage.
+            Red defends a warlock and Blue defends a druid. The first god
+            to reach zero health loses.
           </p>
         </div>
         <div class="lanes">
           <div class="chip"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>Footmen</b><div class="muted">60 HP, 12 damage, 15 gold</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">Outer 600, inner 800, gate 1000</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/fort.png" alt=""><div><b>Gods</b><div class="muted">400 HP, exposed after a lane falls</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">HP: outer 950, inner 1300, gate 1950. Damage: 18, 24, 30.</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/fort.png" alt=""><div><b>Gods</b><div class="muted">400 HP, exposed after both god guards fall</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/kills.png" alt=""><div><b>Hero bounty</b><div class="muted">150 XP and 100 gold</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>Level curve</b><div class="muted">100 XP, then +75 each level</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">24 ticks a second, 20 minute match</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">20 minute match</div></div></div>
         </div>
       </div>
     </section>
@@ -371,6 +446,7 @@
     <section id="heroes">
       <p class="kicker">THE ROSTER</p>
       <h2>Heroes and ability kits</h2>
+      <p class="lede">Each ability shows what it affects beside its artwork. Footprints describe the hit area; visual effects describe its appearance. Arc and cone effects share a sector footprint. Every area spell leaves a warning on the map until impact.</p>
       <p>
         Every hero enters with Q, W, E, and R ready at <b>level 1</b>. There is
         no skill-point tree. Stats climb through level 20. Cooldowns and ranges
@@ -392,10 +468,10 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>330 → 1470</b><span class="muted">HP +60/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>110 → 262</b><span class="muted">MANA +8/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 120</b><span class="muted">DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 120</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.17</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.32 → 2.78</b><span class="muted">MOVE</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.92</b><span class="muted">ATTACKS / S</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.00</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
                 <div class="bar hp"><i style="width:22%"></i><div class="bar-label"><span>HEALTH</span><span>330 → 1470</span></div></div>
@@ -404,42 +480,106 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/lion_guard.png" alt="Lion Guard">
-              <div class="key">Q</div>
-              <div>
-                <h4>Lion Guard</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+28 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A blue and gold lion shield. Restores health on a short cycle with no mana cost.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/lion_guard.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/firebrand_sword.png" alt="Firebrand Sword">
-              <div class="key">W</div>
-              <div>
-                <h4>Firebrand Sword</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">40 DMG</span><span class="tag">20 MANA</span><span class="tag">4s CD</span><span class="tag">1.5 RANGE</span></div>
-                <p class="bonus">A flaming white sword. Close-range fire strike for the front line.</p>
+              <h4>Lion Guard</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+28 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your health.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/firebrand_sword.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/inferno_aegis.png" alt="Inferno Aegis">
-              <div class="key">E</div>
-              <div>
-                <h4>Inferno Aegis</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+50 HP</span><span class="tag">35 MANA</span><span class="tag">10s CD</span></div>
-                <p class="bonus">A lava-cracked shield. A larger self-heal when the knight needs to hold.</p>
+              <h4>Firebrand Sword</h4>
+              <p class="cast-type">Melee</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>40</dd></div>
+                <div><dt>Mana cost</dt><dd>20</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>1.5 tiles</dd></div>
+              </dl>
+              <p class="bonus">Strike one enemy at close range. Aim at empty ground to swing into space.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/inferno_aegis.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/blazing_blade.png" alt="Blazing Blade">
-              <div class="key">R</div>
-              <div>
-                <h4>Blazing Blade</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">90 DMG</span><span class="tag">70 MANA</span><span class="tag">20s CD</span><span class="tag">1.8 RANGE</span></div>
-                <p class="bonus">A silver blade wrapped in orange fire. The knight's heaviest melee burst.</p>
+              <h4>Inferno Aegis</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+50 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>35</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>10s</dd></div>
+                <div><dt>Recharge</dt><dd>10s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.5s</dd></div>
+                <div><dt>Cast range</dt><dd>2.33 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2.33 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Circle</dd></div>
+              </dl>
+              <p class="bonus">Centered on you. Heals all allied heroes in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/blazing_blade.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 41L6 10a36 36 0 0 1 36 0Z"/></svg>
+                  <div><span>Footprint</span><b>Sector</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Blazing Blade</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>90</dd></div>
+                <div><dt>Mana cost</dt><dd>70</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>20s</dd></div>
+                <div><dt>Recharge</dt><dd>20s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.25s</dd></div>
+                <div><dt>Cast range</dt><dd>1.83 tiles</dd></div>
+                <div><dt>Radius</dt><dd>1.83 tiles</dd></div>
+                <div><dt>Angle</dt><dd>120°</dd></div>
+                <div><dt>Visual effect</dt><dd>Arc</dd></div>
+              </dl>
+              <p class="bonus">Starts at your position, facing your aim. Hits all enemies in the sector at impact.</p>
+            </article>
           </div>
         </article>
 
@@ -457,7 +597,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>210 → 932</b><span class="muted">HP +38/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>110 → 262</b><span class="muted">MANA +8/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 139</b><span class="muted">DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 139</b><span class="muted">BASIC DAMAGE +6/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.76 → 3.44</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.33</b><span class="muted">ATTACKS / S</span></div></div>
@@ -469,42 +609,106 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/dragon_sight.png" alt="Dragon Sight">
-              <div class="key">Q</div>
-              <div>
-                <h4>Dragon Sight</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">16 DMG</span><span class="tag">9s CD</span><span class="tag">7.0 RANGE</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A glowing dragon eye. Long-range poke with no mana cost.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/dragon_sight.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/verdant_arrow.png" alt="Verdant Arrow">
-              <div class="key">W</div>
-              <div>
-                <h4>Verdant Arrow</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">32 DMG</span><span class="tag">18 MANA</span><span class="tag">3s CD</span><span class="tag">6.0 RANGE</span></div>
-                <p class="bonus">A vine-wrapped golden arrow. Fast nature shot for lane pressure.</p>
+              <h4>Dragon Sight</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>16</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>9s</dd></div>
+                <div><dt>Recharge</dt><dd>9s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>7 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/verdant_arrow.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/ricochet_disc.png" alt="Ricochet Disc">
-              <div class="key">E</div>
-              <div>
-                <h4>Ricochet Disc</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">48 DMG</span><span class="tag">32 MANA</span><span class="tag">8s CD</span><span class="tag">6.5 RANGE</span></div>
-                <p class="bonus">A crescent disc that hunts back lines. Heavier ranged hit.</p>
+              <h4>Verdant Arrow</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>32</dd></div>
+                <div><dt>Mana cost</dt><dd>18</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>6 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/ricochet_disc.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/storm_eagle.png" alt="Storm Eagle">
-              <div class="key">R</div>
-              <div>
-                <h4>Storm Eagle</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">95 DMG</span><span class="tag">80 MANA</span><span class="tag">24s CD</span><span class="tag">8.0 RANGE</span></div>
-                <p class="bonus">A lightning eagle dive. The longest-range burst on the roster.</p>
+              <h4>Ricochet Disc</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>48</dd></div>
+                <div><dt>Mana cost</dt><dd>32</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>6.5 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Disc</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/storm_eagle.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38"/></svg>
+                  <div><span>Footprint</span><b>Line</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Storm Eagle</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>95</dd></div>
+                <div><dt>Mana cost</dt><dd>80</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>24s</dd></div>
+                <div><dt>Recharge</dt><dd>24s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>8 tiles</dd></div>
+                <div><dt>Width × length</dt><dd>1.5 × 8 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Line</dd></div>
+              </dl>
+              <p class="bonus">Starts at your position, facing your aim. Hits all enemies in the line at impact.</p>
+            </article>
           </div>
         </article>
 
@@ -522,7 +726,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>190 → 760</b><span class="muted">HP +30/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>180 → 465</b><span class="muted">MANA +15/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>38 → 190</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>38 → 190</b><span class="muted">BASIC DAMAGE +8/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.48 → 3.01</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
@@ -534,42 +738,105 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/mana_crystal.png" alt="Mana Crystal">
-              <div class="key">Q</div>
-              <div>
-                <h4>Mana Crystal</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag restore">RESTORE</span><span class="tag">+28 MANA</span><span class="tag">6s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A cluster of blue shards. Refunds mana so the burst kit can keep firing.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/mana_crystal.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/frost_lance.png" alt="Frost Lance">
-              <div class="key">W</div>
-              <div>
-                <h4>Frost Lance</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">42 DMG</span><span class="tag">28 MANA</span><span class="tag">4s CD</span><span class="tag">5.5 RANGE</span></div>
-                <p class="bonus">An ice-crystal lance. Reliable piercing frost shot.</p>
+              <h4>Mana Crystal</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Restores</dt><dd>+28 mana</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>6s</dd></div>
+                <div><dt>Recharge</dt><dd>6s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your mana.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/frost_lance.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/meteor_strike.png" alt="Meteor Strike">
-              <div class="key">E</div>
-              <div>
-                <h4>Meteor Strike</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">70 DMG</span><span class="tag">50 MANA</span><span class="tag">9s CD</span><span class="tag">6.0 RANGE</span></div>
-                <p class="bonus">A flaming rocky meteor. Mid-kit bombardment.</p>
+              <h4>Frost Lance</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>42</dd></div>
+                <div><dt>Mana cost</dt><dd>28</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>5.5 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/meteor_strike.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/arcane_meteor.png" alt="Arcane Meteor">
-              <div class="key">R</div>
-              <div>
-                <h4>Arcane Meteor</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">120 DMG</span><span class="tag">100 MANA</span><span class="tag">25s CD</span><span class="tag">7.0 RANGE</span></div>
-                <p class="bonus">A violet meteor ringed in crystals. The largest single-target mage hit.</p>
+              <h4>Meteor Strike</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>70</dd></div>
+                <div><dt>Mana cost</dt><dd>50</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>9s</dd></div>
+                <div><dt>Recharge</dt><dd>9s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>2s</dd></div>
+                <div><dt>Cast range</dt><dd>6 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Circle</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/arcane_meteor.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Arcane Meteor</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>120</dd></div>
+                <div><dt>Mana cost</dt><dd>100</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>25s</dd></div>
+                <div><dt>Recharge</dt><dd>25s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>3s</dd></div>
+                <div><dt>Cast range</dt><dd>7 tiles</dd></div>
+                <div><dt>Radius</dt><dd>3 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Circle</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
           </div>
         </article>
 
@@ -587,7 +854,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>250 → 1162</b><span class="muted">HP +48/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>170 → 436</b><span class="muted">MANA +14/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>22 → 98</b><span class="muted">DAMAGE +4/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>22 → 98</b><span class="muted">BASIC DAMAGE +4/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>4.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.56 → 3.09</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.92</b><span class="muted">ATTACKS / S</span></div></div>
@@ -599,42 +866,107 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/nature_talisman.png" alt="Nature Talisman">
-              <div class="key">Q</div>
-              <div>
-                <h4>Nature Talisman</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+22 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A wooden spiral charm. Quiet regeneration with no mana cost.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/nature_talisman.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/healing_bloom.png" alt="Healing Bloom">
-              <div class="key">W</div>
-              <div>
-                <h4>Healing Bloom</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+55 HP</span><span class="tag">30 MANA</span><span class="tag">7s CD</span></div>
-                <p class="bonus">A white and gold flower. The main support heal.</p>
+              <h4>Nature Talisman</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+22 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your health.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/healing_bloom.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/kindred_wisps.png" alt="Kindred Wisps">
-              <div class="key">E</div>
-              <div>
-                <h4>Kindred Wisps</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+80 HP</span><span class="tag">45 MANA</span><span class="tag">12s CD</span></div>
-                <p class="bonus">Twin pale spirits on a cyan cord. A larger recovery when the lane turns.</p>
+              <h4>Healing Bloom</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+55 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>30</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>7s</dd></div>
+                <div><dt>Recharge</dt><dd>7s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.5s</dd></div>
+                <div><dt>Cast range</dt><dd>4 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Circle</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Heals all allied heroes in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/kindred_wisps.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/golem_seed.png" alt="Golem Seed">
-              <div class="key">R</div>
-              <div>
-                <h4>Golem Seed</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">85 DMG</span><span class="tag">75 MANA</span><span class="tag">22s CD</span><span class="tag">3.3 RANGE</span></div>
-                <p class="bonus">A stone seed that cracks into a guardian. The warden's objective hit.</p>
+              <h4>Kindred Wisps</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+80 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>45</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>12s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.5s</dd></div>
+                <div><dt>Cast range</dt><dd>4 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2.5 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Sphere</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Heals all allied heroes in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/golem_seed.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Golem Seed</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>85</dd></div>
+                <div><dt>Mana cost</dt><dd>75</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>22s</dd></div>
+                <div><dt>Recharge</dt><dd>22s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>3.33 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Cylinder</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
           </div>
         </article>
 
@@ -652,7 +984,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>220 → 904</b><span class="muted">HP +36/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>90 → 223</b><span class="muted">MANA +7/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>32 → 165</b><span class="muted">DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>32 → 165</b><span class="muted">BASIC DAMAGE +7/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.25</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>3.04 → 3.95</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.50</b><span class="muted">ATTACKS / S</span></div></div>
@@ -664,42 +996,104 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/shadow_cloak.png" alt="Shadow Cloak">
-              <div class="key">Q</div>
-              <div>
-                <h4>Shadow Cloak</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+18 HP</span><span class="tag">10s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">An empty hooded cloak. Small sustain while hunting.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/shadow_cloak.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/void_blade.png" alt="Void Blade">
-              <div class="key">W</div>
-              <div>
-                <h4>Void Blade</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">38 DMG</span><span class="tag">16 MANA</span><span class="tag">3.3s CD</span><span class="tag">1.5 RANGE</span></div>
-                <p class="bonus">A jagged purple dagger. Cheap melee strike for trades.</p>
+              <h4>Shadow Cloak</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+18 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>10s</dd></div>
+                <div><dt>Recharge</dt><dd>10s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your health.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/void_blade.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/gale_slash.png" alt="Gale Slash">
-              <div class="key">E</div>
-              <div>
-                <h4>Gale Slash</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">52 DMG</span><span class="tag">28 MANA</span><span class="tag">7s CD</span><span class="tag">2.0 RANGE</span></div>
-                <p class="bonus">A curved blade of wind. A longer-reach slash after the gap close.</p>
+              <h4>Void Blade</h4>
+              <p class="cast-type">Melee</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>38</dd></div>
+                <div><dt>Mana cost</dt><dd>16</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>1.5 tiles</dd></div>
+              </dl>
+              <p class="bonus">Strike one enemy at close range. Aim at empty ground to swing into space.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/gale_slash.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 41L6 10a36 36 0 0 1 36 0Z"/></svg>
+                  <div><span>Footprint</span><b>Sector</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/shadow_comet.png" alt="Shadow Comet">
-              <div class="key">R</div>
-              <div>
-                <h4>Shadow Comet</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">100 DMG</span><span class="tag">65 MANA</span><span class="tag">21s CD</span><span class="tag">5.0 RANGE</span></div>
-                <p class="bonus">A dark comet on a purple crescent. Assassin execute from mid range.</p>
+              <h4>Gale Slash</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>52</dd></div>
+                <div><dt>Mana cost</dt><dd>28</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>7s</dd></div>
+                <div><dt>Recharge</dt><dd>7s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.25s</dd></div>
+                <div><dt>Cast range</dt><dd>2 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Angle</dt><dd>120°</dd></div>
+                <div><dt>Visual effect</dt><dd>Cone</dd></div>
+              </dl>
+              <p class="bonus">Starts at your position, facing your aim. Hits all enemies in the sector at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/shadow_comet.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Shadow Comet</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>100</dd></div>
+                <div><dt>Mana cost</dt><dd>65</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>21s</dd></div>
+                <div><dt>Recharge</dt><dd>21s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>5 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
           </div>
         </article>
 
@@ -717,7 +1111,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>350 → 1528</b><span class="muted">HP +62/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>90 → 242</b><span class="muted">MANA +8/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>30 → 144</b><span class="muted">DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>30 → 144</b><span class="muted">BASIC DAMAGE +6/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.27</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.28 → 2.74</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
@@ -729,42 +1123,106 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/sanguine_chalice.png" alt="Sanguine Chalice">
-              <div class="key">Q</div>
-              <div>
-                <h4>Sanguine Chalice</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+26 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A crimson chalice of living blood. Passive sustain in the grind.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/sanguine_chalice.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/afterlight_sickle.png" alt="Afterlight Sickle">
-              <div class="key">W</div>
-              <div>
-                <h4>Afterlight Sickle</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">42 DMG</span><span class="tag">18 MANA</span><span class="tag">4.5s CD</span><span class="tag">1.5 RANGE</span></div>
-                <p class="bonus">A dark crescent sickle. Melee harvest for the bruiser kit.</p>
+              <h4>Sanguine Chalice</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+36 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your health.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/afterlight_sickle.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/withering_idol.png" alt="Withering Idol">
-              <div class="key">E</div>
-              <div>
-                <h4>Withering Idol</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">60 DMG</span><span class="tag">36 MANA</span><span class="tag">9s CD</span><span class="tag">2.7 RANGE</span></div>
-                <p class="bonus">A cracked idol that drains green light. Mid-range blight strike.</p>
+              <h4>Afterlight Sickle</h4>
+              <p class="cast-type">Melee</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>42</dd></div>
+                <div><dt>Mana cost</dt><dd>18</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>1.5 tiles</dd></div>
+              </dl>
+              <p class="bonus">Strike one enemy at close range. Aim at empty ground to swing into space.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/withering_idol.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/dark_eclipse.png" alt="Dark Eclipse">
-              <div class="key">R</div>
-              <div>
-                <h4>Dark Eclipse</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">110 DMG</span><span class="tag">80 MANA</span><span class="tag">26s CD</span><span class="tag">2.3 RANGE</span></div>
-                <p class="bonus">A black sun with a gold-violet corona. Close-range celestial smash.</p>
+              <h4>Withering Idol</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>60</dd></div>
+                <div><dt>Mana cost</dt><dd>36</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>9s</dd></div>
+                <div><dt>Recharge</dt><dd>9s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>2.67 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Circle</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/dark_eclipse.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path fill-rule="evenodd" d="M42 24a18 18 0 1 0-36 0a18 18 0 1 0 36 0M32 24a8 8 0 1 1-16 0a8 8 0 1 1 16 0"/></svg>
+                  <div><span>Footprint</span><b>Ring</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Dark Eclipse</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>110</dd></div>
+                <div><dt>Mana cost</dt><dd>80</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>26s</dd></div>
+                <div><dt>Recharge</dt><dd>26s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.5s</dd></div>
+                <div><dt>Cast range</dt><dd>2.33 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2.33 tiles</dd></div>
+                <div><dt>Inner radius</dt><dd>0.67 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Ring</dd></div>
+              </dl>
+              <p class="bonus">Centered on you. Hits all enemies in the ring at impact. The center is safe.</p>
+            </article>
           </div>
         </article>
 
@@ -782,7 +1240,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>230 → 1028</b><span class="muted">HP +42/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>80 → 194</b><span class="muted">MANA +6/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>43 → 195</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>46 → 217</b><span class="muted">BASIC DAMAGE +9/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>6.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.40 → 2.86</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.67</b><span class="muted">ATTACKS / S</span></div></div>
@@ -794,42 +1252,107 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/final_measure.png" alt="Final Measure">
-              <div class="key">Q</div>
-              <div>
-                <h4>Final Measure</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">20 DMG</span><span class="tag">9s CD</span><span class="tag">7.0 RANGE</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A bronze balance of blade and skull. Free long-range poke.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/final_measure.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/siege_scarab.png" alt="Siege Scarab">
-              <div class="key">W</div>
-              <div>
-                <h4>Siege Scarab</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">50 DMG</span><span class="tag">22 MANA</span><span class="tag">5s CD</span><span class="tag">6.7 RANGE</span></div>
-                <p class="bonus">A brass scarab crushing a tower. Structure-minded bolt.</p>
+              <h4>Final Measure</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>20</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>9s</dd></div>
+                <div><dt>Recharge</dt><dd>9s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>7 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/siege_scarab.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/lodestone_surge.png" alt="Lodestone Surge">
-              <div class="key">E</div>
-              <div>
-                <h4>Lodestone Surge</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">68 DMG</span><span class="tag">40 MANA</span><span class="tag">10s CD</span><span class="tag">6.0 RANGE</span></div>
-                <p class="bonus">An enchanted lodestone pulling steel. Heavier ranged shot.</p>
+              <h4>Siege Scarab</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>50</dd></div>
+                <div><dt>Mana cost</dt><dd>22</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>6.67 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/lodestone_surge.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 41L6 10a36 36 0 0 1 36 0Z"/></svg>
+                  <div><span>Footprint</span><b>Sector</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/clockwork_charge.png" alt="Clockwork Charge">
-              <div class="key">R</div>
-              <div>
-                <h4>Clockwork Charge</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">115 DMG</span><span class="tag">70 MANA</span><span class="tag">23s CD</span><span class="tag">7.5 RANGE</span></div>
-                <p class="bonus">A ticking clockwork bomb. Slow, long, and meant to end a siege.</p>
+              <h4>Lodestone Surge</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>68</dd></div>
+                <div><dt>Mana cost</dt><dd>40</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>10s</dd></div>
+                <div><dt>Recharge</dt><dd>10s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.5s</dd></div>
+                <div><dt>Cast range</dt><dd>6 tiles</dd></div>
+                <div><dt>Radius</dt><dd>6 tiles</dd></div>
+                <div><dt>Angle</dt><dd>90°</dd></div>
+                <div><dt>Visual effect</dt><dd>Cone</dd></div>
+              </dl>
+              <p class="bonus">Starts at your position, facing your aim. Hits all enemies in the sector at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/clockwork_charge.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="4" width="20" height="40" rx="10"/></svg>
+                  <div><span>Footprint</span><b>Capsule</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Clockwork Charge</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>115</dd></div>
+                <div><dt>Mana cost</dt><dd>70</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>23s</dd></div>
+                <div><dt>Recharge</dt><dd>23s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>7.5 tiles</dd></div>
+                <div><dt>Width × length</dt><dd>1.5 × 7.5 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Capsule</dd></div>
+              </dl>
+              <p class="bonus">Starts at your position, facing your aim. Hits all enemies in the capsule at impact.</p>
+            </article>
           </div>
         </article>
 
@@ -847,7 +1370,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>185 → 717</b><span class="muted">HP +28/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>210 → 533</b><span class="muted">MANA +17/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>36 → 188</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>36 → 188</b><span class="muted">BASIC DAMAGE +8/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.40 → 2.86</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.75</b><span class="muted">ATTACKS / S</span></div></div>
@@ -859,42 +1382,107 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/frost_sigil.png" alt="Frost Sigil">
-              <div class="key">Q</div>
-              <div>
-                <h4>Frost Sigil</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">14 DMG</span><span class="tag">8s CD</span><span class="tag">6.0 RANGE</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A geometric snowflake ward. Free frost poke.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/frost_sigil.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/ice_spear.png" alt="Ice Spear">
-              <div class="key">W</div>
-              <div>
-                <h4>Ice Spear</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">44 DMG</span><span class="tag">30 MANA</span><span class="tag">4s CD</span><span class="tag">6.0 RANGE</span></div>
-                <p class="bonus">A bursting blue ice projectile. Primary control shot.</p>
+              <h4>Frost Sigil</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>14</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>6 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/ice_spear.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/bone_marionette.png" alt="Bone Marionette">
-              <div class="key">E</div>
-              <div>
-                <h4>Bone Marionette</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">66 DMG</span><span class="tag">48 MANA</span><span class="tag">9s CD</span><span class="tag">5.0 RANGE</span></div>
-                <p class="bonus">A skeletal hand on spectral strings. Mid-kit corpse strike.</p>
+              <h4>Ice Spear</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>48</dd></div>
+                <div><dt>Mana cost</dt><dd>30</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>6.67 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/bone_marionette.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/bound_void.png" alt="Bound Void">
-              <div class="key">R</div>
-              <div>
-                <h4>Bound Void</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">125 DMG</span><span class="tag">110 MANA</span><span class="tag">27s CD</span><span class="tag">6.5 RANGE</span></div>
-                <p class="bonus">A chained purple void sphere. Highest damage and longest cooldown in the game.</p>
+              <h4>Bone Marionette</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>66</dd></div>
+                <div><dt>Mana cost</dt><dd>48</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>9s</dd></div>
+                <div><dt>Recharge</dt><dd>9s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>5 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Dome</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/bound_void.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path fill-rule="evenodd" d="M42 24a18 18 0 1 0-36 0a18 18 0 1 0 36 0M32 24a8 8 0 1 1-16 0a8 8 0 1 1 16 0"/></svg>
+                  <div><span>Footprint</span><b>Ring</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Bound Void</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>125</dd></div>
+                <div><dt>Mana cost</dt><dd>110</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>27s</dd></div>
+                <div><dt>Recharge</dt><dd>27s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>6.5 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Inner radius</dt><dd>0.67 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Torus</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the ring at impact. The center is safe.</p>
+            </article>
           </div>
         </article>
 
@@ -912,7 +1500,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>240 → 1114</b><span class="muted">HP +46/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>190 → 494</b><span class="muted">MANA +16/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>26 → 121</b><span class="muted">DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>26 → 121</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>4.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.48 → 3.01</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
@@ -924,42 +1512,106 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/aether_siphon.png" alt="Aether Siphon">
-              <div class="key">Q</div>
-              <div>
-                <h4>Aether Siphon</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag restore">RESTORE</span><span class="tag">+22 MANA</span><span class="tag">7s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">A spectral serpent draining light. Passive mana refund.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/aether_siphon.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/moth_hex.png" alt="Moth Hex">
-              <div class="key">W</div>
-              <div>
-                <h4>Moth Hex</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">36 DMG</span><span class="tag">24 MANA</span><span class="tag">4s CD</span><span class="tag">4.7 RANGE</span></div>
-                <p class="bonus">A moonlit moth inside a blue hex. Cheap utility strike.</p>
+              <h4>Aether Siphon</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Restores</dt><dd>+30 mana</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>7s</dd></div>
+                <div><dt>Recharge</dt><dd>7s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your mana.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/moth_hex.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/dread_totem.png" alt="Dread Totem">
-              <div class="key">E</div>
-              <div>
-                <h4>Dread Totem</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">58 DMG</span><span class="tag">42 MANA</span><span class="tag">9s CD</span><span class="tag">4.0 RANGE</span></div>
-                <p class="bonus">A screaming shadow totem. Mid-range fear strike.</p>
+              <h4>Moth Hex</h4>
+              <p class="cast-type">Projectile</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>36</dd></div>
+                <div><dt>Mana cost</dt><dd>24</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>4.67 tiles</dd></div>
+              </dl>
+              <p class="bonus">Follows the selected enemy. A ground shot hits the first enemy along its path.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/dread_totem.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38"/></svg>
+                  <div><span>Footprint</span><b>Line</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/void_portal.png" alt="Void Portal">
-              <div class="key">R</div>
-              <div>
-                <h4>Void Portal</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">105 DMG</span><span class="tag">90 MANA</span><span class="tag">24s CD</span><span class="tag">5.0 RANGE</span></div>
-                <p class="bonus">A dark ring of purple stones. Summoner finisher through the void.</p>
+              <h4>Dread Totem</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>58</dd></div>
+                <div><dt>Mana cost</dt><dd>42</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>9s</dd></div>
+                <div><dt>Recharge</dt><dd>9s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>4 tiles</dd></div>
+                <div><dt>Width × length</dt><dd>1 × 4 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Box</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the line at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/void_portal.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path fill-rule="evenodd" d="M42 24a18 18 0 1 0-36 0a18 18 0 1 0 36 0M32 24a8 8 0 1 1-16 0a8 8 0 1 1 16 0"/></svg>
+                  <div><span>Footprint</span><b>Ring</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Void Portal</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>105</dd></div>
+                <div><dt>Mana cost</dt><dd>90</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>24s</dd></div>
+                <div><dt>Recharge</dt><dd>24s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>1s</dd></div>
+                <div><dt>Cast range</dt><dd>5 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Inner radius</dt><dd>0.67 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Helix</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the ring at impact. The center is safe.</p>
+            </article>
           </div>
         </article>
 
@@ -977,7 +1629,7 @@
               <div class="stats">
                 <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>300 → 1345</b><span class="muted">HP +55/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>40 → 116</b><span class="muted">MANA +4/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>35 → 168</b><span class="muted">DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>38 → 190</b><span class="muted">BASIC DAMAGE +8/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.33</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.72 → 3.40</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.20</b><span class="muted">ATTACKS / S</span></div></div>
@@ -989,42 +1641,106 @@
             </div>
           </div>
           <div class="abilities">
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/rage_crucible.png" alt="Rage Crucible">
-              <div class="key">Q</div>
-              <div>
-                <h4>Rage Crucible</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+20 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
-                <p class="bonus">An iron heart overflowing with fire. Cheap sustain for a low-mana carry.</p>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/rage_crucible.png" alt="" loading="lazy">
+                  <kbd class="key">Q</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><circle class="icon-core" cx="24" cy="24" r="4"/></svg>
+                  <div><span>Affects</span><b>Self</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/molten_fist.png" alt="Molten Fist">
-              <div class="key">W</div>
-              <div>
-                <h4>Molten Fist</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">45 DMG</span><span class="tag">8 MANA</span><span class="tag">3.5s CD</span><span class="tag">1.5 RANGE</span></div>
-                <p class="bonus">A flaming stone fist. Almost free melee punch.</p>
+              <h4>Rage Crucible</h4>
+              <p class="cast-type">Self cast</p>
+              <dl class="ability-stats">
+                <div><dt>Healing</dt><dd>+20 HP</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+              </dl>
+              <p class="bonus">Restores your health.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/molten_fist.png" alt="" loading="lazy">
+                  <kbd class="key">W</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="11"/><path class="icon-line" d="M24 5v10m0 18v10M5 24h10m18 0h10"/><circle class="icon-core" cx="24" cy="24" r="3"/></svg>
+                  <div><span>Affects</span><b>Single target</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/winged_boot.png" alt="Winged Boot">
-              <div class="key">E</div>
-              <div>
-                <h4>Winged Boot</h4>
-                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">40 DMG</span><span class="tag">12 MANA</span><span class="tag">8s CD</span><span class="tag">2.5 RANGE</span></div>
-                <p class="bonus">A winged armored boot. Gap-close strike with a longer reach.</p>
+              <h4>Molten Fist</h4>
+              <p class="cast-type">Melee</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>45</dd></div>
+                <div><dt>Mana cost</dt><dd>0</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>2s</dd></div>
+                <div><dt>Recharge</dt><dd>12s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>Instant</dd></div>
+                <div><dt>Cast range</dt><dd>1.5 tiles</dd></div>
+              </dl>
+              <p class="bonus">Strike one enemy at close range. Aim at empty ground to swing into space.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/winged_boot.png" alt="" loading="lazy">
+                  <kbd class="key">E</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 41L6 10a36 36 0 0 1 36 0Z"/></svg>
+                  <div><span>Footprint</span><b>Sector</b></div>
+                </div>
               </div>
-            </div>
-            <div class="ability">
-              <img src="../../../../polyworld_data/abilities/volcanic_eruption.png" alt="Volcanic Eruption">
-              <div class="key">R</div>
-              <div>
-                <h4>Volcanic Eruption</h4>
-                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">100 DMG</span><span class="tag">24 MANA</span><span class="tag">20s CD</span><span class="tag">2.2 RANGE</span></div>
-                <p class="bonus">A volcano throwing lava and rock. Cheap ultimate for a mana-starved fighter.</p>
+              <h4>Winged Boot</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>40</dd></div>
+                <div><dt>Mana cost</dt><dd>12</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>8s</dd></div>
+                <div><dt>Recharge</dt><dd>8s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>0.5s</dd></div>
+                <div><dt>Cast range</dt><dd>2.5 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2.5 tiles</dd></div>
+                <div><dt>Angle</dt><dd>90°</dd></div>
+                <div><dt>Visual effect</dt><dd>Cone</dd></div>
+              </dl>
+              <p class="bonus">Starts at your position, facing your aim. Hits all enemies in the sector at impact.</p>
+            </article>
+            <article class="ability">
+              <div class="ability-head">
+                <div class="ability-art">
+                  <img src="../../../../polyworld_data/abilities/volcanic_eruption.png" alt="" loading="lazy">
+                  <kbd class="key">R</kbd>
+                </div>
+                <div class="footprint">
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18"/></svg>
+                  <div><span>Footprint</span><b>Circle</b></div>
+                </div>
               </div>
-            </div>
+              <h4>Volcanic Eruption</h4>
+              <p class="cast-type">Area cast</p>
+              <dl class="ability-stats">
+                <div><dt>Damage</dt><dd>100</dd></div>
+                <div><dt>Mana cost</dt><dd>24</dd></div>
+                <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
+                <div><dt>Cast cooldown</dt><dd>20s</dd></div>
+                <div><dt>Recharge</dt><dd>20s / charge</dd></div>
+                <div><dt>Cast delay</dt><dd>2s</dd></div>
+                <div><dt>Cast range</dt><dd>2.17 tiles</dd></div>
+                <div><dt>Radius</dt><dd>2 tiles</dd></div>
+                <div><dt>Visual effect</dt><dd>Circle</dd></div>
+              </dl>
+              <p class="bonus">Locks at your aimed map position. Hits all enemies in the circle at impact.</p>
+            </article>
           </div>
         </article>
       </div>
@@ -1077,7 +1793,7 @@
               <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">40</div>
             </div>
           </div>
-          <p class="bonus">Use: deal 35 strike damage.</p>
+          <p class="bonus">Use: deal 35 strike damage to a living, visible enemy within your hero's attack range. Tower order and god protection still apply.</p>
         </article>
       </div>
 
@@ -1246,11 +1962,128 @@
       </div>
     </section>
 
-    <footer>
-      Numbers come from <code>examples/gods_of_the_arena/content.nim</code> and
-      <code>sim.nim</code>. Icons load from the sibling <code>polyworld_data</code>
-      folder. Clone it next to this repo and open this file from docs.
-    </footer>
+    <section id="casting" class="panel">
+      <p class="kicker">ACTIONS AND SPELLS</p>
+      <h2>Aim, cast, impact, recharge</h2>
+      <p><strong>Basic attack + four abilities:</strong> Every hero has a separate single-target basic attack: a melee strike or a ranged shot, including magic bolts. Basic attacks cost no mana, use no spell charges, and repeat at the hero's attack speed. Their damage grows every level: base damage + (level − 1) × damage per level, plus equipment bonuses. Q/W/E/R are four additional abilities with their own cooldowns and charges.</p>
+      <div class="spell-grid">
+        <article class="spell-rule"><h3>One target</h3><p>Melee strikes need close range. Projectiles travel to one target. Neither becomes an area attack just because its effect looks wide. In player mode, aim at an object to target it, or aim at empty ground to swing or shoot into space.</p></article>
+        <article class="spell-rule"><h3>An area on the map</h3><p>Circles, lines, sectors and other footprints affect every eligible occupant when the effect lands. The area locks when cast. Moving into it before impact can get you hit; moving out can avoid it. Enemy damage, allied healing and structure protection still apply.</p></article>
+        <article class="spell-rule"><h3>A visible warning</h3><p>Cast delay is the time from releasing an area spell until it takes effect. The full footprint remains on the map during that delay, then flashes at impact. Every cast uses the same warnings and timing. Changing playback speed speeds up or slows down the battle and spell effects together.</p></article>
+      </div>
+      <p><strong>Mana</strong> is paid when a cast is accepted. Basic attacks cost zero mana, as does Molten Fist. Other spells have their own mana costs. Invalid casts do not spend mana or charges; a valid shot into empty space does.</p>
+      <div class="spell-grid">
+        <article class="spell-rule"><h3>Charges</h3><p>The number of casts held in reserve. You need at least one charge. Each hero starts with a full set; a respawn restores the set.</p></article>
+        <article class="spell-rule"><h3>Cast cooldown</h3><p>The minimum time between uses of the same action, even if charges remain. It is separate from the effect's cast delay and from its recharge timer.</p></article>
+        <article class="spell-rule"><h3>Recharge cooldown</h3><p>Charges refill one at a time. The timer starts with the first spent charge. Spending another does not restart it. When a charge returns, the next missing charge starts its own full recharge.</p></article>
+      </div>
+      <div class="charge-demo" aria-label="Interactive charge timing example">
+        <h3>Try it: 3 charges · 2s cooldown · 12s recharge</h3>
+        <p>Cast at 0, 2 and 4 seconds. Charges return at 12, 24 and 36 seconds if you stop casting.</p>
+        <div class="charge-pips" id="charge-pips" aria-hidden="true"></div>
+        <output id="charge-status" aria-live="polite"></output>
+        <button id="charge-cast" type="button">Cast</button>
+        <button id="charge-step" type="button">Advance 2 seconds</button>
+        <button id="charge-wait" type="button">Advance 10 seconds</button>
+        <button id="charge-reset" type="button">Reset</button>
+      </div>
+      <p><strong>Refill resources:</strong> Ironroot Ration costs 30 gold and heals 40 HP; Vitality Elixir costs 50 gold and heals 90 HP; Mana Potion costs 45 gold and restores 60 mana. Buy them in the <a href="#shop">shop</a>. Healing cannot revive a hero at zero HP.</p>
+    </section>
+    <section id="controls" class="panel">
+      <p class="kicker">PLAYER CONTROLS</p>
+      <h2>Control your hero</h2>
+      <p>Idle heroes automatically attack the closest visible enemy creep nearby. Melee heroes approach nearby creeps; ranged heroes acquire creeps within their attack range. Select an enemy or right-click it to make it take priority. Both melee and ranged heroes move toward that target until they reach their own basic-attack range, then stop and attack repeatedly. When the target dies or is lost in fog, they return to nearby creeps. A ground move order cancels the attack and takes priority over automatic acquisition. These rules also apply with zero mana or all four abilities on cooldown.</p>
+      <p>You control your four extra abilities; they only cast when you use them. Q/W/E/R cast immediately at your current valid target. Self actions always fire on key press and affect you. Melee actions also fire immediately: they strike a nearby target, or swing toward the pointer when there is none. For other abilities with no valid target, the key selects the ability and right-click casts at an object or the ground. Escape cancels the selection. With no ability selected, right-click moves or attacks. Click SHOP in the inventory, or press B, to open the full-screen item shop; click an item to buy it. Space pauses or resumes the battle, including while shopping. The HUD shows remaining charges and the wait until an empty action can be used again. A blue bar tracks progress toward the next charge.</p>
+      <table class="spell-table"><thead><tr><th>Input</th><th>Action</th></tr></thead><tbody>
+        <tr><td>Q / W / E / R</td><td>Your four extra abilities. Self and melee actions fire immediately; other actions use your current target or select right-click aiming.</td></tr>
+        <tr><td>F / G</td><td>Use the first two inventory items, including health and mana potions.</td></tr>
+        <tr><td>O</td><td>Toggle character outlines behind scenery. Enabled by default; hidden portions are outlined without revealing enemies in fog of war.</td></tr>
+      </tbody></table>
+    </section>
+
+    <section id="basic" class="panel api-section">
+      <p class="kicker">BASIC HOST</p>
+      <h2>BASIC observations</h2>
+      <p>Self data and visible objects are sampled for each decision and remain consistent during it, including after an action call. Spell queries read the pending casts, so a successful cast can append a spell during that decision. Object and spell indices are zero-based and may change next decision. Keep <code>objectId(i)</code> when tracking an object across decisions or calling <code>attackTarget</code>, rather than keeping its list index.</p>
+      <p>All values are integers. <code>worldScale = 60000</code> is the number of world units per tile, and <code>tickRate = 24</code> is the number of simulation ticks per second. <code>selfX</code>, <code>selfY</code>, <code>objectX(i)</code>, <code>objectY(i)</code>, <code>spellX(i)</code>, and <code>spellY(i)</code> use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.</p>
+      <h3>Your hero</h3>
+      <p>The existing <code>selfId</code>, <code>selfTeam</code>, <code>selfClass</code>, <code>selfX</code>, <code>selfY</code>, <code>selfHp</code>, <code>selfMaxHp</code>, <code>selfMana</code>, <code>selfMaxMana</code>, <code>selfGold</code>, <code>selfLevel</code>, <code>selfLayer</code>, and <code>worldTick</code> remain available. These additional read-only values describe the current hero:</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>selfMoveSpeed</code></td><td>Unblocked movement speed in world units per tick, including level and equipment bonuses.</td></tr>
+          <tr><td><code>selfAttackRange</code></td><td>Basic-attack range in world units, measured by planar Euclidean distance between centers. Towers and barracks allow at least 105000 units measured from their occupied footprint; gods use 255000 units.</td></tr>
+          <tr><td><code>selfAttackDamage</code></td><td>Current basic-attack damage, including level and equipment bonuses.</td></tr>
+          <tr><td><code>selfTarget</code></td><td>Current ordered or automatically acquired attack target's stable object ID, or zero for none.</td></tr>
+          <tr><td><code>selfAttackCooldown</code></td><td>Ticks until the next basic hit could land if the target stays in range. Includes remaining recovery and the next windup, or the remainder of a current windup. An idle hero reports a full windup. Excludes chasing and is separate from ability cooldowns. Movement can cancel a swing.</td></tr>
+          <tr><td><code>selfAttacksLanded</code></td><td>Lifetime count of successful basic hits, preserved across respawns. Spells do not increment it.</td></tr>
+        </tbody>
+      </table>
+      <h3>Visible objects</h3>
+      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>objectLevel(i)</code></td><td>Hero level.</td></tr>
+          <tr><td><code>objectMana(i)</code></td><td>Hero's current mana.</td></tr>
+          <tr><td><code>objectItemId(i, slot)</code></td><td>Hero's held item ID, using the same IDs as <code>itemId</code> and <code>buyItem</code>. Zero means no item. Slots are 0 through 5.</td></tr>
+          <tr><td><code>objectItemCount(i, slot)</code></td><td>Stack count in that hero's inventory slot.</td></tr>
+          <tr><td><code>objectFacingX(i)</code>, <code>objectFacingY(i)</code></td><td>Normalized horizontal facing, scaled by <code>worldScale</code>. A unit facing positive X reports <code>(60000, 0)</code>.</td></tr>
+          <tr><td><code>objectTarget(i)</code></td><td>Current attack target's stable object ID, or zero if absent or not visible to your team.</td></tr>
+          <tr><td><code>objectVelX(i)</code>, <code>objectVelY(i)</code></td><td>Actual displacement over the last simulation tick in world units, including collision adjustments. Stationary objects report zero.</td></tr>
+        </tbody>
+      </table>
+      <p>These new object queries return zero for invalid indices or fields that do not apply to that object. Invalid inventory slots also return zero. Hero level, mana, and inventory queries return zero for non-heroes. An object's ID is not a valid substitute for its list index.</p>
+      <h3>Pending spells and warnings</h3>
+      <p>Loop over <code>0</code> through <code>spellCount() - 1</code>. This list contains unresolved casts from their start through impact, including projectiles and area warnings. Allied casts are observable; enemy casts require their aim position to be visible, matching the viewer's warning visibility. Completed effects are omitted.</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>spellAbility(i)</code></td><td>Ability enum ID from <code>content.nim</code>, beginning at zero. Invalid indices return -1.</td></tr>
+          <tr><td><code>spellCasterId(i)</code></td><td>Caster's stable object ID, or zero if the enemy caster is hidden.</td></tr>
+          <tr><td><code>spellX(i)</code>, <code>spellY(i)</code></td><td>Aim/impact position or area center in whole global tiles. This is not the projectile's interpolated flight position.</td></tr>
+          <tr><td><code>spellImpactTick(i)</code></td><td>Absolute simulation tick at impact. Subtract <code>worldTick</code> to obtain the remaining ticks.</td></tr>
+        </tbody>
+      </table>
+      <p>Other invalid spell queries return zero. Visibility of an enemy warning does not reveal its hidden caster's identity.</p>
+      <h3>Attack-move and the rusher policy</h3>
+      <p><code>attackMove(x, y)</code> follows a path toward a tile, fights enemies in the hero's normal acquisition range, and resumes afterward. It returns 1 when accepted and 0 when rejected. Orders are recorded in replays.</p>
+      <p><code>players/rusher.bas</code> pushes all five heroes down mid together. When any pair of living allies is more than 10 tiles apart, the team regroups toward its center until the gap is at most 8 tiles. Otherwise it attacks visible, vulnerable enemies within 20 tiles or attack-moves through the middle toward the enemy god. Dead allies are ignored until they respawn. Automatic abilities stay enabled.</p>
+      <h3 id="terrain-api">Terrain API</h3>
+      <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>
+      <p>Read-only constants expose <code>mapWidth</code>, <code>mapHeight</code>, <code>mapLayers</code>, <code>GroundLayer</code>, <code>RedFortLayer</code>, <code>BlueFortLayer</code>, and <code>WaterLayer</code>. Terrain kinds are <code>TerrainNone</code>, <code>TerrainGrass</code>, <code>TerrainRoad</code>, <code>TerrainRock</code>, <code>TerrainTrees</code>, <code>TerrainMarsh</code>, <code>TerrainWall</code>, and <code>TerrainWater</code>.</p>
+    </section>
+
   </main>
+
+  <script>
+    (() => {
+      let now = 0, charges = 3, readyAt = 0, rechargeAt = null;
+      const status = document.getElementById('charge-status');
+      function draw() {
+        document.getElementById('charge-pips').innerHTML = [0, 1, 2].map(i => `<span class="${i < charges ? '' : 'empty'}"></span>`).join('');
+        status.textContent = `Time: ${now}s · Charges: ${charges}/3 · Cast cooldown: ${Math.max(0, readyAt - now)}s · Next charge: ${rechargeAt === null ? 'full' : (rechargeAt - now) + 's'}`;
+        document.getElementById('charge-cast').disabled = charges === 0 || now < readyAt;
+      }
+      function advance(seconds) {
+        now += seconds;
+        while (rechargeAt !== null && rechargeAt <= now) {
+          charges++;
+          rechargeAt = charges < 3 ? rechargeAt + 12 : null;
+        }
+        draw();
+      }
+      document.getElementById('charge-cast').onclick = () => {
+        if (charges === 0 || now < readyAt) return;
+        charges--; readyAt = now + 2;
+        if (rechargeAt === null) rechargeAt = now + 12;
+        draw();
+      };
+      document.getElementById('charge-step').onclick = () => advance(2);
+      document.getElementById('charge-wait').onclick = () => advance(10);
+      document.getElementById('charge-reset').onclick = () => { now = 0; charges = 3; readyAt = 0; rechargeAt = null; draw(); };
+      draw();
+    })();
+  </script>
 </body>
 </html>

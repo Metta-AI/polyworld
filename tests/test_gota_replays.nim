@@ -10,7 +10,7 @@ let setup = Setup(
   mapSeed: 2026,
   mapHash: 0x123456789ABCDEF0'u64,
   tickRate: uint16(TickRate),
-  gridTiles: 128,
+  gridTiles: 116,
   spawnIntervalTicks: uint32(TickRate) * 10,
   maximumTicks: 20,
   heroes: @[
@@ -62,6 +62,20 @@ doAssert decoded.actions[2].first == 70
 doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
+echo "Testing every spell slot and manual control round trip"
+block:
+  let spells = initReplayRecorder(setup)
+  spells.record ReplayAction(
+    tick: 1, heroId: 100, kind: ActionManualSpells, first: 1
+  )
+  for slot in 0'i32 .. 3'i32:
+    spells.recordCast(2, 100, slot, 105, 0, false)
+    spells.recordCast(2, 100, slot, 64, 42, true)
+  spells.recordHash(123)
+  spells.recordHash(456)
+  let restored = decodeReplay(spells.data.encodeReplay())
+  doAssert restored.actions == spells.data.actions
+
 echo "Testing exact-tick action playback"
 let player = initReplayPlayer(decoded)
 doAssert player.actionsAt(0).len == 0
@@ -102,6 +116,16 @@ doAssert replayBytes.find("bestDistance = 2147483647") < 0
 removeFile(path)
 
 echo "Testing replay validation"
+for version in 0'u16 ..< ReplayGameVersion:
+  var unsupported = encoded
+  unsupported[ReplayMagic.len + 2] = char(version and 0xff)
+  unsupported[ReplayMagic.len + 3] = char(version shr 8)
+  try:
+    discard decodeReplay(unsupported)
+    doAssert false, "an unsupported simulation must require its old viewer"
+  except ReplayError as error:
+    doAssert error.msg.contains("expected " & $ReplayGameVersion)
+
 try:
   discard decodeReplayFile(
     "light_vs_dark",
