@@ -13,10 +13,11 @@ type
 proc drawWorld*(backdrop: var WebBackdrop, mode: BackdropMode,
     width, height: int, invalidated: bool, revision = 0,
     nowMillis = 0'i64): bool =
-  ## Increment revision for visibility/focus events that can occur between frames.
-  ## nowMillis is monotonic; this policy never advances simulation or input.
+  ## Callers change revision for visibility/focus events that can occur between
+  ## frames. nowMillis is monotonic; this policy never advances simulation or input.
   result = mode != hidden and (mode == visible or not backdrop.initialized or
-    mode != backdrop.previous or width != backdrop.width or height != backdrop.height or
+    mode != backdrop.previous or width != backdrop.width or
+    height != backdrop.height or
     invalidated or revision != backdrop.revision or
     (mode == unfocused and nowMillis >= backdrop.nextBackgroundFrame))
   backdrop.previous = mode
