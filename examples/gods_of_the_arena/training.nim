@@ -31,6 +31,13 @@ type
     bot, opponent, policy: string
     maxTicks: int
 
+proc score(lane: TrainingLane): int64 =
+  let hero = lane.game.world.heroes[lane.seat]
+  let healthMilli = if hero.maxHp > 0: int64(max(hero.hp, 0)) * 1000 div hero.maxHp else: 0'i64
+  result = lane.transition.xp + lane.transition.structureHp +
+    4 * lane.transition.heroXp + 2 * lane.transition.heroGold +
+    500 * (lane.transition.heroKills - lane.transition.heroDeaths) + healthMilli
+
 proc snapshot(lane: TrainingLane, terminal: bool) =
   let game = lane.game
   let team = game.world.heroes[lane.seat].team
@@ -130,9 +137,7 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
   bindHeroData(program)
   game.heroVms[seat] = HeroVm(runtime: initRuntime(program, host, limits), limits: limits, ready: true)
   lane.advance()
-  lane.previousScore = lane.transition.xp + lane.transition.structureHp +
-    4 * lane.transition.heroXp + 2 * lane.transition.heroGold +
-    500 * (lane.transition.heroKills - lane.transition.heroDeaths)
+  lane.previousScore = lane.score()
   result = lane
 
 proc reset*(batch: TrainingBatch, seed: int) =
@@ -153,11 +158,9 @@ proc step*(batch: TrainingBatch, actions: openArray[int32], transitions: var ope
   doAssert actions.len == batch.lanes.len and transitions.len == batch.lanes.len
   for index, lane in batch.lanes:
     lane.advance(actions[index])
-    let score = lane.transition.xp + lane.transition.structureHp +
-      4 * lane.transition.heroXp + 2 * lane.transition.heroGold +
-      500 * (lane.transition.heroKills - lane.transition.heroDeaths)
-    lane.transition.reward = float32(score - lane.previousScore) / 1000'f32
-    lane.previousScore = score
+    let currentScore = lane.score()
+    lane.transition.reward = float32(currentScore - lane.previousScore) / 1000'f32
+    lane.previousScore = currentScore
     if lane.transition.terminal != 0:
       lane.transition.reward += float32(lane.transition.outcome) * 10'f32
     transitions[index] = lane.transition
