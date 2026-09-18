@@ -1,19 +1,26 @@
 ## Gods of the Arena action-only replay format and playback cursor.
 
 import
-  polyworld/tapes,
-  content
+  std/os,
+  polyworld/[tapes, metrics],
+  content, presets
+
+export presets
 
 const
   ReplayGame* = "gods_of_the_arena"
-  ReplayFormatVersion* = 3'u16
-  ReplayGameVersion* = 13'u16
-  ReplayGridTiles* = 128'u16
+  ReplayFormatVersion* = 5'u16
+  ## This client supports only this gameplay version. Bump it when rules change.
+  ## Older replays use their archived client; never add compatibility branches.
+  ReplayGameVersion* = 41'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
   ActionUseItem* = 4'u8
   ActionAttackMove* = 5'u8
+  ActionCastTarget* = 6'u8
+  ActionCastPoint* = 10'u8
+  ActionManualSpells* = 14'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -44,29 +51,37 @@ type
     second*: int32
 
   ReplayHeader* = TapeHeader[Setup]
-  ReplayData* = ActionTape[Setup, ReplayAction]
-  ReplayRecorder* = TapeRecorder[Setup, ReplayAction]
-  ReplayPlayer* = TapePlayer[Setup, ReplayAction]
+  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics, GotaConfig]
+  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics, GotaConfig]
+  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics, GotaConfig]
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Gods of the Arena replay error.
   raise newException(ReplayError, message)
 
-proc initReplayData*(setup: Setup): ReplayData =
-  ## Creates an empty replay with a versioned deterministic setup.
-  initActionTape[Setup, ReplayAction](
+proc initReplayData*(
+    setup: Setup, preset = defaultConfig()
+): ReplayData =
+  ## Creates a replay containing the match setup, config, and action tape.
+  result.header = initActionTape[Setup, ReplayAction](
     setup,
     ReplayFormatVersion,
     ReplayGameVersion
+  ).header
+  result.config = GotaConfig(
+    seed: setup.mapSeed,
+    maxTicks: int32(setup.maximumTicks),
+    players: unnamedPlayers(HeroClassCount),
+    spawnIntervalTicks: int32(setup.spawnIntervalTicks),
+    mapPreset: preset
   )
+  result.config.mapPreset.mapSize = setup.gridTiles.int
 
-proc initReplayRecorder*(setup: Setup): ReplayRecorder =
-  ## Creates an in-memory Gods of the Arena action recorder.
-  initTapeRecorder[Setup, ReplayAction](
-    setup,
-    ReplayFormatVersion,
-    ReplayGameVersion
-  )
+proc initReplayRecorder*(
+    setup: Setup, preset = defaultConfig()
+): ReplayRecorder =
+  ## Creates an in-memory recorder owning the complete replay data.
+  ReplayRecorder(data: initReplayData(setup, preset))
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one bot action in deterministic tick order.
@@ -76,9 +91,25 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionAttackTarget and
       action.kind != ActionBuyItem and
       action.kind != ActionUseItem and
-      action.kind != ActionAttackMove:
+      action.kind != ActionAttackMove and
+      action.kind notin ActionCastTarget .. ActionManualSpells:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
+
+proc recordCast*(
+    recorder: ReplayRecorder,
+    tick: uint32,
+    heroId, slot, first, second: int32,
+    ground: bool
+) =
+  ## Records a spell slot and object or ground aim in the existing payload.
+  if slot < 0 or slot > HeroAbilitySlot.high.ord:
+    fail("spell slot is invalid")
+  recorder.record ReplayAction(
+    tick: tick, heroId: heroId,
+    kind: (if ground: ActionCastPoint else: ActionCastTarget) + uint8(slot),
+    first: first, second: second
+  )
 
 proc recordWalkTo*(
     recorder: ReplayRecorder,
@@ -160,6 +191,17 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
 
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, actor IDs, and action ordering.
+  data.config.validateConfig(HeroClassCount)
+  try:
+    data.config.mapPreset.validate()
+  except MapgenError as error:
+    fail(error.msg)
+  if data.config.seed != data.header.setup.mapSeed or
+    data.config.maxTicks != int32(data.header.setup.maximumTicks):
+      fail("replay configuration does not match its simulation setup")
+  if data.config.spawnIntervalTicks !=
+    int32(data.header.setup.spawnIntervalTicks):
+      fail("replay configuration has a different spawn interval")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion
@@ -167,7 +209,7 @@ proc validate*(data: ReplayData) =
   let setup = data.header.setup
   if setup.tickRate != uint16(TickRate):
     fail("replay setup has an unsupported tick rate")
-  if setup.gridTiles != ReplayGridTiles:
+  if setup.gridTiles.int != data.config.mapPreset.mapSize:
     fail("replay setup has an unsupported map size")
   if setup.mapHash == 0:
     fail("replay setup has no deterministic map fingerprint")
@@ -204,7 +246,8 @@ proc validate*(data: ReplayData) =
         action.kind != ActionAttackTarget and
         action.kind != ActionBuyItem and
         action.kind != ActionUseItem and
-        action.kind != ActionAttackMove:
+        action.kind != ActionAttackMove and
+        action.kind notin ActionCastTarget .. ActionManualSpells:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:
@@ -214,19 +257,22 @@ proc validate*(data: ReplayData) =
     if not knownHero:
       fail("replay action references an unknown hero")
     lastTick = action.tick
+  try:
+    data.metrics.validate(
+      data.config.players.len,
+      int32(data.header.setup.tickRate),
+      data.hashes.len
+    )
+  except MetricsError as error:
+    fail(error.msg)
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes a validated arena replay using the shared Flatty envelope.
+  ## Encodes a validated recording for this client's gameplay version.
   data.validate()
-  encodeReplayFile(
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Decodes and validates one arena replay buffer.
+  ## Rejects other gameplay versions before decoding the recording.
   result = decodeReplayFile(
     ReplayGame,
     ReplayGameVersion,
@@ -237,26 +283,24 @@ proc decodeReplay*(bytes: string): ReplayData =
   result.validate()
 
 proc saveReplay*(path: string, data: ReplayData) =
-  ## Writes one complete arena replay file.
-  data.validate()
-  saveReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    data,
-    MaxReplayBytes
-  )
+  ## Creates the parent directory and saves the complete recording.
+  if path.len == 0:
+    fail("replay output path is empty")
+  let bytes = encodeReplay(data)
+  try:
+    let directory = path.parentDir
+    if directory.len > 0:
+      createDir(directory)
+    writeFile(path, bytes)
+  except IOError, OSError:
+    fail("cannot save replay: " & getCurrentExceptionMsg())
 
 proc loadReplay*(path: string): ReplayData =
-  ## Loads one complete arena replay file.
-  result = loadReplayFile(
-    path,
-    ReplayGame,
-    ReplayGameVersion,
-    ReplayData,
-    MaxReplayBytes
-  )
-  result.validate()
+  ## Loads one recording with its complete match configuration and metrics.
+  try:
+    result = decodeReplay(readFile(path))
+  except IOError, OSError:
+    fail("cannot load replay: " & getCurrentExceptionMsg())
 
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Creates a playback cursor over validated action data.

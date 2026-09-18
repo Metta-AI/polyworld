@@ -11,9 +11,9 @@
 ## Outfits share the loaded file.
 
 import
-  std/[tables, json, strutils, sets, os],
+  std/[tables, json, strutils, sets, os, options],
   chroma, gltf, vmath, windy,
-  pathing, shadows, toon
+  animblend, picking, shadows, toon
 
 type
   CharacterShading* = enum
@@ -33,6 +33,8 @@ type
     toon*: ToonContext
     shading*: CharacterShading
     sunDepthPass*: bool  ## drawCharacter renders into the sun map instead
+
+  CharacterGear* = tuple[root, socket: Node]
 
 const ToonRimStrength* = 0.6'f32  ## the rim light every game shares
 
@@ -119,6 +121,23 @@ proc clipDuration*(model: CharacterModel, clip: int): float32 =
   ## Returns the duration in seconds of an animation clip.
   model.file.root.animations[clip].duration
 
+proc socketNode(model: CharacterModel, name: string): Node =
+  ## Finds one named attachment node. Asset packs use different hand-bone
+  ## conventions, so callers pass the model's real node name.
+  doAssert name.len > 0, "character socket name is empty"
+  for node in model.file.root.walkNodes:
+    if node.name == name:
+      doAssert result == nil, "duplicate character socket " & name
+      result = node
+  doAssert result != nil, "character has no socket " & name
+
+proc attachGear*(
+    model: CharacterModel, root: Node, socketName: string
+): CharacterGear =
+  ## Binds a caller-owned gear tree to a named node. Load it once and reuse it.
+  root.ensureNormals()
+  (root, model.socketNode(socketName))
+
 proc newCharacterScene*(window: Window): CharacterScene =
   ## Creates the shared PBR renderer and attaches its environment map, plus
   ## the toon renderer; `shading` picks which one draws.
@@ -196,6 +215,97 @@ proc beginCharacters*(
   toon.cameraPosition = cameraEye
   scene.renderer.beginFrame(window, window.size)
 
+proc prepareCharacterParts(model: CharacterModel) =
+  if model.partNodes.len > 0:
+    # Modular: the shared tree shows exactly this model's outfit.
+    for node in model.partNodes:
+      node.baseVisible = false
+      node.visible = false
+    for node in model.shownParts:
+      node.baseVisible = true
+      node.visible = true
+
+proc setCharacterPose(
+    model: CharacterModel, clip: int, animTime: float32
+) =
+  let root = model.file.root
+  model.prepareCharacterParts()
+  if root.activeClips.len != 1:
+    root.activeClips.setLen(1)
+  root.activeClips[0] = clip
+  root.animTime = animTime
+  root.updateAnimation(0)
+
+proc setCharacterPose(model: CharacterModel, player: ClipPlayer) =
+  doAssert player.rootNode == model.file.root,
+    "animation player belongs to a different character model"
+  model.prepareCharacterParts()
+  # Shared character models retain the last instance's node values. Reapply
+  # this player's owned pose immediately before every transform query or draw.
+  player.pose()
+
+proc characterTransform(
+    model: CharacterModel,
+    position: Vec3, facing, sizeFactor: float32
+): Mat4 =
+  translate(position) * rotateY(facing) *
+    scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
+
+proc handTransform*(
+    model: CharacterModel, player: ClipPlayer, socketName: string,
+    position: Vec3, facing: float32, sizeFactor = 1.0'f32
+): Mat4 =
+  ## Returns a named socket's world transform in a player's blended pose.
+  let socket = model.socketNode(socketName)
+  model.setCharacterPose(player)
+  model.file.root.updateTransforms(
+    model.characterTransform(position, facing, sizeFactor))
+  socket.mat
+
+proc drawModel(
+    scene: CharacterScene, root: Node,
+    transform: Mat4, tint: Color, unlitParts: openArray[string] = []
+) =
+  if scene.sunDepthPass:
+    scene.toon.transform = transform
+    scene.toon.drawSunDepth(root)
+    return
+  case scene.shading
+  of PbrCharacters:
+    scene.context.transform = transform
+    scene.context.tint = tint
+    scene.context.draw(root)
+  of ToonCharacters:
+    scene.toon.unlitNodes.clear()
+    for name in unlitParts:
+      scene.toon.unlitNodes.incl name
+    scene.toon.transform = transform
+    scene.toon.tint = tint
+    scene.toon.draw(root)
+
+proc visibleIn(node, root: Node): bool =
+  if not root.visible:
+    return false
+  if root == node:
+    return true
+  for child in root.nodes:
+    if node.visibleIn(child):
+      return true
+
+proc drawPosedCharacter(
+    scene: CharacterScene, model: CharacterModel,
+    position: Vec3, facing: float32,
+    gear: openArray[CharacterGear],
+    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
+) =
+  let
+    root = model.file.root
+    transform = model.characterTransform(position, facing, sizeFactor)
+  scene.drawModel(root, transform, tint, model.unlitParts)
+  for attachment in gear:
+    if attachment.socket.visibleIn(root):
+      scene.drawModel(attachment.root, attachment.socket.mat, tint)
+
 proc drawCharacter*(
     scene: CharacterScene, model: CharacterModel,
     position: Vec3, facing: float32, clip: int, animTime: float32,
@@ -205,92 +315,41 @@ proc drawCharacter*(
   ## Looping clips may pass any time (playback wraps); one-shot clips like
   ## Death should clamp animTime to clipDuration to hold the last frame.
   ## Keep tint.a at 1.0 — lower alpha reroutes into the blended pass.
-  let root = model.file.root
-  if model.partNodes.len > 0:
-    # Modular: the shared tree shows exactly this model's outfit.
-    for node in model.partNodes:
-      node.baseVisible = false
-      node.visible = false
-    for node in model.shownParts:
-      node.baseVisible = true
-      node.visible = true
-  if root.activeClips.len != 1:
-    root.activeClips.setLen(1)
-  root.activeClips[0] = clip
-  root.animTime = animTime
-  root.updateAnimation(0)
-  let transform =
-    translate(position) * rotateY(facing) *
-    scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
-  if scene.sunDepthPass:
-    # Same pose, but rendered into the sun's shadow map: games run their
-    # character loop once inside the depth pass and once for the camera.
-    scene.toon.transform = transform
-    scene.toon.drawSunDepth(model.file.root)
-    return
-  case scene.shading
-  of PbrCharacters:
-    scene.context.transform = transform
-    scene.context.tint = tint
-    scene.context.draw(root)
-  of ToonCharacters:
-    let toon = scene.toon
-    for name in model.unlitParts:
-      toon.unlitNodes.incl name
-    toon.transform = transform
-    toon.tint = tint
-    toon.draw(root)
+  model.setCharacterPose(clip, animTime)
+  scene.drawPosedCharacter(model, position, facing, [], tint, sizeFactor)
+
+proc drawCharacter*(
+    scene: CharacterScene, model: CharacterModel, player: ClipPlayer,
+    position: Vec3, facing: float32,
+    gear: openArray[CharacterGear] = [],
+    tint = color(1, 1, 1, 1), sizeFactor = 1.0'f32
+) =
+  ## Reapplies a player's blended pose and draws optional attachments. Keep
+  ## calling player.update to advance its clock; paused players still re-pose.
+  model.setCharacterPose(player)
+  scene.drawPosedCharacter(model, position, facing, gear, tint, sizeFactor)
 
 proc finishCharacters*(scene: CharacterScene) =
   ## Finishes the character renderer's current frame.
   scene.renderer.endFrame()
 
-proc pickPrimitive(
-    primitive: Primitive,
-    world: Mat4,
+proc pickPosedCharacter(
+    model: CharacterModel,
     origin,
-    dir: Vec3
+    dir,
+    position: Vec3,
+    facing: float32,
+    sizeFactor = 1.0'f32
 ): float32 =
-  ## Ray distance to one mesh primitive, or -1 when it misses.
   result = -1
-  if primitive == nil or primitive.points.len == 0:
-    return
-  template consider(ia, ib, ic: int) =
-    if ia < primitive.points.len and
-        ib < primitive.points.len and
-        ic < primitive.points.len:
-      let distance = rayTriangle(
-        origin,
-        dir,
-        world * primitive.points[ia],
-        world * primitive.points[ib],
-        world * primitive.points[ic]
-      )
-      if distance > 0 and (result < 0 or distance < result):
-        result = distance
-  if primitive.indices32.len > 0:
-    var i = 0
-    while i + 2 < primitive.indices32.len:
-      consider(
-        primitive.indices32[i].int,
-        primitive.indices32[i + 1].int,
-        primitive.indices32[i + 2].int
-      )
-      i += 3
-  elif primitive.indices16.len > 0:
-    var i = 0
-    while i + 2 < primitive.indices16.len:
-      consider(
-        primitive.indices16[i].int,
-        primitive.indices16[i + 1].int,
-        primitive.indices16[i + 2].int
-      )
-      i += 3
-  else:
-    var i = 0
-    while i + 2 < primitive.points.len:
-      consider(i, i + 1, i + 2)
-      i += 3
+  let root = model.file.root
+  let transform = model.characterTransform(position, facing, sizeFactor)
+  root.updateTransforms(transform)
+  # The smallest positive float excludes zero without a world-space epsilon.
+  let hit = pickRay(origin, dir, near = 1e-45'f32).pickMesh(
+    root, doubleSided = true)
+  if hit.isSome:
+    result = hit.get.distance
 
 proc pickCharacter*(
     model: CharacterModel,
@@ -302,29 +361,16 @@ proc pickCharacter*(
     animTime: float32,
     sizeFactor = 1.0'f32
 ): float32 =
-  ## Ray distance to one posed character's triangles, or -1 when they miss.
-  result = -1
-  let root = model.file.root
-  if model.partNodes.len > 0:
-    for node in model.partNodes:
-      node.baseVisible = false
-      node.visible = false
-    for node in model.shownParts:
-      node.baseVisible = true
-      node.visible = true
-  if root.activeClips.len != 1:
-    root.activeClips.setLen(1)
-  root.activeClips[0] = clip
-  root.animTime = animTime
-  root.updateAnimation(0)
-  let transform =
-    translate(position) * rotateY(facing) *
-    scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
-  root.updateTransforms(transform)
-  for node in root.walkNodes:
-    if node.mesh == nil or not node.visible:
-      continue
-    for primitive in node.mesh.primitives:
-      let distance = pickPrimitive(primitive, node.mat, origin, dir)
-      if distance > 0 and (result < 0 or distance < result):
-        result = distance
+  ## Ray distance to one clip-posed character's triangles, or -1 on a miss.
+  model.setCharacterPose(clip, animTime)
+  model.pickPosedCharacter(origin, dir, position, facing, sizeFactor)
+
+proc pickCharacter*(
+    model: CharacterModel, player: ClipPlayer,
+    origin, dir, position: Vec3,
+    facing: float32,
+    sizeFactor = 1.0'f32
+): float32 =
+  ## Ray distance to one blended character pose's triangles, or -1 on a miss.
+  model.setCharacterPose(player)
+  model.pickPosedCharacter(origin, dir, position, facing, sizeFactor)

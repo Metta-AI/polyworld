@@ -9,8 +9,7 @@
 ## VM type on `Game` but never runs a program.
 
 import
-  std/[strformat],
-  polyworld/[basic, bodies, fixed, hashes, noises, pathing, profiles, rngs,
+  polyworld/[basic, bodies, fixed, hashes, metrics, noises, pathing, profiles, rngs,
     tapes, visions],
   content,
   maps,
@@ -29,36 +28,18 @@ const
   heroDeathClip* = 2
   heroAttackClips* = [3, 4]
 
-## Lane waypoints
-
-type LaneStop = tuple[layer, x, z: int]
-
-const LaneRoutes: array[3, seq[LaneStop]] = [
-  @[(GroundLayer, 23, 20), (GroundLayer, 29, 20),
-    (GroundLayer, 107, 21), (GroundLayer, 107, 32),
-    (GroundLayer, 107, 98), (GroundLayer, 107, 104)],
-  @[(GroundLayer, 23, 21), (GroundLayer, 29, 21),
-    (GroundLayer, 48, 54), (GroundLayer, 65, 61),
-    (GroundLayer, 82, 68), (GroundLayer, 98, 106),
-    (GroundLayer, 104, 106)],
-  @[(GroundLayer, 20, 23), (GroundLayer, 20, 29),
-    (GroundLayer, 21, 107), (GroundLayer, 32, 107),
-    (GroundLayer, 98, 107), (GroundLayer, 104, 107)],
-]
-
 var
   lanePathPoints*: array[3, seq[PathPoint]]
   lanePathTiles: array[3, seq[PathTile]]
   laneWorldLayers: array[3, seq[int32]]
   visionBlockers: seq[int16]
   visionSources: seq[VisionSource]
-  visionSkipWorld: pointer
-  visionSkipKeys: seq[int32]
   visionSkipNow: seq[int32]
   heroPathPoints: seq[PathPoint]
   heroPathTiles: seq[PathTile]
   gotaWalkLayer: int
   gotaWalkDestLayer: int
+  gotaWalkOrigin: FixedVec2
 
 ## Simulation
 
@@ -66,11 +47,13 @@ type
   Team* = enum RedTeam, BlueTeam
   FootmanState* = enum Marching, Fighting, Dying
   TowerTier* = enum OuterTower, InnerTower, GateTower
+  BuildingKind* = enum TowerBuilding, BarracksBuilding
   WorldPoint* = object
     x*, y*, z*: int32
   Heading* = object
     x*, z*: int32
   HeroVm* = ref object
+    output*: PrintProc
     runtime*: Runtime
     limits*: Limits
     ready*: bool
@@ -85,13 +68,20 @@ type
     lane*: int
     position*: WorldPoint
     facing*: Heading
+    velocity*: Heading
     body*: Body
     hp*: int32
     state*: FootmanState
     waypointIndex*: int
+    movePath*: seq[PathTile]
+    movePathIndex*: int
+    moveGoal*: WorldPoint
+    moveRevision*: int32
+    nextPathTick*: int32
+    stuckTicks*: int32
     targetId*: int32
     targetHeroId*: int32
-    targetTowerId*: int32
+    targetBuildingId*: int32
     attackingFort*: bool
     swingClip*: int
     swingTicks*: int32
@@ -111,6 +101,7 @@ type
     position*: WorldPoint
     spawnPosition*: WorldPoint
     facing*: Heading
+    velocity*: Heading
     body*: Body
     hp*: int32
     maxHp*: int32
@@ -124,11 +115,12 @@ type
     waypointIndex*: int
     targetFootmanId*: int32
     targetHeroId*: int32
-    targetTowerId*: int32
+    targetBuildingId*: int32
     attackingFort*: bool
     swingClip*: int
     swingTicks*: int32
     damageLanded*: bool
+    attacksLanded*: int32
     animClip*: int
     animTicks*: int32
     deathTicks*: int32
@@ -142,9 +134,15 @@ type
     moveTileX*: int
     moveTileY*: int
     hasMoveTarget*: bool
+    moveRevision*: int32
+    stuckTicks*: int32
     inventory*: array[InventorySlots, Item]
     itemCounts*: array[InventorySlots, int32]
     cooldowns*: array[HeroAbilitySlot, int32]
+    charges*: array[HeroAbilitySlot, int32]
+    recharges*: array[HeroAbilitySlot, int32]
+    spellsReady*: bool
+    manualSpells*: bool
 
   Fort* = object
     id*: int32
@@ -152,7 +150,13 @@ type
     center*: WorldPoint
     hp*: int32
 
-  Tower* = object
+  Building* = object
+    kind*: BuildingKind
+    guardsGod*: bool
+    spawn*: WorldPoint
+    footprint*: seq[PathTile]
+    occupied*: bool
+    knownAlive*: array[Team, bool]
     id*: int32
     team*: Team
     lane*: int
@@ -173,19 +177,40 @@ type
     hp*: int32
     maxHp*: int32
     alive*: bool
+    level*, mana*: int32
+    inventory*: array[InventorySlots, Item]
+    itemCounts*: array[InventorySlots, int32]
+    facing*, velocity*: Heading
+    targetId*: int32
 
   NavTile* = object
     layer*: int
     x*: int
     z*: int
 
+  SpellCast* = object
+    ability*: Ability
+    heroId*: int32
+    targetId*: int32
+    origin*: WorldPoint
+    position*: WorldPoint
+    direction*: Heading
+    started*: int32
+    impact*: int32
+    ends*: int32
+    resolved*: bool
+
   World* = ref object
+    heroSpawns*: array[2, WorldPoint]
+    casts*: seq[SpellCast]
+    stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
     footmen*: seq[Footman]
     heroes*: seq[Hero]
     forts*: array[2, Fort]
-    towers*: seq[Tower]
-    barracksSpawns*: array[2, array[3, WorldPoint]]
+    buildings*: seq[Building]
+    occupancy*: seq[seq[int16]]
+    navigationRevision*: int32
     spawnIntervalTicks*: int32
     spawnTimerTicks*: int32
     gameOver*: bool
@@ -199,6 +224,8 @@ type
     teamHeroDeaths*: array[2, int]
     teamVisible*: array[2, seq[uint8]]
     teamExplored*: array[2, seq[uint8]]
+    visionCache: array[2, VisionCache]
+    visionSkipKeys: seq[int32]
     scriptObjects: seq[WorldObject]
     scriptObjectCount: int
     scriptObjectsHeroId: int32
@@ -207,6 +234,8 @@ type
     ## One match session. World is the hashable sim; everything else is
     ## tape, map, and agents.
     world*: World
+    metrics*: MatchMetrics
+    history*: MetricHistory
     map*: MapData
     recorder*: ReplayRecorder
     replayData*: ReplayData
@@ -217,11 +246,19 @@ type
     recordingError*: string
     heroVms*: seq[HeroVm]
 
+var navigationWorld: World
+
 const
   WorldScale* = 60_000'i32
   FirstTowerId = 10'i32
-  TowerHitPoints*: array[TowerTier, int32] = [600'i32, 800, 1_000]
-  TowerDamages*: array[TowerTier, int32] = [14'i32, 18, 22]
+  FirstBarracksId = 40'i32
+  WaypointRadius* = 6 * WorldScale
+  WaypointSpacing = 10 * WorldScale
+  PathPointRadius = WorldScale div 3
+  ChasePathTicks = 6'i32
+  FailedPathTicks = TickRate
+  TowerHitPoints*: array[TowerTier, int32] = [950'i32, 1_300, 1_950]
+  TowerDamages*: array[TowerTier, int32] = [18'i32, 24, 30]
   TowerAttackRanges*: array[TowerTier, int32] = [
     300_000'i32,
     330_000,
@@ -229,6 +266,13 @@ const
   ]
   TowerAttackTicks* = TickRate
   TowerSiegeRange* = 105_000'i32
+
+proc config*(game: Game): GotaConfig =
+  ## Reads the match configuration owned by the live or loaded replay.
+  if game.recorder != nil:
+    game.recorder.data.config
+  else:
+    game.replayData.config
 
 proc worldPoint(point: PathPoint): WorldPoint =
   ## Converts one exact 1/32-tile path point into integer world units.
@@ -266,7 +310,7 @@ proc distanceSquared(first, second: WorldPoint): int64 =
     z = int64(first.z) - int64(second.z)
   x * x + z * z
 
-proc within(first, second: WorldPoint, distance: int32): bool =
+proc within*(first, second: WorldPoint, distance: int32): bool =
   ## Tests a planar range using squared authoritative integer units.
   distanceSquared(first, second) <= int64(distance) * int64(distance)
 
@@ -297,75 +341,30 @@ proc fixedSurfaceHeightNear(
     referenceY: int32
 ): int32
 
-proc laneWorldPlacement(
-    path: seq[PathPoint],
-    ratioPermille: int32,
-    offset: int32
-): tuple[position: WorldPoint, facing: Heading] =
-  ## Places one authoritative structure using integer path geometry.
-  let
-    index = clamp(
-      int(roundDivision(
-        int64(path.len - 1) * ratioPermille,
-        1000
-      )),
-      0,
-      path.len - 1
-    )
-    nextIndex = min(index + 1, path.len - 1)
-    previousIndex = max(index - 1, 0)
-    center = worldPoint(path[index])
-    previous = worldPoint(path[previousIndex])
-    next = worldPoint(path[nextIndex])
-    direction = next - previous
-    side = WorldPoint(x: -direction.z, z: direction.x)
-  result.facing = heading(direction.x, direction.z)
-  for amount in [offset, -offset, offset div 2, -offset div 2]:
-    var position = center + scaledPlanar(side, amount)
-    let
-      tileX = floorWorldTile(position.x) + GridTiles div 2
-      tileZ = floorWorldTile(position.z) + GridTiles div 2
-    if isWalkable(GroundLayer, tileX, tileZ):
-      position.y = fixedSurfaceHeight(position)
-      result.position = position
-      return
-  result.position = center
-  result.position.y = fixedSurfaceHeight(result.position)
-
-proc initTowers(world: World) =
-  ## Creates the lane tower records used by simulation UI and rendering.
+proc initTowers(world: World, map: MapData) =
+  ## Creates towers at the courts selected by this map's layout.
   for lane in 0 .. 2:
-    let path = lanePathPoints[lane]
-    for definition in [
-      (team: RedTeam, tier: OuterTower,
-        ratio: 380'i32, offset: 180_000'i32),
-      (team: RedTeam, tier: InnerTower,
-        ratio: 220'i32, offset: 192_000'i32),
-      (team: RedTeam, tier: GateTower,
-        ratio: 55'i32, offset: 210_000'i32),
-      (team: BlueTeam, tier: OuterTower,
-        ratio: 620'i32, offset: -180_000'i32),
-      (team: BlueTeam, tier: InnerTower,
-        ratio: 780'i32, offset: -192_000'i32),
-      (team: BlueTeam, tier: GateTower,
-        ratio: 945'i32, offset: -210_000'i32)
-    ]:
-      let placement = laneWorldPlacement(
-        path,
-        definition.ratio,
-        definition.offset
-      )
-      let hitPoints = TowerHitPoints[definition.tier]
-      world.towers.add Tower(
-        id: FirstTowerId + world.towers.len.int32,
-        team: definition.team,
-        lane: lane,
-        tier: definition.tier,
-        position: placement.position,
-        facing: placement.facing,
-        hp: hitPoints,
-        maxHp: hitPoints
-      )
+    for team in Team:
+      for tier in TowerTier:
+        let
+          hitPoints = TowerHitPoints[tier]
+          site = map.layout.towers[lane][team.ord][tier.ord]
+          facing = heading(
+            site.facing.x - site.position.x,
+            site.facing.z - site.position.z
+          )
+        var position = worldPoint(site.position)
+        position.y = fixedSurfaceHeight(position)
+        world.buildings.add Building(
+          id: FirstTowerId + world.buildings.len.int32,
+          team: team,
+          lane: lane,
+          tier: tier,
+          position: position,
+          facing: facing,
+          hp: hitPoints,
+          maxHp: hitPoints
+        )
 
 const
   FootmanHp* = 60'i32
@@ -378,6 +377,7 @@ const
   FootmanTowerSightRadius = 7 * WorldScale
   FootmanMeleeRange* = 54_000'i32
   FortRange = 255_000'i32
+  FortSightRadius = 14'i32
   HeroMeleeIdleRange* = 150_000'i32
     ## Standing melee heroes auto-attack enemies this close.
   HeroMeleeAttackMoveRange* = 480_000'i32
@@ -397,42 +397,26 @@ const
   HeroObjectKind = 2'i32
   FootmanObjectKind = 3'i32
   TowerObjectKind = 4'i32
+  BarracksObjectKind = 5'i32
   RedFortId = 1'i32
   BlueFortId = 2'i32
   FirstHeroId* = 100'i32
   FirstFootmanId = 1000'i32
-  UnitCap = 120
+  UnitCap = 120 * CreepsPerBarracks
   CorpseLingerTicks = 60'i32
   FootmanDeathTicks = 24'i32
   HeroDeathTicks = 24'i32
   FortHp* = 400'i32
 
-proc startingForts(): array[2, Fort] =
-  ## Places the two forts on their canonical map tiles.
-  [
-    Fort(
-      id: RedFortId,
-      team: RedTeam,
+proc startingForts(map: MapData): array[2, Fort] =
+  ## Places both gods at the selected layout's fort centers.
+  for team in Team:
+    result[team.ord] = Fort(
+      id: (if team == RedTeam: RedFortId else: BlueFortId),
+      team: team,
       hp: FortHp,
-      center: WorldPoint(
-        x: (RedFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2,
-        z: (RedFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2
-      )
-    ),
-    Fort(
-      id: BlueFortId,
-      team: BlueTeam,
-      hp: FortHp,
-      center: WorldPoint(
-        x: (BlueFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2,
-        z: (BlueFortTile - GridTiles div 2) * WorldScale +
-          WorldScale div 2
-      )
+      center: worldPoint(map.layout.forts[team.ord])
     )
-  ]
 
 proc cloneHeroes(heroes: seq[Hero]): seq[Hero] =
   ## Copies each hero so two worlds never share a path seq.
@@ -445,19 +429,22 @@ proc clone*(w: World): World =
   ## Deep copy. Heroes are refs and must be cloned one by one.
   result = World()
   result[] = w[]
+  result.stats = w.stats.clone()
   result.heroes = cloneHeroes(w.heroes)
 
 proc restore*(w: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
   w[] = snapshot[]
+  w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
+  navigationWorld = w
 
 proc buildSightTerrain(): tuple[
     terrainHeights,
     blockerHeights: seq[int16]
 ] =
   ## Builds one integer occlusion grid from terrain and forest tiles.
-  let cellCount = GridTiles * GridTiles
+  let cellCount = mapTiles() * mapTiles()
   result.terrainHeights = newSeq[int16](cellCount)
   result.blockerHeights = newSeq[int16](cellCount)
   for value in result.terrainHeights.mitems:
@@ -469,13 +456,13 @@ proc buildSightTerrain(): tuple[
       for x in 0 ..< layer.width:
         let
           tile = layer.tiles[z * layer.width + x]
-          mapX = layer.originX + x
-          mapZ = layer.originZ + z
-        if not tile.exists or mapX < 0 or mapX >= GridTiles or
-            mapZ < 0 or mapZ >= GridTiles:
+          mapX = layer.originX + x - mapOrigin()
+          mapZ = layer.originZ + z - mapOrigin()
+        if not tile.exists or mapX < 0 or mapX >= mapTiles() or
+            mapZ < 0 or mapZ >= mapTiles():
           continue
         let
-          index = mapZ * GridTiles + mapX
+          index = mapZ * mapTiles() + mapX
           mean = int16(
             (int32(tile.tops[0]) + int32(tile.tops[1]) +
               int32(tile.tops[2]) + int32(tile.tops[3])) div 4
@@ -488,10 +475,11 @@ proc buildSightTerrain(): tuple[
   for z in 0 ..< ground.depth:
     for x in 0 ..< ground.width:
       let index = z * ground.width + x
-      if ground.tiles[index].kind == TreeTile:
-        result.blockerHeights[
-          (ground.originZ + z) * GridTiles + ground.originX + x
-        ] = 24
+      if ground.tiles[index].kind == TreeTile or
+        ground.tiles[index].kind == ArenaRockKind:
+          result.blockerHeights[
+            z * ground.width + x
+          ] = 24
   for value in result.terrainHeights.mitems:
     if value == int16.low:
       value = 0
@@ -500,15 +488,15 @@ var sightTerrain: tuple[terrainHeights, blockerHeights: seq[int16]]
 
 proc sightTile(position: WorldPoint): tuple[x, z: int32] =
   ## Converts one integer world position to the shared visibility grid.
-  result.x = int32(floorWorldTile(position.x) + GridTiles div 2)
-  result.z = int32(floorWorldTile(position.z) + GridTiles div 2)
+  result.x = int32(floorWorldTile(position.x) + mapTiles() div 2)
+  result.z = int32(floorWorldTile(position.z) + mapTiles() div 2)
 
 proc addVisionBlocker(position: WorldPoint, height: int16) =
   ## Raises one tile's occluder height for this tick's vision pass.
   let tile = sightTile(position)
-  if tile.x >= 0 and tile.x < GridTiles and
-      tile.z >= 0 and tile.z < GridTiles:
-    let index = tile.z * GridTiles + tile.x
+  if tile.x >= 0 and tile.x < mapTiles() and
+      tile.z >= 0 and tile.z < mapTiles():
+    let index = tile.z * mapTiles() + tile.x
     visionBlockers[index] = max(visionBlockers[index], height)
 
 proc fillVisionKeys(world: World, dest: var seq[int32]) =
@@ -521,8 +509,7 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
       tile = sightTile(hero.position)
     dest.add hero.id
     dest.add int32(hero.team.ord)
-    dest.add int32(hero.state.ord)
-    dest.add hero.hp
+    dest.add int32(hero.state != Dying and hero.hp > 0)
     dest.add tile.x
     dest.add tile.z
   dest.add int32(world.footmen.len)
@@ -530,16 +517,15 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
     let tile = sightTile(footman.position)
     dest.add footman.id
     dest.add int32(footman.team.ord)
-    dest.add int32(footman.state.ord)
-    dest.add footman.hp
+    dest.add int32(footman.state != Dying and footman.hp > 0)
     dest.add tile.x
     dest.add tile.z
-  dest.add int32(world.towers.len)
-  for tower in world.towers:
+  dest.add int32(world.buildings.len)
+  for tower in world.buildings:
     let tile = sightTile(tower.position)
     dest.add tower.id
     dest.add int32(tower.team.ord)
-    dest.add tower.hp
+    dest.add int32(tower.hp > 0)
     dest.add tile.x
     dest.add tile.z
   dest.add int32(world.forts.len)
@@ -547,20 +533,19 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
     let tile = sightTile(fort.center)
     dest.add fort.id
     dest.add int32(fort.team.ord)
-    dest.add fort.hp
+    dest.add int32(fort.hp > 0)
     dest.add tile.x
     dest.add tile.z
 
 proc rebuildVision*(world: World) {.measure.} =
   ## Rebuilds both teams' limited, terrain-occluded visibility maps.
   world.fillVisionKeys(visionSkipNow)
-  if visionSkipWorld == cast[pointer](world) and
-      sameVisionKeys(visionSkipNow, visionSkipKeys):
+  if sameVisionKeys(visionSkipNow, world.visionSkipKeys):
     return
   visionBlockers.setLen(sightTerrain.blockerHeights.len)
   for i, value in sightTerrain.blockerHeights:
     visionBlockers[i] = value
-  for tower in world.towers:
+  for tower in world.buildings:
     if tower.hp > 0:
       addVisionBlocker(tower.position, 28)
   for fort in world.forts:
@@ -587,7 +572,7 @@ proc rebuildVision*(world: World) {.measure.} =
           radius: FootmanSightRadius div WorldScale,
           eyeHeight: 12
         )
-    for tower in world.towers:
+    for tower in world.buildings:
       if tower.team == team and tower.hp > 0:
         let tile = sightTile(tower.position)
         visionSources.add VisionSource(
@@ -602,13 +587,14 @@ proc rebuildVision*(world: World) {.measure.} =
         visionSources.add VisionSource(
           x: tile.x,
           z: tile.z,
-          radius: FortOuterRadius + 2,
+          radius: FortSightRadius,
           eyeHeight: 28
         )
-    revealVision(
+    revealVisionCached(
+      world.visionCache[team.ord],
       world.teamVisible[team.ord],
-      GridTiles,
-      GridTiles,
+      mapTiles().int32,
+      mapTiles().int32,
       sightTerrain.terrainHeights,
       visionBlockers,
       visionSources
@@ -616,16 +602,15 @@ proc rebuildVision*(world: World) {.measure.} =
     for i, value in world.teamVisible[team.ord]:
       if value != 0:
         world.teamExplored[team.ord][i] = 255
-  copyVisionKeys(visionSkipKeys, visionSkipNow)
-  visionSkipWorld = cast[pointer](world)
+  copyVisionKeys(world.visionSkipKeys, visionSkipNow)
 
 proc visible*(world: World, team: Team, position: WorldPoint): bool =
   ## Returns whether a position is currently visible to one team.
   let tile = sightTile(position)
-  tile.x >= 0 and tile.x < GridTiles and
-    tile.z >= 0 and tile.z < GridTiles and
-    world.teamVisible[team.ord].len == GridTiles * GridTiles and
-    world.teamVisible[team.ord][tile.z * GridTiles + tile.x] != 0
+  tile.x >= 0 and tile.x < mapTiles() and
+    tile.z >= 0 and tile.z < mapTiles() and
+    world.teamVisible[team.ord].len == mapTiles() * mapTiles() and
+    world.teamVisible[team.ord][tile.z * mapTiles() + tile.x] != 0
 
 proc enemyFort(team: Team): int =
   ## Returns the opposing fort index for a team.
@@ -649,51 +634,89 @@ proc heroIndex*(world: World, id: int32): int =
       return i
   -1
 
-proc towerIndex*(world: World, id: int32): int =
+proc buildingIndex*(world: World, id: int32): int =
   ## Returns the tower slot for one id, or -1.
   if id == 0:
     return -1
-  for i, tower in world.towers:
+  for i, tower in world.buildings:
     if tower.id == id:
       return i
   -1
 
-proc towerById*(world: World, id: int32): Tower =
+proc buildingById*(world: World, id: int32): Building =
   ## Reads one tower by its script-visible object ID.
-  let index = towerIndex(world, id)
+  let index = buildingIndex(world, id)
   if index >= 0:
-    result = world.towers[index]
+    result = world.buildings[index]
 
-proc towerExposed*(world: World, tower: Tower): bool =
-  ## Returns whether every earlier tower in this lane has been destroyed.
-  if tower.id == 0 or tower.hp <= 0:
-    return false
-  for other in world.towers:
-    if other.team == tower.team and other.lane == tower.lane and
-        other.tier.ord < tower.tier.ord and other.hp > 0:
-      return false
-  true
-
-proc nextEnemyTower(world: World, team: Team, lane: int): Tower =
-  ## Returns the first standing tower in one enemy lane.
-  let enemy = if team == RedTeam: BlueTeam else: RedTeam
-  for tier in TowerTier:
-    for tower in world.towers:
-      if tower.team == enemy and tower.lane == lane and
-          tower.tier == tier and tower.hp > 0:
-        return tower
-
-proc fortExposed*(world: World, team: Team): bool =
-  ## Returns whether one complete lane into a team's fort has been cleared.
+proc laneCleared(world: World, team: Team): bool =
+  ## Returns whether attackers have destroyed every tower in any one lane.
   for lane in 0 .. 2:
     var standing = false
-    for tower in world.towers:
-      if tower.team == team and tower.lane == lane and tower.hp > 0:
+    for tower in world.buildings:
+      if tower.kind == TowerBuilding and not tower.guardsGod and
+          tower.team == team and tower.lane == lane and tower.hp > 0:
         standing = true
         break
     if not standing:
       return true
   false
+
+proc buildingExposed*(world: World, tower: Building): bool =
+  ## Exposes lane structures in order and god guards after any lane falls.
+  if tower.id == 0 or tower.hp <= 0:
+    return false
+  if tower.guardsGod:
+    return world.laneCleared(tower.team)
+  for other in world.buildings:
+    if other.kind == TowerBuilding and not other.guardsGod and
+        other.team == tower.team and
+        other.lane == tower.lane and other.hp > 0 and
+        (tower.kind == BarracksBuilding or other.tier.ord < tower.tier.ord):
+      return false
+  true
+
+proc nextEnemyBuilding(
+    world: World, team: Team, lane: int, position: WorldPoint
+): Building =
+  ## Finds lane towers, then barracks, then the nearest exposed god guard.
+  let enemy = if team == RedTeam: BlueTeam else: RedTeam
+  for tier in TowerTier:
+    for tower in world.buildings:
+      if tower.kind == TowerBuilding and not tower.guardsGod and
+          tower.team == enemy and
+          tower.lane == lane and tower.tier == tier and tower.hp > 0:
+        return tower
+
+  var nearest = int64.high
+  for building in world.buildings:
+    if building.kind == BarracksBuilding and building.team == enemy and
+        building.lane == lane and building.hp > 0:
+      let distance = distanceSquared(position, building.position)
+      if distance < nearest:
+        nearest = distance
+        result = building
+  if result.id != 0:
+    return
+  for building in world.buildings:
+    if building.guardsGod and building.team == enemy and
+        world.buildingExposed(building):
+      let distance = distanceSquared(position, building.position)
+      if distance < nearest:
+        nearest = distance
+        result = building
+
+proc fortExposed*(world: World, team: Team): bool =
+  ## Keeps a god invulnerable until both of its own guard towers are dead.
+  for tower in world.buildings:
+    if tower.guardsGod and tower.team == team and tower.hp > 0:
+      return false
+  true
+
+proc damageFort(world: World, index: int, damage: int32) =
+  ## Applies damage only after the god's two guards have been destroyed.
+  if damage > 0 and world.fortExposed(world.forts[index].team):
+    world.forts[index].hp = max(0'i32, world.forts[index].hp - damage)
 
 proc xpForNextLevel*(level: int): int =
   ## Returns the XP needed to advance from the given hero level.
@@ -735,6 +758,23 @@ proc refreshHeroStats*(hero: Hero) =
 proc heroAttackDamage*(hero: Hero): int32 =
   ## Returns basic-attack damage including held equipment.
   heroDamage(hero.class, hero.level) + hero.heroItemBonus().damage
+
+proc heroAttackTicks*(world: World, hero: Hero): int32 =
+  ## Returns the hero class's current basic-attack cadence.
+  heroAttackTicks(hero.class)
+
+proc heroAttackCooldown*(world: World, hero: Hero): int32 =
+  ## Returns ticks until the next basic hit, assuming uninterrupted range.
+  if hero.hp <= 0 or hero.state == Dying:
+    return 0
+  let
+    duration = world.heroAttackTicks(hero)
+    windup = duration * 45 div 100
+  if hero.swingTicks < 0:
+    return windup
+  if not hero.damageLanded:
+    return max(0, windup - hero.swingTicks)
+  max(0, duration - hero.swingTicks) + windup
 
 proc heroMoveSpeed*(hero: Hero): int32 =
   ## Returns movement distance including held equipment.
@@ -820,11 +860,10 @@ proc fixedSurfaceHeightNear(
 
 proc canStand(x, z: int32): bool =
   ## Keeps units out of forests, blocked fort tiles, and the map rim.
-  const
-    Margin = 18_000'i32
-    HalfGridUnits = GridTiles div 2 * WorldScale
-  if x < -HalfGridUnits + Margin or x > HalfGridUnits - Margin or
-      z < -HalfGridUnits + Margin or z > HalfGridUnits - Margin:
+  const Margin = 18_000'i32
+  let halfGridUnits = mapTiles().int32 div 2 * WorldScale
+  if x < -halfGridUnits + Margin or x > halfGridUnits - Margin or
+      z < -halfGridUnits + Margin or z > halfGridUnits - Margin:
     return false
   let
     tileX = floorWorldTile(x) + GridTiles div 2 -
@@ -844,21 +883,56 @@ proc walkWorldCell(pos: FixedVec2): tuple[x, z: int] =
 
 proc inWalkMargin(pos: FixedVec2): bool =
   ## Keeps units off the map rim.
-  const
-    Margin = 18_000'i32
-    HalfGridUnits = GridTiles div 2 * WorldScale
+  const Margin = 18_000'i32
+  let halfGridUnits = mapTiles().int32 div 2 * WorldScale
   let
     x = tilesToWorld(pos.x, WorldScale)
     z = tilesToWorld(pos.y, WorldScale)
-  x >= -HalfGridUnits + Margin and x <= HalfGridUnits - Margin and
-    z >= -HalfGridUnits + Margin and z <= HalfGridUnits - Margin
+  x >= -halfGridUnits + Margin and x <= halfGridUnits - Margin and
+    z >= -halfGridUnits + Margin and z <= halfGridUnits - Margin
+
+proc navigationOpen*(layer, x, z: int): bool
+
+proc navigationLineClear(
+    a, b: WorldPoint, firstLayer, lastLayer: int32
+): bool =
+  ## Checks exact positions against the same tile edges and building occupancy.
+  const Origin = int64(GridTiles div 2) * WorldScale
+  let
+    first = layers[firstLayer]
+    last = layers[lastLayer]
+  lineClear(
+    PathTile(
+      layer: firstLayer,
+      x: int32(floorWorldTile(a.x) + GridTiles div 2 - first.originX),
+      z: int32(floorWorldTile(a.z) + GridTiles div 2 - first.originZ)
+    ),
+    PathTile(
+      layer: lastLayer,
+      x: int32(floorWorldTile(b.x) + GridTiles div 2 - last.originX),
+      z: int32(floorWorldTile(b.z) + GridTiles div 2 - last.originZ)
+    ),
+    (int64(a.x) + Origin, int64(a.z) + Origin),
+    (int64(b.x) + Origin, int64(b.z) + Origin),
+    WorldScale,
+    navigationOpen
+  )
 
 proc tilesWalkable(pos: FixedVec2): bool =
-  ## Current nav layer, plus the next waypoint layer while crossing a ramp.
+  ## Applies the same tile rule to walking, sliding, and unit separation.
   if not inWalkMargin(pos):
     return false
-  let (x, z) = walkWorldCell(pos)
-  worldLayersOpen(gotaWalkLayer, gotaWalkDestLayer, x, z)
+  let
+    (x, z) = walkWorldCell(pos)
+    destLayer = worldPreferLayer(gotaWalkLayer, gotaWalkDestLayer, x, z)
+  navigationLineClear(
+    WorldPoint(x: tilesToWorld(gotaWalkOrigin.x, WorldScale),
+      z: tilesToWorld(gotaWalkOrigin.y, WorldScale)),
+    WorldPoint(x: tilesToWorld(pos.x, WorldScale),
+      z: tilesToWorld(pos.y, WorldScale)),
+    gotaWalkLayer.int32,
+    destLayer.int32
+  )
 
 proc bindNavLayer(position: WorldPoint): int32 =
   ## Picks the packed layer under a spawn or teleport.
@@ -867,6 +941,134 @@ proc bindNavLayer(position: WorldPoint): int32 =
     int32(tile.layer)
   else:
     int32(GroundLayer)
+
+proc navigationOpen*(layer, x, z: int): bool =
+  ## Combines static terrain with the active world's living buildings.
+  if not isWalkable(layer, x, z):
+    return false
+  navigationWorld == nil or navigationWorld.occupancy.len == 0 or
+    navigationWorld.occupancy[layer][z * layers[layer].width + x] == 0
+
+proc buildingFootprint(building: Building): seq[PathTile] =
+  ## Rasterizes shared, fixed-point foundation sizes onto the occupied layer.
+  const TowerRadii = [63_000'i32, 75_000'i32, 99_000'i32]
+  let
+    layer = int(bindNavLayer(building.position))
+    floor = layers[layer]
+    forward = scaledPlanar(WorldPoint(
+      x: building.facing.x, z: building.facing.z), WorldScale)
+    halfX = 39_000'i64
+    halfZ = 50_400'i64
+    halfTile = int64(WorldScale div 2)
+  for z in floorWorldTile(building.position.z) - 3 ..
+      floorWorldTile(building.position.z) + 3:
+    for x in floorWorldTile(building.position.x) - 3 ..
+        floorWorldTile(building.position.x) + 3:
+      let
+        localX = x + GridTiles div 2 - floor.originX
+        localZ = z + GridTiles div 2 - floor.originZ
+      if localX < 0 or localZ < 0 or localX >= floor.width or localZ >= floor.depth:
+        continue
+      let
+        dx = int64(x) * WorldScale + halfTile - building.position.x
+        dz = int64(z) * WorldScale + halfTile - building.position.z
+      var touches: bool
+      if building.kind == TowerBuilding:
+        let radius = int64(TowerRadii[building.tier.ord])
+        touches = dx * dx + dz * dz <= radius * radius
+      else:
+        let
+          fx = int64(forward.x)
+          fz = int64(forward.z)
+          projectedTile = halfTile * (abs(fx) + abs(fz))
+        touches =
+          abs(dx) * WorldScale < halfX * abs(fz) + halfZ * abs(fx) +
+            halfTile * WorldScale and
+          abs(dz) * WorldScale < halfX * abs(fx) + halfZ * abs(fz) +
+            halfTile * WorldScale and
+          abs(dx * fz - dz * fx) < halfX * WorldScale + projectedTile and
+          abs(dx * fx + dz * fz) < halfZ * WorldScale + projectedTile
+      if touches:
+        result.add PathTile(layer: layer.int32, x: localX.int32, z: localZ.int32)
+
+proc syncBuildings*(world: World) =
+  ## Releases destroyed footprints and invalidates paths and stale targets.
+  navigationWorld = world
+  for building in world.buildings.mitems:
+    let alive = building.hp > 0
+    if alive == building.occupied:
+      continue
+    for tile in building.footprint:
+      world.occupancy[tile.layer][int(tile.z) * layers[tile.layer].width +
+        int(tile.x)] += (if alive: 1'i16 else: -1'i16)
+    building.occupied = alive
+    inc world.navigationRevision
+    if not alive:
+      building.targetId = 0
+      for hero in world.heroes:
+        if hero.attackObjectId == building.id:
+          hero.attackObjectId = 0
+          hero.hasMoveTarget = false
+          hero.movePath.setLen(0)
+        if hero.targetBuildingId == building.id:
+          hero.targetBuildingId = 0
+      for footman in world.footmen.mitems:
+        if footman.targetBuildingId == building.id:
+          footman.targetBuildingId = 0
+
+proc initOccupancy(world: World) =
+  ## Initializes independent occupancy and known building state for one match.
+  navigationWorld = nil
+  world.occupancy.setLen(layers.len)
+  for i, layer in layers:
+    world.occupancy[i] = newSeq[int16](layer.width * layer.depth)
+  for building in world.buildings.mitems:
+    building.footprint = buildingFootprint(building)
+    building.knownAlive = [true, true]
+  world.syncBuildings()
+
+proc updateKnownBuildings(world: World) =
+  ## Remembers enemy destruction only when the team's vision confirms it.
+  for building in world.buildings.mitems:
+    for team in Team:
+      if building.team == team or world.visible(team, building.position):
+        building.knownAlive[team] = building.hp > 0
+
+proc knownWalkable*(world: World, team: Team, layer, x, z: int): bool =
+  ## Reports static terrain and remembered occupancy without fog information leaks.
+  if not isWalkable(layer, x, z):
+    return false
+  for building in world.buildings:
+    if not building.knownAlive[team]:
+      continue
+    for tile in building.footprint:
+      if tile.layer == layer and tile.x == x and tile.z == z:
+        return false
+  true
+
+proc buildingAim*(building: Building, fromPoint: WorldPoint): WorldPoint =
+  ## Finds the nearest point on occupied tiles for siege range and approach.
+  result = building.position
+  var best = int64.high
+  for tile in building.footprint:
+    let
+      center = worldPoint(pathPoint(int(tile.layer), int(tile.x), int(tile.z)))
+      point = WorldPoint(
+        x: clamp(fromPoint.x, center.x - WorldScale div 2,
+          center.x + WorldScale div 2),
+        y: center.y,
+        z: clamp(fromPoint.z, center.z - WorldScale div 2,
+          center.z + WorldScale div 2))
+      distance = distanceSquared(fromPoint, point)
+    if distance < best:
+      best = distance
+      result = point
+
+proc damageBuilding(world: World, index: int, damage: int32) =
+  ## Applies building damage and releases occupied tiles on the killing hit.
+  world.buildings[index].hp -= damage
+  if world.buildings[index].hp <= 0:
+    world.syncBuildings()
 
 proc settleOnLayer(position: var WorldPoint, layer: int32) =
   ## Writes this layer's packed height onto a world point.
@@ -919,12 +1121,14 @@ proc applyBody(hero: Hero) =
 proc place*(footman: var Footman, at: WorldPoint) =
   ## Teleports a footman and keeps its body on the same plane.
   footman.position = at
+  footman.velocity = Heading()
   footman.body.pos = toPlanar(at)
   footman.navLayer = bindNavLayer(at)
 
 proc place*(hero: Hero, at: WorldPoint) =
   ## Teleports a hero and keeps its body on the same plane.
   hero.position = at
+  hero.velocity = Heading()
   hero.body.pos = toPlanar(at)
   hero.navLayer = bindNavLayer(at)
 
@@ -950,6 +1154,7 @@ proc tryMove(
 ) =
   ## Turns toward the offset, then walks along facing with wall-slide.
   gotaWalkLayer = int(footman.navLayer)
+  gotaWalkOrigin = footman.body.pos
   gotaWalkDestLayer =
     if destLayer < 0: gotaWalkLayer else: int(destLayer)
   steer(
@@ -967,6 +1172,7 @@ proc tryMove(
 proc tryMove(hero: Hero, direction: WorldPoint, destLayer = -1'i32) =
   ## Turns and walks a hero at its level-scaled tile-space speed.
   gotaWalkLayer = int(hero.navLayer)
+  gotaWalkOrigin = hero.body.pos
   gotaWalkDestLayer =
     if destLayer < 0: gotaWalkLayer else: int(destLayer)
   steer(
@@ -1011,6 +1217,18 @@ proc currentWaypointLayer(footman: Footman): int32 =
   else:
     route[index]
 
+proc advanceWaypoints*(footman: var Footman) =
+  ## Clears reached lane goals even while pursuing an enemy.
+  let route = laneWorldPaths[footman.lane]
+  while footman.waypointIndex < route.len and
+      within(footman.position, footman.currentWaypoint, WaypointRadius):
+    inc footman.waypointIndex
+
+proc creepWaypoints*(footman: Footman): seq[WorldPoint] =
+  ## Returns the lane goals in this creep's marching order for the viewer.
+  for i in 0 ..< laneWorldPaths[footman.lane].len:
+    result.add footman.waypointAt(i)
+
 proc liveHeroSetup(total: int): seq[ReplayHero] =
   ## Assigns the ten live bot slots evenly across both teams.
   let redCount = (total + 1) div 2
@@ -1047,7 +1265,7 @@ proc spawnHeroes(world: World, setup: openArray[ReplayHero]) =
       lane = int(heroSetup.lane)
       class = HeroClass(heroSetup.class)
       path = lanePathPoints[lane]
-      start = world.barracksSpawns[team.ord][lane]
+      start = world.heroSpawns[team.ord]
       inner =
         if team == RedTeam:
           worldPoint(path[min(3, path.len - 1)])
@@ -1102,7 +1320,7 @@ proc currentSetup*(game: Game, maximumTicks: uint32): Setup =
     mapSeed: game.map.seed,
     mapHash: game.map.hash,
     tickRate: uint16(TickRate),
-    gridTiles: uint16(GridTiles),
+    gridTiles: uint16(game.map.resolution),
     spawnIntervalTicks: uint32(game.world.spawnIntervalTicks),
     maximumTicks: maximumTicks
   )
@@ -1126,47 +1344,67 @@ proc validateReplayWorld(game: Game) =
       "the replay setup does not match this Gods of the Arena build"
     )
 
+proc nearestNavTile(
+    mapX, mapY: int, referenceY: int32, value: var NavTile,
+    excluded: seq[PathTile] = @[]
+): bool
+
 proc spawnWave(world: World) {.measure.} =
-  ## Spawns two footmen per lane for both teams when the cap permits it.
-  const WaveSize = 12
-  if world.footmen.len + WaveSize > UnitCap:
+  ## Spawns three aligned creeps per surviving barracks on separate open tiles.
+  var count = 0
+  for building in world.buildings:
+    if building.kind == BarracksBuilding and building.hp > 0:
+      count += CreepsPerBarracks
+  if world.footmen.len + count > UnitCap:
     return
-  for team in [RedTeam, BlueTeam]:
-    for lane in 0 .. 2:
-      let start = world.barracksSpawns[team.ord][lane]
-      for i in 0 .. 1:
-        let
-          id = world.nextFootmanId
-          placed = start + WorldPoint(
-            x: world.rng.below(72_001) - 36_000,
-            z: world.rng.below(72_001) - 36_000
-          )
-        inc world.nextFootmanId
-        world.footmen.add Footman(
-          id: id,
-          team: team,
-          lane: lane,
-          position: placed,
-          body: bindBody(placed, Heading(), FootmanBodyRadius),
-          hp: FootmanHp,
-          state: Marching,
-          animClip: runClip,
-          animTicks: world.rng.below(TickRate),
-          surfaceHint: start.y,
-          navLayer: bindNavLayer(placed)
-        )
+  var occupied: seq[PathTile]
+  for footman in world.footmen:
+    if footman.hp <= 0:
+      continue
+    var tile: NavTile
+    if navTileAt(footman.position, tile):
+      occupied.add PathTile(
+        layer: tile.layer.int32, x: tile.x.int32, z: tile.z.int32)
+  for building in world.buildings:
+    if building.kind != BarracksBuilding or building.hp <= 0:
+      continue
+    for unit in 0 ..< CreepsPerBarracks:
+      let start = building.spawn + scaledPlanar(
+        WorldPoint(x: building.facing.z, z: -building.facing.x),
+        int32(unit - CreepsPerBarracks div 2) * WorldScale
+      )
+      var tile: NavTile
+      if not nearestNavTile(
+        floorWorldTile(start.x) + mapTiles() div 2,
+        floorWorldTile(start.z) + mapTiles() div 2, start.y, tile, occupied
+      ):
+        continue
+      occupied.add PathTile(
+        layer: tile.layer.int32, x: tile.x.int32, z: tile.z.int32)
+      let placed = worldPoint(pathPoint(tile.layer, tile.x, tile.z))
+      var footman = Footman(
+        id: world.nextFootmanId,
+        team: building.team, lane: building.lane,
+        position: placed,
+        body: bindBody(placed, Heading(), FootmanBodyRadius),
+        hp: FootmanHp, state: Marching, animClip: runClip,
+        animTicks: world.rng.below(TickRate),
+        surfaceHint: placed.y, navLayer: tile.layer.int32)
+      inc world.nextFootmanId
+      footman.advanceWaypoints()
+      world.footmen.add footman
 
 proc mapCoordinate*(value: int32): int32 =
   ## Converts one world coordinate to a clamped script map coordinate.
   int32(clamp(
-    floorWorldTile(value) + GridTiles div 2,
+    floorWorldTile(value) + mapTiles() div 2,
     0,
-    GridTiles - 1
+    mapTiles() - 1
   ))
 
 proc rawWorldObjectCount(world: World): int =
   ## Returns the total number of stable script-addressable objects.
-  world.forts.len + world.towers.len + world.heroes.len + world.footmen.len
+  world.forts.len + world.buildings.len + world.heroes.len + world.footmen.len
 
 proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
   ## Reads one object from the complete stable world enumeration.
@@ -1185,21 +1423,24 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
       alive: fort.hp > 0 and fortExposed(world, fort.team)
     )
     return true
-  let towerIndex = index - world.forts.len
-  if towerIndex < world.towers.len:
-    let tower = world.towers[towerIndex]
+  let buildingIndex = index - world.forts.len
+  if buildingIndex < world.buildings.len:
+    let tower = world.buildings[buildingIndex]
     value = WorldObject(
       id: tower.id,
-      kind: TowerObjectKind,
+      kind: (if tower.kind == TowerBuilding: TowerObjectKind
+        else: BarracksObjectKind),
       class: -1,
       team: tower.team,
       position: tower.position,
       hp: tower.hp,
       maxHp: tower.maxHp,
-      alive: towerExposed(world, tower)
+      alive: buildingExposed(world, tower),
+      facing: tower.facing,
+      targetId: (if tower.hp > 0: tower.targetId else: 0)
     )
     return true
-  let heroIndex = towerIndex - world.towers.len
+  let heroIndex = buildingIndex - world.buildings.len
   if heroIndex < world.heroes.len:
     let hero = world.heroes[heroIndex]
     value = WorldObject(
@@ -1210,7 +1451,16 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
       position: hero.position,
       hp: hero.hp,
       maxHp: hero.maxHp,
-      alive: hero.state != Dying and hero.hp > 0
+      alive: hero.state != Dying and hero.hp > 0,
+      level: int32(hero.level),
+      mana: hero.mana,
+      inventory: hero.inventory,
+      itemCounts: hero.itemCounts,
+      facing: hero.facing,
+      velocity: hero.velocity,
+      targetId:
+        if hero.hp > 0 and hero.state != Dying: hero.attackObjectId
+        else: 0
     )
     return true
   let footmanIndex = heroIndex - world.heroes.len
@@ -1224,7 +1474,16 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
       position: footman.position,
       hp: footman.hp,
       maxHp: FootmanHp,
-      alive: footman.state != Dying and footman.hp > 0
+      alive: footman.state != Dying and footman.hp > 0,
+      facing: footman.facing,
+      velocity: footman.velocity,
+      targetId:
+        if footman.hp <= 0 or footman.state == Dying: 0
+        elif footman.targetId != 0: footman.targetId
+        elif footman.targetHeroId != 0: footman.targetHeroId
+        elif footman.targetBuildingId != 0: footman.targetBuildingId
+        elif footman.attackingFort: world.forts[enemyFort(footman.team)].id
+        else: 0
     )
     return true
   false
@@ -1245,7 +1504,8 @@ proc ensureScriptObjects(world: World, heroId: int32) =
     var value: WorldObject
     for i in 0 ..< rawWorldObjectCount(world):
       if not rawWorldObjectAt(world, i, value) or
-          not objectVisibleTo(world, team, value):
+          not objectVisibleTo(world, team, value) or
+          (value.kind in [TowerObjectKind, BarracksObjectKind] and value.hp <= 0):
         continue
       if world.scriptObjectCount == world.scriptObjects.len:
         world.scriptObjects.add value
@@ -1328,25 +1588,28 @@ proc nearestNavTile(
     mapX,
     mapY: int,
     referenceY: int32,
-    value: var NavTile
+    value: var NavTile,
+    excluded: seq[PathTile]
 ): bool =
-  ## Finds the closest walkable tile to a script map coordinate.
+  ## Finds the closest walkable tile, optionally reserving occupied spawn cells.
   var bestScore = int64.high
   for dz in -8 .. 8:
     for dx in -8 .. 8:
       let
         worldX = mapX + dx
         worldZ = mapY + dz
-      if worldX < 0 or worldX >= GridTiles or
-          worldZ < 0 or worldZ >= GridTiles:
+      if worldX < 0 or worldX >= mapTiles() or
+          worldZ < 0 or worldZ >= mapTiles():
         continue
       for layerIndex, layer in layers:
         if layer.water:
           continue
         let
-          x = worldX - layer.originX
-          z = worldZ - layer.originZ
-        if not isWalkable(layerIndex, x, z):
+          x = worldX + mapOrigin() - layer.originX
+          z = worldZ + mapOrigin() - layer.originZ
+        if not navigationOpen(layerIndex, x, z):
+          continue
+        if PathTile(layer: layerIndex.int32, x: x.int32, z: z.int32) in excluded:
           continue
         let
           centerY = worldPoint(pathPoint(layerIndex, x, z)).y
@@ -1358,6 +1621,91 @@ proc nearestNavTile(
           bestScore = score
           result = true
 
+proc movementPath(tiles: seq[PathTile], start: WorldPoint): seq[PathTile] =
+  ## Keeps the farthest clear shortcut from each turn, starting at the unit.
+  if tiles.len == 0:
+    return
+  result.add tiles[0]
+  var
+    anchor = 0
+    position = start
+  while anchor < tiles.high:
+    var
+      last = anchor
+      reach = -1
+      destination: WorldPoint
+    while last < tiles.high and tiles[last + 1].layer == tiles[anchor].layer:
+      inc last
+    last = max(last, anchor + 1)
+    for i in countdown(last, anchor + 1):
+      let point = worldPoint(pathPoint(
+        int(tiles[i].layer), int(tiles[i].x), int(tiles[i].z)))
+      if navigationLineClear(position, point, tiles[anchor].layer, tiles[i].layer):
+        reach = i
+        destination = point
+        break
+    if reach < 0:
+      return @[]
+    result.add tiles[reach]
+    position = destination
+    anchor = reach
+
+proc followCreepPath(world: World, footman: var Footman, goal: WorldPoint) =
+  ## Follows a cached route and throttles changed chase goals and failed searches.
+  let
+    changed = floorWorldTile(goal.x) != floorWorldTile(footman.moveGoal.x) or
+      floorWorldTile(goal.z) != floorWorldTile(footman.moveGoal.z) or
+      goal.y != footman.moveGoal.y
+    invalid = footman.moveRevision != world.navigationRevision
+    finished = footman.movePathIndex >= footman.movePath.len
+  if invalid or ((changed or finished) and world.tick >= footman.nextPathTick):
+    footman.moveGoal = goal
+    footman.moveRevision = world.navigationRevision
+    footman.movePathIndex = 0
+    footman.movePath.setLen(0)
+    footman.nextPathTick = world.tick + FailedPathTicks
+    var first, last: NavTile
+    if navTileAt(footman.position, first) and nearestNavTile(
+      int(mapCoordinate(goal.x)), int(mapCoordinate(goal.z)), goal.y, last
+    ):
+      let route = findTilePath(PathQuery(
+        startLayer: first.layer, startX: first.x, startZ: first.z,
+        finishLayer: last.layer, finishX: last.x, finishZ: last.z,
+        walkable: navigationOpen)).tiles
+      footman.movePath = movementPath(route, footman.position)
+      # The first tile is the search origin, not a movement destination.
+      if footman.movePath.len > 1:
+        footman.movePathIndex = 1
+      if footman.movePath.len > 0:
+        footman.nextPathTick = world.tick + ChasePathTicks
+  while footman.movePathIndex < footman.movePath.len:
+    let
+      tile = footman.movePath[footman.movePathIndex]
+      point = worldPoint(pathPoint(int(tile.layer), int(tile.x), int(tile.z)))
+    if not navigationOpen(int(tile.layer), int(tile.x), int(tile.z)):
+      footman.moveRevision = -1
+      return
+    var reached = within(footman.position, point, PathPointRadius)
+    if reached and footman.movePathIndex < footman.movePath.high:
+      let
+        next = footman.movePath[footman.movePathIndex + 1]
+        nextPoint = worldPoint(pathPoint(int(next.layer), int(next.x), int(next.z)))
+      reached = navigationLineClear(
+        footman.position, nextPoint, footman.navLayer, next.layer)
+    if reached:
+      inc footman.movePathIndex
+    else:
+      let before = footman.position
+      footman.tryMove(point - footman.position, tile.layer)
+      if within(before, footman.position, 100):
+        inc footman.stuckTicks
+        if footman.stuckTicks >= TickRate:
+          footman.moveRevision = -1
+          footman.stuckTicks = 0
+      else:
+        footman.stuckTicks = 0
+      return
+
 proc setHeroDestination(
     hero: Hero,
     mapX,
@@ -1366,9 +1714,10 @@ proc setHeroDestination(
 ): bool =
   ## Computes and stores a server-side path for one hero destination.
   let
-    targetX = clamp(mapX, 0, GridTiles - 1)
-    targetY = clamp(mapY, 0, GridTiles - 1)
-  if hero.hasMoveTarget and hero.moveTileX == targetX and
+    targetX = clamp(mapX, 0, mapTiles() - 1)
+    targetY = clamp(mapY, 0, mapTiles() - 1)
+  if hero.moveRevision == navigationWorld.navigationRevision and
+      hero.hasMoveTarget and hero.moveTileX == targetX and
       hero.moveTileY == targetY and hero.movePathIndex < hero.movePath.len:
     return true
   var
@@ -1383,11 +1732,14 @@ proc setHeroDestination(
     startZ: startTile.z,
     finishLayer: finishTile.layer,
     finishX: finishTile.x,
-    finishZ: finishTile.z
+    finishZ: finishTile.z,
+    walkable: navigationOpen
   ), heroPathTiles)
   if heroPathTiles.len == 0:
     return false
-  let pulled = smoothPathTiles(heroPathTiles)
+  let pulled = movementPath(heroPathTiles, hero.position)
+  if pulled.len == 0:
+    return false
   hero.movePath.setLen(pulled.len)
   hero.movePathLayers.setLen(pulled.len)
   for i, tile in pulled:
@@ -1397,27 +1749,57 @@ proc setHeroDestination(
       int(tile.z)
     ))
     hero.movePathLayers[i] = tile.layer
-  hero.movePathIndex = 0
+  hero.moveRevision = navigationWorld.navigationRevision
+  # Replanning must not send the hero back to its starting tile's center.
+  hero.movePathIndex = if pulled.len > 1: 1 else: 0
   hero.moveTileX = targetX
   hero.moveTileY = targetY
   hero.hasMoveTarget = true
   true
 
+proc stopHeroPath(hero: Hero) =
+  ## Drops the finished chase so a hero can acquire nearby creeps again.
+  hero.hasMoveTarget = false
+  hero.movePath.setLen(0)
+  hero.movePathLayers.setLen(0)
+  hero.movePathIndex = 0
+
 proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
+  if hero.hasMoveTarget and hero.moveRevision != navigationWorld.navigationRevision:
+    if not hero.setHeroDestination(hero.moveTileX, hero.moveTileY, hero.position.y):
+      hero.movePath.setLen(0)
+      return false
   while hero.movePathIndex < hero.movePath.len:
     let waypoint = hero.movePath[hero.movePathIndex]
     let offset = WorldPoint(
       x: waypoint.x - hero.position.x,
       z: waypoint.z - hero.position.z
     )
-    if not within(hero.position, waypoint, 21_000):
+    var reached = within(hero.position, waypoint, PathPointRadius)
+    if reached and hero.movePathIndex < hero.movePath.high:
+      let
+        next = hero.movePathIndex + 1
+        layer =
+          if next < hero.movePathLayers.len: hero.movePathLayers[next]
+          else: hero.navLayer
+      reached = navigationLineClear(
+        hero.position, hero.movePath[next], hero.navLayer, layer)
+    if not reached:
       let destLayer =
         if hero.movePathIndex < hero.movePathLayers.len:
           hero.movePathLayers[hero.movePathIndex]
         else:
           hero.navLayer
+      let before = hero.position
       hero.tryMove(offset, destLayer)
+      if within(before, hero.position, 100):
+        inc hero.stuckTicks
+        if hero.stuckTicks >= TickRate:
+          hero.moveRevision = -1
+          hero.stuckTicks = 0
+      else:
+        hero.stuckTicks = 0
       return true
     inc hero.movePathIndex
   hero.hasMoveTarget = false
@@ -1425,6 +1807,7 @@ proc followHeroPath(hero: Hero): bool =
 
 proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
   ## Applies one hero walk command using server-side pathfinding.
+  navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
@@ -1432,7 +1815,7 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
   world.heroes[index].attackMoving = false
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
-  world.heroes[index].targetTowerId = 0
+  world.heroes[index].targetBuildingId = 0
   world.heroes[index].attackingFort = false
   setHeroDestination(
     world.heroes[index],
@@ -1443,6 +1826,7 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
 
 proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
   ## Walks toward a map tile and attacks enemies found along the way.
+  navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
@@ -1450,7 +1834,7 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
   world.heroes[index].attackMoving = true
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
-  world.heroes[index].targetTowerId = 0
+  world.heroes[index].targetBuildingId = 0
   world.heroes[index].attackingFort = false
   setHeroDestination(
     world.heroes[index],
@@ -1475,9 +1859,9 @@ proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
     return other.team != hero.team and
       other.state != Dying and
       other.hp > 0
-  let tower = towerIndex(world, targetId)
+  let tower = buildingIndex(world, targetId)
   if tower >= 0:
-    let other = world.towers[tower]
+    let other = world.buildings[tower]
     return other.team != hero.team and other.hp > 0
   for fort in world.forts:
     if fort.id == targetId:
@@ -1486,6 +1870,7 @@ proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
 
 proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   ## Applies one hero attack command after validating its target.
+  navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return false
@@ -1501,17 +1886,40 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   world.heroes[index].attackObjectId = targetId
   true
 
-proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
-  ## Spends gold to put one shop item into a hero inventory.
+proc purchaseReason*(world: World, heroId, itemId: int32): string =
+  ## Returns an empty string when a purchase is allowed, or its rejection.
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
-    return false
+    return "Available when alive"
+  if world.heroes[index].hp <= 0:
+    return "Available when alive"
   let item = itemFromId(itemId)
   if item == NoItem:
-    return false
+    return "Unknown item"
   let spec = item.itemSpec
   if world.heroes[index].gold < spec.cost:
+    return "Not enough gold"
+  var empty = false
+  for slot in 0 ..< InventorySlots:
+    if world.heroes[index].inventory[slot] == NoItem:
+      empty = true
+    elif world.heroes[index].inventory[slot] == item:
+      if spec.kind == Equipment:
+        return "Already equipped"
+      if world.heroes[index].itemCounts[slot] >= MaxItemStack:
+        return "Stack full"
+      return ""
+  if not empty:
+    return "Inventory full"
+
+proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
+  ## Spends gold to put one shop item into a hero inventory.
+  if world.purchaseReason(heroId, itemId).len > 0:
     return false
+  let
+    index = heroIndex(world, heroId)
+    item = itemFromId(itemId)
+    spec = item.itemSpec
   var
     stackSlot = -1
     emptySlot = -1
@@ -1553,9 +1961,9 @@ proc startSwing(world: World, hero: Hero) =
   hero.swingTicks = 0
   hero.damageLanded = false
 
-proc updateTower*(world: World, tower: var Tower) =
+proc updateTower*(world: World, tower: var Building) =
   ## Acquires one nearby enemy and applies a deterministic periodic attack.
-  if tower.hp <= 0:
+  if tower.kind == BarracksBuilding or tower.hp <= 0:
     tower.targetId = 0
     tower.attackTicks = 0
     return
@@ -1628,9 +2036,11 @@ proc updateTower*(world: World, tower: var Tower) =
     world.heroes[targetHero].hp -= damage
     if wasAlive and world.heroes[targetHero].hp <= 0:
       recordHeroKill(world, tower.team, world.heroes[targetHero].team)
+      world.stats.hitHero(-1, targetHero, world.tick, TickRate, true)
 
 proc updateFootman(world: World, footman: var Footman) =
   ## Advances one footman's movement, target selection, combat, and animation.
+  footman.velocity = Heading()
   if footman.state == Dying:
     inc footman.deathTicks
     footman.animClip = deathClip
@@ -1642,12 +2052,20 @@ proc updateFootman(world: World, footman: var Footman) =
     footman.deathTicks = 0
     return
 
+  footman.advanceWaypoints()
+  let start = footman.position
+  defer:
+    footman.velocity = heading(
+      footman.position.x - start.x,
+      footman.position.z - start.z
+    )
+
   # Acquire: keep a live target while it stays in extended range, otherwise
   # take the nearest visible enemy; with none, batter the fort when close.
   var
     targetFootman = footmanIndex(world, footman.targetId)
     targetHero = heroIndex(world, footman.targetHeroId)
-    targetTower = towerIndex(world, footman.targetTowerId)
+    targetBuilding = buildingIndex(world, footman.targetBuildingId)
   if targetFootman >= 0:
     let other = world.footmen[targetFootman]
     if other.state == Dying or other.hp <= 0 or
@@ -1668,17 +2086,17 @@ proc updateFootman(world: World, footman: var Footman) =
           FootmanSightRadius * 8 div 5
         ):
       targetHero = -1
-  if targetTower >= 0:
-    let tower = world.towers[targetTower]
-    if not towerExposed(world, tower) or
+  if targetBuilding >= 0:
+    let tower = world.buildings[targetBuilding]
+    if not buildingExposed(world, tower) or
         not visible(world, footman.team, tower.position) or
         not within(
           footman.position,
           tower.position,
           FootmanTowerSightRadius * 8 div 5
         ):
-      targetTower = -1
-  if targetFootman < 0 and targetHero < 0 and targetTower < 0:
+      targetBuilding = -1
+  if targetFootman < 0 and targetHero < 0 and targetBuilding < 0:
     var bestSquared = int64(FootmanSightRadius) * FootmanSightRadius
     for i, other in world.footmen:
       if other.team == footman.team or other.state == Dying or other.hp <= 0:
@@ -1700,34 +2118,35 @@ proc updateFootman(world: World, footman: var Footman) =
         bestSquared = distance
         targetFootman = -1
         targetHero = i
-  if targetFootman < 0 and targetHero < 0 and targetTower < 0:
-    let tower = nextEnemyTower(world, footman.team, footman.lane)
+  if targetFootman < 0 and targetHero < 0 and targetBuilding < 0:
+    let tower = nextEnemyBuilding(world, footman.team, footman.lane, footman.position)
     if tower.id != 0 and within(
         footman.position,
         tower.position,
         FootmanTowerSightRadius
     ) and visible(world, footman.team, tower.position):
-      targetTower = towerIndex(world, tower.id)
+      targetBuilding = buildingIndex(world, tower.id)
   footman.targetId =
     if targetFootman >= 0: world.footmen[targetFootman].id else: 0
   footman.targetHeroId =
     if targetHero >= 0: world.heroes[targetHero].id else: 0
-  footman.targetTowerId =
-    if targetTower >= 0: world.towers[targetTower].id else: 0
+  footman.targetBuildingId =
+    if targetBuilding >= 0: world.buildings[targetBuilding].id else: 0
   let fortIndex = enemyFort(footman.team)
   footman.attackingFort = targetFootman < 0 and targetHero < 0 and
-    targetTower < 0 and
+    targetBuilding < 0 and
     fortExposed(world, world.forts[fortIndex].team) and
     visible(world, footman.team, world.forts[fortIndex].center) and
     within(footman.position, world.forts[fortIndex].center, FortRange)
 
   if targetFootman >= 0 or targetHero >= 0 or
-      targetTower >= 0 or footman.attackingFort:
+      targetBuilding >= 0 or footman.attackingFort:
     footman.state = Fighting
     let targetPosition =
       if targetFootman >= 0: world.footmen[targetFootman].position
       elif targetHero >= 0: world.heroes[targetHero].position
-      elif targetTower >= 0: world.towers[targetTower].position
+      elif targetBuilding >= 0:
+        buildingAim(world.buildings[targetBuilding], footman.position)
       else: world.forts[fortIndex].center
     footman.surfaceHint = targetPosition.y
     let
@@ -1737,14 +2156,14 @@ proc updateFootman(world: World, footman: var Footman) =
       inRange =
         if targetFootman >= 0 or targetHero >= 0:
           within(footman.position, targetPosition, FootmanMeleeRange)
-        elif targetTower >= 0:
+        elif targetBuilding >= 0:
           within(footman.position, targetPosition, TowerSiegeRange)
         else: true
     if not inRange:
       footman.swingTicks = -1
       footman.animClip = runClip
       inc footman.animTicks
-      footman.tryMove(offset)
+      world.followCreepPath(footman, targetPosition)
     else:
       snapFacing(footman.body, footman.facing, offset)
       if footman.swingTicks < 0:
@@ -1761,43 +2180,43 @@ proc updateFootman(world: World, footman: var Footman) =
           world.heroes[targetHero].hp -= FootmanDamage
           if wasAlive and world.heroes[targetHero].hp <= 0:
             recordHeroKill(world, footman.team, world.heroes[targetHero].team)
-        elif targetTower >= 0:
-          world.towers[targetTower].hp -= FootmanDamage
+            world.stats.hitHero(-1, targetHero, world.tick, TickRate, true)
+        elif targetBuilding >= 0:
+          world.damageBuilding(targetBuilding, FootmanDamage)
         else:
-          world.forts[fortIndex].hp -= FootmanDamage
+          world.damageFort(fortIndex, FootmanDamage)
       if footman.swingTicks >= duration:
         startSwing(world, footman)
       footman.animClip = footman.swingClip
       footman.animTicks = max(footman.swingTicks, 0)
     return
 
-  # March down the lane.
   footman.state = Marching
   footman.swingTicks = -1
   footman.animClip = runClip
   inc footman.animTicks
+  var goal = world.forts[enemyFort(footman.team)].center
   if footman.waypointIndex < laneWorldPaths[footman.lane].len:
-    let
-      waypoint = footman.currentWaypoint
-      offset = waypoint - footman.position
-    if within(footman.position, waypoint, 21_000):
-      inc footman.waypointIndex
-    else:
-      footman.tryMove(offset, footman.currentWaypointLayer)
+    goal = footman.currentWaypoint
   else:
-    let fort = world.forts[enemyFort(footman.team)]
-    footman.tryMove(fort.center - footman.position)
+    let objective = world.nextEnemyBuilding(
+      footman.team, footman.lane, footman.position
+    )
+    if objective.id != 0:
+      goal = buildingAim(objective, footman.position)
+  world.followCreepPath(footman, goal)
 
 proc respawn(hero: Hero) =
   ## Restores a fallen hero at its original barracks spawn.
   hero.place(hero.spawnPosition)
+  hero.applyBody()
   hero.hp = hero.maxHp
   hero.mana = hero.maxMana
   hero.state = Marching
   hero.waypointIndex = 0
   hero.targetFootmanId = 0
   hero.targetHeroId = 0
-  hero.targetTowerId = 0
+  hero.targetBuildingId = 0
   hero.attackingFort = false
   hero.attackObjectId = 0
   hero.attackMoving = false
@@ -1812,12 +2231,29 @@ proc respawn(hero: Hero) =
   hero.navLayer = bindNavLayer(hero.spawnPosition)
   for slot in HeroAbilitySlot:
     hero.cooldowns[slot] = 0
+  hero.spellsReady = false
 
-proc tickHeroCooldowns(hero: Hero) =
-  ## Counts down every ability slot that is waiting to be used again.
+proc initHeroCharges(hero: Hero) =
+  ## Starts a new life with every ability fully charged.
+  for slot in HeroAbilitySlot:
+    hero.charges[slot] = heroAbility(hero.class, slot).abilitySpec.charges
+    hero.recharges[slot] = 0
+  hero.spellsReady = true
+
+proc tickHeroCooldowns(world: World, hero: Hero) =
+  ## Advances spell cooldowns and restores spent charges one at a time.
+  if not hero.spellsReady:
+    hero.initHeroCharges()
   for slot in HeroAbilitySlot:
     if hero.cooldowns[slot] > 0:
       dec hero.cooldowns[slot]
+    if hero.recharges[slot] > 0:
+      dec hero.recharges[slot]
+      if hero.recharges[slot] == 0:
+        let spec = heroAbility(hero.class, slot).abilitySpec
+        hero.charges[slot] = min(hero.charges[slot] + 1, spec.charges)
+        if hero.charges[slot] < spec.charges:
+          hero.recharges[slot] = spec.rechargeTicks
 
 proc regenHeroMana(hero: Hero, tick: int32) =
   ## Restores a small amount of mana on a stable cadence.
@@ -1828,7 +2264,7 @@ proc applyHeroHit(
     world: World,
     hero: Hero,
     damage: int32,
-    targetFootman, targetHero, targetTower, fortIndex: int
+    targetFootman, targetHero, targetBuilding, fortIndex: int
 ) =
   ## Applies one hero hit to the current combat target.
   if damage <= 0:
@@ -1838,19 +2274,27 @@ proc applyHeroHit(
     world.footmen[targetFootman].hp -= damage
     if wasAlive and world.footmen[targetFootman].hp <= 0:
       hero.gainRewards(FootmanXpReward, FootmanGoldReward)
+      world.stats.add(heroIndex(world, hero.id), GoldMetric, FootmanGoldReward)
   elif targetHero >= 0:
     let wasAlive = world.heroes[targetHero].hp > 0
     world.heroes[targetHero].hp -= damage
+    if wasAlive:
+      world.stats.hitHero(
+        heroIndex(world, hero.id), targetHero, world.tick, TickRate,
+        world.heroes[targetHero].hp <= 0
+      )
     if wasAlive and world.heroes[targetHero].hp <= 0:
       hero.gainRewards(HeroXpReward, HeroGoldReward)
+      world.stats.add(heroIndex(world, hero.id), GoldMetric, HeroGoldReward)
       recordHeroKill(world, hero.team, world.heroes[targetHero].team)
-  elif targetTower >= 0:
-    let wasStanding = world.towers[targetTower].hp > 0
-    world.towers[targetTower].hp -= damage
-    if wasStanding and world.towers[targetTower].hp <= 0:
+  elif targetBuilding >= 0:
+    let wasStanding = world.buildings[targetBuilding].hp > 0
+    world.damageBuilding(targetBuilding, damage)
+    if wasStanding and world.buildings[targetBuilding].hp <= 0:
       hero.gainRewards(TowerXpReward, TowerGoldReward)
+      world.stats.add(heroIndex(world, hero.id), GoldMetric, TowerGoldReward)
   elif fortIndex >= 0:
-    world.forts[fortIndex].hp -= damage
+    world.damageFort(fortIndex, damage)
 
 proc consumeItem(hero: Hero, slot: int) =
   ## Removes one charge from an inventory slot and clears an empty stack.
@@ -1859,12 +2303,50 @@ proc consumeItem(hero: Hero, slot: int) =
     hero.inventory[slot] = NoItem
     hero.itemCounts[slot] = 0
 
+proc canHitTarget(
+    world: World,
+    hero: Hero,
+    targetFootman, targetHero, targetBuilding, fortIndex: int,
+    range: int32
+): bool =
+  ## Requires a living, visible, exposed enemy within the strike's range.
+  var position: WorldPoint
+  if targetFootman >= 0:
+    let target = world.footmen[targetFootman]
+    if target.team == hero.team or target.hp <= 0 or target.state == Dying:
+      return false
+    position = target.position
+  elif targetHero >= 0:
+    let target = world.heroes[targetHero]
+    if target.team == hero.team or target.hp <= 0 or target.state == Dying:
+      return false
+    position = target.position
+  elif targetBuilding >= 0:
+    let target = world.buildings[targetBuilding]
+    if target.team == hero.team or not world.buildingExposed(target):
+      return false
+    position = target.position
+  elif fortIndex >= 0:
+    let target = world.forts[fortIndex]
+    if target.team == hero.team or target.hp <= 0 or
+      not world.fortExposed(target.team):
+        return false
+    position = target.center
+  else:
+    return false
+  let aim =
+    if targetBuilding >= 0: buildingAim(world.buildings[targetBuilding], hero.position)
+    else: position
+  within(hero.position, aim, range) and world.visible(hero.team, position)
+
 proc applyUseItem*(world: World, heroId, slotId: int32): bool =
   ## Spends one consumable for a heal, mana restore, or poison strike.
   let
     index = heroIndex(world, heroId)
     slot = int(slotId)
   if index < 0 or world.heroes[index].state == Dying:
+    return false
+  if world.heroes[index].hp <= 0:
     return false
   if slot < 0 or slot >= InventorySlots:
     return false
@@ -1895,15 +2377,24 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
     var
       targetFootman = footmanIndex(world, targetId)
       targetHero = heroIndex(world, targetId)
-      targetTower = towerIndex(world, targetId)
+      targetBuilding = buildingIndex(world, targetId)
       fortIndex = -1
-    if targetFootman < 0 and targetHero < 0 and targetTower < 0:
+    if targetFootman < 0 and targetHero < 0 and targetBuilding < 0:
       for i, fort in world.forts:
         if fort.id == targetId:
           fortIndex = i
           break
     if targetFootman < 0 and targetHero < 0 and
-        targetTower < 0 and fortIndex < 0:
+        targetBuilding < 0 and fortIndex < 0:
+      return false
+    if not world.canHitTarget(
+      world.heroes[index],
+      targetFootman,
+      targetHero,
+      targetBuilding,
+      fortIndex,
+      heroAttackRange(world.heroes[index].class)
+    ):
       return false
     applyHeroHit(
       world,
@@ -1911,7 +2402,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       spec.strike,
       targetFootman,
       targetHero,
-      targetTower,
+      targetBuilding,
       fortIndex
     )
   else:
@@ -1919,21 +2410,334 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
   world.heroes[index].consumeItem(slot)
   true
 
-proc applyReplayAction(world: World, action: ReplayAction) =
+proc spellTarget*(world: World, id: int32, value: var WorldObject): bool =
+  ## Resolves an existing object without depending on the script query cache.
+  let hero = heroIndex(world, id)
+  if hero >= 0:
+    let target = world.heroes[hero]
+    value = WorldObject(id: id, team: target.team, position: target.position,
+      hp: target.hp, alive: target.hp > 0 and target.state != Dying)
+    return true
+  let footman = footmanIndex(world, id)
+  if footman >= 0:
+    let target = world.footmen[footman]
+    value = WorldObject(id: id, team: target.team, position: target.position,
+      hp: target.hp, alive: target.hp > 0 and target.state != Dying)
+    return true
+  let tower = buildingIndex(world, id)
+  if tower >= 0:
+    let target = world.buildings[tower]
+    value = WorldObject(id: id, team: target.team, position: target.position,
+      hp: target.hp, alive: world.buildingExposed(target))
+    return true
+  for fort in world.forts:
+    if fort.id == id:
+      value = WorldObject(id: id, team: fort.team, position: fort.center,
+        hp: fort.hp, alive: fort.hp > 0 and world.fortExposed(fort.team))
+      return true
+  false
+
+proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
+  ## Applies one effect, checking living targets and structure protection again.
+  let
+    caster = heroIndex(world, spell.heroId)
+    spec = spell.ability.abilitySpec
+  var target: WorldObject
+  if caster < 0 or not world.spellTarget(id, target) or not target.alive:
+    return
+  let hero = world.heroes[caster]
+  if spec.kind == Strike:
+    if target.team == hero.team:
+      return
+    var fortIndex = -1
+    for i, fort in world.forts:
+      if fort.id == id:
+        fortIndex = i
+    world.applyHeroHit(
+      hero, spec.damage, world.footmanIndex(id), world.heroIndex(id),
+      world.buildingIndex(id), fortIndex
+    )
+  elif target.team == hero.team:
+    let index = world.heroIndex(id)
+    if index >= 0:
+      let ally = world.heroes[index]
+      ally.hp = min(ally.maxHp, ally.hp + spec.heal)
+      ally.mana = min(ally.maxMana, ally.mana + spec.restore)
+
+proc spellContains*(spell: SpellCast, area: FxArea, point: WorldPoint): bool =
+  ## Transforms a target into the spell's fixed local frame before hit testing.
+  let
+    offset = point - spell.position
+    x = int32((int64(offset.x) * spell.direction.z -
+      int64(offset.z) * spell.direction.x) div WorldScale)
+    z = int32((int64(offset.x) * spell.direction.x +
+      int64(offset.z) * spell.direction.z) div WorldScale)
+  area.contains(x, z, offset.y)
+
+proc resolveSpell(world: World, spell: var SpellCast) =
+  ## Resolves one area or single-target impact exactly once.
+  spell.resolved = true
+  let spec = spell.ability.abilitySpec
+  if spec.casting == SelfCast:
+    world.hitSpellTarget(spell, spell.heroId)
+    return
+  if spec.casting != AreaCast and spell.targetId != 0:
+    world.hitSpellTarget(spell, spell.targetId)
+    return
+  var
+    footprint = spec.area
+    frame = spell
+    nearest = int64.high
+    nearestId = 0'i32
+  if spec.casting != AreaCast:
+    footprint = FxArea(
+      shape: CapsuleFootprint, width: 30_000, height: 120_000,
+      length: max(30_000'i32, int32(integerSqrt(
+        distanceSquared(spell.origin, spell.position))))
+    )
+    frame.position = spell.origin
+  template affect(id: int32, position: WorldPoint) =
+    if frame.spellContains(footprint, position):
+      if spec.casting == AreaCast:
+        world.hitSpellTarget(spell, id)
+      else:
+        var target: WorldObject
+        let caster = world.heroIndex(spell.heroId)
+        if caster >= 0 and world.spellTarget(id, target) and target.alive and
+          target.team != world.heroes[caster].team:
+            let distance = distanceSquared(spell.origin, position)
+            if distance < nearest:
+              nearest = distance
+              nearestId = id
+  for hero in world.heroes:
+    affect(hero.id, hero.position)
+  if spec.kind == Strike:
+    for footman in world.footmen:
+      affect(footman.id, footman.position)
+    for tower in world.buildings:
+      affect(tower.id, tower.position)
+    for fort in world.forts:
+      affect(fort.id, fort.center)
+  if nearestId != 0:
+    world.hitSpellTarget(spell, nearestId)
+
+proc advanceGroundShot(world: World, spell: var SpellCast) =
+  ## Sweeps one tick of projectile travel and stops at the first enemy.
+  let
+    spec = spell.ability.abilitySpec
+    start = spell.started + spec.castTicks
+    duration = max(1'i32, spell.impact - start)
+    elapsed = clamp(world.tick - start, 0'i32, duration)
+    previous = max(0'i32, elapsed - 1)
+    caster = world.heroIndex(spell.heroId)
+    origin = spell.origin
+    destination = spell.position
+  if elapsed == 0 or caster < 0:
+    return
+  proc travel(ticks: int32): WorldPoint =
+    ## Interpolates one authoritative projectile position with integers.
+    result.x = origin.x + int32(
+      int64(destination.x - origin.x) * ticks div duration
+    )
+    result.y = origin.y + int32(
+      int64(destination.y - origin.y) * ticks div duration
+    )
+    result.z = origin.z + int32(
+      int64(destination.z - origin.z) * ticks div duration
+    )
+  let
+    first = travel(previous)
+    last = travel(elapsed)
+    distance = int32(integerSqrt(distanceSquared(first, last)))
+    radius = 15_000'i32
+    footprint = FxArea(
+      shape: CapsuleFootprint,
+      width: radius * 2,
+      length: distance + radius * 2,
+      height: 120_000
+    )
+  var
+    frame = spell
+    nearest = int64.high
+    nearestId = 0'i32
+  frame.position = first - scaledPlanar(
+    WorldPoint(x: spell.direction.x, z: spell.direction.z), radius
+  )
+  template consider(id: int32, position: WorldPoint) =
+    if frame.spellContains(footprint, position):
+      var target: WorldObject
+      if world.spellTarget(id, target) and target.alive and
+        target.team != world.heroes[caster].team:
+          let distance = distanceSquared(first, position)
+          if distance < nearest:
+            nearest = distance
+            nearestId = id
+  for hero in world.heroes:
+    consider(hero.id, hero.position)
+  for footman in world.footmen:
+    consider(footman.id, footman.position)
+  for tower in world.buildings:
+    consider(tower.id, tower.position)
+  for fort in world.forts:
+    consider(fort.id, fort.center)
+  if nearestId != 0:
+    world.hitSpellTarget(spell, nearestId)
+    spell.resolved = true
+    spell.position = last
+    spell.impact = world.tick
+    spell.ends = world.tick + 12
+  elif world.tick >= spell.impact:
+    spell.resolved = true
+
+proc advanceSpells(world: World) =
+  ## Resolves due effects and bounds the retained impact presentation state.
+  var write = 0
+  for read in 0 ..< world.casts.len:
+    var spell = world.casts[read]
+    if not spell.resolved:
+      if spell.ability.abilitySpec.casting == ProjectileCast and
+        spell.targetId == 0:
+          world.advanceGroundShot(spell)
+      elif world.tick >= spell.impact:
+        world.resolveSpell(spell)
+    if world.tick < spell.ends:
+      world.casts[write] = spell
+      inc write
+  world.casts.setLen(write)
+
+proc castAbility(
+    world: World,
+    hero: Hero,
+    slot: HeroAbilitySlot,
+    targetId: int32,
+    aim: WorldPoint
+): bool =
+  ## Releases an object or ground spell after atomically checking its costs.
+  if hero.hp <= 0 or hero.state == Dying or
+    world.casts.len >= 512:
+      return false
+  if not hero.spellsReady:
+    hero.initHeroCharges()
+  let
+    ability = heroAbility(hero.class, slot)
+    spec = ability.abilitySpec
+  if hero.cooldowns[slot] > 0 or hero.charges[slot] <= 0 or
+    hero.mana < spec.manaCost:
+      return false
+  var
+    point = aim
+    selected = targetId
+  if spec.casting == SelfCast:
+    point = hero.position
+    selected = hero.id
+    if (spec.kind == Heal and hero.hp >= hero.maxHp) or
+      (spec.kind == Restore and hero.mana >= hero.maxMana):
+        return false
+  else:
+    if selected != 0:
+      var target: WorldObject
+      if not world.spellTarget(selected, target) or not target.alive or
+        not world.visible(hero.team, target.position):
+          return false
+      if (spec.kind == Strike and target.team == hero.team) or
+        (spec.kind != Strike and target.team != hero.team):
+          return false
+      point = target.position
+      if not within(hero.position, point, spec.range):
+        return false
+    elif not within(hero.position, point, spec.range):
+      point = hero.position + scaledPlanar(point - hero.position, spec.range)
+      point.y = fixedSurfaceHeightNear(point, aim.y)
+    if not world.visible(hero.team, point):
+      return false
+  var direction = scaledPlanar(point - hero.position, WorldScale)
+  if direction.x == 0 and direction.z == 0:
+    direction = scaledPlanar(
+      WorldPoint(x: hero.facing.x, z: hero.facing.z), WorldScale
+    )
+  if direction.x == 0 and direction.z == 0:
+    direction.z = WorldScale
+  var spell = SpellCast(
+    ability: ability, heroId: hero.id, targetId: selected,
+    origin: hero.position, position: point,
+    direction: heading(direction.x, direction.z),
+    started: world.tick, impact: world.tick + spec.castTicks
+  )
+  if spec.casting == AreaCast:
+    spell.targetId = 0
+    if spec.fromCaster:
+      spell.position = hero.position
+    elif selected != 0 and spec.area.innerRadius > 0:
+      spell.position = point - scaledPlanar(
+        direction, (spec.area.innerRadius + spec.area.radius) div 2
+      )
+  if spec.casting == ProjectileCast:
+    spell.impact += max(1'i32, int32((integerSqrt(
+      distanceSquared(spell.origin, point)) + spec.projectileSpeed - 1) div
+      max(spec.projectileSpeed, 1)))
+  spell.ends = spell.impact + 12
+  hero.mana -= spec.manaCost
+  dec hero.charges[slot]
+  hero.cooldowns[slot] = spec.cooldownTicks
+  if hero.recharges[slot] == 0:
+    hero.recharges[slot] = spec.rechargeTicks
+  hero.facing = spell.direction
+  if spell.impact <= world.tick:
+    world.resolveSpell(spell)
+  world.casts.add spell
+  true
+
+proc applyCastTarget*(world: World, heroId, slotId, targetId: int32): bool =
+  ## Casts one ability on an object, or on the caster for a self action.
+  let index = world.heroIndex(heroId)
+  if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord:
+    return false
+  let hero = world.heroes[index]
+  world.castAbility(hero, HeroAbilitySlot(slotId), targetId, hero.position)
+
+proc applyCastPoint*(
+    world: World,
+    heroId, slotId, mapX, mapY: int32
+): bool =
+  ## Casts toward a map tile, clamping empty-ground shots to their range.
+  let index = world.heroIndex(heroId)
+  if index < 0 or slotId < 0 or slotId > HeroAbilitySlot.high.ord or
+    mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles():
+      return false
+  let hero = world.heroes[index]
+  var point = WorldPoint(
+    x: (mapX - mapTiles().int32 div 2) * WorldScale + WorldScale div 2,
+    z: (mapY - mapTiles().int32 div 2) * WorldScale + WorldScale div 2
+  )
+  point.y = fixedSurfaceHeightNear(point, hero.position.y)
+  world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
+
+proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
   case action.kind
   of ActionWalkTo:
-    discard applyWalkTo(world, action.heroId, action.first, action.second)
+    applyWalkTo(world, action.heroId, action.first, action.second)
   of ActionAttackMove:
-    discard applyAttackMove(
+    applyAttackMove(
       world, action.heroId, action.first, action.second
     )
   of ActionAttackTarget:
-    discard applyAttackTarget(world, action.heroId, action.first)
+    applyAttackTarget(world, action.heroId, action.first)
   of ActionBuyItem:
-    discard applyBuyItem(world, action.heroId, action.first)
+    applyBuyItem(world, action.heroId, action.first)
   of ActionUseItem:
-    discard applyUseItem(world, action.heroId, action.first)
+    applyUseItem(world, action.heroId, action.first)
+  of ActionCastTarget .. ActionCastPoint - 1:
+    applyCastTarget(world, action.heroId,
+      int32(action.kind - ActionCastTarget), action.first)
+  of ActionCastPoint .. ActionManualSpells - 1:
+    applyCastPoint(world, action.heroId,
+      int32(action.kind - ActionCastPoint), action.first, action.second)
+  of ActionManualSpells:
+    let index = world.heroIndex(action.heroId)
+    if index >= 0:
+      world.heroes[index].manualSpells = action.first != 0
+    false
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
@@ -1941,84 +2745,57 @@ proc tryCastAbility(
     world: World,
     hero: Hero,
     slot: HeroAbilitySlot,
-    targetFootman, targetHero, targetTower, fortIndex: int
+    targetFootman, targetHero, targetBuilding, fortIndex: int
 ): bool =
-  ## Spends one ready ability if its cost, range, and target match.
+  ## Attempts an automatic cast using the current spell rules.
   let spec = heroAbility(hero.class, slot).abilitySpec
-  if hero.cooldowns[slot] > 0:
+  var targetId = 0'i32
+  if spec.kind != Strike:
+    if spec.casting == SelfCast:
+      return world.castAbility(hero, slot, hero.id, hero.position)
+    for ally in world.heroes:
+      if ally.team == hero.team and ally.hp > 0 and ally.hp < ally.maxHp and
+        ally.state != Dying and
+        within(hero.position, ally.position, spec.range):
+          if world.castAbility(hero, slot, ally.id, ally.position):
+            return true
     return false
-  if hero.mana < spec.manaCost:
+  if targetFootman >= 0:
+    targetId = world.footmen[targetFootman].id
+  elif targetHero >= 0:
+    targetId = world.heroes[targetHero].id
+  elif targetBuilding >= 0:
+    targetId = world.buildings[targetBuilding].id
+  elif fortIndex >= 0:
+    targetId = world.forts[fortIndex].id
+  if targetId == 0:
     return false
-  let hasTarget =
-    targetFootman >= 0 or targetHero >= 0 or
-    targetTower >= 0 or fortIndex >= 0
-  var targetPosition = hero.position
-  if hasTarget:
-    targetPosition =
-      if targetFootman >= 0: world.footmen[targetFootman].position
-      elif targetHero >= 0: world.heroes[targetHero].position
-      elif targetTower >= 0: world.towers[targetTower].position
-      else: world.forts[fortIndex].center
-  case spec.kind
-  of Strike:
-    if not hasTarget:
-      return false
-    if not within(hero.position, targetPosition, spec.range):
-      return false
-  of Heal:
-    if hero.hp >= hero.maxHp:
-      return false
-  of Restore:
-    if hero.mana >= hero.maxMana:
-      return false
-  hero.mana -= spec.manaCost
-  hero.cooldowns[slot] = spec.cooldownTicks
-  case spec.kind
-  of Strike:
-    applyHeroHit(
-      world,
-      hero,
-      spec.damage,
-      targetFootman,
-      targetHero,
-      targetTower,
-      fortIndex
-    )
-    if spec.heal > 0:
-      hero.hp = min(hero.maxHp, hero.hp + spec.heal)
-    if spec.restore > 0:
-      hero.mana = min(hero.maxMana, hero.mana + spec.restore)
-  of Heal:
-    hero.hp = min(hero.maxHp, hero.hp + spec.heal)
-  of Restore:
-    hero.mana = min(hero.maxMana, hero.mana + spec.restore)
-  true
+  world.castAbility(hero, slot, targetId, hero.position)
 
 proc tryCombatAbilities(
     world: World,
     hero: Hero,
-    targetFootman, targetHero, targetTower, fortIndex: int
+    targetFootman, targetHero, targetBuilding, fortIndex: int
 ) =
-  ## Fires the strongest ready combat ability, then the class passive.
+  ## Fires the passive, then the strongest ready strike or support ability.
+  if hero.manualSpells:
+    return
   discard tryCastAbility(
     world,
     hero,
     PassiveAbility,
     targetFootman,
     targetHero,
-    targetTower,
+    targetBuilding,
     fortIndex
   )
-  if targetFootman < 0 and targetHero < 0 and
-      targetTower < 0 and fortIndex < 0:
-    return
   if tryCastAbility(
       world,
       hero,
       UltimateAbility,
       targetFootman,
       targetHero,
-      targetTower,
+      targetBuilding,
       fortIndex
     ):
     return
@@ -2028,7 +2805,7 @@ proc tryCombatAbilities(
       SecondaryAbility,
       targetFootman,
       targetHero,
-      targetTower,
+      targetBuilding,
       fortIndex
     ):
     return
@@ -2038,12 +2815,14 @@ proc tryCombatAbilities(
     PrimaryAbility,
     targetFootman,
     targetHero,
-    targetTower,
+    targetBuilding,
     fortIndex
   )
 
-proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
-  ## Returns the closest visible enemy within `radius`, or 0.
+proc nearestEnemy(
+    world: World, hero: Hero, radius: int32, creepsOnly = false
+): int32 =
+  ## Returns the closest visible enemy, optionally restricting it to creeps.
   var bestSquared = int64(radius) * int64(radius)
   for footman in world.footmen:
     if footman.team == hero.team or
@@ -2055,6 +2834,8 @@ proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
     if squared <= bestSquared:
       bestSquared = squared
       result = footman.id
+  if creepsOnly:
+    return
   for other in world.heroes:
     if other.id == hero.id or
         other.team == hero.team or
@@ -2066,10 +2847,10 @@ proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
     if squared <= bestSquared:
       bestSquared = squared
       result = other.id
-  for tower in world.towers:
+  for tower in world.buildings:
     if tower.team == hero.team or
         tower.hp <= 0 or
-        not towerExposed(world, tower) or
+        not buildingExposed(world, tower) or
         not visible(world, hero.team, tower.position):
       continue
     let squared = distanceSquared(hero.position, tower.position)
@@ -2087,19 +2868,21 @@ proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
       bestSquared = squared
       result = fort.id
 
-proc acquireRadius(hero: Hero): int32 =
+proc acquireRadius(world: World, hero: Hero): int32 =
   ## Returns the search radius for idle or attack-move acquisition.
   if hero.attackMoving:
     if hero.class.heroSpec.attackStyle == MeleeAttack:
       return HeroMeleeAttackMoveRange
     return heroAttackRange(hero.class)
-  if hero.class.heroSpec.attackStyle == MeleeAttack and
-      not hero.hasMoveTarget:
-    return HeroMeleeIdleRange
+  if not hero.hasMoveTarget:
+    if hero.class.heroAttackCasting == MeleeCast:
+      return HeroMeleeIdleRange
+    return heroAttackRange(hero.class)
   0
 
 proc updateHero(world: World, hero: Hero) =
   ## Applies scripted navigation, combat, rewards, death, and respawn.
+  hero.velocity = Heading()
   if hero.state == Dying:
     inc hero.deathTicks
     hero.animClip = heroDeathClip
@@ -2113,21 +2896,28 @@ proc updateHero(world: World, hero: Hero) =
     hero.deathTicks = 0
     hero.targetFootmanId = 0
     hero.targetHeroId = 0
-    hero.targetTowerId = 0
+    hero.targetBuildingId = 0
     hero.attackingFort = false
     hero.attackObjectId = 0
     hero.attackMoving = false
     hero.hasMoveTarget = false
     return
 
+  let start = hero.position
+  defer:
+    hero.velocity = heading(
+      hero.position.x - start.x,
+      hero.position.z - start.z
+    )
+
   hero.targetFootmanId = 0
   hero.targetHeroId = 0
-  hero.targetTowerId = 0
+  hero.targetBuildingId = 0
   hero.attackingFort = false
   var
     targetFootman = -1
     targetHero = -1
-    targetTower = -1
+    targetBuilding = -1
     fortIndex = -1
   if hero.attackObjectId != 0:
     targetFootman = footmanIndex(world, hero.attackObjectId)
@@ -2144,13 +2934,13 @@ proc updateHero(world: World, hero: Hero) =
             other.hp <= 0 or not visible(world, hero.team, other.position):
           targetHero = -1
     if targetFootman < 0 and targetHero < 0:
-      targetTower = towerIndex(world, hero.attackObjectId)
-      if targetTower >= 0:
-        let tower = world.towers[targetTower]
-        if tower.team == hero.team or not towerExposed(world, tower) or
+      targetBuilding = buildingIndex(world, hero.attackObjectId)
+      if targetBuilding >= 0:
+        let tower = world.buildings[targetBuilding]
+        if tower.team == hero.team or not buildingExposed(world, tower) or
             not visible(world, hero.team, tower.position):
-          targetTower = -1
-    if targetFootman < 0 and targetHero < 0 and targetTower < 0:
+          targetBuilding = -1
+    if targetFootman < 0 and targetHero < 0 and targetBuilding < 0:
       for i, fort in world.forts:
         if fort.id == hero.attackObjectId and fort.team != hero.team and
             fort.hp > 0 and fortExposed(world, fort.team):
@@ -2159,13 +2949,17 @@ proc updateHero(world: World, hero: Hero) =
           fortIndex = i
           hero.attackingFort = true
           break
-    if targetFootman < 0 and targetHero < 0 and targetTower < 0 and
+    if targetFootman < 0 and targetHero < 0 and targetBuilding < 0 and
         not hero.attackingFort:
       hero.attackObjectId = 0
+      if not hero.attackMoving:
+        hero.stopHeroPath()
   if hero.attackObjectId == 0:
-    let radius = hero.acquireRadius()
+    let radius = world.acquireRadius(hero)
     if radius > 0:
-      hero.attackObjectId = world.nearestEnemy(hero, radius)
+      hero.attackObjectId = world.nearestEnemy(
+        hero, radius, creepsOnly = true
+      )
       if hero.attackObjectId != 0:
         targetFootman = footmanIndex(world, hero.attackObjectId)
         if targetFootman >= 0:
@@ -2181,12 +2975,12 @@ proc updateHero(world: World, hero: Hero) =
                 other.hp <= 0:
               targetHero = -1
         if targetFootman < 0 and targetHero < 0:
-          targetTower = towerIndex(world, hero.attackObjectId)
-          if targetTower >= 0:
-            let tower = world.towers[targetTower]
-            if tower.team == hero.team or not towerExposed(world, tower):
-              targetTower = -1
-        if targetFootman < 0 and targetHero < 0 and targetTower < 0:
+          targetBuilding = buildingIndex(world, hero.attackObjectId)
+          if targetBuilding >= 0:
+            let tower = world.buildings[targetBuilding]
+            if tower.team == hero.team or not buildingExposed(world, tower):
+              targetBuilding = -1
+        if targetFootman < 0 and targetHero < 0 and targetBuilding < 0:
           for i, fort in world.forts:
             if fort.id == hero.attackObjectId:
               fortIndex = i
@@ -2196,27 +2990,40 @@ proc updateHero(world: World, hero: Hero) =
     if targetFootman >= 0: world.footmen[targetFootman].id else: 0
   hero.targetHeroId =
     if targetHero >= 0: world.heroes[targetHero].id else: 0
-  hero.targetTowerId =
-    if targetTower >= 0: world.towers[targetTower].id else: 0
+  hero.targetBuildingId =
+    if targetBuilding >= 0: world.buildings[targetBuilding].id else: 0
 
-  tickHeroCooldowns(hero)
   regenHeroMana(hero, world.tick)
   tryCombatAbilities(
     world,
     hero,
     targetFootman,
     targetHero,
-    targetTower,
+    targetBuilding,
     fortIndex
   )
 
+  if not world.isEnemyTarget(hero, hero.attackObjectId):
+    if hero.attackObjectId != 0 and not hero.attackMoving:
+      hero.stopHeroPath()
+    targetFootman = -1
+    targetHero = -1
+    targetBuilding = -1
+    fortIndex = -1
+    hero.attackObjectId = 0
+    hero.targetFootmanId = 0
+    hero.targetHeroId = 0
+    hero.targetBuildingId = 0
+    hero.attackingFort = false
+
   if targetFootman >= 0 or targetHero >= 0 or
-      targetTower >= 0 or hero.attackingFort:
+      targetBuilding >= 0 or hero.attackingFort:
     hero.state = Fighting
     let targetPosition =
       if targetFootman >= 0: world.footmen[targetFootman].position
       elif targetHero >= 0: world.heroes[targetHero].position
-      elif targetTower >= 0: world.towers[targetTower].position
+      elif targetBuilding >= 0:
+        buildingAim(world.buildings[targetBuilding], hero.position)
       else: world.forts[fortIndex].center
     hero.surfaceHint = targetPosition.y
     let
@@ -2228,7 +3035,7 @@ proc updateHero(world: World, hero: Hero) =
             targetPosition,
             heroAttackRange(hero.class)
           )
-        elif targetTower >= 0:
+        elif targetBuilding >= 0:
           within(
             hero.position,
             targetPosition,
@@ -2243,29 +3050,33 @@ proc updateHero(world: World, hero: Hero) =
       let
         targetX = int(mapCoordinate(targetPosition.x))
         targetY = int(mapCoordinate(targetPosition.z))
-      discard hero.setHeroDestination(
+      if hero.setHeroDestination(
         targetX,
         targetY,
         targetPosition.y
-      )
-      if not hero.followHeroPath():
-        hero.tryMove(offset)
+      ):
+        discard hero.followHeroPath()
+      else:
+        hero.stopHeroPath()
     else:
       snapFacing(hero.body, hero.facing, offset)
       if hero.swingTicks < 0:
         startSwing(world, hero)
-      let duration = heroAttackTicks(hero.class)
+      let duration = world.heroAttackTicks(hero)
       inc hero.swingTicks
       if not hero.damageLanded and
           hero.swingTicks >= duration * 45 div 100:
         hero.damageLanded = true
+        let damage = hero.heroAttackDamage
+        if damage > 0:
+          inc hero.attacksLanded
         applyHeroHit(
           world,
           hero,
-          hero.heroAttackDamage,
+          damage,
           targetFootman,
           targetHero,
-          targetTower,
+          targetBuilding,
           fortIndex
         )
       if hero.swingTicks >= duration:
@@ -2282,8 +3093,13 @@ proc updateHero(world: World, hero: Hero) =
 
 proc separateBodies(first, second: var Body, layer: int32) =
   ## Pushes two living units apart while keeping both on this layer.
+  if not needsSeparation(first, second):
+    return
   gotaWalkLayer = int(layer)
   gotaWalkDestLayer = int(layer)
+  gotaWalkOrigin = first.pos
+  if not tilesWalkable(second.pos):
+    return
   separatePair(first, second, tilesWalkable)
 
 proc addHashy(hash: var uint32, value: WorldPoint) =
@@ -2320,8 +3136,12 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(fort.team.ord)
     hash.addHashy(fort.center)
     hash.addHashy(fort.hp)
-  hash.addHashy(world.towers.len)
-  for tower in world.towers:
+  hash.addHashy(world.navigationRevision)
+  hash.addHashy(world.buildings.len)
+  for tower in world.buildings:
+    hash.addHashy(tower.kind.ord)
+    hash.addHashy(tower.guardsGod)
+    hash.addHashy(tower.knownAlive)
     hash.addHashy(tower.id)
     hash.addHashy(tower.team.ord)
     hash.addHashy(tower.lane)
@@ -2343,6 +3163,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.position)
     hash.addHashy(hero.spawnPosition)
     hash.addHashy(hero.facing)
+    hash.addHashy(hero.velocity)
     hash.addHashy(hero.body)
     hash.addHashy(hero.hp)
     hash.addHashy(hero.maxHp)
@@ -2356,11 +3177,12 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.waypointIndex)
     hash.addHashy(hero.targetFootmanId)
     hash.addHashy(hero.targetHeroId)
-    hash.addHashy(hero.targetTowerId)
+    hash.addHashy(hero.targetBuildingId)
     hash.addHashy(hero.attackingFort)
     hash.addHashy(hero.swingClip)
     hash.addHashy(hero.swingTicks)
     hash.addHashy(hero.damageLanded)
+    hash.addHashy(hero.attacksLanded)
     hash.addHashy(hero.animClip)
     hash.addHashy(hero.animTicks)
     hash.addHashy(hero.deathTicks)
@@ -2372,6 +3194,8 @@ proc stateHash*(game: Game): uint64 =
     for waypoint in hero.movePath:
       hash.addHashy(waypoint)
     hash.addHashy(hero.movePathIndex)
+    hash.addHashy(hero.moveRevision)
+    hash.addHashy(hero.stuckTicks)
     hash.addHashy(hero.moveTileX)
     hash.addHashy(hero.moveTileY)
     hash.addHashy(hero.hasMoveTarget)
@@ -2380,6 +3204,10 @@ proc stateHash*(game: Game): uint64 =
       hash.addHashy(hero.itemCounts[slot])
     for slot in HeroAbilitySlot:
       hash.addHashy(hero.cooldowns[slot])
+      hash.addHashy(hero.charges[slot])
+      hash.addHashy(hero.recharges[slot])
+    hash.addHashy(hero.spellsReady)
+    hash.addHashy(hero.manualSpells)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
@@ -2387,13 +3215,20 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.lane)
     hash.addHashy(footman.position)
     hash.addHashy(footman.facing)
+    hash.addHashy(footman.velocity)
     hash.addHashy(footman.body)
     hash.addHashy(footman.hp)
     hash.addHashy(footman.state.ord)
     hash.addHashy(footman.waypointIndex)
+    hash.addHashy(footman.movePath)
+    hash.addHashy(footman.movePathIndex)
+    hash.addHashy(footman.moveGoal)
+    hash.addHashy(footman.moveRevision)
+    hash.addHashy(footman.nextPathTick)
+    hash.addHashy(footman.stuckTicks)
     hash.addHashy(footman.targetId)
     hash.addHashy(footman.targetHeroId)
-    hash.addHashy(footman.targetTowerId)
+    hash.addHashy(footman.targetBuildingId)
     hash.addHashy(footman.attackingFort)
     hash.addHashy(footman.swingClip)
     hash.addHashy(footman.swingTicks)
@@ -2403,6 +3238,19 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.deathTicks)
     hash.addHashy(footman.surfaceHint)
     hash.addHashy(footman.navLayer)
+  hash.addHashy(world.casts.len)
+  for spell in world.casts:
+    hash.addHashy(spell.ability.ord)
+    hash.addHashy(spell.heroId)
+    hash.addHashy(spell.targetId)
+    hash.addHashy(spell.origin)
+    hash.addHashy(spell.position)
+    hash.addHashy(spell.direction)
+    hash.addHashy(spell.started)
+    hash.addHashy(spell.impact)
+    hash.addHashy(spell.ends)
+    hash.addHashy(spell.resolved)
+  hash.addHashy(world.stats)
   uint64(hash)
 
 proc settleSurface(position: var WorldPoint, surfaceHint: int32) =
@@ -2421,6 +3269,7 @@ proc checkReplayHash(game: Game, hash: uint64) =
 proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   ## Advances exactly one authoritative integer simulation tick.
   let world = game.world
+  world.syncBuildings()
   if world.gameOver:
     return
   if game.replayMode and
@@ -2434,14 +3283,19 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       spawnWave(world)
 
   world.tick = world.tick +% 1
+  for hero in world.heroes:
+    if hero.hp > 0 and hero.state != Dying:
+      world.tickHeroCooldowns(hero)
   profileBlock "vision":
     rebuildVision(world)
+    world.updateKnownBuildings()
   if game.historyPlayback:
     if game.recorder != nil:
       game.replayPlayer.data = game.recorder.data
     var action: ReplayAction
     while game.replayPlayer.takeActionAt(uint32(world.tick), action):
-      applyReplayAction(world, action)
+      if applyReplayAction(world, action):
+        game.metrics.command(heroIndex(world, action.heroId), world.tick)
   dec world.heroTurnTicks
   if world.heroTurnTicks <= 0:
     world.heroTurnTicks += DecisionTicks
@@ -2455,11 +3309,13 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     for footman in world.footmen.mitems:
       updateFootman(world, footman)
   profileBlock "towers":
-    for tower in world.towers.mitems:
+    for tower in world.buildings.mitems:
       updateTower(world, tower)
   profileBlock "heroes":
     for hero in world.heroes:
       updateHero(world, hero)
+
+  world.advanceSpells()
 
   var write = 0
   for read in 0 ..< world.footmen.len:
@@ -2511,10 +3367,18 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 
   profileBlock "applyBody":
     for footman in world.footmen.mitems:
+      let before = footman.position
       applyBody(footman)
+      if footman.state != Dying:
+        footman.velocity.x += footman.position.x - before.x
+        footman.velocity.z += footman.position.z - before.z
       settleOnLayer(footman.position, footman.navLayer)
     for hero in world.heroes:
+      let before = hero.position
       applyBody(hero)
+      if hero.state != Dying:
+        hero.velocity.x += hero.position.x - before.x
+        hero.velocity.z += hero.position.z - before.z
       settleOnLayer(hero.position, hero.navLayer)
 
   for fort in world.forts.mitems:
@@ -2534,94 +3398,115 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           if hero.team == world.winner: heroIdleClip else: heroDeathClip
         hero.animTicks = 0
 
-  let hash = stateHash(game)
   if game.historyPlayback:
-    checkReplayHash(game, hash)
+    checkReplayHash(game, stateHash(game))
   elif game.recorder != nil and game.recordingError.len == 0 and
       game.recorder.data.hashes.len < world.tick:
     try:
-      game.recorder.recordHash(hash)
+      game.recorder.recordHash(stateHash(game))
     except ReplayError as error:
       game.recordingError = error.msg
 
-proc initLanePaths(seed: int32) =
-  ## Builds shared lane polylines on the generated map.
-  for lane in 0 .. 2:
+proc initLanePaths(map: MapData) =
+  ## Samples symmetric lane goals without baking live buildings into roads.
+  proc gate(lane: int, team: Team): ArenaStop =
+    ## Places a lane endpoint between its two barracks at the fort exit.
+    var midpoint: WorldPoint
+    var count = 0
+    for site in map.layout.barracks:
+      if site.lane == lane and site.team == team.ord:
+        midpoint = midpoint + worldPoint(site.position)
+        inc count
+    doAssert count == 2
+    (
+      GroundLayer,
+      int(mapCoordinate(midpoint.x div count.int32)),
+      int(mapCoordinate(midpoint.z div count.int32))
+    )
+
+  proc nearestStop(route: seq[ArenaStop], stop: ArenaStop): int =
+    ## Finds the generated road sample nearest a fort exit during map setup.
+    var best = int.high
+    for i, candidate in route:
+      let distance = (candidate.x - stop.x) * (candidate.x - stop.x) +
+        (candidate.z - stop.z) * (candidate.z - stop.z)
+      if distance < best:
+        best = distance
+        result = i
+
+  for lane in [0, 1]:
+    let
+      source = map.layout.lanes[lane]
+      first = gate(lane, RedTeam)
+      last = gate(lane, BlueTeam)
+      firstIndex = source.nearestStop(first)
+      lastIndex = source.nearestStop(last)
+    doAssert firstIndex < lastIndex
+    var route = @[first]
+    for i in firstIndex + 1 ..< lastIndex:
+      route.add source[i]
+    route.add last
+    if lane == 1:
+      route.setLen(route.len div 2 + route.len mod 2)
     lanePathPoints[lane].setLen(0)
     lanePathTiles[lane].setLen(0)
-    for i in 0 ..< LaneRoutes[lane].len - 1:
-      let
-        a = LaneRoutes[lane][i]
-        b = LaneRoutes[lane][i + 1]
-        segment = findTilePath(a.layer, a.x, a.z, b.layer, b.x, b.z)
-      doAssert segment.len > 0,
-        &"lane {lane} seed {seed}: no path {a} -> {b}; " &
-        &"walkable {isWalkable(a.layer, a.x, a.z)} -> " &
-        &"{isWalkable(b.layer, b.x, b.z)}"
-      for tileIndex, tile in segment:
-        if lanePathTiles[lane].len > 0 and tileIndex == 0:
-          continue
-        lanePathTiles[lane].add tile
-        lanePathPoints[lane].add pathPoint(
-          int(tile.layer),
-          int(tile.x),
-          int(tile.z)
-        )
-  let
-    redTunnel = findPathPoints(
-      GroundLayer,
-      RedFortTile + FortOuterRadius + 1,
-      RedFortTile,
-      GroundLayer,
-      RedFortTile + 3,
-      RedFortTile
-    )
-    blueTunnel = findPathPoints(
-      GroundLayer,
-      BlueFortTile - FortOuterRadius - 1,
-      BlueFortTile,
-      GroundLayer,
-      BlueFortTile - 3,
-      BlueFortTile
-    )
-    redRampart = findPathPoints(
-      GroundLayer,
-      RedFortTile + 1,
-      RedFortTile - 4,
-      RedFortLayer,
-      FortOuterRadius + FortWallRadius,
-      FortOuterRadius - 4
-    )
-    blueRampart = findPathPoints(
-      GroundLayer,
-      BlueFortTile - 1,
-      BlueFortTile + 4,
-      BlueFortLayer,
-      FortOuterRadius - FortWallRadius,
-      FortOuterRadius + 4
-    )
-    redFountainPath = findPathPoints(
-      GroundLayer,
-      RedFortTile + FortOuterRadius + 1,
-      RedFortTile,
-      RedFortLayer,
-      FortOuterRadius,
-      FortOuterRadius
-    )
-    blueFountainPath = findPathPoints(
-      GroundLayer,
-      BlueFortTile - FortOuterRadius - 1,
-      BlueFortTile,
-      BlueFortLayer,
-      FortOuterRadius,
-      FortOuterRadius
-    )
-  doAssert redTunnel.len > 0, "red fort gate tunnel is unreachable"
-  doAssert blueTunnel.len > 0, "blue fort gate tunnel is unreachable"
-  doAssert redRampart.len > 0, "red fort rampart is unreachable"
-  doAssert blueRampart.len > 0, "blue fort rampart is unreachable"
-  doAssert redFountainPath.len > 0, "red fountain dais is unreachable"
-  doAssert blueFountainPath.len > 0, "blue fountain dais is unreachable"
+    if route.len == 0:
+      continue
+    var distance = 0'i64
+    for i, stop in route:
+      let point = pathPoint(stop.layer, stop.x, stop.z)
+      if i > 0:
+        let previous = route[i - 1]
+        distance += integerSqrt(distanceSquared(
+          worldPoint(point),
+          worldPoint(pathPoint(previous.layer, previous.x, previous.z))
+        ))
+      let crossing = i > 0 and stop.layer != route[i - 1].layer
+      var bend = false
+      if i > 0 and i < route.high:
+        let
+          back = route[max(0, i - 5)]
+          ahead = route[min(route.high, i + 5)]
+          dx = int64(stop.x - back.x)
+          dz = int64(stop.z - back.z)
+          ex = int64(ahead.x - stop.x)
+          ez = int64(ahead.z - stop.z)
+        bend = distance >= WaypointSpacing div 2 and
+          abs(dx * ez - dz * ex) > abs(dx * ex + dz * ez)
+      if i == 0 or i == route.high or crossing or bend or
+          distance >= WaypointSpacing:
+        lanePathPoints[lane].add point
+        lanePathTiles[lane].add PathTile(
+          layer: stop.layer.int32, x: stop.x.int32, z: stop.z.int32)
+        distance = 0
+
+  proc mirrored(tile: PathTile): PathTile =
+    ## Rotates a goal by 180 degrees on the same symmetric arena layer.
+    PathTile(layer: tile.layer,
+      x: int32(layers[tile.layer].width - 1) - tile.x,
+      z: int32(layers[tile.layer].depth - 1) - tile.z)
+  lanePathTiles[2].setLen(0)
+  for i in countdown(lanePathTiles[0].high, 0):
+    lanePathTiles[2].add mirrored(lanePathTiles[0][i])
+  let middle = lanePathTiles[1]
+  for i in countdown(middle.high, 0):
+    let tile = mirrored(middle[i])
+    if lanePathTiles[1][^1] != tile:
+      lanePathTiles[1].add tile
+  for lane in 0 .. 2:
+    lanePathPoints[lane].setLen(0)
+    for tile in lanePathTiles[lane]:
+      lanePathPoints[lane].add pathPoint(int(tile.layer), int(tile.x), int(tile.z))
+
+proc sampleMetrics*(game: Game, force = false) =
+  ## Samples deterministic world counters and independent VM telemetry.
+  if game.metrics == nil or game.world.stats == nil:
+    return
+  for slot, values in game.world.stats.values:
+    for kind in MetricKind:
+      game.metrics.set(slot, kind, values[kind])
+    game.metrics.set(slot, LevelMetric, game.world.heroes[slot].level)
+  game.history.capture(game.metrics, game.world.tick, force)
 
 proc newGame*(
     map: MapData,
@@ -2633,7 +3518,7 @@ proc newGame*(
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
     world: World(
-      forts: startingForts(),
+      forts: startingForts(map),
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
       scriptObjects: newSeqOfCap[WorldObject](256),
@@ -2646,20 +3531,56 @@ proc newGame*(
   let world = result.world
   world.spawnIntervalTicks = spawnInterval
   world.rng = initRng(map.seed)
-  initLanePaths(map.seed)
-  initTowers(world)
-  for lane in 0 .. 2:
-    world.barracksSpawns[RedTeam.ord][lane] = worldPoint(lanePathPoints[lane][0])
-    world.barracksSpawns[BlueTeam.ord][lane] = worldPoint(lanePathPoints[lane][^1])
+  initTowers(world, map)
+  initLanePaths(map)
+  for team in Team:
+    var point = worldPoint(map.layout.spawns[team.ord])
+    point.y = fixedSurfaceHeight(point)
+    world.heroSpawns[team.ord] = point
+  for i, site in map.layout.barracks:
+    var
+      position = worldPoint(site.position)
+      spawn = worldPoint(site.spawn)
+    position.y = fixedSurfaceHeight(position)
+    spawn.y = fixedSurfaceHeight(spawn)
+    world.buildings.add Building(
+      kind: BarracksBuilding,
+      id: FirstBarracksId + int32(i),
+      team: Team(site.team), lane: site.lane,
+      position: position, spawn: spawn,
+      facing: heading(site.facing.x - site.position.x,
+        site.facing.z - site.position.z),
+      hp: TowerHitPoints[OuterTower], maxHp: TowerHitPoints[OuterTower]
+    )
+  for team in Team:
+    for i, site in map.layout.guards[team.ord]:
+      var position = worldPoint(site.position)
+      position.y = fixedSurfaceHeight(position)
+      world.buildings.add Building(
+        id: FirstTowerId + 18 + int32(team.ord * 2 + i),
+        kind: TowerBuilding,
+        guardsGod: true,
+        team: team,
+        lane: -1,
+        tier: GateTower,
+        position: position,
+        facing: heading(
+          site.facing.x - site.position.x,
+          site.facing.z - site.position.z
+        ),
+        hp: TowerHitPoints[GateTower],
+        maxHp: TowerHitPoints[GateTower]
+      )
+  world.initOccupancy()
   sightTerrain = buildSightTerrain()
-  let visionCells = GridTiles * GridTiles
+  let visionCells = mapTiles() * mapTiles()
   for team in Team:
     world.teamVisible[team.ord] = newSeq[uint8](visionCells)
     world.teamExplored[team.ord] = newSeq[uint8](visionCells)
   for lane in 0 .. 2:
     laneWorldPaths[lane].setLen(0)
     laneWorldLayers[lane].setLen(0)
-    for tile in smoothPathTiles(lanePathTiles[lane]):
+    for tile in lanePathTiles[lane]:
       laneWorldPaths[lane].add worldPoint(pathPoint(
         int(tile.layer),
         int(tile.x),
@@ -2674,8 +3595,29 @@ proc newGame*(
     else:
       liveHeroSetup(botCount)
   spawnHeroes(world, heroSetup)
+  for hero in world.heroes:
+    hero.initHeroCharges()
+  world.stats = newCombatStats(world.heroes.len)
+  result.metrics = newMetrics(world.heroes.len, TickRate)
+  for slot, hero in world.heroes:
+    world.stats.teams[slot] = hero.team.ord
   doAssert world.heroes.len == heroSetup.len, "every configured hero must spawn"
   rebuildVision(world)
+  world.updateKnownBuildings()
   world.heroTurnStart = seededHeroTurnStart(world)
   if replayMode:
     validateReplayWorld(result)
+  result.sampleMetrics(true)
+
+proc scores*(world: World): seq[int] =
+  ## Awards every hero on the victorious team one win.
+  result.setLen(world.heroes.len)
+  if world.gameOver:
+    for slot, hero in world.heroes:
+      if hero.team == world.winner:
+        result[slot] = 1
+
+proc totalXp*(world: World): seq[int] =
+  ## Returns lifetime hero XP in platform seat order.
+  for hero in world.heroes:
+    result.add hero.totalXp
