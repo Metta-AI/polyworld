@@ -13,4 +13,16 @@ suite "floating pose":
       sin(x * 0.19 + z * 0.07) * 0.8)
     check pose.roll in -0.18'f32..0.18'f32
     check pose.pitch in -0.16'f32..0.16'f32
-    check pose.heave >= 0.6
+    let minX = bounds.minX - 1
+    let maxX = bounds.maxX + 1
+    let minZ = bounds.minZ - 1
+    let maxZ = bounds.maxZ + 1
+    for row in 0..4:
+      for column in 0..4:
+        let
+          x = minX + (maxX - minX) * column.float32 / 4
+          z = minZ + (maxZ - minZ) * row.float32 / 4
+          surface = sin(x * 0.19 + z * 0.07) * 0.8
+          deck = pose.heave + (x - pose.centerX) * tan(pose.roll) +
+            (z - pose.centerZ) * tan(-pose.pitch)
+        check deck >= surface
