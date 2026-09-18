@@ -436,7 +436,8 @@ proc setPalette*(ctx: ToonContext, palette: ToonPalette) =
   ctx.groundColor.a = 1
   ctx.horizonHeight = 0.42
 
-proc newToonContext*(vertexSrc = ToonVertSrc, fragmentSrc = ToonFragSrc): ToonContext =
+proc newToonContext*(vertexSrc = ToonVertSrc,
+    fragmentSrc = ToonFragSrc): ToonContext =
   result = ToonContext(
     transform: mat4(),
     lightDirection: ToonLightDirection,
