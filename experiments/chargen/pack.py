@@ -181,7 +181,10 @@ def packLibrary(source, output, partIds=None, clipNames=None, atlas=True):
   manifest['presets'] = [preset for preset in manifest.get('presets', [])
     if all(part['item'] == 'None' or part['item'] in categories.get(part['category'], [])
            for part in preset['parts'])]
-  defaultClip = 'Walk' if 'Walk' in wanted else next(iter(manifest['clips']), {}).get('name', '')
+  defaultClip = manifest.get('defaultAnimation', 'Walk')
+  if defaultClip not in wanted:
+    defaultClip = next(iter(manifest['clips']), {}).get('name', '')
+  manifest['defaultAnimation'] = defaultClip
   for preset in manifest['presets']:
     if preset['pose'] not in wanted:
       preset['pose'] = defaultClip

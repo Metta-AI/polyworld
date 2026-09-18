@@ -21,6 +21,7 @@ Reference = Preview / "reference/01_base_body.png"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.dont_write_bytecode = True
 from retarget import FrameRate, retarget
+from universal import retargetUniversal
 from hairs import Names as HairNames, buildHair
 from beards import Names as BeardNames, buildBeards
 
@@ -738,6 +739,9 @@ for item in items:
     total = sum(group.weight for group in vertex.groups)
     assert abs(total - 1) < 1e-5, (item.name, vertex.index, total)
 actions, sourceClips = retarget(rig)
+universalActions, universalClips = retargetUniversal(rig)
+actions.extend(universalActions)
+sourceClips.extend(universalClips)
 rig.animation_data.action = None
 for pose in rig.pose.bones:
   pose.rotation_mode = "QUATERNION"
@@ -803,7 +807,7 @@ bpy.ops.object.select_all(action="DESELECT")
 for item in items + [rig]:
   item.select_set(True)
 bpy.context.view_layer.objects.active = rig
-rig.animation_data.action = actions[0]
+rig.animation_data.action = universalActions[0]
 scene.frame_set(0)
 bpy.ops.export_scene.gltf(
   filepath=str(Preview / "character.glb"), export_format="GLB",
@@ -811,7 +815,8 @@ bpy.ops.export_scene.gltf(
   export_frame_range=False, export_force_sampling=True, export_skins=True,
   export_materials="EXPORT", export_yup=True
 )
-rig.animation_data.action = actions[0]
+rig.animation_data.action = bpy.data.actions['Idle_Loop']
+rig.animation_data.action_slot = rig.animation_data.action.slots[0]
 scene.frame_set(0)
 for item in items:
   item.hide_set(item.name not in defaultNames)
@@ -896,15 +901,16 @@ manifest = {
        "nodes": ["Beard_" + str(i + 1).zfill(2)]}
       for i, name in enumerate(BeardNames)]},
   ],
-  "clipSource": "modular_chars: RPG Tiny Hero Duo SwordAndShield and Layer Lab poses",
+  "clipSource": "Quaternius Universal Standard; RPG Tiny Hero Duo and Layer Lab poses",
+  "defaultAnimation": "Walk_Loop",
   "clips": sourceClips,
   "presets": [
-    {"name": "Base", "pose": "Idle", "skin": 5, "parts": []},
-    {"name": "Happy", "pose": "Walk", "skin": 1, "parts": [
+    {"name": "Base", "pose": "Idle_Loop", "skin": 5, "parts": []},
+    {"name": "Happy", "pose": "Walk_Loop", "skin": 1, "parts": [
       {"category": "Eyes", "item": "05 Open"},
       {"category": "Mouth", "item": "10 Laugh"},
       {"category": "Ears", "item": "Round"}]},
-    {"name": "Elf", "pose": "Victory", "skin": 0, "parts": [
+    {"name": "Elf", "pose": "Dance_Loop", "skin": 0, "parts": [
       {"category": "Ears", "item": "Elf"}]},
   ],
 }

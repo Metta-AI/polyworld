@@ -24,6 +24,9 @@ type
   Shading = enum
     Clay, Toon, Weights
 
+  ClipFamily = enum
+    Universal, SwordShield, HeldPoses
+
 proc cycle(current, step, count: int): int =
   ## Cycles through None and the available choices in either direction.
   let length = count + 1
@@ -97,7 +100,7 @@ proc run() =
     boneLabels = false
     restWrist = false
     focusBone = false
-    compareOriginal = getEnv("COMPARE_ORIGINAL", "1") == "1"
+    compareOriginal = getEnv("COMPARE_ORIGINAL", "0") == "1"
     originalOutfit = getEnv("ORIGINAL_OUTFIT", "0") == "1"
     reference: Reference
     selection = manifest.defaultSelection()
@@ -105,6 +108,7 @@ proc run() =
     palette = 0
     showParts = true
     showAnimations = true
+    clipFamily = Universal
     editingOriginal = getEnv("PARTS_MODEL", "Chargen") == "Original"
     unlitFace = true
     rimLight = true
@@ -133,13 +137,22 @@ proc run() =
   for clip in manifest.clips:
     if player.clipIndex(clip.name) < 0:
       raise newException(ChargenError, "Missing animation: " & clip.name)
-    player.setRule(clip.name, ClipRule(loop: clip.loop, next: clip.next))
+    player.setRule(clip.name, ClipRule(
+      loop: clip.loop, next: clip.next, hold: clip.hold
+    ))
 
   proc playClip(name: string, duration: float32) =
     ## Plays a named clip or the bind pose and resumes the transport.
     if name.len > 0 and player.clipIndex(name) < 0:
       raise newException(ChargenError, "Unknown animation: " & name)
     player.play(name, duration)
+    for clip in manifest.clips:
+      if clip.name == name:
+        clipFamily =
+          case clip.kind
+          of "universal": Universal
+          of "pose": HeldPoses
+          else: SwordShield
     if reference != nil:
       reference.player.play(name, duration)
     player.paused = false
@@ -234,7 +247,9 @@ proc run() =
   applyParts()
   if existsEnv("ANIM") or player.current < 0:
     let defaultClip =
-      if player.clipIndex("Walk") >= 0:
+      if manifest.defaultAnimation.len > 0:
+        manifest.defaultAnimation
+      elif player.clipIndex("Walk") >= 0:
         "Walk"
       elif manifest.clips.len > 0:
         manifest.clips[0].name
@@ -532,15 +547,26 @@ proc run() =
           distance = 5.8
           target = vec3(0, 1.52, 0)
 
-  proc clipButtons(poses: bool) =
-    ## Packs clip buttons into rows while keeping held poses in their own group.
+  proc clipButtons() =
+    ## Packs the selected animation family into readable button rows.
+    proc label(name: string): string =
+      ## Shortens button labels while keeping the exported clip names intact.
+      if name == "A_TPose":
+        "T pose"
+      else:
+        name.replace("_Loop", "").replace("_", " ")
     var
       rows: seq[seq[string]] = @[@[]]
       used = 0.0'f
     for clip in manifest.clips:
-      if (clip.kind == "pose") != poses:
+      let family =
+        case clip.kind
+        of "universal": Universal
+        of "pose": HeldPoses
+        else: SwordShield
+      if family != clipFamily:
         continue
-      let width = sk.getTextSize(sk.textStyle, clip.name).x +
+      let width = sk.getTextSize(sk.textStyle, label(clip.name)).x +
         sk.theme.padding.float32 * 3
       if used + width > RowWidth.float32 and rows[^1].len > 0:
         rows.add @[]
@@ -550,12 +576,12 @@ proc run() =
     for i, names in rows:
       if names.len == 0:
         continue
-      group "clips " & $poses & " " & $i:
+      group "clips " & $clipFamily & " " & $i:
         box RowWidth, 36
         layout LeftToRight
         itemSpacing 4
         for name in names:
-          button name:
+          button label(name):
             playClip(name, fade)
 
   proc animationsPanel() =
@@ -681,12 +707,23 @@ proc run() =
           text &"Wrist bend: {weightPreview.jointBend(selectedBone):.1f} deg"
         text "W: weights. B: bones. F: focus."
       text "Animation clips"
-      clipButtons(false)
-      for clip in manifest.clips:
-        if clip.kind == "pose":
-          text "Poses"
-          clipButtons(true)
-          break
+      group "animation family":
+        box RowWidth, 36
+        layout LeftToRight
+        itemSpacing 4
+        radioButton("Universal", clipFamily, Universal)
+        radioButton("RPG", clipFamily, SwordShield)
+        radioButton("Poses", clipFamily, HeldPoses)
+      case clipFamily
+      of Universal:
+        text "Quaternius Standard - in-place"
+        if compareOriginal:
+          text "Universal clips play on Chargen only."
+      of SwordShield:
+        text "RPG Tiny Hero Duo - sword and shield"
+      of HeldPoses:
+        text "Layer Lab - static poses"
+      clipButtons()
 
   when defined(takeScreenshot):
     var screenshotFrame = 0
@@ -821,7 +858,12 @@ proc run() =
     glDisable(GL_MULTISAMPLE)
     sk.beginUi(window, window.size)
     if compareOriginal:
-      for (x, title) in [(-1.2'f, "ORIGINAL KIT"),
+      let originalTitle =
+        if reference.player.current < 0:
+          "ORIGINAL KIT (BIND POSE)"
+        else:
+          "ORIGINAL KIT"
+      for (x, title) in [(-1.2'f, originalTitle),
                          (1.2'f, "CHARGEN MODEL")]:
         let
           point = projection * view * vec4(x, 3.18, 0, 1)

@@ -13,6 +13,7 @@ import vmath, gltf
 type
   ClipRule* = object
     loop*: bool
+    hold*: bool    ## Keep the final pose instead of returning to a loop.
     next*: string   ## one-shots only: clip to chain into; "" = return
 
   Pose = seq[tuple[pos: Vec3, rot: Quat, scale: Vec3]]
@@ -148,6 +149,7 @@ proc update*(player: ClipPlayer, dt: float32) =
     let rule = player.rules[player.current]
     if rule.next.len > 0:
       player.play(rule.next)
-    elif player.lastLoop >= 0 and player.lastLoop != player.current:
-      player.play(player.lastLoop)
+    elif not rule.hold and player.lastLoop >= 0 and
+      player.lastLoop != player.current:
+        player.play(player.lastLoop)
   player.pose()

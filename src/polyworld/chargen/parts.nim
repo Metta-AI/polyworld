@@ -27,7 +27,7 @@ type
 
   ClipInfo* = object
     name*, kind*, next*, file*: string
-    loop*: bool
+    loop*, hold*: bool
 
   Skin* = object
     name*: string
@@ -56,6 +56,7 @@ type
     rig*, skeleton*, skinPalette*, hairPalette*, pupilPalette*: string
     hairColors*, pupilColors*: seq[ColorPreset]
     defaultHairColor*, defaultPupilColor*: string
+    defaultAnimation*: string
     defaultSkin*: int
     base*: seq[string]
     skinNodes*: seq[string]

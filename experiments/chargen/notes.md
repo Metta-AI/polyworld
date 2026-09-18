@@ -120,6 +120,31 @@ exported tint functions, as shown in `chargen.nim`.
 
 ## Rebuilding and checking
 
+The default animation group is Quaternius Universal Standard, with 43 entries
+including its T-pose. The complete downloaded source pack lives in
+`polyworld_data/animations/quaternius/universal_standard`, together with its
+CC0 license, setup images, and both in-place and root-motion exports.
+Chargen uses the in-place GLB. Its retargeted clips are individually exported
+under `characters/chargen/animations/universal`. The existing RPG animations
+and Layer Lab poses remain in separate viewer groups.
+
+`universal.py` maps all 22 Chargen bones using the source's explicit T-pose,
+preserves fixed limb lengths, and bakes at 30 fps. No arm mirroring or runtime
+wrist correction is applied. Universal clips animate only the Chargen model.
+The optional original comparison stays in bind pose for those clips.
+
+To update animations without rebuilding geometry, run Blender in background
+with `--python experiments/chargen/import_animations.py`. Set
+`CHARGEN_PYTHON=/opt/homebrew/bin/python3` when that interpreter has Pillow.
+Run Blender with `--python experiments/chargen/verify_universal.py` to check
+all exported bone rotations, hip movement, and limb lengths against the source.
+Full model builds also include the Universal library.
+
+`defaultAnimation` in the library manifest selects the initial clip.
+One-shots can use `next` to chain into a loop, or `hold: true` to keep their
+final pose. Death and the aiming poses hold, while jumping, sitting, and spell
+transitions lead into their respective loops.
+
 The monster eyes and evil mouths use approved sheets under
 `source/eyes/monster_v1` and `source/mouths/evil_v1`. To repeat their cuts,
 run `python3 experiments/chargen/cut_faces.py` with Pillow and ImageMagick
