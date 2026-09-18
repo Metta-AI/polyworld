@@ -676,13 +676,15 @@ proc run() =
           skinControls()
       var categoryOrder: seq[int]
       for key in ["Headgear", "Chest", "Belt", "Jacket",
-                  "Suspenders", "Leg", "Foot"]:
+                  "Suspenders", "Leg", "Foot", "Left hand",
+                  "Right hand", "Back"]:
         for i, category in source.categories:
           if category.key == key:
             categoryOrder.add i
       for i, category in source.categories:
         if category.key notin ["Headgear", "Chest", "Jacket", "Belt",
-                              "Suspenders", "Leg", "Foot"]:
+                              "Suspenders", "Leg", "Foot", "Left hand",
+                              "Right hand", "Back"]:
           categoryOrder.add i
       for i in categoryOrder:
         let category = source.categories[i]
@@ -710,7 +712,6 @@ proc run() =
           text "Beard uses hair color."
       if not editingOriginal:
         pupilControls()
-        text "Props: not modeled yet."
       button "Reset parts":
         if editingOriginal:
           reference.clearParts()

@@ -1,15 +1,27 @@
 import
-  std/[os, sets, tables],
+  std/[os, sets, strutils, tables],
   chroma, gltf, opengl, pixie, vmath, windy,
   polyworld/[animblend, chargen, toon], lineups
 
 proc run() =
-  ## Renders one exported hero and its separate wearable parts in both views.
+  ## Renders a preset and its clothing or equipment in both views.
   let
     directory = getEnv("CHARGEN_LIBRARY", ChargenLibrary)
     output = getEnv("REVIEW_OUTPUT", "tmp/chargen/gota/review")
     manifest = readManifest(directory)
-    preset = manifest.presets[0]
+    presetName = getEnv("REVIEW_PRESET", manifest.presets[0].name)
+    equipment = getEnv("REVIEW_EQUIPMENT", "0") == "1"
+    smoothLighting = getEnv("REVIEW_PBR", "0") == "1"
+    angle = parseFloat(getEnv("REVIEW_ANGLE", "0")).float32
+  var
+    preset: Preset
+    found = false
+  for candidate in manifest.presets:
+    if candidate.name == presetName:
+      preset = candidate
+      found = true
+  if not found:
+    raise newException(ChargenError, "Unknown review preset: " & presetName)
   var inventory = manifest.presetManifest(preset)
   for clip in manifest.clips:
     if clip.name in ["A_TPose", "Walk_Loop", "Crouch_Fwd_Loop"]:
@@ -25,6 +37,7 @@ proc run() =
   let
     renderer = newRenderer(window)
     toon = newToonContext()
+    pbr = newPbrContext(renderer)
     model = readCharacter(directory, inventory)
     nodes = partNodes(model.root)
     player = newClipPlayer(model.root)
@@ -43,7 +56,14 @@ proc run() =
   eyes.applyPupilTint(
     manifest.pupilColors[manifest.pupilColors.colorIndex(preset.pupilColor)].rgb
   )
-  var original: Table[string, bool]
+  var
+    original: Table[string, bool]
+    categories: seq[string]
+  for key in (if equipment: @["Left hand", "Right hand", "Back"]
+              else: @["Foot", "Leg", "Belt", "Chest", "Headgear"]):
+    for category in inventory.categories:
+      if category.key == key and category.items.len > 0:
+        categories.add key
   for name, node in nodes:
     original[name] = node.visible
   for category in inventory.categories:
@@ -54,14 +74,23 @@ proc run() =
   toon.setPalette(ToonPalettes[0])
   toon.rimColor = color(1, 1, 1, 0)
   toon.lightDirection = -normalize(vec3(-0.6, 0.5, 0.7))
+  pbr.size = window.size
+  pbr.tint = color(1, 1, 1, 1)
+  pbr.useTrs = true
+  pbr.ambientLightColor = color(0.65, 0.67, 0.72, 0.65)
+  pbr.sunLightDirection = toon.lightDirection
+  pbr.sunLightColor = color(0.95, 0.96, 1, 1)
+  pbr.rimLightDirection = normalize(vec3(-1, 1, -1))
+  pbr.rimLightColor = color(0.95, 0.82, 0.66, 0.25)
+  pbr.debugView = dvLit
+  pbr.useShadows = false
+  pbr.drawSkybox = false
   player.play("A_TPose", 0)
   player.seek(0)
   var frame = 0
   window.onFrame = proc() =
     ## Captures actual runtime meshes with the shared skin and animation code.
-    let
-      slot = frame - 3
-      categories = ["Foot", "Leg", "Belt", "Chest", "Headgear"]
+    let slot = frame - 3
     for name, node in nodes:
       node.visible = original[name]
       node.baseVisible = original[name]
@@ -84,7 +113,7 @@ proc run() =
     var
       center = vec3(0, 1.7, 0)
       height = 3.8'f
-      width = 3.1'f
+      width = if equipment: 3.7'f else: 3.1'f
     if frame >= 3:
       var
         low = vec3(100, 100, 100)
@@ -112,9 +141,17 @@ proc run() =
     for i in 0 ..< 2:
       toon.transform = translate(vec3(
         if i == 0: -separation else: separation, 0, 0
-      )) * rotateY(if i == 0: 0'f else: PI.float32) * translate(-center)
+      )) * rotateY(angle + (if i == 0: 0'f else: PI.float32)) *
+        translate(-center)
       model.root.updateTransforms(toon.transform)
-      toon.draw(model.root)
+      if smoothLighting:
+        pbr.view = toon.view
+        pbr.proj = toon.proj
+        pbr.cameraPosition = toon.cameraPosition
+        pbr.transform = toon.transform
+        pbr.draw(model.root)
+      else:
+        toon.draw(model.root)
     renderer.endFrame()
     let shot = newImage(window.size.x, window.size.y)
     glReadPixels(
@@ -126,11 +163,11 @@ proc run() =
       if frame == 0: "model"
       elif frame == 1: "walk"
       elif frame == 2: "crouch"
-      else: categories[slot]
+      else: categories[slot].replace(' ', '_')
     shot.writeFile(output / (name & ".png"))
     window.swapBuffers()
     inc frame
-    if frame == 8:
+    if frame == 3 + categories.len:
       quit(0)
   while not window.closeRequested:
     pollEvents()
