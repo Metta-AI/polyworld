@@ -2,7 +2,7 @@
 
 import
   vmath,
-  polyworld/[gameuis, player, stackpanels],
+  polyworld/[chrome, gameuis, player, stackpanels],
   ../examples/gods_of_the_arena/layouts as gota,
   ../examples/light_vs_dark/layouts as lvd,
   ../examples/call_to_adventure/layouts as cta
@@ -20,6 +20,62 @@ proc checkPanels(parent: GameUiPanel, children: openArray[GameUiPanel]) =
     doAssert child.origin.x == child.origin.x.int.float32
     doAssert child.origin.y == child.origin.y.int.float32
   doAssert not panelsOverlap(children)
+
+proc checkHud(
+    layout: GameUiLayout,
+    panels: openArray[GameUiPanel]
+) =
+  ## Checks that game plates and transport fit at the chosen HUD scale.
+  doAssert layout.size.x >= TransportMinWidth
+  doAssert layoutFits(layout, panels, 48), $layout.size
+
+proc checkHud(
+    layout: GameUiLayout,
+    regions: openArray[tuple[region: GameUiRegion, size: Vec2]]
+) =
+  ## Checks the actual game plates and transport at the shared HUD scale.
+  var panels: seq[GameUiPanel]
+  for (region, size) in regions:
+    panels.add layout.panel(region, size)
+  checkHud(layout, panels)
+
+echo "Testing all game HUDs at shared scale breakpoints"
+for size in [
+  vec2(480, 270), vec2(959, 539), vec2(960, 540), vec2(1024, 576),
+  vec2(1280, 720), vec2(1919, 1079), vec2(1920, 1080),
+  vec2(2560, 1440), vec2(3071, 1728), vec2(3072, 1727),
+  vec2(3072, 1728), vec2(3839, 2159), vec2(3840, 2160),
+  vec2(7680, 4320), vec2(1080, 1920), vec2(3440, 1440)
+]:
+  let layout = initGameUiLayout(size / gameUiScale(size), TransportHeight)
+  let shop = gota.shopPanels(layout.size)
+  checkPanels(shop.panel, [shop.heading, shop.catalog, shop.footer])
+  checkPanels(shop.catalog, shop.cards)
+  doAssert shop.cards[0].size.x >= (if shop.compact: 280 else: 320)
+  doAssert shop.cards[0].size.y >= (if shop.compact: 140 else: 160)
+  checkHud(layout, [
+    gota.scorePanel(layout),
+    layout.panel(GameUiRegion.TopCenter, gota.PanelHeroes),
+    layout.panel(GameUiRegion.TopRight, gota.PanelClock),
+    layout.panel(GameUiRegion.BottomLeft, gota.PanelMinimap),
+    layout.panel(GameUiRegion.BottomCenter, gota.PanelDetails),
+    layout.panel(GameUiRegion.BottomRight, gota.PanelInventory)
+  ])
+  checkHud(layout, [
+    (GameUiRegion.TopLeft, lvd.PanelScore),
+    (GameUiRegion.TopCenter, lvd.PanelResources),
+    (GameUiRegion.TopRight, lvd.PanelMinimap),
+    (GameUiRegion.BottomLeft, lvd.PanelSelection),
+    (GameUiRegion.BottomRight, lvd.PanelBuild)
+  ])
+  checkHud(layout, [
+    (GameUiRegion.TopLeft, cta.PanelParty),
+    (GameUiRegion.TopCenter, cta.PanelQuest),
+    (GameUiRegion.TopRight, cta.PanelMinimap),
+    (GameUiRegion.BottomLeft, cta.PanelChat),
+    (GameUiRegion.BottomCenter, cta.PanelAbilities),
+    (GameUiRegion.BottomRight, cta.PanelInventory)
+  ])
 
 echo "Testing HUD stacks at different screen origins"
 for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
@@ -43,7 +99,7 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
       panel = GameUiPanel(origin: origin, size: gota.PanelHeroes)
       cards = panel.heroPanels()
     for card in cards:
-      checkPanels(panel, [card.portrait, card.hp, card.mana])
+      checkPanels(panel, [card.portrait, card.name, card.hp, card.mana])
       doAssert card.hp.origin.x == card.mana.origin.x
       doAssert card.hp.size == card.mana.size
     for team in 0 ..< 2:
@@ -51,7 +107,7 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
         let
           previous = cards[team * 5 + i - 1].portrait
           current = cards[team * 5 + i].portrait
-        doAssert current.origin.x - previous.origin.x == 95
+        doAssert current.origin.x - previous.origin.x == 104
   block:
     let
       panel = GameUiPanel(origin: origin, size: gota.PanelDetails)
@@ -70,11 +126,10 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
     let
       panel = GameUiPanel(origin: origin, size: gota.PanelInventory)
       inventory = gota.inventoryPanels(panel)
-    checkPanels(panel, [inventory.title, inventory.contents, inventory.gold])
+    checkPanels(panel, [
+      inventory.title, inventory.shop, inventory.contents, inventory.gold
+    ])
     checkPanels(inventory.contents, inventory.slots)
-    var shop: array[20, GameUiPanel]
-    stackGrid(inventory.contents, vec2(36), 5, vec2(8, 1), shop)
-    checkPanels(inventory.contents, shop)
   block:
     let
       panel = GameUiPanel(origin: origin, size: lvd.PanelMinimap)

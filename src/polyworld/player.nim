@@ -36,7 +36,7 @@ type
     controls*: array[5, GameUiPanel]
     loop*: GameUiPanel
     speeds*: array[4, GameUiPanel]
-    scrub*, recorded*, scrubHit*, camera*, tick*: GameUiPanel
+    scrub*, recorded*, scrubHit*, camera*, stats*, tick*: GameUiPanel
 
   Player* = object
     playing*: bool
@@ -54,6 +54,8 @@ type
     targetTick*: int32
       ## Catch up to this tick at max speed. -1 means none.
     accumulator*: float32
+    seekSerial*: int
+    automaticSeek*: bool
     tickRate: int32
 
 proc speed*(player: Player): int32 =
@@ -82,12 +84,16 @@ proc initPlayer*(
     live: bool,
     durationTicks: int32,
     playing = true,
-    speed = 1'i32
+    speed = 1'i32,
+    repeating = false
 ): Player =
   ## Creates a transport that starts in play unless asked to pause.
   result.live = live
   result.durationTicks = max(durationTicks, 0)
   result.playing = playing
+  result.repeating = repeating
+  when defined(replayViewer):
+    result.repeating = repeating or not live
   result.speedIndex = speedIndexOf(speed)
   result.restoreTick = -1
   result.targetTick = -1
@@ -107,10 +113,13 @@ proc sync*(
   if player.targetTick >= 0 and player.tick >= player.targetTick:
     player.targetTick = -1
 
-proc seekTo*(player: var Player, tick: int32, play = true) =
+proc seekTo*(player: var Player, tick: int32, play = true,
+    automatic = false) =
   ## Jumps toward one timeline tick at max speed, restoring if going back.
   ## Backward seeks reload the last checkpoint at or before the target,
   ## then resimulate up to it.
+  inc player.seekSerial
+  player.automaticSeek = automatic
   let wanted = clamp(tick, 0'i32, player.timelineEnd)
   if wanted < player.tick:
     player.restoreTick = wanted
@@ -195,7 +204,7 @@ proc shouldTick*(
   ## Paused seeks run until they land so single-tick steps stay exact.
   if player.reachedEnd:
     if player.repeating:
-      player.seekTo(0)
+      player.seekTo(0, automatic = true)
       return false
     player.playing = false
     player.targetTick = -1
@@ -213,11 +222,13 @@ proc shouldTick*(
     return true
   false
 
-proc transportPanels*(panel: GameUiPanel): TransportPanels =
+proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
   ## Reserves fixed controls at both ends, then fills the timeline between.
   var trailing = panel.stack(RightToLeft, vec2(0, IconY))
   let tick = trailing.takeColumn(TickLabelW, 16)
   result.camera = trailing.take(vec2(IconSize), GroupGap)
+  if showStats:
+    result.stats = trailing.take(vec2(IconSize), IconGap)
   var leading = trailing.takeRest().stack(LeftToRight)
   leading.gap(12)
   for control in result.controls.mitems:
@@ -290,13 +301,14 @@ proc drawTransport*(
     window: Window,
     panel: GameUiPanel,
     actionCam: var ActionCam,
-    followSelection: var bool
+    followSelection: var bool,
+    statsToggle: ptr bool = nil
 ) =
   ## Draws the shared play/replay bar and applies clicks.
   sk.drawRibbon(panel)
   let playing = player.playing or player.targetTick >= 0
   let
-    slots = panel.transportPanels()
+    slots = panel.transportPanels(statsToggle != nil)
     skipStart = slots.controls[0]
     stepBackBtn = slots.controls[1]
     playBtn = slots.controls[2]
@@ -353,6 +365,15 @@ proc drawTransport*(
         1.0'f32
       )
       player.seekTo(int32(ratio * player.timelineEnd.float32))
+  if statsToggle != nil:
+    let automatic = actionCam.subjectMode and actionCam.enabled and
+      (actionCam.director.overview or actionCam.director.finalResults)
+    sk.drawIcon(slots.stats, "stats", statsToggle[] or automatic)
+    if window.clicked(sk, slots.stats):
+      if automatic and not statsToggle[]:
+        actionCam.director.dismissOverview()
+      else:
+        statsToggle[] = not statsToggle[]
   let actionBtn = slots.camera
   sk.drawIcon(actionBtn, "action_cam", actionCam.enabled)
   if window.clicked(sk, actionBtn):

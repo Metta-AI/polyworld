@@ -6,13 +6,16 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps,
   sim,
   bots,
   controls,
   replays
+
+when defined(coworld):
+  import polyworld/coworld
 
 proc usage() =
   ## Prints the shared Polyworld game command surface.
@@ -114,11 +117,19 @@ proc advanceGame*() =
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+  run.sampleMetrics(
+    run.world.outcome != RunningOutcome or
+      (run.replayMode and run.world.tick >= run.replayData.hashes.len)
+  )
+  run.metrics.finishTick(run.world.tick)
 
 proc saveRecording*(path = options.recordPath) =
   ## Finalizes and writes a requested action replay.
   if run.recorder == nil or path.len == 0:
     return
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  run.recorder.data.metrics = run.history.replayMetrics()
   saveReplay(path, run.recorder.data)
   echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
@@ -203,15 +214,20 @@ proc runHeadless*() =
     saveRecording()
     for slot in 0 ..< PartySize:
       if run.heroVms[slot] != nil and run.heroVms[slot].failed:
-        echo &"hero {100 + slot} script FAILED: {run.heroVms[slot].lastError}"
+        when not defined(coworld):
+          echo &"hero {100 + slot} script FAILED: {run.heroVms[slot].lastError}"
 
-options = parseGameOptions()
+when defined(coworld):
+  options = coworldOptions(4)
+else:
+  options = parseGameOptions()
+
 startGameProfile()
 if options.replayPath.len > 0:
   var replayData: ReplayData
   profileBlock "replay":
     replayData = loadReplay(options.replayPath)
-  options.seed = replayData.header.setup.seed
+  options.seed = replayData.config.seed
   options.maximumTicks = int32(replayData.hashes.len)
   profileBlock "map":
     run = newGame(
@@ -232,4 +248,9 @@ else:
     run = newGame(options.seed, options.maximumTicks)
   loadBots(run, options.botGroups, options.playerSlot)
   run.recorder = initReplayRecorder(run.world.setup)
+  run.recorder.data.config =
+    when defined(coworld):
+      coworld.config
+    else:
+      localGameConfig(options, PartySize)
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
