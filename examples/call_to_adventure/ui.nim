@@ -3,12 +3,11 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels],
+  polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player,
+    rtscameras, stackpanels],
   content, maps, sim, game, controls, layouts
 
 const
-  HudClearance = 48.0'f32
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
   IconTiny = 16.0'f32
@@ -16,12 +15,6 @@ const
   DividerColor = rgbx(94, 80, 56, 255)
   ActionKeys = [
     "Q", "W", "E", "R", "F", "G"
-  ]
-  HeroNames: array[HeroClass, string] = [
-    "Brom", "Nyra", "Fenn", "Zyra"
-  ]
-  HeroTitles: array[HeroClass, string] = [
-    "Fighter", "Wizard", "Rogue", "Cleric"
   ]
   HeroPortraitKeys*: array[HeroClass, string] = [
     "hero_fighter", "hero_wizard", "hero_rogue", "hero_cleric"
@@ -52,39 +45,68 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
     PanelInventory
   )
 
-proc hudLayoutFits(layoutSize: Vec2): bool =
-  ## Returns whether native HUD plates fit this layout without overlap.
-  let
-    layout = initGameUiLayout(layoutSize, TransportHeight)
-    chrome = placeChrome(layout)
-  layoutSize.x >= TransportMinWidth and layoutFits(
-    layout,
-    [
-      chrome.party,
-      chrome.chat,
-      chrome.minimap,
-      chrome.quest,
-      chrome.abilities,
-      chrome.inventory
-    ],
-    HudClearance
-  )
-
-proc hudUiScale*(windowSize: Vec2): float32 =
-  ## Returns the stepped Silky scale that keeps HUD plates from overlapping.
-  fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
-
-proc hudUiScale*(window: Window): float32 =
-  ## Returns the stepped Silky scale that fits the native HUD on this window.
-  hudUiScale(vec2(window.size.x.float32, window.size.y.float32))
-
 proc currentLayout*(window: Window): GameUiLayout =
   ## Returns the nine-region HUD layout in Silky layout space.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
-      hudUiScale(window),
+      gameUiScale(window),
     TransportHeight
   )
+
+var statsState: StatsState
+
+proc currentMetrics(slot: int, complete: bool): MetricRow =
+  ## Combines authoritative totals with live or original replay telemetry.
+  result = run.metrics.read(slot, run.world.tick, complete)
+  if run.historyPlayback:
+    result = result.withTelemetry(
+      run.history, slot, run.world.tick, complete
+    )
+  if run.replayMode:
+    result = result.withTelemetry(
+      run.replayData.metrics, slot, run.world.tick, complete
+    )
+
+proc currentStats(): StatsTable =
+  ## Adapts the actual roster and outcome to the shared table.
+  run.sampleMetrics()
+  result = StatsTable(kind: AdventureStats, tick: run.world.tick,
+    complete: run.world.outcome != RunningOutcome, winner: -1)
+  let wins = run.world.scores()
+  const Roles = ["FIGHTER", "WIZARD", "ROGUE", "CLERIC"]
+  for slot in 0 ..< PartySize:
+    let hero = run.world.actors[slot]
+    var outcome = ""
+    if not hero.alive:
+      outcome = "FALLEN"
+    elif result.complete:
+      if wins[slot] > 0:
+        outcome = "WINNER"
+      elif run.world.returned[slot]:
+        outcome = "ESCAPED"
+      else:
+        outcome = "STRANDED"
+    result.rows.add StatsRow(
+      slot: slot,
+      name: run.config.players[slot].displayName(slot),
+      subtitle: Roles[hero.heroClass.ord],
+      portrait: HeroPortraitKeys[hero.heroClass],
+      outcome: outcome,
+      fallen: not hero.alive,
+      selected: not run.replayMode and options.playerSlot == slot + 1,
+      metrics: currentMetrics(slot, result.complete)
+    )
+
+proc statsContains(window: Window, mouse: Vec2): bool =
+  ## Tests the overlay before allowing input through to the existing HUD.
+  if not statsState.visible(window.tabHeld):
+    return false
+  statsState.mouseOverStats(window, currentLayout(window),
+    currentStats(), mouse)
+
+proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
+  ## Keeps covered HUD controls from receiving an overlay click.
+  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
 
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
@@ -107,7 +129,7 @@ proc insideMinimapCircle(area: GameUiPanel, point: Vec2): bool =
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether camera input begins inside any visible HUD panel.
-  if mouseOverDebugMenu(mouse):
+  if window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   if insideMinimapCircle(chrome.minimap.minimapInner(), mouse):
@@ -305,6 +327,9 @@ proc updateMinimapCamera*(
     viewLevel: int
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
+  if window.statsContains(mouse):
+    minimapPanning = false
+    return
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapInner()
@@ -361,15 +386,27 @@ proc drawUi*(
     focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  let table = currentStats()
+  statsState.syncDirector(actionCam, table, window.tabHeld)
   let
     chrome = currentChrome(window)
     chatPanel = sk.beginFrame(chrome.chat)
     questPanel = sk.beginFrame(chrome.quest)
     detailsPanel = sk.beginFrame(chrome.abilities)
     inventoryPanel = sk.beginFrame(chrome.inventory)
-    selectedActor = run.world.actors[primaryId]
+    detailSlot =
+      if actionCam.enabled and actionCam.locked and
+          actionCam.director.subject.owner in 0 ..< PartySize:
+        int(actionCam.director.subject.owner)
+      else:
+        primaryId
+    selectedActor = run.world.actors[detailSlot]
     selectedClass = selectedActor.heroClass
-    shownLevel = run.viewLevel(selectedIds)
+    shownLevel =
+      if actionCam.enabled and actionCam.locked:
+        actionCam.director.subject.floor
+      else:
+        run.viewLevel(selectedIds)
     experience = run.progressExperience
     experienceInLevel = experience mod 250
     nextExperience = 250
@@ -395,11 +432,16 @@ proc drawUi*(
         rgbx(255, 255, 255, 255)
       else:
         rgbx(140, 140, 148, 255),
-      selected = selectedIds[slot],
+      selected = (if actionCam.enabled and actionCam.locked:
+        slot == detailSlot else: selectedIds[slot]),
       iconSize = IconSmall
     )
     sk.drawLabel(
-      HeroNames[class],
+      sk.fittedLabel(
+        run.config.players[slot].displayName(slot),
+        nameBox.size.x,
+        "Bold"
+      ),
       nameBox.origin,
       nameBox.size,
       rgbx(255, 255, 255, 255),
@@ -465,7 +507,7 @@ proc drawUi*(
       vec2(IconTiny),
       rgbx(186, 214, 255, 255)
     )
-    if window.clicked(sk, card):
+    if window.hudClicked(sk, card):
       actionCam.takeManual()
       selectHeroSlot(
         primaryId,
@@ -501,9 +543,9 @@ proc drawUi*(
     "Small",
     CenterAlign
   )
-  if window.clicked(sk, generalTab):
+  if window.hudClicked(sk, generalTab):
     chatTab = 0
-  if window.clicked(sk, combatTab):
+  if window.hudClicked(sk, combatTab):
     chatTab = 1
   var shown: seq[string]
   if run.log.len == 0:
@@ -687,9 +729,10 @@ proc drawUi*(
       if options.playerSlot > 0 and
           not run.replayMode and
           primaryId == options.playerSlot - 1:
-        if window.clicked(sk, slotPanel):
+        if window.hudClicked(sk, slotPanel):
           queueUseItem(int32(primaryId), int32(bag))
-        elif window.buttonReleased[MouseRight] and
+        elif not window.statsContains(sk.mousePos) and
+          window.buttonReleased[MouseRight] and
             slotPanel.contains(sk.mousePos):
           queueDropItem(int32(primaryId), int32(bag))
     sk.drawKeyPip(slotPanel, ActionKeys[index])
@@ -728,9 +771,10 @@ proc drawUi*(
         options.playerSlot > 0 and
         not run.replayMode and
         primaryId == options.playerSlot - 1:
-      if window.clicked(sk, well):
+      if window.hudClicked(sk, well):
         queueUseItem(int32(primaryId), int32(bag))
-      elif window.buttonReleased[MouseRight] and
+      elif not window.statsContains(sk.mousePos) and
+          window.buttonReleased[MouseRight] and
           well.contains(sk.mousePos):
         queueDropItem(int32(primaryId), int32(bag))
   let counters = [
@@ -754,7 +798,8 @@ proc drawUi*(
     window,
     chrome.layout.transportPanel,
     actionCam,
-    followSelection
+    followSelection,
+    addr statsState.toggled
   )
   if run.hashCheck.mismatches > 0:
     sk.drawError(
@@ -763,3 +808,10 @@ proc drawUi*(
         &"first at tick {run.hashCheck.firstTick}"
     )
   sk.drawDebugMenu(window)
+  statsState.syncDirector(actionCam, table, window.tabHeld)
+
+proc drawStatsOverlay*(sk: Silky, window: Window) =
+  ## Presents readable statistics above the HUD at every window width.
+  sk.drawStatsOverlay(
+    window, currentLayout(window), statsState, currentStats(), run.history
+  )

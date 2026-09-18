@@ -21,6 +21,8 @@ import
   controls,
   ground,
   decor,
+  democamera,
+  scorecard,
   houses,
   houseview
 
@@ -44,11 +46,10 @@ const
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
     ## texture instead of feathering across a whole tile.
-  CropHeight = 1.0'f32
-    ## A growing crop stands this many tiles tall, waist high on a villager.
+  CropHeight = 0.7'f32
   CropBrightness = 1.3'f32
     ## The kit plants are painted a deep green; lifted so they read on
-    ## dark soil.
+    ## their containers.
   CropLooks: array[VeggieKinds, tuple[kit: DecorKit, node: string, tint: Vec3]] = [
     (ValleyVegetation, "plant_04a", vec3(1.0, 1.05, 0.85)),   # carrot
     (ValleyVegetation, "plant_06a", vec3(1.15, 0.95, 0.85)),  # tomato
@@ -80,7 +81,7 @@ const
     ## stalks for the onion family, low feathery tops for roots, a bush for
     ## tomatoes and peppers, seedling leaves for squashes, broad leaves for
     ## the cabbage family, and the wheat clump for corn. A tint tells them
-    ## apart. A bare plot is just the tilled dirt the terrain draws.
+    ## apart. Harvested plots retain their empty pots.
 
 type
   GraphicsError = object of CatchableError
@@ -103,7 +104,8 @@ var
     live = not run.replayMode,
     durationTicks = run.maximumTicks,
     playing = not options.pauseOnStart,
-    speed = options.speed
+    speed = options.speed,
+    repeating = run.replayMode
   )
   frameAlpha = 0.0'f32
   previousPositions: array[VillagerCount, Vec3]
@@ -250,12 +252,10 @@ proc runGraphics*() =
       int(RoadTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
     setTileMaterial(
       int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
-    ## Tilled plots are dirt through the ground mask like the roads, only
-    ## darker, so the tile itself bakes as grass with a tilled tint.
     setTileMaterial(
       int(GardenTileKind),
       GrassMaterial, DirtMaterial,
-      vec3(0.72, 0.62, 0.55), vec3(0.8, 0.7, 0.55),
+      vec3(1), vec3(0.85),
       1
     )
     setTileMaterial(
@@ -358,6 +358,11 @@ proc runGraphics*() =
     closeScale = 0.5
   )
 
+  let demoMode = options.playerSlot == 0 or run.replayMode
+  var demoCamera = initDemoCamera(VillagerCount)
+  if demoMode:
+    cameraDistance = DemoDistance
+
   ## Replay scaffolding
 
   seekCheckpoints.add SeekCheckpoint(
@@ -389,9 +394,15 @@ proc runGraphics*() =
     run.hashCheck = seekCheckpoints[slot].hashCheck
     run.historyPlayback = true
     havePoses = false
+    demoCamera.resetMotion()
     while run.world.tick < wanted:
       advanceGame()
       captureCheckpoint()
+
+  seekStartup(captureCheckpoint)
+  transport.sync(run.world.tick,
+    (if run.recorder != nil: int32(run.recorder.data.hashes.len)
+     else: int32(run.replayPlayer.data.hashes.len)), run.world.over)
 
   ## Camera and input
 
@@ -478,6 +489,28 @@ proc runGraphics*() =
             48
           )
 
+  proc followPoint(v: Villager): Vec3 =
+    ## Frames an outdoor gnome at body height, or their house while indoors.
+    if v.inHouse >= 0:
+      tileWorldPoint(run.world.map.houses[v.inHouse].center)
+    else:
+      renderPoint(v) + vec3(0, VillagerHeight * 0.5'f32, 0)
+
+  proc demoSubjects(): array[VillagerCount, DemoSubject] =
+    ## Supplies interpolated viewer positions without modifying the simulation.
+    for slot, v in run.world.villagers:
+      var conversation = 0
+      if v.order == TalkOrder:
+        for member in run.world.socialGroup(int32(slot)):
+          conversation = member + 1
+          break
+      result[slot] = DemoSubject(
+        conversation: conversation,
+        position: followPoint(v),
+        indoors: v.inHouse >= 0,
+        quiet: v.animation == IdleAnimation
+      )
+
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and villager following.
     updateMinimapCamera(
@@ -515,12 +548,22 @@ proc runGraphics*() =
       followSlot = -1
       actionCam.takeManual()
     if not overUi and window.scrollDelta.y != 0:
-      actionCam.takeManual()
+      if not demoMode:
+        actionCam.takeManual()
       cameraDistance = clamp(
         cameraDistance * pow(0.92'f32, window.scrollDelta.y / 3.0'f32),
         6.0'f32,
         220.0'f32
       )
+    if demoMode:
+      if actionCam.enabled:
+        let subjects = demoSubjects()
+        if not demoCamera.active:
+          demoCamera.activate(subjects, cameraTarget, int(followSlot))
+          followSlot = -1
+        demoCamera.update(subjects, cameraTarget, dt, transport.playing and not run.world.over)
+        return
+      demoCamera.deactivate()
     if actionCam.enabled:
       feedActionCam()
       actionCam.chooseShot(dt, transport.speed)
@@ -532,13 +575,14 @@ proc runGraphics*() =
       )
       return
     if followSlot >= 0:
-      let v = run.world.villagers[followSlot]
-      let focus =
-        if v.inHouse >= 0:
-          tileWorldPoint(run.world.map.houses[v.inHouse].center)
-        else:
-          renderPoint(v)
-      cameraTarget = mix(cameraTarget, focus, damping(5.0'f32, dt))
+      cameraTarget = followPoint(run.world.villagers[followSlot])
+
+  proc snapFollowCamera() =
+    ## Speed controls recenter only the current follow target.
+    if followSlot >= 0:
+      cameraTarget = followPoint(run.world.villagers[followSlot])
+    elif demoMode and demoCamera.active:
+      demoCamera.snapToSubject(demoSubjects(), cameraTarget)
 
   proc updateSelection(viewProjection: Mat4) =
     ## A left click on a villager follows them; empty ground lets go.
@@ -622,10 +666,6 @@ proc runGraphics*() =
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
-      sk.uiScale = hudUiScale(window)
-      sk.mousePos = window.mousePos.vec2 / sk.uiScale
-      profileBlock "camera":
-        updateCamera(dt)
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
@@ -634,19 +674,25 @@ proc runGraphics*() =
       if restoreTick >= 0:
         restoreTo(restoreTick)
         transport.sync(run.world.tick, recorded, run.world.over)
-      transport.startFrame(dt, TickRate)
+      transport.startScoreFrame(run.world, dt)
       let frameStart = epochTime()
       run.historyPlayback = transport.inHistory
       profileBlock "simulate":
-        while transport.shouldTick(frameStart):
+        while transport.shouldScoreTick(frameStart):
           if atLiveTickCap(run.world.tick, run.maximumTicks, transport.live):
             break
           run.historyPlayback = transport.inHistory
+          let previousPhase = run.world.phase
           advanceRenderedGame()
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
             else: int32(run.replayPlayer.data.hashes.len)
           transport.sync(run.world.tick, recordedNow, run.world.over)
+          if transport.stopAtScoreBoundary(previousPhase, run.world):
+            break
+      scorePresentation.update(run.world, dt)
+      sk.uiScale = hudUiScale(window)
+      sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let active = simulationActive(transport)
       frameAlpha =
         if active:
@@ -655,6 +701,8 @@ proc runGraphics*() =
           0.0'f32
       if active:
         clickMarks.advanceClickMarks(dt)
+      profileBlock "camera":
+        updateCamera(dt)
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()
@@ -670,7 +718,7 @@ proc runGraphics*() =
         setEnvironmentPalette(scene.toon)
 
         proc drawCrops(matrix: Mat4) =
-          ## Stocked gardens show their vegetable; bare plots show dirt.
+          ## Stocked pots show their vegetable; harvested pots stay empty.
           for garden in 0 ..< GardenCount:
             let veggie = run.world.gardens[garden]
             if veggie < 0:
@@ -678,7 +726,8 @@ proc runGraphics*() =
             let look = CropLooks[int(veggie)]
             kits[look.kit].drawProp(
               look.node,
-              tileWorldPoint(run.world.map.gardenTiles[garden]),
+              tileWorldPoint(run.world.map.gardenTiles[garden]) +
+                vec3(0, GardenCropLift, 0),
               float32(garden) * 0.7'f32,
               CropHeight,
               matrix,
@@ -777,7 +826,7 @@ proc runGraphics*() =
           let v = run.world.villagers[slot]
           if v.inHouse >= 0:
             continue
-          if v.animation notin {GatherAnimation, WaveAnimation}:
+          if v.order != TalkOrder and v.animation notin {GatherAnimation, WaveAnimation}:
             continue
           let anchor = screenPosition(
             renderPoint(v) + vec3(0, VillagerHeight + 0.6'f32, 0),
@@ -789,7 +838,7 @@ proc runGraphics*() =
             vec2(20)
           )
 
-        drawUi(
+        let speedClicked = drawUi(
           sk,
           window,
           transport,
@@ -797,8 +846,11 @@ proc runGraphics*() =
           cameraDistance,
           viewProjection,
           followSlot,
-          actionCam
+          actionCam,
+          preserveFollowOnAuto = demoMode
         )
+        if speedClicked:
+          snapFollowCamera()
         sk.endUi()
       when defined(takeScreenshot):
         captureScreenshot(
@@ -819,7 +871,7 @@ proc runGraphics*() =
     of KeyC:
       var following = followSlot >= 0
       actionCam.toggle(following)
-      if not following:
+      if not following and not (demoMode and actionCam.enabled):
         followSlot = -1
     of KeyT: scene.toggleShading()
     of KeyF1, KeyF2:

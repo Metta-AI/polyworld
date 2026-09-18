@@ -14,9 +14,8 @@
 ## An optional rim light is available through `rimColor`; its alpha is the
 ## strength.
 ##
-## Eyes and mouths read best when never shaded: node names in `unlitNodes`
-## are drawn always full-bright, albedo times the highlight colour, no shadow
-## band, no rim.
+## Unlit materials and node names in `unlitNodes` preserve their albedo,
+## without palette coloration, shadows, or rim lighting.
 ##
 ## The shaders are written with Shady and draw the same GPU buffers the gltf
 ## PBR renderer uploads, so a scene can switch between the two per frame.
@@ -167,18 +166,18 @@ proc toonFrag(
   let albedo: Vec4 = texture(toonBaseColorTexture, uv) * toonBaseColorFactor * color
   if albedo.a < toonAlphaCutoff:
     discardFragment()
+  if toonUnlit:
+    fragColor = albedo * toonTint
+    return
   # Step 2: the intensity — scaled by the sun shadow test, flattened by the
   # shading strength when the sky is dark — is a texture coordinate into
-  # the ramp. Unlit parts (eyes, mouth) skip it and sit in the highlight
-  # band forever.
+  # the ramp.
   let
     sunFactor = sunShadowFactor(worldPos)
     intensity =
       (1.0'f - toonShadingStrength +
         lightIntensity * sunFactor * toonShadingStrength) * toonLightLevel
-  var band = texture(toonRamp, vec2(intensity, 0.5'f)).r
-  if toonUnlit:
-    band = 1.0'f
+  let band = texture(toonRamp, vec2(intensity, 0.5'f)).r
   # Step 3: two hand-picked colours, then the albedo on top.
   var lit: Vec3 = mix(toonShadowColor.rgb, toonHighlightColor.rgb, band)
   var n: Vec3 = normalize(normal)
@@ -188,8 +187,7 @@ proc toonFrag(
     eye: Vec3 = normalize(toonCameraPosition - worldPos)
     facing = 1.0'f - abs(dot(eye, n))
     rim = facing * facing * facing * facing
-  if not toonUnlit:
-    lit = mix(lit, toonRimColor.rgb, rim * toonRimColor.a)
+  lit = mix(lit, toonRimColor.rgb, rim * toonRimColor.a)
   let emissive: Vec3 = texture(toonEmissiveTexture, uv).rgb * toonEmissiveFactor
   fragColor = vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint
 
@@ -555,7 +553,10 @@ proc drawPrimitive(
   root.skinMatricesInto(owner, ctx.jointMatrices)
   let useSkinning = ctx.jointMatrices.len > 0
   glUniform1i(u.useSkinning, useSkinning.ord.GLint)
-  glUniform1i(u.unlit, (owner.name in ctx.unlitNodes).ord.GLint)
+  glUniform1i(
+    u.unlit,
+    (primitive.material.unlit or owner.name in ctx.unlitNodes).ord.GLint
+  )
   if useSkinning:
     glUniformMatrix4fv(
       u.jointMatrices, ctx.jointMatrices.len.GLsizei, GL_FALSE,

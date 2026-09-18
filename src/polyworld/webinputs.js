@@ -29,7 +29,8 @@
       kind: kind,
       source: source,
       url: resolveUrl(source),
-      name: name
+      directory: path.slice(0, path.lastIndexOf("/")),
+      name: path.slice(path.lastIndexOf("/") + 1)
     });
     commandArguments.push("--" + kind, path + suffix);
   }
@@ -42,7 +43,17 @@
     var match = specification.match(/^(.*):([0-9]+)$/);
     var source = match ? match[1] : specification;
     var suffix = match ? ":" + match[2] : "";
-    addInput("bot", source, "bot" + index + ".bas", suffix);
+    var filename = new URL(resolveUrl(source)).pathname.split("/").pop();
+    try {
+      filename = decodeURIComponent(filename);
+    } catch (error) {
+      // Keep a literal percent sign when the URL has no encoded filename.
+    }
+    filename = filename.replace(/[\/\\\x00-\x1f\x7f]/g, "_");
+    if (!filename || filename === "." || filename === "..") {
+      filename = "bot" + index + ".bas";
+    }
+    addInput("bot", source, "bot" + index + "/" + filename, suffix);
   });
 
   [
@@ -69,6 +80,10 @@
 
   function showError(message) {
     console.error(message);
+    if (Module["polyworldError"]) {
+      Module["polyworldError"](message);
+      return;
+    }
     var output = document.createElement("pre");
     output.textContent = message;
     output.style.background = "#220b0b";
@@ -90,6 +105,7 @@
       Module["FS_createPath"]("/", "web", true, true);
       inputs.forEach(function loadInput(input, index) {
         var dependency = "polyworld-web-input-" + index;
+        Module["FS_createPath"]("/", input.directory.slice(1), true, true);
         Module["addRunDependency"](dependency);
         fetch(input.url, {credentials: "same-origin"})
           .then(function checkResponse(response) {
@@ -100,7 +116,7 @@
           })
           .then(function installInput(buffer) {
             Module["FS_createDataFile"](
-              "/web",
+              input.directory,
               input.name,
               new Uint8Array(buffer),
               true,

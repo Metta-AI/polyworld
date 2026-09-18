@@ -783,6 +783,55 @@ proc generateDungeon(seed: int32): Dungeon {.measure.} =
   # they stay walkable while the vertical aprons never do.
   computeWalkable()
 
+  # A landing is joined to its level by one L-shaped corridor whose vertical
+  # leg runs up the target room's column. When that room sits north of the
+  # landing on the ramp's own column, the leg would have to cross the three
+  # slope lanes, which are locked against carving: the corridor is cut in two
+  # and the arrival chamber becomes an island the party can never leave. Only
+  # maps that actually came out that way are touched here -- a detour is cut
+  # beside the ramp, clear of the locked lanes -- so every dungeon that was
+  # already whole is generated exactly as before.
+  var mended = false
+  for ramp in result.ramps:
+    let
+      level = int(ramp.lower)
+      rooms = result.rooms[level]
+    if rooms.len == 0:
+      continue
+    let (startX, startZ) = result.walkableIn(level, rooms[0])
+    if startX < 0:
+      continue
+    let reached = floodFill(level, startX, startZ)
+    if reached[ramp.bottomZ * GridTiles + ramp.bottomX]:
+      continue
+    var nearest = 0
+    var bestDistance = int64.high
+    for index, room in rooms:
+      let
+        (cx, cz) = room.center
+        dx = int64(cx - ramp.bottomX)
+        dz = int64(cz - ramp.bottomZ)
+        distance = dx * dx + dz * dz
+      if distance < bestDistance:
+        bestDistance = distance
+        nearest = index
+    let
+      (nx, nz) = rooms[nearest].center
+      aside = int32(3)
+      eastFits = ramp.bottomX + aside + 1 < int32(GridTiles) - 1
+      detourX = ramp.bottomX + (if eastFits: aside else: -aside)
+    carveCorridor(
+      level, ramp.bottomX, ramp.bottomZ + 2, detourX, nz,
+      levelBase(level), Themes[level].floorKind, 3
+    )
+    carveCorridor(
+      level, detourX, nz, nx, nz,
+      levelBase(level), Themes[level].floorKind, 3
+    )
+    mended = true
+  if mended:
+    computeWalkable()
+
   # The entrance was fixed before the stairs were cut; make sure the tile is
   # still floor, since the surface stairwell may have opened where it stood.
   if not isWalkable(
@@ -815,10 +864,6 @@ proc generateDungeon(seed: int32): Dungeon {.measure.} =
   result.seed = seed
   result.hash = terrainHash()
 
-proc generateMap*(seed: int32): MapData =
-  ## Builds the dungeon for one expedition seed.
-  generateDungeon(seed)
-
 proc terrainHash*(): uint64 =
   ## Fingerprints every generated tile and walkability decision.
   var hash = HashySeed
@@ -841,56 +886,15 @@ proc terrainHash*(): uint64 =
 
 ## Assertions
 
+# Defined after `descentPath`, which it consults.
+proc dungeonProblem*(dungeon: Dungeon): string
+
 proc verifyDungeon*(dungeon: Dungeon) =
-  ## The checks that make six stacked levels safe to walk.
-  for ramp in dungeon.ramps:
-    let down = edgeLink(
-      int(ramp.upper), int(ramp.topX), int(ramp.topZ), South.ord)
-    doAssert down.open,
-      "ramp from level " & $ramp.upper & " does not link at the top"
-    doAssert down.layer == int(ramp.lower),
-      "ramp top links to layer " & $down.layer & ", expected " & $ramp.lower
-
-  # No cross-layer link may exist that is not part of an authored ramp. This
-  # is the assertion that catches two levels accidentally sharing a corner
-  # height, which would otherwise show up as a teleport in the middle of a
-  # fight.
-  var strays = 0
-  for level in 0 ..< LevelCount:
-    for z in 0 ..< GridTiles:
-      for x in 0 ..< GridTiles:
-        if not isWalkable(level, x, z):
-          continue
-        for direction in 0 .. 3:
-          let link = edgeLink(level, x, z, direction)
-          if link.open and link.layer != level:
-            inc strays
-  doAssert strays > 0, "the levels are not connected to each other at all"
-
-  # Every level's rooms must be mutually reachable within that level, and the
-  # stairs must be reachable from them. Probing a room's raw centre is wrong:
-  # a shaft or an apron can legitimately occupy it, so ask each room for a
-  # tile that is actually walkable and fail loudly if it has none.
-  for level in 0 ..< LevelCount:
-    let rooms = dungeon.rooms[level]
-    if rooms.len == 0:
-      continue
-    let (sx, sz) = dungeon.walkableIn(level, rooms[0])
-    doAssert sx >= 0, "the first room on level " & $level & " has no floor"
-    let reached = floodFill(level, sx, sz)
-    for index, room in rooms:
-      let (rx, rz) = dungeon.walkableIn(level, room)
-      doAssert rx >= 0,
-        "room " & $index & " on level " & $level & " has no floor"
-      doAssert reached[rz * GridTiles + rx],
-        "room " & $index & " on level " & $level & " is cut off"
-    for ramp in dungeon.ramps:
-      if int(ramp.upper) == level:
-        doAssert reached[ramp.topZ * GridTiles + ramp.topX],
-          "the way down from level " & $level & " is cut off from its rooms"
-      if int(ramp.lower) == level:
-        doAssert reached[ramp.bottomZ * GridTiles + ramp.bottomX],
-          "the way up from level " & $level & " is cut off from its rooms"
+  ## The checks that make six stacked levels safe to walk. `generateMap` never
+  ## returns a dungeon that fails this, so a failure here means something
+  ## rewrote the world after it was generated.
+  let problem = dungeon.dungeonProblem()
+  doAssert problem.len == 0, problem
 
 proc descentPath*(dungeon: Dungeon): bool =
   ## True when the vault can actually be walked to from the entrance, and
@@ -905,3 +909,109 @@ proc descentPath*(dungeon: Dungeon): bool =
       int(vault.level), int(vault.x), int(vault.z),
       int(entrance.level), int(entrance.x), int(entrance.z))
   down.len > 0 and up.len > 0
+
+
+proc dungeonProblem*(dungeon: Dungeon): string =
+  ## The first reason this dungeon cannot be walked, or an empty string when
+  ## it is sound. Checked in order and returning at the first fault, because
+  ## the later checks read tiles the earlier ones prove are floor.
+  for ramp in dungeon.ramps:
+    let down = edgeLink(
+      int(ramp.upper), int(ramp.topX), int(ramp.topZ), South.ord)
+    if not down.open:
+      return "ramp from level " & $ramp.upper & " does not link at the top"
+    if down.layer != int(ramp.lower):
+      return "ramp top links to layer " & $down.layer &
+        ", expected " & $ramp.lower
+
+  # No cross-layer link may exist that is not part of an authored ramp. This
+  # is the check that catches two levels accidentally sharing a corner height,
+  # which would otherwise show up as a teleport in the middle of a fight.
+  var strays = 0
+  for level in 0 ..< LevelCount:
+    for z in 0 ..< GridTiles:
+      for x in 0 ..< GridTiles:
+        if not isWalkable(level, x, z):
+          continue
+        for direction in 0 .. 3:
+          let link = edgeLink(level, x, z, direction)
+          if link.open and link.layer != level:
+            inc strays
+  if strays == 0:
+    return "the levels are not connected to each other at all"
+
+  # Every level's rooms must be mutually reachable within that level, and the
+  # stairs must be reachable from them. Probing a room's raw centre is wrong:
+  # a shaft or an apron can legitimately occupy it, so ask each room for a
+  # tile that is actually walkable and reject the dungeon if it has none.
+  for level in 0 ..< LevelCount:
+    let rooms = dungeon.rooms[level]
+    if rooms.len == 0:
+      continue
+    let (sx, sz) = dungeon.walkableIn(level, rooms[0])
+    if sx < 0:
+      return "the first room on level " & $level & " has no floor"
+    let reached = floodFill(level, sx, sz)
+    for index, room in rooms:
+      let (rx, rz) = dungeon.walkableIn(level, room)
+      if rx < 0:
+        return "room " & $index & " on level " & $level & " has no floor"
+      if not reached[rz * GridTiles + rx]:
+        return "room " & $index & " on level " & $level & " is cut off"
+    for ramp in dungeon.ramps:
+      if int(ramp.upper) == level and
+          not reached[ramp.topZ * GridTiles + ramp.topX]:
+        return "the way down from level " & $level & " is cut off from its rooms"
+      if int(ramp.lower) == level and
+          not reached[ramp.bottomZ * GridTiles + ramp.bottomX]:
+        return "the way up from level " & $level & " is cut off from its rooms"
+
+  if not dungeon.descentPath():
+    return "the vault cannot be reached and left again"
+
+## Rejection and retry
+
+const DungeonAttempts = 32
+  ## How many seeds one expedition may burn before the generator gives up.
+  ## Roughly one dungeon in two thousand is still unbuildable after the ramp
+  ## repair above, so this bound exists to make the loop terminate, not
+  ## because the generator is expected to approach it.
+
+proc nextDungeonSeed(seed: int32): int32 =
+  ## The seed a rejected dungeon hands to its replacement. A full period
+  ## generator, so an expedition cannot cycle back onto a seed it already
+  ## rejected, and the substitution is a pure function of the seed: the
+  ## server, a replay and a local run all land on the same dungeon.
+  int32((uint32(seed) * 1664525'u32 + 1013904223'u32) and 0x7FFF_FFFF'u32)
+
+proc generateMap*(seed: int32): MapData =
+  ## Builds a walkable dungeon for one expedition seed.
+  ##
+  ## The generator carves rooms and ramps out of noise and cannot always
+  ## finish: a snake may leave no room wide enough for a stairwell, or a
+  ## landing may come out sealed. Such a dungeon used to reach the game and
+  ## abort it on an assertion, which on the ladder means a dead episode and a
+  ## failed round. It is regenerated from a derived seed instead, until one
+  ## comes out sound. `result.seed` is the seed that actually carved the
+  ## dungeon, so a replay records the world it was played in.
+  ##
+  ## Generation asserts as it carves, so a failed attempt arrives as a defect
+  ## rather than a return value. Catching it is safe here and only here: every
+  ## attempt rebuilds the level layers from scratch, so a half carved dungeon
+  ## leaves nothing behind for the next attempt to inherit. This does need a
+  ## build that keeps defects catchable, which is every build we ship (none
+  ## pass `--panics:on`).
+  var attemptSeed = seed
+  for attempt in 1 .. DungeonAttempts:
+    var problem = ""
+    try:
+      result = generateDungeon(attemptSeed)
+      problem = result.dungeonProblem()
+    except AssertionDefect as defect:
+      problem = defect.msg
+    if problem.len == 0:
+      return
+    attemptSeed = nextDungeonSeed(attemptSeed)
+  doAssert false,
+    "seed " & $seed & ": no walkable dungeon in " & $DungeonAttempts &
+      " attempts"

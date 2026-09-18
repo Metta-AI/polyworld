@@ -20,16 +20,16 @@ const
   GridCells* = GridSide * GridSide
   TickRate* = SharedTickRate
     ## Simulation ticks per second.
-  DecisionTicks* = 8'i32
+  DecisionTicks* = 6'i32
     ## Ticks between villager decisions: one decision per game minute.
-  TicksPerGameMinute* = 8'i32
-    ## One real second is three game minutes.
+  TicksPerGameMinute* = 6'i32
+    ## One real second is four game minutes.
   DayStartMinute* = 9 * 60
   DinnerMinute* = 18 * 60
     ## The tally fires the moment the clock reaches six in the evening.
   DayEndMinute* = 21 * 60
   DayTicks* = (DayEndMinute - DayStartMinute) * TicksPerGameMinute
-    ## 5760 ticks: four real minutes per village day.
+    ## 4320 ticks: three real minutes per village day.
   ScoreScreenTicks* = 10 * TickRate
     ## Ten real seconds of standings between days.
   DefaultDayCount* = 7'i32
@@ -60,6 +60,7 @@ const
   BiteRounds* = 3'i32
   NewVeggiePoints* = 3'i32
   RepeatVeggiePoints* = 1'i32
+  CurfewPenalty* = 3'i32
 
 ## Movement and interaction
 ##
@@ -74,6 +75,9 @@ const
   GatherRadius* = 1'i32
   DoorRadius* = 1'i32
   InviteRadius* = 3'i32
+  TalkRadius* = 4'i32
+  TalkGroupLimit* = 4'i32
+  TalkReplyTicks* = 2 * TickRate
   GardenEnterCost* = 64'i32
     ## Paths skirt garden plots instead of trampling through them.
   RepathAfterTicks* = 36'i32
@@ -180,8 +184,9 @@ proc contentHash*(): uint64 =
     int32(DayStartMinute), int32(DinnerMinute), int32(DayEndMinute),
     DayTicks, ScoreScreenTicks, int32(VillagerCount), int32(VeggieKinds),
     int32(GardensPerHouse), int32(GardenCount), BiteRounds, NewVeggiePoints,
-    RepeatVeggiePoints, StepTicks, OrthogonalCost, DiagonalCost,
-    GatherRadius, DoorRadius, InviteRadius, GardenEnterCost,
+    RepeatVeggiePoints, CurfewPenalty, StepTicks, OrthogonalCost, DiagonalCost,
+    GatherRadius, DoorRadius, InviteRadius, TalkRadius, TalkGroupLimit,
+    TalkReplyTicks, GardenEnterCost,
     RepathAfterTicks, AbandonAfterTicks, RepathCooldownTicks,
     ShortPathCooldownTicks
   ]:

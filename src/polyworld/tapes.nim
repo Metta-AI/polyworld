@@ -2,7 +2,10 @@
 
 import
   std/[os, strutils, times],
-  flatty
+  flatty,
+  configs
+
+export configs
 
 const
   ReplayMagic* = "POLYWORLDREPLAY"
@@ -22,6 +25,17 @@ type
 proc fail(message: string) {.noreturn.} =
   ## Raises one replay-specific error.
   raise newException(ReplayError, message)
+
+proc validateConfig*[Preset](config: MatchConfig[Preset], count: int) =
+  ## Checks the recorded match config and its ordered public player records.
+  if config.players.len != count:
+    fail("replay configuration players do not match its seats")
+  if config.maxTicks <= 0 or config.spawnIntervalTicks < 0 or
+    config.playerSlot < 0 or config.playerSlot > count or config.dayCount < 0:
+      fail("replay configuration has invalid match settings")
+  for player in config.players:
+    if player.name.len > 4096:
+      fail("replay player name has an invalid length")
 
 proc addUint16(bytes: var string, value: uint16) =
   ## Appends one portable little-endian header value.
@@ -173,20 +187,23 @@ type
     createdUnixMs*: int64
     setup*: Setup
 
-  ActionTape*[Setup, Action] = object
+  ActionTape*[Setup, Action; Metrics = void; Config = GameConfig] = object
     ## Hash count is the recorded duration, up to `setup.maximumTicks`.
     ## Setup stays unchanged when a match ends early or playback rewinds.
     header*: TapeHeader[Setup]
+    config*: Config
     actions*: seq[Action]
     hashes*: seq[uint64]
+    when Metrics isnot void:
+      metrics*: Metrics
 
-  TapeRecorder*[Setup, Action] = ref object
+  TapeRecorder*[Setup, Action; Metrics = void; Config = GameConfig] = ref object
     ## Appends commands and hashes to one in-memory tape.
-    data*: ActionTape[Setup, Action]
+    data*: ActionTape[Setup, Action, Metrics, Config]
 
-  TapePlayer*[Setup, Action] = ref object
+  TapePlayer*[Setup, Action; Metrics = void; Config = GameConfig] = ref object
     ## Walks one tape's commands in tick order.
-    data*: ActionTape[Setup, Action]
+    data*: ActionTape[Setup, Action, Metrics, Config]
     actionIndex*: int
 
 proc appendAction*[T](
@@ -322,8 +339,8 @@ proc initTapeRecorder*[Setup, Action](
     )
   )
 
-proc recordHash*[Setup, Action](
-    recorder: TapeRecorder[Setup, Action],
+proc recordHash*[Setup, Action, Metrics, Config](
+    recorder: TapeRecorder[Setup, Action, Metrics, Config],
     hash: uint64,
     maxHashes: int
 ) =
@@ -347,21 +364,21 @@ proc requireTapeVersion*[Setup](
   if header.gameVersion != gameVersion:
     fail("unsupported replay game version")
 
-proc initTapePlayer*[Setup, Action](
-    tape: ActionTape[Setup, Action]
-): TapePlayer[Setup, Action] =
+proc initTapePlayer*[Setup, Action, Metrics, Config](
+    tape: ActionTape[Setup, Action, Metrics, Config]
+): TapePlayer[Setup, Action, Metrics, Config] =
   ## Creates a playback cursor over one tape. Does not validate.
-  TapePlayer[Setup, Action](data: tape)
+  TapePlayer[Setup, Action, Metrics, Config](data: tape)
 
-proc finished*[Setup, Action](
-    player: TapePlayer[Setup, Action]
+proc finished*[Setup, Action, Metrics, Config](
+    player: TapePlayer[Setup, Action, Metrics, Config]
 ): bool =
   ## Returns whether every recorded command has been consumed.
   player == nil or
     replayFinished(player.actionIndex, player.data.actions.len)
 
-proc syncCursor*[Setup, Action](
-    player: TapePlayer[Setup, Action],
+proc syncCursor*[Setup, Action, Metrics, Config](
+    player: TapePlayer[Setup, Action, Metrics, Config],
     tick: uint32
 ) =
   ## Points the cursor past every command at or before `tick`.
@@ -369,8 +386,8 @@ proc syncCursor*[Setup, Action](
     return
   player.actionIndex = player.data.actions.actionIndexAfter(tick)
 
-proc takeActionAt*[Setup, Action](
-    player: TapePlayer[Setup, Action],
+proc takeActionAt*[Setup, Action, Metrics, Config](
+    player: TapePlayer[Setup, Action, Metrics, Config],
     tick: uint32,
     action: var Action
 ): bool =
@@ -379,8 +396,8 @@ proc takeActionAt*[Setup, Action](
     return false
   player.data.actions.takeActionAt(player.actionIndex, tick, action)
 
-proc hashAt*[Setup, Action](
-    player: TapePlayer[Setup, Action],
+proc hashAt*[Setup, Action, Metrics, Config](
+    player: TapePlayer[Setup, Action, Metrics, Config],
     tick: uint32,
     hash: var uint64
 ): bool =
@@ -389,12 +406,11 @@ proc hashAt*[Setup, Action](
     return false
   player.data.hashes.hashAt(tick, hash)
 
-proc actionsAt*[Setup, Action](
-    player: TapePlayer[Setup, Action],
+proc actionsAt*[Setup, Action, Metrics, Config](
+    player: TapePlayer[Setup, Action, Metrics, Config],
     tick: uint32
 ): seq[Action] =
   ## Consumes and returns every command recorded for one exact tick.
   var action: Action
   while player.takeActionAt(tick, action):
     result.add action
-
