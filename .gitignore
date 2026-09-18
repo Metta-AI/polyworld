@@ -46,6 +46,3 @@ coworld/evidence/
 !Dockerfile
 !.dockerignore
 coworld/**/__pycache__/
-
-# Character authoring Python caches.
-experiments/chargen/__pycache__/

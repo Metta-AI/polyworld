@@ -9,10 +9,27 @@ nim r experiments/chargen/chargen.nim
 The default library is `../polyworld_data/characters/chargen`. Set
 `CHARGEN_LIBRARY` to open another library or a game-specific export.
 
+The Python authoring toolkit lives with the assets in
+`../polyworld_data/characters/chargen/source/scripts`. This includes Blender
+geometry builders, animation imports, texture cutters, packers, and checks.
+The viewer, runtime, and render utilities remain Nim code in Polyworld.
+
+For the authoring commands below, start in the Polyworld repository and set:
+
+```sh
+export CHARGEN_SCRIPTS=../polyworld_data/characters/chargen/source/scripts
+```
+
+The scripts resolve asset paths from their own location, so Blender and Python
+can run them from any working directory. Intermediate exports and preview
+renders still use the sibling `polyworld/tmp/chargen` folder. No authoring
+scripts or Blender files are included in game-specific packs.
+
 ## Folder layout
 
 | Folder | Contents |
 | --- | --- |
+| `source/scripts` | Python and Blender authoring tools |
 | `body` | Body, hands, and feet as separate GLBs, grouped by a part sidecar |
 | `heads`, `noses`, `ears` | Independently selectable head and facial geometry |
 | `hair`, `beards` | One GLB and JSON sidecar per style |
@@ -20,7 +37,7 @@ The default library is `../polyworld_data/characters/chargen`. Set
 | `mouths`, `eyebrows` | One PNG, GLB surface, and JSON sidecar per generated style |
 | `colors` | Editable skin, hair, and eye preset lists |
 | `clothing/torsos` | Eight medieval tops and a tucked shirt |
-| `clothing/pants`, `clothing/boots` | Four trousers, cuffed shorts, and four boots |
+| `clothing/pants`, `clothing/boots` | Four trousers, cuffed shorts, and five boots |
 | `clothing/jackets` | Open jacket, long coat, and vest |
 | `clothing/belts`, `clothing/suspenders` | Buckle belt, suspenders, and overall bib |
 | `hats` | Six recolorable gnome hats, each in its own GLB |
@@ -52,6 +69,8 @@ These presets share `Gnome kind` eyes, `Gnome bulb` nose, `Gnome cups` ears,
 `Gnome pointed` beard with moustache, and the existing `01 Soft arch` brows.
 The nine presets vary the hair, iris, and hat colors and choose from six hat
 styles. Their outfits layer new outerwear over the existing shirts and trousers.
+Each also selects a slightly different fair skin shade from peach, ivory,
+rose, cream, and warm beige variations in the shared skin palette.
 Presets can optionally
 specify `hairColor`, `pupilColor`, and `hatColor` by palette name. `group`
 identifies a lineup's presets.
@@ -68,8 +87,8 @@ highlights, and the upper eyelid stroke. Regenerate the cutout and add the
 facial geometry to the master Blender file without rebuilding other parts:
 
 ```sh
-python3 experiments/chargen/cut_gnomes.py
-blender -b --python-exit-code 1 --python experiments/chargen/build_gnomes.py
+python3 "$CHARGEN_SCRIPTS/cut_gnomes.py"
+blender -b --python-exit-code 1 --python "$CHARGEN_SCRIPTS/build_gnomes.py"
 ```
 
 The full `build_model.py` pipeline also includes these shared parts. The
@@ -98,7 +117,7 @@ The cream lining remains a separate shaded material.
 Rebuild the hats in the master Blender file and export their individual GLBs:
 
 ```sh
-blender -b --python-exit-code 1 --python experiments/chargen/build_hats.py
+blender -b --python-exit-code 1 --python "$CHARGEN_SCRIPTS/build_hats.py"
 nim r experiments/chargen/render_hats.nim
 ```
 
@@ -109,12 +128,18 @@ any subset of the six GLBs, keeping the same shared skeleton and animations.
 ## Gnome clothing
 
 The `Jacket`, `Belt`, and `Suspenders` slots layer independently over `Chest`
-and `Leg`. The eight new parts are an open jacket, long coat, vest, cuffed
-shorts, buckle belt, suspenders, overall bib, and tucked shirt. They reuse
+and `Leg`. The nine new parts are an open jacket, long coat, vest, cuffed
+shorts, buckle belt, suspenders, overall bib, tucked shirt, and pointed-cuff
+boots. They reuse
 outer fabric from the existing long-sleeved shirt and trousers, preserving
 body-derived weights. Lapels, cuffs, pockets, buttons, and brass buckles are
 small mesh details. The bib works best over `Gnome tucked shirt` so its straps
 meet the waistband instead of hanging over a loose hem.
+
+Gnomes 05 and 07 share the fuller long coat with broad lapels and a gently
+flared hem, colored gray and blue respectively. Gnome 06 wears taller boots
+with V-shaped cuffs and contrasting brown piping. The boots hide the feet
+and the lowest trouser sections while retaining trousers behind the front V.
 
 Each part is a separate GLB in its part folder. `clothShades` identifies the
 fabric primitives to tint; fixed metal, boot soles, and contrasting trim keep
@@ -123,10 +148,10 @@ range. Enable `Custom <slot> color` in the viewer to adjust that slot's RGB.
 Games can use `initClothMaterials`, `applyClothPreset`, and `applyClothTint`.
 
 ```sh
-blender -b --python-exit-code 1 --python experiments/chargen/build_garments.py
+blender -b --python-exit-code 1 --python "$CHARGEN_SCRIPTS/build_garments.py"
 nim r experiments/chargen/render_garments.nim
 CLOTHING_DETAILS=1 nim r experiments/chargen/render_garments.nim
-blender -b --python-exit-code 1 --python experiments/chargen/verify_garments.py
+blender -b --python-exit-code 1 --python "$CHARGEN_SCRIPTS/verify_garments.py"
 ```
 
 Review sheets and geometry/posed-clearance diagnostics go in
@@ -199,7 +224,7 @@ To rebuild only clothing while retaining the current body and animations:
 ```sh
 PYTHONDONTWRITEBYTECODE=1 \
   /Applications/Blender.app/Contents/MacOS/Blender --background \
-  --python experiments/chargen/build_clothes.py
+  --python "$CHARGEN_SCRIPTS/build_clothes.py"
 ```
 
 `clothes.py` is also part of the full model build. `render_clothes.py` and
@@ -214,13 +239,13 @@ in bent poses. Check the actual rendered outfits when changing their fit.
 The Python tools require Pillow. List stable part IDs and available clips:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 experiments/chargen/pack.py --list
+PYTHONDONTWRITEBYTECODE=1 python3 "$CHARGEN_SCRIPTS/pack.py" --list
 ```
 
 For example, export two eye options and only the walking and idle animations:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 experiments/chargen/pack.py \
+PYTHONDONTWRITEBYTECODE=1 python3 "$CHARGEN_SCRIPTS/pack.py" \
   --output tmp/chargen/my_game \
   --parts body/base heads/base noses/tiny hair/01_french_crop \
     eyes/02_focused eyes/04_calm mouths/01_relaxed_smile \
@@ -265,9 +290,9 @@ wrist correction is applied. Universal clips animate only the Chargen model.
 The optional original comparison stays in bind pose for those clips.
 
 To update animations without rebuilding geometry, run Blender in background
-with `--python experiments/chargen/import_animations.py`. Set
+with `--python "$CHARGEN_SCRIPTS/import_animations.py"`. Set
 `CHARGEN_PYTHON=/opt/homebrew/bin/python3` when that interpreter has Pillow.
-Run Blender with `--python experiments/chargen/verify_universal.py` to check
+Run Blender with `--python "$CHARGEN_SCRIPTS/verify_universal.py"` to check
 all exported bone rotations, hip movement, and limb lengths against the source.
 Full model builds also include the Universal library.
 
@@ -278,7 +303,7 @@ transitions lead into their respective loops.
 
 The monster eyes and evil mouths use approved sheets under
 `source/eyes/monster_v1` and `source/mouths/evil_v1`. To repeat their cuts,
-run `python3 experiments/chargen/cut_faces.py` with Pillow and ImageMagick
+run `python3 "$CHARGEN_SCRIPTS/cut_faces.py"` with Pillow and ImageMagick
 installed, then rebuild. The cutter records per-part projection data in
 `source/faces.json`. Corrected individual images in each sheet's `overrides`
 folder replace the matching cut by filename. This includes the goblin grin
@@ -289,13 +314,13 @@ the source sheet is retained, so the other part names keep their numbers.
 ```sh
 PYTHONDONTWRITEBYTECODE=1 \
   /Applications/Blender.app/Contents/MacOS/Blender --background \
-  --python experiments/chargen/build_model.py
+  --python "$CHARGEN_SCRIPTS/build_model.py"
 nim check experiments/chargen/chargen.nim
 nim check experiments/chargen/tests.nim
 nim c -r --nimcache:tmp/chargen/nimcache_tests \
   -o:tmp/chargen/tests experiments/chargen/tests.nim
-PYTHONDONTWRITEBYTECODE=1 python3 experiments/chargen/verify_library.py
-PYTHONDONTWRITEBYTECODE=1 python3 experiments/chargen/test_packs.py \
+PYTHONDONTWRITEBYTECODE=1 python3 "$CHARGEN_SCRIPTS/verify_library.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$CHARGEN_SCRIPTS/test_packs.py" \
   --runtime-tests tmp/chargen/tests
 ```
 
@@ -306,11 +331,25 @@ crop step from `tmp/chargen/character.glb`. Generated style files are replaced
 when rebuilding. Additional sidecars, color palettes, category defaults, and
 custom categories are retained. Each part's `alignment` tag is also retained
 when its geometry is rebuilt or it is packed into a game-specific library.
-Edit that field in the part's JSON sidecar to retag it. Skin, hair, and eye
-color presets remain shared by both random buttons. For reproducible rolls,
-launch with `RANDOM_SEED=19 RANDOM_ALIGNMENT=good` (or `evil` or `both`).
+Edit that field in the part's JSON sidecar to retag it. Supported tags are
+`both`, `good`, `evil`, and `gnome`. Good and evil rolls exclude gnome-only
+features and hats. Gnome clothing uses `good`, so it stays available to good
+rolls. Unfiltered Random includes all tags.
+
+`Random gnome` prefers gnome-tagged parts in each slot, with shared and good
+parts filling the remaining slots. It always includes a nose, ears, hat,
+shirt, trousers, and footwear when eligible choices exist. It uses fair skin,
+hair, eye, and clothing color suggestions from the nine gnome presets.
+The other random buttons use the complete skin, hair, and eye palettes.
+For reproducible rolls, launch with `RANDOM_SEED=19 RANDOM_ALIGNMENT=gnome`
+(or `good`, `evil`, or `both`).
 Random characters have a 50% chance of facial hair, independent of how many
 beard styles are available.
+
+Run `python3 "$CHARGEN_SCRIPTS/count_polygons.py"` for per-gnome triangle,
+vertex, and material primitive counts. The Markdown and JSON reports go to
+`tmp/chargen/polygons`. Counts resolve preset visibility masks and include
+covered surfaces that still render.
 
 Enable `Custom skin RGB` below the skin preset to edit red, green, and blue
 from 0 to 255. This affects skin meshes, including ears and nose, while eyes,
