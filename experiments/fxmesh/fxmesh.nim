@@ -669,9 +669,6 @@ proc main() =
   makeContextCurrent(window)
   loadExtensions()
   let sk = newSilky(window, "tmp/editor.atlas.png")
-  window.runeInputEnabled = true
-  window.onRune = proc(rune: Rune) =
-    sk.inputRunes.add rune
 
   let presets = loadPresets()
   let presetIndex = presetFromArgs(presets.len)

@@ -3,25 +3,23 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+  polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
-  content, sim, game, controls, layouts
+  content, sim, game, controls, layouts, shops, maps
 
 const
-  HudClearance = 48.0'f32
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
   IconTiny = 16.0'f32
   IconSmall = 64.0'f32
   IconLarge = 128.0'f32
-  ShopIcon = 32.0'f32
-  ShopWell = ShopIcon + 4
-  BadgeSmall = 18.0'f32
+  BadgeSmall = 16.0'f
   BadgeLarge = 64.0'f32
   AbilityKeys = ["Q", "W", "E", "R", "F", "G"]
   ScoreIcons = ["tower", "kills", "deaths"]
   CooldownFill = rgbx(8, 10, 16, 180)
   IconTint = rgbx(245, 230, 190, 255)
+  ManaColor* = rgbx(238, 202, 65, 255)
   HeroPortraitKeys: array[HeroClass, string] = [
     "gota_vanguard_knight",
     "gota_ranger",
@@ -34,9 +32,6 @@ const
     "gota_warlock",
     "gota_berserker"
   ]
-  ShopColumns = 5
-
-var shopOpen = false
 
 type
   HudChrome = object
@@ -50,6 +45,7 @@ type
   SelectedKind = enum
     SelectedHero,
     SelectedTower,
+    SelectedBarracks,
     SelectedMob,
     SelectedGod
 
@@ -70,6 +66,7 @@ type
     gold: int
     level: int
     damage: int32
+    attackCasting: CastKind
     moveSpeed: float32
     attackSpeed: float32
     attackRange: float32
@@ -77,11 +74,13 @@ type
     itemCounts: array[InventorySlots, int32]
     abilities: array[HeroAbilitySlot, Ability]
     cooldowns: array[HeroAbilitySlot, int32]
+    charges: array[HeroAbilitySlot, int32]
+    recharges: array[HeroAbilitySlot, int32]
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
   result.layout = layout
-  result.score = layout.panel(GameUiRegion.TopLeft, PanelScore)
+  result.score = layout.scorePanel()
   result.heroes = layout.panel(GameUiRegion.TopCenter, PanelHeroes)
   result.clock = layout.panel(GameUiRegion.TopRight, PanelClock)
   result.minimap = layout.panel(GameUiRegion.BottomLeft, PanelMinimap)
@@ -91,39 +90,62 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
     PanelInventory
   )
 
-proc hudLayoutFits(layoutSize: Vec2): bool =
-  ## Returns whether native HUD plates fit this layout without overlap.
-  let
-    layout = initGameUiLayout(layoutSize, TransportHeight)
-    chrome = placeChrome(layout)
-  layoutSize.x >= TransportMinWidth and layoutFits(
-    layout,
-    [
-      chrome.score,
-      chrome.heroes,
-      chrome.clock,
-      chrome.minimap,
-      chrome.details,
-      chrome.inventory
-    ],
-    HudClearance
-  )
-
-proc hudUiScale*(windowSize: Vec2): float32 =
-  ## Returns the stepped Silky scale that keeps HUD plates from overlapping.
-  fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
-
-proc hudUiScale*(window: Window): float32 =
-  ## Returns the stepped Silky scale that fits the native HUD on this window.
-  hudUiScale(vec2(window.size.x.float32, window.size.y.float32))
-
 proc currentLayout*(window: Window): GameUiLayout =
   ## Returns the nine-region HUD layout in Silky layout space.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
-      hudUiScale(window),
+      gameUiScale(window),
     TransportHeight
   )
+
+var
+  statsState: StatsState
+  showCreepWaypoints* = false
+
+proc currentMetrics(slot: int, complete: bool): MetricRow =
+  ## Combines authoritative totals with live or original replay telemetry.
+  result = run.metrics.read(slot, run.world.tick, complete)
+  if run.historyPlayback:
+    result = result.withTelemetry(
+      run.history, slot, run.world.tick, complete
+    )
+  if run.replayMode:
+    result = result.withTelemetry(
+      run.replayData.metrics, slot, run.world.tick, complete
+    )
+
+proc currentStats(): StatsTable =
+  ## Adapts the actual roster and outcome to the shared table.
+  run.sampleMetrics()
+  result = StatsTable(kind: GotaStats, tick: run.world.tick,
+    complete: run.world.gameOver or run.world.tick >= run.config.maxTicks,
+    winner: if run.world.gameOver: run.world.winner.ord else: -1,
+    kills: run.world.teamHeroKills)
+  for team in [BlueTeam, RedTeam]:
+    for slot, hero in run.world.heroes:
+      if hero.team != team:
+        continue
+      result.rows.add StatsRow(
+        slot: slot,
+        name: run.config.players[slot].displayName(slot),
+        subtitle: HeroSpecs[hero.class].name,
+        portrait: HeroPortraitKeys[hero.class],
+        team: team.ord,
+        fallen: hero.state == Dying,
+        selected: not run.replayMode and options.playerSlot == slot + 1,
+        metrics: currentMetrics(slot, result.complete)
+      )
+
+proc statsContains(window: Window, mouse: Vec2): bool =
+  ## Tests the overlay before allowing input through to the existing HUD.
+  if not statsState.visible(window.tabHeld):
+    return false
+  statsState.mouseOverStats(window, currentLayout(window),
+    currentStats(), mouse)
+
+proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
+  ## Keeps covered HUD controls from receiving an overlay click.
+  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
 
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
@@ -135,7 +157,7 @@ proc mouseOverUi*(
     primaryId = 0'i32
 ): bool =
   ## Returns whether the pointer is over a visible game UI panel.
-  if mouseOverDebugMenu(mouse):
+  if shopOpen or window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   if primaryId == 0:
@@ -172,8 +194,8 @@ proc renderPoint(position: WorldPoint): Vec3 =
     position.z.float32 / WorldScale.float32
   )
 
-proc teamHudColor(team: Team): ColorRGBX =
-  ## Returns a readable HUD color for one team.
+proc teamHudColor*(team: Team): ColorRGBX =
+  ## Returns the team's color for HUD markers and health bars.
   if team == RedTeam:
     rgbx(224, 80, 83, 255)
   else:
@@ -199,8 +221,8 @@ proc callsign(name: string): string =
 
 proc remainingTowers(team: Team): int =
   ## Counts the towers still standing for one team.
-  for tower in run.world.towers:
-    if tower.team == team and tower.hp > 0:
+  for tower in run.world.buildings:
+    if tower.kind == TowerBuilding and tower.team == team and tower.hp > 0:
       inc result
 
 proc clockHour*(): float32 =
@@ -241,7 +263,7 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
           TickRate.float32 / WorldScale.float32
         attackRange = heroAttackRange(hero.class).float32 /
           WorldScale.float32
-        attackTicks = heroAttackTicks(hero.class).float32
+        attackTicks = run.world.heroAttackTicks(hero).float32
       return SelectedUnit(
         id: hero.id,
         kind: SelectedHero,
@@ -263,12 +285,15 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         gold: hero.gold,
         level: hero.level,
         damage: hero.heroAttackDamage,
+        attackCasting: hero.class.heroAttackCasting,
         moveSpeed: moveSpeed,
         attackSpeed: TickRate.float32 / max(attackTicks, 1),
         attackRange: attackRange,
         inventory: hero.inventory,
         itemCounts: hero.itemCounts,
         abilities: spec.abilities,
+        charges: hero.charges,
+        recharges: hero.recharges,
         cooldowns: hero.cooldowns
       )
   for footman in run.world.footmen:
@@ -294,8 +319,10 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         attackSpeed: 1.0'f32,
         attackRange: meleeRange
       )
-  for tower in run.world.towers:
+  for tower in run.world.buildings:
     if tower.id == id:
+      if tower.hp <= 0:
+        return nil
       if not visibleInView(viewMode, tower.team, tower.position):
         return nil
       let
@@ -311,22 +338,24 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
           WorldScale.float32
       return SelectedUnit(
         id: tower.id,
-        kind: SelectedTower,
+        kind: (if tower.kind == BarracksBuilding: SelectedBarracks
+          else: SelectedTower),
         team: tower.team,
-        callsign: role,
-        classLabel: "TOWER",
+        callsign: (if tower.kind == BarracksBuilding: "BARRACKS"
+          elif tower.guardsGod: "GOD GUARD" else: role),
+        classLabel: (if tower.kind == BarracksBuilding: "BARRACKS" else: "TOWER"),
         status:
           if tower.hp <= 0:
             "Destroyed"
-          elif towerExposed(run.world, tower):
+          elif buildingExposed(run.world, tower):
             "Exposed"
           else:
             "Protected",
         hp: max(tower.hp, 0'i32).float32,
         maxHp: tower.maxHp.float32,
         level: tower.tier.ord + 1,
-        damage: TowerDamages[tower.tier],
-        attackRange: attackRange
+        damage: (if tower.kind == TowerBuilding: TowerDamages[tower.tier] else: 0),
+        attackRange: (if tower.kind == TowerBuilding: attackRange else: 0)
       )
   for fort in run.world.forts:
     if fort.id == id:
@@ -337,8 +366,11 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         kind: SelectedGod,
         team: fort.team,
         callsign: "GOD",
-        classLabel: "FORT",
-        status: if fort.hp > 0: "Defending" else: "Fallen",
+        classLabel: (if fort.team == RedTeam: "WARLOCK" else: "DRUID"),
+        status:
+          if fort.hp <= 0: "Fallen"
+          elif fortExposed(run.world, fort.team): "Exposed"
+          else: "Protected by god guards",
         hp: max(fort.hp, 0'i32).float32,
         maxHp: FortHp.float32,
         level: 1
@@ -387,6 +419,9 @@ proc updateMinimapCamera*(
     followSelection: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
+  if window.statsContains(mouse):
+    minimapPanning = false
+    return
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
@@ -400,7 +435,7 @@ proc updateMinimapCamera*(
       mouse,
       area.origin,
       area.size,
-      HalfGrid
+      mapHalfSize()
     )
     cameraTarget.x = point.x
     cameraTarget.z = point.y
@@ -411,16 +446,85 @@ proc minimapPosition(position: Vec3, panel: GameUiPanel): Vec2 =
   let area = panel.minimapMap()
   let
     x = clamp(
-      (position.x + HalfGrid) / (HalfGrid * 2),
+      (position.x + mapHalfSize()) / (mapHalfSize() * 2),
       0.0'f32,
       1.0'f32
     )
     y = clamp(
-      (position.z + HalfGrid) / (HalfGrid * 2),
+      (position.z + mapHalfSize()) / (mapHalfSize() * 2),
       0.0'f32,
       1.0'f32
     )
   area.origin + vec2(x * area.size.x, y * area.size.y)
+
+proc drawMinimapIcon(
+    sk: Silky,
+    name: string,
+    point: Vec2,
+    size: float32,
+    color: ColorRGBX,
+    selected = false
+) =
+  ## Draws a team glyph with a dark outline or a selection highlight.
+  let
+    outline = if selected: rgbx(255, 242, 187, 255)
+      else: rgbx(16, 19, 24, 255)
+    outlineSize = size + (if selected: 4.0'f else: 2.0'f)
+  sk.drawSprite(
+    name,
+    point - vec2(outlineSize / 2),
+    vec2(outlineSize),
+    outline
+  )
+  sk.drawSprite(name, point - vec2(size / 2), vec2(size), color)
+
+proc drawMinimapHero(
+    sk: Silky,
+    hero: Hero,
+    point: Vec2,
+    selected: bool
+) =
+  ## Points a map marker along the heading beneath an upright hero portrait.
+  const
+    MarkerSize = 48.0'f
+    MarkerCenter = vec2(0.5'f, 50.0'f / 128.0'f)
+    Corners = [vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1)]
+  let
+    entry = sk.atlas.entries["map_marker"]
+    uvOrigin = vec2(entry.x.float32, entry.y.float32)
+    uvSize = vec2(entry.width.float32, entry.height.float32)
+    markerColor = if selected: rgbx(255, 242, 187, 255) else: IconTint
+  var forward = vec2(hero.facing.x.float32, hero.facing.z.float32)
+  if lengthSq(forward) > 0:
+    forward = normalize(forward)
+  else:
+    forward = vec2(0, 1)
+  let right = vec2(forward.y, -forward.x)
+  var positions, uvs: array[4, Vec2]
+  for i, corner in Corners:
+    # The source marker points down, with its circular head above center.
+    let offset = (corner - MarkerCenter) * MarkerSize
+    positions[i] = point + right * offset.x + forward * offset.y
+    uvs[i] = uvOrigin + corner * uvSize
+  for indices in [[0, 1, 2], [0, 2, 3]]:
+    sk.drawTriangle(
+      [positions[indices[0]], positions[indices[1]], positions[indices[2]]],
+      [uvs[indices[0]], uvs[indices[1]], uvs[indices[2]]],
+      [markerColor, markerColor, markerColor]
+    )
+  sk.drawSprite(
+    WhiteTileKey,
+    point - vec2(10),
+    vec2(20),
+    teamHudColor(hero.team),
+    radius = 10
+  )
+  sk.drawSprite(
+    HeroPortraitKeys[hero.class],
+    point - vec2(8),
+    vec2(16),
+    radius = 8
+  )
 
 proc drawMinimapCamera(
     sk: Silky,
@@ -440,7 +544,7 @@ proc drawMinimapCamera(
       aspect,
       area.origin,
       area.size,
-      HalfGrid
+      mapHalfSize()
     ),
     rgbx(255, 242, 187, 255)
   )
@@ -505,7 +609,7 @@ proc drawHeroPortrait(
     selected = picked,
     iconSize = IconSmall
   )
-  if window.clicked(sk, portrait):
+  if window.hudClicked(sk, portrait):
     actionCam.takeManual()
     selectHeroCard(
       primaryId,
@@ -535,17 +639,17 @@ proc drawHeroMeters(
     hpBar.size,
     hero.hp.float32,
     hero.maxHp.float32,
-    rgbx(70, 190, 95, 255)
+    teamHudColor(hero.team)
   )
   sk.drawBar(
     manaBar.origin,
     manaBar.size,
     hero.mana.float32,
     hero.maxMana.float32,
-    rgbx(65, 126, 224, 255)
+    ManaColor
   )
   sk.drawBadge(
-    portrait.origin + vec2(-2, portrait.size.y - BadgeSmall),
+    portrait.origin + vec2(-4, portrait.size.y - BadgeSmall + 3),
     vec2(BadgeSmall),
     $hero.level
   )
@@ -617,6 +721,12 @@ proc drawUi*(
     focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  if shopOpen and options.playerSlot > 0 and not run.replayMode:
+    sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
+      currentLayout(window).size, transport.playing)
+    return
+  let table = currentStats()
+  statsState.syncDirector(actionCam, table, window.tabHeld)
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
@@ -630,7 +740,10 @@ proc drawUi*(
     inventory = inventoryPanel.inventoryPanels()
     details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
-  var selection = selectedUnit(primaryId, viewMode)
+  let detailId =
+    if actionCam.enabled and actionCam.locked: actionCam.lockId
+    else: primaryId
+  var selection = selectedUnit(detailId, viewMode)
   if selection != nil:
     discard sk.beginFrame(chrome.details)
 
@@ -660,8 +773,28 @@ proc drawUi*(
       actionCam,
       focusPlayerHero
     )
-  for hero in run.world.heroes:
-    sk.drawHeroMeters(heroes[hero.heroCardIndex], hero)
+  for slot, hero in run.world.heroes:
+    let panel = heroes[hero.heroCardIndex]
+    sk.drawLabel(
+      sk.fittedLabel(
+        run.config.players[slot].displayName(slot),
+        panel.name.size.x,
+        "Small"
+      ),
+      panel.name.origin,
+      panel.name.size,
+      rgbx(166, 174, 190, 255),
+      "Small",
+      CenterAlign
+    )
+    sk.drawHeroMeters(panel, hero)
+  sk.drawLabel(
+    "vs",
+    heroesPanel.origin + vec2(532, 57),
+    vec2(26, 28),
+    rgbx(166, 174, 190, 255),
+    "HeroVersus"
+  )
 
   sk.drawSprite(
     if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",
@@ -689,64 +822,70 @@ proc drawUi*(
   sk.drawFrame(
     GameUiPanel(origin: mapArea.origin, size: mapArea.size)
   )
+  if run.map.minimap.len == mapTiles() * mapTiles():
+    let tileSize = mapArea.size / mapTiles().float32
+    for y in 0 ..< mapTiles():
+      var x = 0
+      while x < mapTiles():
+        let color = run.map.minimap[y * mapTiles() + x]
+        var finish = x + 1
+        while finish < mapTiles() and
+          run.map.minimap[y * mapTiles() + finish] == color:
+            finish.inc
+        sk.drawRect(
+          mapArea.origin + vec2(x.float32, y.float32) * tileSize,
+          vec2((finish - x).float32, 1) * tileSize,
+          rgbx(
+            uint8((color shr 16) and 255),
+            uint8((color shr 8) and 255),
+            uint8(color and 255),
+            255
+          )
+        )
+        x = finish
   sk.drawRect(
     mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
     vec2(4),
     rgbx(91, 119, 128, 255)
   )
-  template drawMinimapPip(
-      objectId: int32,
-      worldPosition: Vec3,
-      pipSize: float32,
-      pipColor: ColorRGBX
-  ) =
-    block:
-      let point = minimapPosition(worldPosition, minimapPanel)
-      if isPicked(objectId, selectedIds):
-        sk.drawRect(
-          point - vec2(pipSize * 0.5'f32 + 2),
-          vec2(pipSize + 4),
-          rgbx(255, 242, 187, 255)
-        )
-      sk.drawRect(
-        point - vec2(pipSize * 0.5'f32),
-        vec2(pipSize),
-        pipColor
-      )
-  for tower in run.world.towers:
+  sk.pushClipRect(rect(mapArea.origin, mapArea.size))
+  for tower in run.world.buildings:
     if tower.hp > 0 and
         visibleInView(viewMode, tower.team, tower.position):
-      drawMinimapPip(
-        tower.id,
-        renderPoint(tower.position),
-        5.0'f32,
-        teamHudColor(tower.team)
+      sk.drawMinimapIcon(
+        (if tower.kind == BarracksBuilding: "barracks" else: "tower"),
+        minimapPosition(renderPoint(tower.position), minimapPanel),
+        16.0'f,
+        teamHudColor(tower.team),
+        isPicked(tower.id, selectedIds)
       )
   for fort in run.world.forts:
     if visibleInView(viewMode, fort.team, fort.center):
-      drawMinimapPip(
-        fort.id,
-        renderPoint(fort.center),
-        10.0'f32,
-        teamHudColor(fort.team)
+      sk.drawMinimapIcon(
+        WhiteTileKey,
+        minimapPosition(renderPoint(fort.center), minimapPanel),
+        10.0'f,
+        teamHudColor(fort.team),
+        isPicked(fort.id, selectedIds)
       )
   for footman in run.world.footmen:
     if footman.state != Dying and footman.hp > 0 and
         visibleInView(viewMode, footman.team, footman.position):
-      drawMinimapPip(
-        footman.id,
-        renderPoint(footman.position),
-        3.0'f32,
-        teamHudColor(footman.team)
+      sk.drawMinimapIcon(
+        "contact",
+        minimapPosition(renderPoint(footman.position), minimapPanel),
+        8.0'f,
+        teamHudColor(footman.team),
+        isPicked(footman.id, selectedIds)
       )
   for hero in run.world.heroes:
     if visibleInView(viewMode, hero.team, hero.position):
-      drawMinimapPip(
-        hero.id,
-        renderPoint(hero.position),
-        7.0'f32,
-        teamHudColor(hero.team)
+      sk.drawMinimapHero(
+        hero,
+        minimapPosition(renderPoint(hero.position), minimapPanel),
+        isPicked(hero.id, selectedIds)
       )
+  sk.popClipRect()
   sk.drawMinimapCamera(
     window,
     minimapPanel,
@@ -767,6 +906,8 @@ proc drawUi*(
         case selection.kind
         of SelectedTower:
           "tower"
+        of SelectedBarracks:
+          "barracks"
         of SelectedMob:
           "minion"
         of SelectedGod:
@@ -774,7 +915,7 @@ proc drawUi*(
         of SelectedHero:
           "champion"
       sk.drawWellImage(portrait, glyph, teamColor, iconSize = IconLarge)
-    if window.clicked(sk, portrait) and
+    if window.hudClicked(sk, portrait) and
         selection.kind == SelectedHero and
         options.playerSlot > 0 and
         not run.replayMode and
@@ -782,12 +923,37 @@ proc drawUi*(
       actionCam.takeManual()
       focusPlayerHero = true
     if selection.kind == SelectedHero:
+      let
+        basic = GameUiPanel(
+          origin: portrait.origin + vec2(0, 158), size: vec2(40)
+        )
+        melee = selection.attackCasting == MeleeCast
+      sk.drawWellImage(
+        basic, if melee: "attack" else: "bow", iconSize = 32
+      )
+      sk.drawLabel(
+        "BASIC ATTACK",
+        basic.origin + vec2(46, 2),
+        vec2(108, 18),
+        rgbx(247, 221, 143, 255),
+        "Small"
+      )
+      sk.drawLabel(
+        (if melee: "Melee" else: "Ranged") & ": " & $selection.damage,
+        basic.origin + vec2(46, 20),
+        vec2(108, 18),
+        rgbx(236, 238, 244, 255),
+        "Small"
+      )
       for slot in HeroAbilitySlot:
         let
           i = slot.ord
           well = details.abilities[i]
           spec = selection.abilities[slot].abilitySpec
-          remaining = selection.cooldowns[slot]
+          empty = selection.charges[slot] == 0
+          remaining =
+            if empty: max(selection.cooldowns[slot], selection.recharges[slot])
+            else: selection.cooldowns[slot]
         sk.drawAbilityIcon(
           well,
           abilityIconKey(selection.abilities[slot]),
@@ -796,7 +962,21 @@ proc drawUi*(
           else:
             rgbx(255, 255, 255, 255)
         )
-        sk.drawCooldownSweep(well, remaining, spec.cooldownTicks)
+        sk.drawCooldownSweep(
+          well, remaining, if empty: spec.rechargeTicks else: spec.cooldownTicks
+        )
+        if options.playerSlot > 0 and not run.replayMode and
+          selection.id == run.world.heroes[options.playerSlot - 1].id:
+            if window.hudClicked(sk, well):
+              armedAbility = slot.ord.int32
+            if armedAbility == slot.ord.int32:
+              let color = rgbx(255, 223, 133, 255)
+              sk.drawRect(well.origin, vec2(well.size.x, 3), color)
+              sk.drawRect(well.origin, vec2(3, well.size.y), color)
+              sk.drawRect(well.origin + vec2(well.size.x - 3, 0),
+                vec2(3, well.size.y), color)
+              sk.drawRect(well.origin + vec2(0, well.size.y - 3),
+                vec2(well.size.x, 3), color)
       for i in 0 .. 1:
         let
           well = details.abilities[4 + i]
@@ -813,38 +993,27 @@ proc drawUi*(
     else:
       0'i32
   if playerHero:
-    let title = inventory.title
-    if window.clicked(sk, title):
-      shopOpen = not shopOpen
-  if playerHero and shopOpen:
-    var
-      index = 0
-      shopSlots: array[Item.high.ord, GameUiPanel]
-    stackGrid(
-      inventory.contents, vec2(ShopWell), ShopColumns, vec2(8, 1),
-      shopSlots
-    )
-    for item in Item:
-      if item == NoItem:
-        continue
-      let
-        slotPanel = shopSlots[index]
-      sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = ShopIcon)
-      if window.clicked(sk, slotPanel):
-        queueBuyItem(playerHeroId, int32(item.ord))
-      inc index
-  else:
-    for slot in 0 ..< InventorySlots:
-      let
-        slotPanel = inventory.slots[slot]
-        item =
-          if selection == nil: NoItem else: selection.inventory[slot]
-      if item != NoItem:
-        sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
-      else:
-        sk.drawSlot(slotPanel)
-      if playerHero and window.clicked(sk, slotPanel):
-        queueUseItem(playerHeroId, int32(slot))
+    sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
+    sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
+    sk.drawLabel("SHOP  B", inventory.shop.origin + vec2(28, 0),
+      inventory.shop.size - vec2(28, 0), rgbx(247, 221, 143, 255), "Small")
+    if window.hudClicked(sk, inventory.shop):
+      shopOpen = true
+      armedAbility = -1
+  let inventoryHero =
+    if playerHero: selectedUnit(playerHeroId, viewMode)
+    else: selection
+  for slot in 0 ..< InventorySlots:
+    let
+      slotPanel = inventory.slots[slot]
+      item =
+        if inventoryHero == nil: NoItem else: inventoryHero.inventory[slot]
+    if item != NoItem:
+      sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
+    else:
+      sk.drawSlot(slotPanel)
+    if playerHero and window.hudClicked(sk, slotPanel):
+      queueUseItem(playerHeroId, int32(slot))
 
   if selection != nil:
     let
@@ -887,14 +1056,14 @@ proc drawUi*(
       hpBar.size,
       selection.hp,
       selection.maxHp,
-      rgbx(66, 188, 91, 255),
+      teamColor,
       hudScratch
     )
     sk.drawSprite(
       "health",
       hpBar.origin + vec2(4, 4),
       vec2(20),
-      rgbx(66, 188, 91, 255)
+      teamColor
     )
     if selection.maxMana > 0:
       sk.drawValueBar(
@@ -902,14 +1071,14 @@ proc drawUi*(
         manaBar.size,
         selection.mana,
         selection.maxMana,
-        rgbx(61, 124, 225, 255),
+        ManaColor,
         (writeRatio(hudScratch, selection.mana.int, selection.maxMana.int); hudScratch)
       )
       sk.drawSprite(
         "mana",
         manaBar.origin + vec2(4, 4),
         vec2(20),
-        rgbx(186, 214, 255, 255)
+        ManaColor
       )
     if selection.nextXp > 0:
       sk.drawValueBar(
@@ -928,7 +1097,13 @@ proc drawUi*(
     for i in 0 .. 5:
       let well = details.abilities[i]
       if i < 4 and selection.kind == SelectedHero:
-        let remaining = selection.cooldowns[HeroAbilitySlot(i)]
+        let
+          slot = HeroAbilitySlot(i)
+          remaining =
+            if selection.charges[slot] == 0:
+              max(selection.cooldowns[slot], selection.recharges[slot])
+            else:
+              selection.cooldowns[slot]
         if remaining > 0:
           sk.drawLabel(
             $cooldownSeconds(remaining),
@@ -937,6 +1112,26 @@ proc drawUi*(
             rgbx(247, 221, 143, 255),
             "Hud",
             CenterAlign
+          )
+        let
+          spec = selection.abilities[slot].abilitySpec
+          badge = well.origin + vec2(3, 2)
+        sk.drawRect(badge, vec2(28, 20), rgbx(0, 0, 0, 190))
+        sk.drawLabel(
+          $selection.charges[slot] & "/" & $spec.charges,
+          badge,
+          vec2(28, 20),
+          rgbx(255, 255, 255, 255),
+          "Small",
+          CenterAlign
+        )
+        if selection.recharges[slot] > 0:
+          let progress = 1 - selection.recharges[slot].float32 /
+            max(1, spec.rechargeTicks).float32
+          sk.drawRect(
+            well.origin + vec2(3, well.size.y - 5),
+            vec2((well.size.x - 6) * progress, 3),
+            rgbx(110, 190, 245, 255)
           )
       if i >= 4 and selection.kind == SelectedHero:
         let count = selection.itemCounts[i - 4]
@@ -951,12 +1146,12 @@ proc drawUi*(
           )
       sk.drawAbilityKey(well, AbilityKeys[i])
 
-  if selection != nil and not (playerHero and shopOpen):
+  if inventoryHero != nil:
     for slot in 0 ..< InventorySlots:
-      if selection.itemCounts[slot] > 1:
+      if inventoryHero.itemCounts[slot] > 1:
         let slotPanel = inventory.slots[slot]
         sk.drawLabel(
-          $selection.itemCounts[slot],
+          $inventoryHero.itemCounts[slot],
           slotPanel.origin,
           slotPanel.size,
           rgbx(247, 221, 143, 255),
@@ -964,7 +1159,7 @@ proc drawUi*(
           CenterAlign
         )
   sk.drawLabel(
-    if playerHero and shopOpen: "SHOP" else: "INVENTORY",
+    "INVENTORY",
     inventory.title.origin,
     inventory.title.size,
     rgbx(200, 205, 216, 255),
@@ -977,7 +1172,7 @@ proc drawUi*(
     vec2(20)
   )
   sk.drawLabel(
-    formatAmount(if selection == nil: 0 else: selection.gold),
+    formatAmount(if inventoryHero == nil: 0 else: inventoryHero.gold),
     gold.origin + vec2(31, 0),
     vec2(gold.size.x - 31, gold.size.y),
     rgbx(232, 196, 86, 255)
@@ -996,6 +1191,24 @@ proc drawUi*(
     window,
     chrome.layout.transportPanel,
     actionCam,
-    followSelection
+    followSelection,
+    addr statsState.toggled
   )
-  sk.drawDebugMenu(window)
+  let creep = footmanById(run.world, primaryId)
+  let waypointStatus =
+    if creep.id == 0:
+      "Select a pikeman to inspect its waypoints."
+    else:
+      $creep.waypointIndex & "/" & $creep.creepWaypoints().len &
+        " cleared - " & (if creep.state == Fighting: "Chasing / fighting"
+          elif creep.state == Dying: "Dying" else: "Marching")
+  sk.drawDebugMenu(window, addr showCreepWaypoints, waypointStatus)
+  statsState.syncDirector(actionCam, table, window.tabHeld)
+
+proc drawStatsOverlay*(sk: Silky, window: Window) =
+  ## Presents readable statistics above the HUD at every window width.
+  if shopOpen:
+    return
+  sk.drawStatsOverlay(
+    window, currentLayout(window), statsState, currentStats(), run.history
+  )

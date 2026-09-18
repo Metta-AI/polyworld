@@ -1,8 +1,7 @@
 ## Heartleaf action-only replay format and playback cursor.
 ##
-## A replay stores accepted villager commands and one canonical simulation
-## hash per tick. It never stores bot source or bot identity, so replaying a
-## game reveals what was done and never how the deciding program was written.
+## A replay contains the match config, accepted commands, and one canonical
+## simulation hash per tick. It never stores bot source or private logs.
 
 import
   polyworld/tapes,
@@ -10,8 +9,10 @@ import
 
 const
   ReplayGame* = "heartleaf"
-  ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 1'u16
+  ReplayFormatVersion* = 2'u16
+  ## This client supports only this gameplay version. Bump it when rules change.
+  ## Older replays use their archived client; never add compatibility branches.
+  ReplayGameVersion* = 6'u16
 
   ActionMove* = 1'u8
   ActionGather* = 2'u8
@@ -21,7 +22,8 @@ const
   ActionEnterHouse* = 6'u8
   ActionExitHouse* = 7'u8
   ActionStop* = 8'u8
-  ActionKindHigh* = ActionStop
+  ActionTalk* = 9'u8
+  ActionKindHigh* = ActionTalk
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
@@ -57,6 +59,7 @@ type
       ##   EnterHouse  house id, unused
       ##   ExitHouse   unused, unused
       ##   Stop        unused, unused
+      ##   Talk        target slot, unused
 
   ReplayHeader* = TapeHeader[Setup]
   ReplayData* = ActionTape[Setup, ReplayAction]
@@ -68,20 +71,22 @@ proc fail(message: string) {.noreturn.} =
   raise newException(ReplayError, message)
 
 proc initReplayData*(setup: Setup): ReplayData =
-  ## Creates an empty replay with a versioned deterministic setup.
-  initActionTape[Setup, ReplayAction](
+  ## Creates a replay containing the match setup, config, and action tape.
+  result = initActionTape[Setup, ReplayAction](
     setup,
     ReplayFormatVersion,
     ReplayGameVersion
+  )
+  result.config = GameConfig(
+    seed: setup.mapSeed,
+    maxTicks: int32(setup.maximumTicks),
+    players: unnamedPlayers(VillagerCount),
+    dayCount: int32(setup.dayCount)
   )
 
 proc initReplayRecorder*(setup: Setup): ReplayRecorder =
-  ## Creates an in-memory recorder for one game.
-  initTapeRecorder[Setup, ReplayAction](
-    setup,
-    ReplayFormatVersion,
-    ReplayGameVersion
-  )
+  ## Creates an in-memory recorder owning the complete replay data.
+  ReplayRecorder(data: initReplayData(setup))
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
@@ -151,7 +156,7 @@ proc validateAction(action: ReplayAction, setup: Setup) =
   of ActionGather:
     if action.first < 0 or action.first >= GardenCount:
       fail("replay gather does not name a garden")
-  of ActionInvite, ActionAccept, ActionDecline:
+  of ActionInvite, ActionAccept, ActionDecline, ActionTalk:
     if action.first < 0 or action.first >= VillagerCount:
       fail("replay action does not name a villager")
     if action.first == int32(action.playerId):
@@ -166,6 +171,12 @@ proc validateAction(action: ReplayAction, setup: Setup) =
 
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, command payloads, and hash coverage.
+  data.config.validateConfig(VillagerCount)
+  if data.config.seed != data.header.setup.mapSeed or
+    data.config.maxTicks != int32(data.header.setup.maximumTicks):
+      fail("replay configuration does not match its simulation setup")
+  if data.config.dayCount != int32(data.header.setup.dayCount):
+    fail("replay configuration has a different day count")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion

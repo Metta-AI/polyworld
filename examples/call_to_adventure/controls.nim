@@ -4,6 +4,7 @@
 ## `applyHeroAction`, the same path BASIC bots use.
 
 import
+  polyworld/metrics,
   sim,
   replays
 

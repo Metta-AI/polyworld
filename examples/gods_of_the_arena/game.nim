@@ -6,13 +6,18 @@
 
 import
   std/[math, os, strformat, strutils, times],
-  polyworld/[cli, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes],
   content,
   maps,
   sim,
   bots,
   controls,
   replays
+
+when defined(coworld):
+  import polyworld/coworld
+
+var matchConfig = GotaConfig(seed: ArenaSeed)
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
@@ -27,7 +32,8 @@ proc usage() =
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
   echo "  --minutes NUMBER        Duration in minutes (default 20)."
   echo "  --ticks NUMBER          Duration in ticks (default 28800)."
-  echo "  --seed NUMBER           Live game map seed."
+  echo "  --seed NUMBER           Match seed, independent of mapPreset.seed."
+  echo "  --config PATH           JSON match settings, including mapPreset."
   echo "  --spawn-interval NUMBER Seconds between waves."
   echo "  --play=false            Start the graphical transport paused."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
@@ -38,23 +44,31 @@ proc usage() =
 
 proc parseGameOptions(): GameOptions =
   ## Parses runtime game, bot, replay, and simulation configuration.
+  let arguments = commandLineParams()
+  var index = 0
+  while index < arguments.len:
+    if arguments[index] == "--config":
+      matchConfig = loadConfig(arguments.argumentValue(index, "--config"))
+    inc index
   result = GameOptions(
-    seed: 2026,
-    seconds: DefaultMinutes * 60,
-    maximumTicks: DefaultDurationTicks,
-    spawnIntervalTicks: 10 * TickRate.int32,
+    seed: matchConfig.seed,
+    seconds: matchConfig.maxTicks div TickRate,
+    maximumTicks: matchConfig.maxTicks,
+    spawnIntervalTicks: matchConfig.spawnIntervalTicks,
+    playerSlot: matchConfig.playerSlot,
     speed: 1,
     windowWidth: 1920,
     windowHeight: 1080
   )
-  let arguments = commandLineParams()
-  var index = 0
+  index = 0
   while index < arguments.len:
     let argument = arguments[index]
     if result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
+      of "--config":
+        discard arguments.argumentValue(index, "--config")
       of "--spawn-interval":
         var seconds: float64
         try:
@@ -83,7 +97,14 @@ proc parseGameOptions(): GameOptions =
     "live games require exactly 10 bots"
   )
 
-let options* = parseGameOptions()
+var options* =
+  when defined(coworld):
+    block:
+      let hosted = coworldOptions(10)
+      matchConfig = parseConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
+      hosted
+  else:
+    parseGameOptions()
 
 var run*: Game
 
@@ -96,14 +117,19 @@ block:
   if replayMode:
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
-    mapSeed = replayData.header.setup.mapSeed
+    mapSeed = replayData.config.seed
+    options.maximumTicks = int32(replayData.hashes.len)
   var gameMap: MapData
   profileBlock "map":
-    gameMap = generateMap(mapSeed)
+    gameMap =
+      if replayMode:
+        generateMap(mapSeed, replayData.config.mapPreset)
+      else:
+        generateMap(mapSeed, matchConfig.mapPreset)
   run = newGame(
     gameMap,
     if replayMode:
-      int32(replayData.header.setup.spawnIntervalTicks)
+      replayData.config.spawnIntervalTicks
     else:
       options.spawnIntervalTicks,
     if replayMode: 0 else: HeroClassCount,
@@ -115,13 +141,39 @@ block:
     run.historyPlayback = true
   else:
     loadBots(run, options.botGroups, options.playerSlot)
+    run.recorder = initReplayRecorder(
+      currentSetup(run, uint32(options.maximumTicks)), gameMap.preset
+    )
+    run.recorder.data.config =
+      when defined(coworld):
+        coworld.config.withMapPreset(gameMap.preset)
+      else:
+        block:
+          var config = localGameConfig(options, HeroClassCount)
+          if matchConfig.players.len > 0:
+            config.players = matchConfig.players
+          config.withMapPreset(gameMap.preset)
+    run.recorder.data.config.validateConfig(HeroClassCount)
+    run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
+  if run.world.tick == 0 and not run.replayMode and
+    not run.historyPlayback and run.recorder != nil:
+      for hero in run.world.heroes:
+        if hero.manualSpells:
+          run.recorder.record ReplayAction(
+            tick: 1, heroId: hero.id, kind: ActionManualSpells, first: 1
+          )
   tickWorld(run, proc() =
     flushPlayerCommands(run)
     runBotDecisions(run)
   )
+
+  run.sampleMetrics(
+    run.world.gameOver or run.world.tick >= options.maximumTicks
+  )
+  run.metrics.finishTick(run.world.tick)
 
 ## Headless reporting and replay recording.
 
@@ -148,8 +200,8 @@ proc teamHeroGold(team: Team): int =
 
 proc teamTowerCount(team: Team): int =
   ## Returns the number of standing towers owned by one team.
-  for tower in run.world.towers:
-    if tower.team == team and tower.hp > 0:
+  for tower in run.world.buildings:
+    if tower.kind == TowerBuilding and tower.team == team and tower.hp > 0:
       inc result
 
 proc heroVmStatus*(): tuple[active, decisions: int] =
@@ -166,15 +218,21 @@ proc heroVmStatus*(): tuple[active, decisions: int] =
 
 proc startReplayRecording*(maximumTicks: uint32) =
   ## Starts the in-memory action tape for a live match.
+  var config = run.config
+  config.maxTicks = int32(maximumTicks)
   run.recorder = initReplayRecorder(
-    currentSetup(run, maximumTicks)
+    currentSetup(run, maximumTicks), config.mapPreset
   )
+  run.recorder.data.config = config
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 proc saveRecording*(path = options.recordPath) =
   ## Finalizes and saves a requested action replay.
   if run.recorder == nil or path.len == 0:
     return
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  run.recorder.data.metrics = run.history.replayMetrics()
   saveReplay(path, run.recorder.data)
   echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
@@ -199,7 +257,7 @@ when defined(headless):
     echo &"result: {outcome}"
     echo &"simulated: {simulated:.2f} s in {elapsed:.4f} s " &
       &"({speedup:.1f}x real time)"
-    echo &"forts: red {redFortHp} hp, blue {blueFortHp} hp"
+    echo &"gods: red {redFortHp} hp, blue {blueFortHp} hp"
     echo &"towers: red {teamTowerCount(RedTeam)}, " &
       &"blue {teamTowerCount(BlueTeam)}"
     echo &"hash: {run.stateHash().toHex(16)} map " &
