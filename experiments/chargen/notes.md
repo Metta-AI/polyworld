@@ -401,3 +401,60 @@ the authoring Blender file, as before.
 Renders, comparisons, build logs, and assembled intermediate exports belong in
 `tmp/chargen`. The original `experiments/modular_chars` utility and its assets
 remain separate.
+
+## Gota heroes
+
+Use `Gota presets` or `Gnome presets` near the top of the Character panel to
+open the ten hero or nine gnome choices. Clicking a name loads the complete
+outfit, skin, eye and hair colors, and pose. Clicking the group button again
+closes its list. Enable `Ten Gota heroes` in the animation panel to view the
+whole roster. Launch their 5 by 2 lineup with:
+
+```sh
+GOTA_LINEUP=1 nim r experiments/chargen/chargen.nim
+```
+
+Each hero has independent Foot, Leg, Belt, Chest and Headgear parts. The Demon
+Hunter blindfold occupies Headgear. Capes belong to Chest. Some heroes also
+have fitted variations of existing hair and beards. The new clothing uses
+solid colors without image textures and includes no weapons or props. Faces
+reuse the existing eyes, mouth, brows, nose and head. The Lich and Death Knight
+are humans with pale and dark skin respectively. The cast uses varied human
+skin tones and character-specific eye shapes. The Demon Hunter retains
+concealed eyes under the blindfold, and the Warlock uses warm brown skin.
+
+Curved helmet shells, hoods, horns, boots and cuffs use smooth normals with
+sharp garment edges. The Ranger uses `12 Sleepy` eyes, a smaller rounded hood,
+and the separate `Ranger hood braids` hair piece. That piece contains just the
+hanging braids for use under hoods or helmets. The Crossbowman has a trimmed
+hood fringe, and the Lich uses no hair beneath her fitted crystal hood.
+
+The reusable Gota body preserves the original shape and skeleton but splits
+upper and lower skin. Equipping Gota trousers hides covered lower skin to
+prevent it showing through bent clothing. Removing trousers restores it.
+Hands and feet reuse the existing optimized geometry. The original body and
+other character presets remain available.
+
+Authoring builders and review tools live in `source/scripts/gota_*.py`.
+`source/gota` contains the approved roster, each hero's generated front/back
+clothing sheet and exact imagegen prompt, separate Blender authoring files,
+independent judge reports, runtime renders and side-by-side comparisons.
+Open `source/gota/index.html` for the gallery. The built-in imagegen tool was
+used only for the references; the displayed final models are actual GLB renders.
+
+Rebuild all heroes, or add `--hero ranger` for one hero:
+
+```sh
+nim c -d:release -o:tmp/chargen/gota/render_gota \
+  experiments/chargen/render_gota.nim
+python3 "$CHARGEN_SCRIPTS/build_gota.py" --render
+python3 "$CHARGEN_SCRIPTS/gallery_gota.py"
+```
+
+The isolated builders do not rewrite the shared `source/character.blend`.
+Run them after rebuilding the base library. `verify_gota.py` audits the actual
+selected GLB triangles, finite geometry, normalized weights, rig transforms,
+five clothing slots, and absence of clothing textures. Current totals range
+from 12,257 to 17,675 triangles, below the 20,000 limit for every hero. Runtime
+reviews include front, back, walking and crouching poses. The ordinary Chargen
+tests also check Gota budgets, skin restoration, and shared lineup animation.

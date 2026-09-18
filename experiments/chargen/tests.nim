@@ -518,12 +518,16 @@ proc testClothing() =
     player = newClipPlayer(model.root)
   var selection = manifest.defaultSelection()
   for category in manifest.categories:
+    var baseCount = 0
+    for item in category.items:
+      if "/gota_" notin item.id:
+        inc baseCount
     if category.key == "Chest":
-      doAssert category.items.len == 9
+      doAssert baseCount == 9
     if category.key == "Leg":
-      doAssert category.items.len == 5
+      doAssert baseCount == 5
     if category.key == "Foot":
-      doAssert category.items.len == 5
+      doAssert baseCount == 5
   for category in manifest.categories:
     if category.key != "Leg":
       continue
@@ -647,7 +651,7 @@ proc testHats() =
       manifest.selectPart(selection, "Headgear", item.name)
       nodes.applySelection(manifest, selection)
       doAssert nodes[item.nodes[0]].visible
-      doAssert not nodes["Hair_01"].visible
+      doAssert nodes["Hair_01"].visible == ("Hair_01" notin item.hides)
   manifest.selectPart(selection, "Headgear", "None")
   nodes.applySelection(manifest, selection)
   doAssert nodes["Hair_01"].visible
@@ -957,6 +961,62 @@ proc testReference() =
       doAssert abs(player.currentTime - reference.player.currentTime) < 0.0001
       doAssert player.fading == reference.player.fading
 
+proc testGota() =
+  ## Checks all hero budgets, modular skin restoration, and shared animation.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    nodes = partNodes(model.root)
+    player = newClipPlayer(model.root)
+    actors = readLineup(AssetDir, manifest, model.root, "Gota")
+  doAssert actors.len == 10
+  var
+    selection = manifest.defaultSelection()
+    count = 0
+  for preset in manifest.presets:
+    if preset.group != "Gota":
+      continue
+    inc count
+    manifest.applyPreset(selection, preset)
+    nodes.applySelection(manifest, selection)
+    doAssert nodes["GotaSkinUpper"].visible
+    doAssert not nodes["GotaSkinLower"].visible
+    doAssert not nodes["Body"].visible
+    doAssert not nodes["GotaFoot.Left"].visible
+    doAssert not nodes["GotaFoot.Right"].visible
+    var triangles = 0
+    for node in nodes.values:
+      if node.visible:
+        for primitive in node.mesh.primitives:
+          triangles +=
+            (primitive.indices16.len + primitive.indices32.len) div 3
+    doAssert triangles > 0 and triangles < 20_000, preset.name
+    for key in ["Foot", "Leg", "Belt", "Chest", "Headgear"]:
+      var present = false
+      for choice in preset.parts:
+        if choice.category == key:
+          present = choice.item.len > 0 and choice.item != "None"
+      doAssert present, preset.name & " missing " & key
+    manifest.selectPart(selection, "Leg", "None")
+    manifest.selectPart(selection, "Foot", "None")
+    nodes.applySelection(manifest, selection)
+    doAssert nodes["GotaSkinLower"].visible
+    doAssert nodes["GotaFoot.Left"].visible
+    doAssert nodes["GotaFoot.Right"].visible
+  doAssert count == 10
+  for clip in ["A_TPose", "Walk_Loop", "Crouch_Fwd_Loop"]:
+    player.play(clip, 0)
+    player.seek(0.35)
+    actors.sync()
+    for actor in actors:
+      doAssert actor.root.animations.len == 0
+      for node in actor.root.walkNodes:
+        if node.mesh == nil:
+          for source in model.root.walkNodes:
+            if source.mesh == nil and source.name == node.name:
+              doAssert node.pos == source.pos
+              doAssert node.rot == source.rot
+
 proc testAssembly(directory: string) =
   ## Verifies independent meshes and clips share the same live skeleton.
   let
@@ -1034,6 +1094,7 @@ else:
   testHats()
   testGarments()
   testGnomes()
+  testGota()
   testWeights()
   testReference()
   echo "Chargen tests passed"
