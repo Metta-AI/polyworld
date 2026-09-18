@@ -3,7 +3,7 @@
 import
   std/strformat,
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+  polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
   content, sim, game, controls, layouts
 
@@ -13,7 +13,6 @@ const
     rgbx(196, 168, 120, 255),
     rgbx(160, 200, 160, 255)
   ]
-  HudClearance = 48.0'f32
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
   IconTiny = 16.0'f32
@@ -120,38 +119,54 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   )
   result.build = layout.panel(GameUiRegion.BottomRight, PanelBuild)
 
-proc hudLayoutFits(layoutSize: Vec2): bool =
-  ## Returns whether native HUD plates fit this layout without overlap.
-  let
-    layout = initGameUiLayout(layoutSize, TransportHeight)
-    chrome = placeChrome(layout)
-  layoutSize.x >= TransportMinWidth and layoutFits(
-    layout,
-    [
-      chrome.score,
-      chrome.resources,
-      chrome.minimap,
-      chrome.selection,
-      chrome.build
-    ],
-    HudClearance
-  )
-
-proc hudUiScale*(windowSize: Vec2): float32 =
-  ## Returns the stepped Silky scale that keeps HUD plates from overlapping.
-  fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
-
-proc hudUiScale*(window: Window): float32 =
-  ## Returns the stepped Silky scale that fits the native HUD on this window.
-  hudUiScale(vec2(window.size.x.float32, window.size.y.float32))
-
 proc currentLayout*(window: Window): GameUiLayout =
   ## Returns the nine-region HUD layout in Silky layout space.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
-      hudUiScale(window),
+      gameUiScale(window),
     TransportHeight
   )
+
+var statsState: StatsState
+
+proc currentMetrics(slot: int, complete: bool): MetricRow =
+  ## Combines authoritative totals with live or original replay telemetry.
+  result = run.metrics.read(slot, run.world.tick, complete)
+  if run.historyPlayback:
+    result = result.withTelemetry(
+      run.history, slot, run.world.tick, complete
+    )
+  if run.replayMode:
+    result = result.withTelemetry(
+      run.replayData.metrics, slot, run.world.tick, complete
+    )
+
+proc currentStats(): StatsTable =
+  ## Adapts the actual roster and outcome to the shared table.
+  run.sampleMetrics()
+  result = StatsTable(kind: RtsStats, tick: run.world.tick,
+    complete: run.world.over, winner: int(run.world.winner))
+  for slot in 0 ..< PlayerCount:
+    result.rows.add StatsRow(
+      slot: slot,
+      name: run.config.players[slot].displayName(slot),
+      subtitle: if slot == 0: "LIGHT COMMANDER" else: "DARK COMMANDER",
+      portrait: unitPortraitKey(int32(slot), PeonUnit),
+      team: slot,
+      selected: not run.replayMode and options.playerSlot == slot + 1,
+      metrics: currentMetrics(slot, result.complete)
+    )
+
+proc statsContains(window: Window, mouse: Vec2): bool =
+  ## Tests the overlay before allowing input through to the existing HUD.
+  if not statsState.visible(window.tabHeld):
+    return false
+  statsState.mouseOverStats(window, currentLayout(window),
+    currentStats(), mouse)
+
+proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
+  ## Keeps covered HUD controls from receiving an overlay click.
+  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
 
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
@@ -159,7 +174,7 @@ proc currentChrome(window: Window): HudChrome =
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether the pointer is over an anchored game UI panel.
-  if mouseOverDebugMenu(mouse):
+  if window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   mouseOverPanels(
@@ -201,40 +216,40 @@ proc towerCount(player: int32): int =
 proc buildingName(kind: BuildingKind, owner = -1'i32): string =
   ## Returns a spectator-facing name for one structure.
   case kind
-  of TownHallBuilding: "TOWN HALL"
-  of FarmBuilding: "FARM"
-  of BarracksBuilding: "BARRACKS"
-  of LumberMillBuilding: "LUMBER MILL"
-  of TowerBuilding: "TOWER"
+  of TownHallBuilding: "Town Hall"
+  of FarmBuilding: "Farm"
+  of BarracksBuilding: "Barracks"
+  of LumberMillBuilding: "Lumber Mill"
+  of TowerBuilding: "Tower"
   of StablesBuilding:
-    if owner == DarkPlayer: "KENNELS" else: "STABLES"
+    if owner == DarkPlayer: "Kennels" else: "Stables"
   of ChurchBuilding:
-    if owner == DarkPlayer: "TEMPLE" else: "CHURCH"
-  of BlacksmithBuilding: "BLACKSMITH"
-  of GoldMineBuilding: "GOLD MINE"
+    if owner == DarkPlayer: "Temple" else: "Church"
+  of BlacksmithBuilding: "Blacksmith"
+  of GoldMineBuilding: "Gold Mine"
 
 proc unitName(kind: UnitKind, owner: int32): string =
   ## Returns a spectator-facing name for one unit.
   if owner == DarkPlayer:
     case kind
-    of PeonUnit: "PEON"
-    of SoldierUnit: "GRUNT"
-    of ArcherUnit: "SPEARMAN"
-    of MageUnit: "WARLOCK"
-    of KnightUnit: "RAIDER"
-    of CatapultUnit: "CATAPULT"
-    of ClericUnit: "NECROLYTE"
-    of SummonUnit: "DAEMON"
+    of PeonUnit: "Peon"
+    of SoldierUnit: "Grunt"
+    of ArcherUnit: "Spearman"
+    of MageUnit: "Warlock"
+    of KnightUnit: "Raider"
+    of CatapultUnit: "Catapult"
+    of ClericUnit: "Necrolyte"
+    of SummonUnit: "Daemon"
   else:
     case kind
-    of PeonUnit: "PEASANT"
-    of SoldierUnit: "FOOTMAN"
-    of ArcherUnit: "ARCHER"
-    of MageUnit: "CONJURER"
-    of KnightUnit: "KNIGHT"
-    of CatapultUnit: "CATAPULT"
-    of ClericUnit: "CLERIC"
-    of SummonUnit: "ELEMENTAL"
+    of PeonUnit: "Peasant"
+    of SoldierUnit: "Footman"
+    of ArcherUnit: "Archer"
+    of MageUnit: "Conjurer"
+    of KnightUnit: "Knight"
+    of CatapultUnit: "Catapult"
+    of ClericUnit: "Cleric"
+    of SummonUnit: "Elemental"
 
 proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
   ## Returns whether one entity belongs to the HUD selection set.
@@ -345,6 +360,9 @@ proc updateMinimapCamera*(
     followSelection: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
+  if window.statsContains(mouse):
+    minimapPanning = false
+    return
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
@@ -460,6 +478,8 @@ proc drawUi*(
     actionCam: var ActionCam
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  let table = currentStats()
+  statsState.syncDirector(actionCam, table, window.tabHeld)
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
@@ -488,6 +508,14 @@ proc drawUi*(
     )
   sk.drawScoreRow(scoreSlots, LightPlayer, 0)
   sk.drawScoreRow(scoreSlots, DarkPlayer, 1)
+  for owner in 0 ..< min(PlayerCount, run.config.players.len):
+    let side = if owner == LightPlayer: "LIGHT: " else: "DARK: "
+    sk.drawLabel(
+      sk.fittedLabel(side & run.config.players[owner].displayName(owner), 262),
+      scorePanel.origin + vec2(18, 100 + owner.float32 * 22),
+      vec2(262, 22),
+      playerColor(int32(owner))
+    )
 
   let resourceRows = [
     ("GOLD", light.gold),
@@ -600,7 +628,7 @@ proc drawUi*(
       "Small",
       CenterAlign
     )
-    if window.clicked(sk, button):
+    if window.hudClicked(sk, button):
       if options.playerSlot == 0:
         viewMode = int32(index)
 
@@ -613,8 +641,11 @@ proc drawUi*(
     portraitKey = ""
     portraitHp = 0'i32
     portraitMax = 1'i32
-    portraitId = primaryId
+    portraitId =
+      if actionCam.enabled and actionCam.locked: actionCam.lockId
+      else: primaryId
     portraitName = "NO SELECTION"
+    portraitOwner = -1'i32
   if portraitId == NoEntity:
     for id in selectedIds:
       if (id.isUnitId and run.world.hasUnit(id)) or
@@ -627,6 +658,7 @@ proc drawUi*(
     portraitHp = unit.hp
     portraitMax = UnitTable[unit.owner][unit.kind].hp
     portraitName = unit.kind.unitName(unit.owner)
+    portraitOwner = unit.owner
   elif portraitId != NoEntity and run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
       run.world.buildingIndex(portraitId)
@@ -638,6 +670,11 @@ proc drawUi*(
     portraitHp = structure.hp
     portraitMax = max(structure.maxHp, 1)
     portraitName = structure.kind.buildingName(structure.owner)
+    portraitOwner = structure.owner
+  let players = run.config.players
+  if portraitOwner >= 0 and portraitOwner < players.len:
+    portraitName = players[portraitOwner].displayName(portraitOwner) &
+      "'s " & portraitName
   let
     selectPortrait = selection.portrait
     selectBar = selection.hp
@@ -653,7 +690,7 @@ proc drawUi*(
     hudScratch
   )
   sk.drawLabel(
-    portraitName,
+    sk.fittedLabel(portraitName, selectName.size.x, "Small"),
     selectName.origin,
     selectName.size,
     rgbx(226, 230, 239, 255),
@@ -682,7 +719,7 @@ proc drawUi*(
       UnitTable[unit.owner][unit.kind].hp.float32,
       HealthColor
     )
-    if window.clicked(sk, slot):
+    if window.hudClicked(sk, slot):
       clickedId = id
     inc shown
   if clickedId != NoEntity:
@@ -694,10 +731,10 @@ proc drawUi*(
       selectedIds.add clickedId
       primaryId = clickedId
   if shown == 0 and
-      primaryId.isBuildingId and
-      run.world.hasBuilding(primaryId):
+      portraitId.isBuildingId and
+      run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
-      run.world.buildingIndex(primaryId)
+      run.world.buildingIndex(portraitId)
     ]
     for slot in 0 ..< min(QueueSlots, selection.units.len):
       let
@@ -745,7 +782,7 @@ proc drawUi*(
       "Hud",
       CenterAlign
     )
-    if window.clicked(sk, tab):
+    if window.hudClicked(sk, tab):
       commandTab = i
   if commandTab == 0:
     for index in 0 ..< build.slots.len:
@@ -764,7 +801,7 @@ proc drawUi*(
         sk.drawSlotCosts(slot, stats.gold, stats.wood)
         if options.playerSlot > 0 and
             not run.replayMode and
-            window.clicked(sk, slot):
+            window.hudClicked(sk, slot):
           pendingBuild = int32(kind.ord)
   elif commandTab == 1:
     for kind in UnitKind:
@@ -783,7 +820,7 @@ proc drawUi*(
       sk.drawSlotCosts(slot, stats.gold, stats.wood)
       if options.playerSlot > 0 and
           not run.replayMode and
-          window.clicked(sk, slot):
+          window.hudClicked(sk, slot):
         let player = options.playerSlot - 1
         if primaryId.isBuildingId and
             run.world.buildingOwner(primaryId) == player:
@@ -803,7 +840,8 @@ proc drawUi*(
     window,
     chrome.layout.transportPanel,
     actionCam,
-    followSelection
+    followSelection,
+    addr statsState.toggled
   )
 
   if run.world.over:
@@ -823,3 +861,10 @@ proc drawUi*(
         &"first at tick {run.hashCheck.firstTick}"
     )
   sk.drawDebugMenu(window)
+  statsState.syncDirector(actionCam, table, window.tabHeld)
+
+proc drawStatsOverlay*(sk: Silky, window: Window) =
+  ## Presents readable statistics above the HUD at every window width.
+  sk.drawStatsOverlay(
+    window, currentLayout(window), statsState, currentStats(), run.history
+  )

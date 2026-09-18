@@ -11,13 +11,13 @@ import
   std/[math, os, strformat, strutils, tables, times, unicode],
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
-    actioncam, characters, chrome, clickmarks, common, fixed, inputs, particles,
-    particleshaders,
+    actioncam, assets, characters, chrome, clickmarks, common, fixed, inputs,
+    particles, particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shapes,
-    shadows, tapes, viewers, visions, worldbars
+    shadows, tapes, toon, viewers, visions, worldbars, worldtexts
   ],
-  content,
+  assets, content,
   sim,
   game,
   replays,
@@ -25,9 +25,9 @@ import
   controls
 
 const
+  DefaultCameraDistance = 17.0'f
   WindowTitle = "Light vs Dark"
   AtlasPath = TmpRoot & "/lvd.atlas.png"
-  LogoPath = DataRoot & "/themes/lvd/lvd_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most
     ## that much.
@@ -36,83 +36,6 @@ const
     ## letting a busy lumber camp stutter the frame rate.
   SelectionDragPixels = 6.0'f32
     ## Pointer travel that turns a click into a box select.
-  UnitModels = [
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/human/worker.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/human/footman.glb",
-      ArcherUnit: DataRoot & "/characters/mini_legion/human/archer.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/human/mage.glb",
-      KnightUnit: DataRoot & "/characters/mini_legion/human/horseman.glb",
-      CatapultUnit: DataRoot &
-        "/characters/mini_legion/human/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/sentinel/druid.glb",
-      SummonUnit: DataRoot &
-        "/characters/mini_legion/sentinel/rock_golem.glb"
-    ],
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/warband/minion.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/warband/grunt.glb",
-      ArcherUnit: DataRoot &
-        "/characters/mini_legion/warband/head_hunter.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/warband/warlock.glb",
-      KnightUnit: DataRoot &
-        "/characters/mini_legion/warband/hog_rider.glb",
-      CatapultUnit: DataRoot &
-        "/characters/mini_legion/undead/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/undead/lich.glb",
-      SummonUnit: DataRoot & "/characters/rpg_monsters/demon_king.glb"
-    ]
-  ]
-  UnitHeights = [
-    PeonUnit: 1.05'f32,
-    SoldierUnit: 1.15'f32,
-    ArcherUnit: 1.20'f32,
-    MageUnit: 1.25'f32,
-    KnightUnit: 1.55'f32,
-    CatapultUnit: 1.40'f32,
-    ClericUnit: 1.22'f32,
-    SummonUnit: 1.90'f32
-  ]
-  LightPropPack = DataRoot & "/terrain/low_poly_village.glb"
-  DarkPropPack = DataRoot & "/terrain/tower_defense_kit.glb"
-  BuildingProps = [
-    [
-      TownHallBuilding: "house_lvl7",
-      FarmBuilding: "farm_lvl4",
-      BarracksBuilding: "farm_house_lvl5",
-      LumberMillBuilding: "farm_house_lvl3",
-      TowerBuilding: "tower_lvl5",
-      StablesBuilding: "farm_house_lvl6",
-      ChurchBuilding: "house_lvl4",
-      BlacksmithBuilding: "farm_house_lvl2",
-      GoldMineBuilding: ""
-    ],
-    [
-      TownHallBuilding: "building1",
-      FarmBuilding: "farm_lvl2",
-      BarracksBuilding: "building3",
-      LumberMillBuilding: "building2",
-      TowerBuilding: "tower_square_tall1",
-      StablesBuilding: "tower_tall1",
-      ChurchBuilding: "tower_square_tall2",
-      BlacksmithBuilding: "tower_square_small1",
-      GoldMineBuilding: ""
-    ]
-  ]
-  BuildingPropHeights = [
-    TownHallBuilding: 3.0'f32,
-    FarmBuilding: 1.6'f32,
-    BarracksBuilding: 2.6'f32,
-    LumberMillBuilding: 2.4'f32,
-    TowerBuilding: 3.2'f32,
-    StablesBuilding: 2.5'f32,
-    ChurchBuilding: 2.8'f32,
-    BlacksmithBuilding: 2.2'f32,
-    GoldMineBuilding: 1.8'f32
-  ]
-  MineProps = ["mineral1", "mineral3", "rock2"]
-  ConstructionProps = ["box1", "barel1", "wall1"]
-  RubbleProps = ["rock1", "stump1"]
 
 type
   GraphicsError = object of CatchableError
@@ -127,7 +50,7 @@ type
 var
   window*: Window
   sk*: Silky
-  cameraDistance* = 190.0'f32
+  cameraDistance* = DefaultCameraDistance
   cameraTarget* = vec3(0, 0, 0)
   cameraEye = vec3(0, 0, 0)
   panning = false
@@ -147,7 +70,8 @@ var
     live = not run.replayMode,
     durationTicks = run.maximumTicks,
     playing = not options.pauseOnStart,
-    speed = options.speed
+    speed = options.speed,
+    repeating = true
   )
   placedEditCount = 0
   placedBuildingKey = ""
@@ -160,28 +84,6 @@ var
   terrainVisionMode = int32.low
 
 ## Presentation helpers
-
-proc unitPortraitPath(player: int32, kind: UnitKind): string =
-  ## Returns the on-disk profile next to one unit model.
-  UnitModels[player][kind].changeFileExt("profile.png")
-
-proc buildingPack(player: int32, kind: BuildingKind): string =
-  ## Returns the GLB pack that holds this building's prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack
-  elif player == LightPlayer or kind == FarmBuilding:
-    LightPropPack
-  else:
-    DarkPropPack
-
-proc buildingPortraitPath(player: int32, kind: BuildingKind): string =
-  ## Returns the on-disk profile for one building prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack.changeFileExt("mineral1.profile.png")
-  else:
-    buildingPack(player, kind).changeFileExt(
-      BuildingProps[player][kind] & ".profile.png"
-    )
 
 proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
   ## Returns a clip for one pose. Locomotion prefers Run, Move, then Walk.
@@ -313,13 +215,15 @@ proc runGraphics*() =
     let builder = newHudAtlas(4096)
     addHudIcons(builder)
     builder.addDefaultFonts()
+    builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
   profileBlock "window":
     (window, sk) = initGameWindow(
       WindowTitle,
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight),
-      options.vsync
+      options.vsync,
+      msaa = msaa4x
     )
   if options.playerSlot > 0 and not run.replayMode:
     let player = options.playerSlot - 1
@@ -334,7 +238,9 @@ proc runGraphics*() =
     seed = run.mapSeed
     treeHeight = 6.0'f
     treeWidth = 0.0'f
-    initTerrain(DenseTrees, GeneratedTerrain, PaintedRocks)
+    initTerrain(
+      DenseTrees, GeneratedTerrain, PaintedRocks, settings = LvdTerrainAssets
+    )
     scatterGrass(800, run.mapSeed)
     scatterRocks(80, run.mapSeed)
 
@@ -363,6 +269,11 @@ proc runGraphics*() =
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
     worldBarRenderer = initWorldBarRenderer()
+    playerLabels = layoutNames(
+      sk.atlas.fonts["WorldName"],
+      sk.atlas.size,
+      run.config.players
+    )
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
 
@@ -371,8 +282,8 @@ proc runGraphics*() =
     villagePack: PropPack
     towerPack: PropPack
   profileBlock "props":
-    villagePack = loadPropPack(LightPropPack)
-    towerPack = loadPropPack(DarkPropPack)
+    villagePack = loadPropPack(propPaths(LightPropPack, lightProps()))
+    towerPack = loadPropPack(propPaths(DarkPropPack, darkProps()))
 
   proc packFor(player: int32, name: string): PropPack =
     ## Chooses the pack that actually carries a prop, so Dark can borrow the
@@ -443,7 +354,11 @@ proc runGraphics*() =
     rebakeScene()
   cameraTarget = vec3(0, 0, 0)
   var
+    viewingDt = 0.0'f
+    viewingSeeking = false
     actionCam = initActionCam(
+      subjectMode = true,
+      defaultDistance = DefaultCameraDistance,
       minDistance = 40,
       maxDistance = 240,
       tight = 0.4,
@@ -453,8 +368,6 @@ proc runGraphics*() =
       mapSpan = HalfGrid * 2,
       closeScale = 0.5
     )
-    seenUnitId = 0'i32
-    sawUnits = false
 
   ## Replay scaffolding
 
@@ -521,6 +434,9 @@ proc runGraphics*() =
   proc playerMode(): bool =
     ## Returns whether this client issues orders for one side.
     options.playerSlot > 0 and not run.replayMode
+
+  if playerMode():
+    actionCam.takeManual()
 
   proc selectEntity(id: int32, additive = false) =
     ## Selects or toggles one entity. Spectator mode follows the selection.
@@ -630,6 +546,20 @@ proc runGraphics*() =
       (0.5'f32 - normalized.y * 0.5'f32) * window.size.y.float32
     )
 
+  proc addPlayerNames() =
+    ## Labels each visible living town hall with its owner's name.
+    for structure in run.world.buildings:
+      if structure.kind != TownHallBuilding or structure.hp <= 0 or
+        structure.owner < 0 or structure.owner >= run.config.players.len or
+        not shownBuilding(structure):
+          continue
+      let anchor = buildingCentre(structure) +
+        vec3(0, BuildingPropHeights[TownHallBuilding] + 0.4'f, 0)
+      worldBarRenderer.addText(
+        playerLabels[structure.owner],
+        anchor
+      )
+
   proc pickEntity(viewProjection: Mat4): int32 =
     ## Finds the nearest visible unit or structure under the pointer.
     var bestDistance = 28.0'f32
@@ -728,95 +658,40 @@ proc runGraphics*() =
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
 
-  proc feedLvdActions() =
-    ## Notes builds, spawns, fights, wrecks, and upcoming tape commands.
-    const LookAheadTicks = 48'i32
-    let tick = run.world.tick
-    actionCam.beginFrame(tick)
-    proc renderOf(id: int32, point: var Vec3): bool =
-      ## Finds a living unit or standing building in render space.
-      if run.world.hasUnit(id):
-        point = renderPoint(
-          run.world.units[run.world.unitIndex(id)]
-        )
-        return true
-      if run.world.hasBuilding(id):
-        point = buildingCentre(
-          run.world.buildings[run.world.buildingIndex(id)]
-        )
-        return true
-      false
-    proc noteUpcoming(actions: openArray[ReplayAction]) =
-      ## Zooms toward recorded attacks and builds before they land.
-      var i = actions.actionIndexAfter(uint32(tick))
-      let limit = uint32(tick + LookAheadTicks)
-      while i < actions.len and actions[i].tick <= limit:
-        let action = actions[i]
-        var pos: Vec3
-        var score = 0.0'f32
-        var id = action.entityId
-        if action.kind == ActionAttack:
-          if renderOf(action.entityId, pos):
-            var target: Vec3
-            if renderOf(action.first, target):
-              pos = mix(pos, target, 0.5'f32)
-            score = 72
-        elif action.kind == ActionBuild:
-          let tile = tile2(action.second, action.third)
-          let xz = tileCentreXZ(tile)
-          pos = vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
-          score = 44
-          id = 90_000_000 + action.entityId
-        elif action.kind == ActionTrain:
-          if renderOf(action.entityId, pos):
-            score = 40
-        if score > 0:
-          actionCam.noteInterest(
-            id,
-            pos,
-            score,
-            6,
-            tick,
-            int32(action.tick) - tick + 24
-          )
-        inc i
-    if run.replayPlayer != nil:
-      noteUpcoming(run.replayPlayer.data.actions)
-    elif run.recorder != nil:
-      noteUpcoming(run.recorder.data.actions)
-    for structure in run.world.buildings:
-      let
-        pos = buildingCentre(structure)
-        radius = float32(structure.side) * 0.7'f32
-      if structure.state == BuildingUnderConstruction:
-        actionCam.noteInterest(
-          structure.id,
-          pos,
-          32,
-          radius,
-          tick,
-          48
-        )
-      elif structure.state == BuildingDying:
-        actionCam.noteInterest(
-          structure.id,
-          pos,
-          50.0'f32 + float32(structure.side) * 8.0'f32,
-          radius,
-          tick,
-          24
-        )
-    var maxId = seenUnitId
+  proc feedLvdActions(observeTick = false) =
+    ## Refreshes real subjects and observes every simulated tick.
+    if not actionCam.enabled:
+      return
+    var subjects: seq[Subject]
     for unit in run.world.units:
-      let pos = renderPoint(unit)
-      if unit.state == UnitAttacking:
-        actionCam.noteInterest(unit.id, pos, 55, 2.5, tick, 24)
-      if sawUnits and unit.id > seenUnitId:
-        actionCam.noteInterest(unit.id, pos, 38, 2, tick, 24)
-      if unit.id > maxId:
-        maxId = unit.id
-    seenUnitId = maxId
-    sawUnits = true
+      subjects.add Subject(
+        id: unit.id, owner: unit.owner, position: renderPoint(unit),
+        height: 0.9, radius: 1.5, visible: shownUnit(unit) and unit.state != UnitInMine,
+        alive: unit.hp > 0 and unit.state != UnitDying,
+        hp: unit.hp, maxHp: UnitTable[unit.owner][unit.kind].hp,
+        complete: true, participant: unit.targetId,
+        fighting: unit.state == UnitAttacking, activity: unit.cooldown,
+        progress: int32(unit.state), gold: unit.carryGold + unit.carryWood,
+        idleScore: (if unit.state == UnitIdle: 8.0'f else: 22.0'f),
+        combatScore: 90
+      )
+    for building in run.world.buildings:
+      subjects.add Subject(
+        id: building.id, owner: building.owner,
+        position: buildingCentre(building), height: 2,
+        radius: float32(building.side) * 0.7'f, visible: shownBuilding(building),
+        alive: building.hp > 0 and building.state != BuildingDying,
+        hp: building.hp, maxHp: building.maxHp,
+        complete: building.state == BuildingComplete,
+        progress: building.queueLength,
+        idleScore: (if building.state == BuildingUnderConstruction: 24.0'f
+          else: 4.0'f),
+        combatScore: (if building.kind == TownHallBuilding: 165.0'f
+          else: 105.0'f)
+      )
+    if observeTick and not viewingSeeking:
+      actionCam.director.observe(subjects)
+    actionCam.director.refresh(subjects)
 
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
@@ -887,44 +762,35 @@ proc runGraphics*() =
           400.0'f32
         )
     if actionCam.enabled:
-      feedLvdActions()
-      actionCam.chooseShot(dt, transport.speed)
-      actionCam.follow(
-        cameraTarget,
-        cameraDistance,
-        dt,
-        transport.speed
-      )
       return
-    if not playerMode() and not selectionStarted:
-      let count = selectedCount()
-      if followSelection and count == 1:
-        let focus = selectionTarget(selectedIds[0]).position
-        cameraTarget = mix(
-          cameraTarget,
-          focus,
-          damping(5.0'f32, dt)
-        )
-      elif followSelection and count > 1:
-        let
-          center = selectedCenter()
-          distance = clamp(
-            14.0'f32 + selectedRadius(center) * 2.8'f32,
-            24.0'f32,
-            400.0'f32
-          ) * groupCameraScale
-        cameraTarget = mix(
-          cameraTarget,
-          center,
-          damping(4.0'f32, dt)
-        )
-        cameraDistance = mix(
-          cameraDistance,
-          distance,
-          damping(2.0'f32, dt)
-        )
-      elif followSelection:
-        clearSelection()
+    let count = selectedCount()
+    if followSelection and count == 1:
+      let focus = selectionTarget(selectedIds[0]).position
+      cameraTarget = mix(
+        cameraTarget,
+        focus,
+        damping(5.0'f32, dt)
+      )
+    elif followSelection and count > 1:
+      let
+        center = selectedCenter()
+        distance = clamp(
+          14.0'f32 + selectedRadius(center) * 2.8'f32,
+          24.0'f32,
+          400.0'f32
+        ) * groupCameraScale
+      cameraTarget = mix(
+        cameraTarget,
+        center,
+        damping(4.0'f32, dt)
+      )
+      cameraDistance = mix(
+        cameraDistance,
+        distance,
+        damping(2.0'f32, dt)
+      )
+    elif followSelection:
+      clearSelection()
 
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Applies click, shift-click, or box selection on left release.
@@ -1263,7 +1129,13 @@ proc runGraphics*() =
           )]
         worldBarRenderer.addResourceBars(anchor, width, bars)
     damageTrails.finishFrame()
-    worldBarRenderer.draw(viewProjection, cameraRight, cameraUp)
+    addPlayerNames()
+    worldBarRenderer.draw(
+      viewProjection,
+      cameraRight,
+      cameraUp,
+      sk.atlasTextureId()
+    )
 
   proc particleTargetPosition(id: int32): tuple[
       found: bool,
@@ -1415,6 +1287,7 @@ proc runGraphics*() =
     let towerTargets = expectedTowerTargets()
     captureUnitPoses()
     advanceGame()
+    feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
     captureCheckpoint()
 
@@ -1452,11 +1325,22 @@ proc runGraphics*() =
           selectedIds.add unit.id
     var screenshotFrame = 0
 
+  var
+    viewingClock: ViewingClock
+    cameraSeekSerial = -1
+
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
-      sk.uiScale = hudUiScale(window)
+      viewingDt = viewingClock.viewingDelta(window)
+      viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
+      if not transport.playing or viewingSeeking:
+        viewingDt = 0
+      if cameraSeekSerial != transport.seekSerial:
+        actionCam.resetDirector(transport.automaticSeek)
+        cameraSeekSerial = transport.seekSerial
+      sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       profileBlock "camera":
         updateCamera(dt)
@@ -1468,6 +1352,7 @@ proc runGraphics*() =
       if restoreTick >= 0:
         restoreTo(restoreTick)
         transport.sync(run.world.tick, recorded, run.world.over)
+      feedLvdActions(observeTick = true)
       transport.startFrame(dt, TickRate)
       let frameStart = epochTime()
       run.historyPlayback = transport.inHistory
@@ -1498,6 +1383,14 @@ proc runGraphics*() =
         (showTiles or framesSinceRebake >= RebakeFrameGap):
           profileBlock "rebake":
             rebakeScene()
+      feedLvdActions()
+      actionCam.direct(
+        cameraTarget, cameraDistance, viewingDt,
+        run.world.over or transport.tick >= transport.timelineEnd,
+        transport.repeating,
+        window.size.x.float32 / max(window.size.y.float32, 1),
+        RtsFollowLift
+      )
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()
@@ -1540,8 +1433,11 @@ proc runGraphics*() =
           scene.sunDepthPass = true
           drawWorldUnits()
           scene.sunDepthPass = false
+        when not defined(emscripten):
+          glEnable(GL_MULTISAMPLE)
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+        scene.toon.drawBackground()
         updateTerrainVision()
         drawTerrain(viewProjection, showTiles)
         beginCharacters(scene, window, view, projection, cameraEye)
@@ -1617,6 +1513,7 @@ proc runGraphics*() =
           selectionStarted
         )
         sk.endUi()
+        drawStatsOverlay(sk, window)
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -1626,6 +1523,10 @@ proc runGraphics*() =
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
+        reportDirectorFrame(
+          actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
+        )
+        reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

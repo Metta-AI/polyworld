@@ -4,8 +4,8 @@
 ## `apply*` procs the BASIC bots use.
 
 import
-  sim,
-  replays
+  polyworld/metrics,
+  content, sim, replays
 
 type
   PlayerCommandKind = enum
@@ -14,14 +14,26 @@ type
     CommandAttackMove
     CommandBuy
     CommandUse
+    CommandCastTarget
+    CommandCastPoint
 
   PlayerCommand = object
     kind: PlayerCommandKind
     heroId: int32
     first: int32
     second: int32
+    slot: int32
 
-var pending: seq[PlayerCommand]
+type PurchaseReceipt* = object
+  serial*: int
+  heroId*, itemId*: int32
+  accepted*: bool
+
+var
+  pending: seq[PlayerCommand]
+  purchaseReceipt*: PurchaseReceipt
+  armedAbility* = -1'i32
+  shopOpen* = false
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
   ## Queues one walk command for the human hero.
@@ -65,8 +77,60 @@ proc queueUseItem*(heroId, slot: int32) =
     first: slot
   )
 
+proc queueCastTarget*(heroId, slot, targetId: int32) =
+  ## Queues one ability on the object under the player's pointer.
+  pending.add PlayerCommand(
+    kind: CommandCastTarget, heroId: heroId, slot: slot, first: targetId
+  )
+
+proc queueCastPoint*(heroId, slot, mapX, mapY: int32) =
+  ## Queues an ability toward the ground even when no object is selected.
+  pending.add PlayerCommand(
+    kind: CommandCastPoint, heroId: heroId, slot: slot,
+    first: mapX, second: mapY
+  )
+
+proc activatePlayerAbility*(
+    world: World,
+    heroId, slotId, selectedId, aimX, aimY: int32
+): bool =
+  ## Casts immediate actions or the current target, otherwise arms map aiming.
+  let hero = world.heroById(heroId)
+  if hero.id == 0 or hero.hp <= 0 or hero.state == Dying or
+    slotId < 0 or slotId > HeroAbilitySlot.high.ord:
+      return false
+  let spec = heroAbility(hero.class, HeroAbilitySlot(slotId)).abilitySpec
+  armedAbility = -1
+  if spec.casting == SelfCast:
+    queueCastTarget(heroId, slotId, heroId)
+    return true
+  var
+    mapX = aimX
+    mapY = aimY
+  for id in [selectedId, hero.attackObjectId]:
+    if id == 0 or id == heroId:
+      continue
+    var target: WorldObject
+    if not world.spellTarget(id, target) or not target.alive or
+      not world.visible(hero.team, target.position):
+        continue
+    if (spec.kind == Strike and target.team == hero.team) or
+      (spec.kind != Strike and target.team != hero.team):
+        continue
+    if spec.casting == MeleeCast and
+      not within(hero.position, target.position, spec.range):
+        mapX = mapCoordinate(target.position.x)
+        mapY = mapCoordinate(target.position.z)
+        break
+    queueCastTarget(heroId, slotId, id)
+    return true
+  if spec.casting == MeleeCast:
+    queueCastPoint(heroId, slotId, mapX, mapY)
+    return true
+  armedAbility = slotId
+
 proc recordCommand(game: Game, command: PlayerCommand) =
-  ## Writes one accepted human command onto the live tape.
+  ## Writes one human command attempt onto the live tape.
   if game.recorder == nil:
     return
   let tick = uint32(game.world.tick)
@@ -86,6 +150,12 @@ proc recordCommand(game: Game, command: PlayerCommand) =
   of CommandUse:
     game.recorder.recordUseItem(tick, command.heroId, command.first)
 
+  of CommandCastTarget, CommandCastPoint:
+    game.recorder.recordCast(
+      tick, command.heroId, command.slot, command.first, command.second,
+      command.kind == CommandCastPoint
+    )
+
 proc applyCommand(game: Game, command: PlayerCommand): bool =
   ## Applies one queued command through the bot validators.
   case command.kind
@@ -104,6 +174,13 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
   of CommandUse:
     applyUseItem(game.world, command.heroId, command.first)
 
+  of CommandCastTarget:
+    applyCastTarget(game.world, command.heroId, command.slot, command.first)
+  of CommandCastPoint:
+    applyCastPoint(
+      game.world, command.heroId, command.slot, command.first, command.second
+    )
+
 proc flushPlayerCommands*(game: Game) =
   ## Drains the human queue on a decision tick.
   if pending.len == 0:
@@ -112,4 +189,13 @@ proc flushPlayerCommands*(game: Game) =
   pending.setLen(0)
   for command in commands:
     game.recordCommand(command)
-    discard game.applyCommand(command)
+    let accepted = game.applyCommand(command)
+    if command.kind == CommandBuy:
+      purchaseReceipt = PurchaseReceipt(
+        serial: purchaseReceipt.serial + 1,
+        heroId: command.heroId, itemId: command.first, accepted: accepted
+      )
+    if accepted:
+      game.metrics.command(
+        heroIndex(game.world, command.heroId), game.world.tick
+      )

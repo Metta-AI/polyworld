@@ -4,7 +4,7 @@ import
   chroma, opengl, shady, vmath
 
 const
-  VertexFloats = 9
+  VertexFloats = 11
   DefaultGap* = 0.045'f32
   DefaultBorder* = 0.035'f32
   DefaultDamageHoldSeconds* = 1.25'f32
@@ -22,6 +22,7 @@ type
     program: GLuint
     vertexArray: GLuint
     vertexBuffer: GLuint
+    whiteTexture: GLuint
     vertices: seq[float32]
 
   WorldResourceBar* = object
@@ -47,13 +48,16 @@ var
   barViewProjection: Uniform[Mat4]
   barCameraRight: Uniform[Vec3]
   barCameraUp: Uniform[Vec3]
+  barTexture: Uniform[Sampler2D]
 
 proc barVertex(
     gl_Position: var Vec4,
     fragmentColor: var Vec4,
+    fragmentUv: var Vec2,
     worldCenter: Vec3,
     billboardOffset: Vec2,
-    vertexColor: Vec4
+    vertexColor: Vec4,
+    vertexUv: Vec2
 ) =
   ## Transforms one bar vertex into a camera-facing world-space plane.
   let position = worldCenter +
@@ -61,10 +65,17 @@ proc barVertex(
     barCameraUp * billboardOffset.y
   gl_Position = barViewProjection * vec4(position, 1)
   fragmentColor = vertexColor
+  fragmentUv = vertexUv
 
-proc barFragment(fragColor: var Vec4, fragmentColor: Vec4) =
-  ## Emits one unlit resource-bar fragment.
+proc barFragment(
+    fragColor: var Vec4,
+    fragmentColor: Vec4,
+    fragmentUv: Vec2
+) =
+  ## Emits an unlit bar or applies the shared font atlas's alpha coverage.
   fragColor = fragmentColor
+  if fragmentUv.x >= 0:
+    fragColor.w *= texture(barTexture, fragmentUv).w
 
 proc compileShaderStage(
     kind: GLenum,
@@ -124,6 +135,15 @@ proc compileProgram(): GLuint =
 proc initWorldBarRenderer*(): WorldBarRenderer =
   ## Creates one dynamic mesh buffer for all world-space resource bars.
   result.program = compileProgram()
+  glGenTextures(1, result.whiteTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, result.whiteTexture)
+  var white = [255'u8, 255'u8, 255'u8, 255'u8]
+  glTexImage2D(
+    GL_TEXTURE_2D, 0, GL_RGBA.GLint, 1, 1, 0,
+    GL_RGBA, GL_UNSIGNED_BYTE, white[0].addr
+  )
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
   glGenVertexArrays(1, result.vertexArray.addr)
   glBindVertexArray(result.vertexArray)
   glGenBuffers(1, result.vertexBuffer.addr)
@@ -132,7 +152,8 @@ proc initWorldBarRenderer*(): WorldBarRenderer =
   for attribute in [
     (name: "worldCenter", count: 3, offset: 0),
     (name: "billboardOffset", count: 2, offset: 3 * sizeof(float32)),
-    (name: "vertexColor", count: 4, offset: 5 * sizeof(float32))
+    (name: "vertexColor", count: 4, offset: 5 * sizeof(float32)),
+    (name: "vertexUv", count: 2, offset: 9 * sizeof(float32))
   ]:
     let location = glGetAttribLocation(
       result.program,
@@ -158,7 +179,8 @@ proc addVertex(
     renderer: var WorldBarRenderer,
     center: Vec3,
     offset: Vec2,
-    color: ColorRGBX
+    color: ColorRGBX,
+    uv: Vec2
 ) =
   ## Adds one interleaved billboard vertex to the dynamic mesh.
   const ByteScale = 1.0'f32 / 255.0'f32
@@ -171,13 +193,17 @@ proc addVertex(
   renderer.vertices.add color.g.float32 * ByteScale
   renderer.vertices.add color.b.float32 * ByteScale
   renderer.vertices.add color.a.float32 * ByteScale
+  renderer.vertices.add uv.x
+  renderer.vertices.add uv.y
 
-proc addQuad(
+proc addBillboardQuad*(
     renderer: var WorldBarRenderer,
     center: Vec3,
     offset,
     size: Vec2,
-    color: ColorRGBX
+    color: ColorRGBX,
+    uv = vec2(-1),
+    uvSize = vec2(0)
 ) =
   ## Adds one camera-facing colored rectangle as two mesh triangles.
   let
@@ -185,12 +211,12 @@ proc addQuad(
     bottomRight = offset + vec2(size.x, 0)
     topLeft = offset + vec2(0, size.y)
     topRight = offset + size
-  renderer.addVertex(center, bottomLeft, color)
-  renderer.addVertex(center, bottomRight, color)
-  renderer.addVertex(center, topRight, color)
-  renderer.addVertex(center, bottomLeft, color)
-  renderer.addVertex(center, topRight, color)
-  renderer.addVertex(center, topLeft, color)
+  renderer.addVertex(center, bottomLeft, color, uv + vec2(0, uvSize.y))
+  renderer.addVertex(center, bottomRight, color, uv + uvSize)
+  renderer.addVertex(center, topRight, color, uv + vec2(uvSize.x, 0))
+  renderer.addVertex(center, bottomLeft, color, uv + vec2(0, uvSize.y))
+  renderer.addVertex(center, topRight, color, uv + vec2(uvSize.x, 0))
+  renderer.addVertex(center, topLeft, color, uv)
 
 proc addResourceBars*(
     renderer: var WorldBarRenderer,
@@ -216,27 +242,27 @@ proc addResourceBars*(
           0.0'f32
         else:
           clamp(bar.delayedValue / bar.maximum, ratio, 1.0'f32)
-    renderer.addQuad(
+    renderer.addBillboardQuad(
       anchor,
       vec2(left - border, bottom - border),
       vec2(width + border * 2, bar.height + border * 2),
       rgbx(5, 7, 10, 240)
     )
-    renderer.addQuad(
+    renderer.addBillboardQuad(
       anchor,
       vec2(left, bottom),
       vec2(width, bar.height),
       rgbx(28, 31, 36, 225)
     )
     if bar.showDamageTrail and delayedRatio > ratio:
-      renderer.addQuad(
+      renderer.addBillboardQuad(
         anchor,
         vec2(left, bottom),
         vec2(width * delayedRatio, bar.height),
         rgbx(245, 243, 232, 255)
       )
     if ratio > 0:
-      renderer.addQuad(
+      renderer.addBillboardQuad(
         anchor,
         vec2(left, bottom),
         vec2(width * ratio, bar.height),
@@ -248,7 +274,8 @@ proc draw*(
     renderer: var WorldBarRenderer,
     viewProjection: Mat4,
     cameraRight,
-    cameraUp: Vec3
+    cameraUp: Vec3,
+    textureId = 0.GLuint
 ) =
   ## Uploads and draws the world-space billboard batch with scene depth.
   if renderer.vertices.len == 0:
@@ -266,6 +293,12 @@ proc draw*(
   glEnable(GL_BLEND)
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
   glUseProgram(renderer.program)
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(
+    GL_TEXTURE_2D,
+    if textureId == 0: renderer.whiteTexture else: textureId
+  )
+  glUniform1i(glGetUniformLocation(renderer.program, "barTexture"), 0)
   barViewProjection = viewProjection
   barCameraRight = cameraRight
   barCameraUp = cameraUp
