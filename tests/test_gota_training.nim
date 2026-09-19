@@ -81,4 +81,29 @@ for episode in 0 ..< 3:
 batch.close()
 for lane in scalar:
   lane.close()
+
+let rusher = "examples/gods_of_the_arena/players/rusher.bas"
+let mixed = newTrainingBatch(config, bot, bot & "\n" & rusher, policy, 1, 120)
+let baseline = newTrainingBatch(config, bot, bot, policy, 1, 120)
+let rushing = newTrainingBatch(config, bot, rusher, policy, 1, 120)
+for seed in [0, 10]:
+  mixed.reset(seed)
+  baseline.reset(seed)
+  rushing.reset(seed)
+  var opponentsDiffer = false
+  for step in 0 ..< 100:
+    var mixedTransition, baselineTransition, rushingTransition: array[1, Transition]
+    let action = [int32(step mod 8)]
+    mixed.step(action, mixedTransition)
+    baseline.step(action, baselineTransition)
+    rushing.step(action, rushingTransition)
+    opponentsDiffer = opponentsDiffer or baselineTransition != rushingTransition
+    if seed == 0:
+      doAssert mixedTransition == baselineTransition
+    else:
+      doAssert mixedTransition == rushingTransition
+  doAssert opponentsDiffer
+mixed.close()
+baseline.close()
+rushing.close()
 echo "Native training lanes match scalar observations, hashes, rewards, terminals, and repeated resets"

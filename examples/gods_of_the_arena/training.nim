@@ -31,7 +31,8 @@ type
   TrainingBatch* = ref object
     lanes*: seq[TrainingLane]
     config: GotaConfig
-    bot, opponent, policy: string
+    bot, policy: string
+    opponents: seq[string]
     maxTicks: int
 
 proc trainingPotential*(transition: Transition): int64 =
@@ -128,11 +129,12 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
   let gameMap = generateMap(int32(seed), batch.config.mapPreset)
   let game = newGame(gameMap, batch.config.spawnIntervalTicks, 10, false, ReplayData())
   let team = Team((seed mod 10) div 5)
+  let opponent = batch.opponents[(seed div 10) mod batch.opponents.len]
   let groups =
     if team == Team(0):
-      @[BotGroup(path: batch.bot, count: 5), BotGroup(path: batch.opponent, count: 5)]
+      @[BotGroup(path: batch.bot, count: 5), BotGroup(path: opponent, count: 5)]
     else:
-      @[BotGroup(path: batch.opponent, count: 5), BotGroup(path: batch.bot, count: 5)]
+      @[BotGroup(path: opponent, count: 5), BotGroup(path: batch.bot, count: 5)]
   loadBots(game, groups)
   game.replayData = initReplayData(currentSetup(game, uint32(batch.maxTicks)), gameMap.preset)
   let lane = TrainingLane(game: game, team: team, seed: seed, maxTicks: batch.maxTicks)
@@ -162,7 +164,11 @@ proc reset*(batch: TrainingBatch, seed: int) =
 proc newTrainingBatch*(config: GotaConfig, bot, opponent, policy: string,
                        count, maxTicks: int): TrainingBatch =
   doAssert count > 0 and maxTicks in 1 .. 28_800
-  result = TrainingBatch(config: config, bot: bot, opponent: opponent, policy: policy, maxTicks: maxTicks)
+  let opponents = opponent.splitLines()
+  doAssert opponents.len > 0
+  for path in opponents:
+    doAssert path.len > 0
+  result = TrainingBatch(config: config, bot: bot, opponents: opponents, policy: policy, maxTicks: maxTicks)
   for index in 0 ..< count:
     result.lanes.add result.newLane(index)
 
