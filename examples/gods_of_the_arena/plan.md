@@ -140,7 +140,7 @@ seat receives one JSON `observation` message at each hero decision:
 {"type":"observation","features":[0,0,0],"reward":0,"terminal":false}
 ```
 
-The complete message contains 25 bounded features, tick, seat, reward,
+The complete message contains 32 bounded features, tick, seat, reward,
 terminal/outcome, state hash, and score counters. Reply with
 `{"action":0}` through `{"action":17}`. This is the same native lane used by
 PufferLib, so a policy can move from the WebSocket testbed to the in-process

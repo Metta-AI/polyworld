@@ -5,7 +5,7 @@ include bots
 
 const
   GotaSourceCommit {.strdefine.} = ""
-  GotaFeatureCount* = 25
+  GotaFeatureCount* = 32
   GotaActionCount* = 18
   GotaOutcomeReward* = 100'f32
   GotaActionRepeat* = 4
@@ -51,9 +51,9 @@ proc snapshot(lane: TrainingLane, terminal: bool) =
     lane.transition.xp += (if hero.team == team: 1 else: -1) * hero.totalXp
   for building in game.world.buildings:
     if building.kind == TowerBuilding:
-      lane.transition.structureHp += (if building.team == team: 1 else: -1) * max(building.hp, 0)
+      lane.transition.structureHp += 2 * (if building.team == team: 1 else: -1) * max(building.hp, 0)
   for fort in game.world.forts:
-    lane.transition.structureHp += (if fort.team == team: 1 else: -1) * max(fort.hp, 0)
+    lane.transition.structureHp += 20 * (if fort.team == team: 1 else: -1) * max(fort.hp, 0)
   let hero = game.world.heroes[lane.transition.seat]
   lane.transition.heroXp = hero.totalXp
   lane.transition.heroGold = game.world.stats.values[lane.transition.seat][GoldMetric]
