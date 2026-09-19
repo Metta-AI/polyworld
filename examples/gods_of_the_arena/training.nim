@@ -63,9 +63,9 @@ proc snapshot(lane: TrainingLane, terminal: bool) =
   lane.transition.tick = game.world.tick
   lane.transition.terminal = int32(terminal)
   lane.transition.outcome =
-    if not game.world.gameOver: 0
-    elif game.world.winner == team: 1
-    else: -1
+    if game.world.gameOver and game.world.winner == team: 1
+    elif game.world.gameOver or terminal: -1
+    else: 0
   lane.transition.stateHash = stateHash(game)
 
 proc advance*(lane: TrainingLane, action: int32 = 0) =
