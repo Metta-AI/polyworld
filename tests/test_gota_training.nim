@@ -72,6 +72,9 @@ for episode in 0 ..< 3:
     inc step
     if transitions[0].terminal != 0:
       doAssert transitions[1].terminal != 0 and transitions[2].terminal != 0
+      doAssert transitions[0].outcome == -1
+      doAssert transitions[1].outcome == -1
+      doAssert transitions[2].outcome == -1
       break
 batch.close()
 for lane in scalar:
