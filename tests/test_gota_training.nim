@@ -51,6 +51,8 @@ for lane in batch.lanes:
     doAssert seat div 5 == firstSeat div 5
     doAssert not seen[seat], $controlledSeats
     seen[seat] = true
+  lane.advance(0)
+  doAssert lane.transition.tick >= GotaActionRepeat, $lane.transition.tick
 var scalar: seq[TrainingBatch]
 for index in 0 ..< 3:
   scalar.add newTrainingBatch(config, bot, bot, policy, 1, 120)
