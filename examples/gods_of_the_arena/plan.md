@@ -129,3 +129,25 @@ Per frame: spawn timer → per footman: Dying advances clamped Death anim then d
 - GL state bleed (gltf enables cull-face; terrain isn't consistently wound) → `drawTerrain` disables culling itself; exactly one clear per frame; water strictly last before UI.
 - Death clip loops if animTime clamp is forgotten (`applyClipAt` uses `mod`).
 - A footman chased off-lane under the bridge would pop onto the deck (`surfaceHeight` returns topmost layer) — lanes never route under it; acceptable for now.
+
+## Neural player endpoint
+
+`player_server.nim` exposes a local `/player` WebSocket for neural policies and
+interactive clients. The nine fixed seats continue to run BASIC. The connected
+seat receives one JSON `observation` message at each hero decision:
+
+```json
+{"type":"observation","features":[0,0,0],"reward":0,"terminal":false}
+```
+
+The complete message contains 25 bounded features, tick, seat, reward,
+terminal/outcome, state hash, and score counters. Reply with
+`{"action":0}` through `{"action":7}`. This is the same native lane used by
+PufferLib, so a policy can move from the WebSocket testbed to the in-process
+batch without changing its observation or action contract.
+
+Run it locally with:
+
+```sh
+nim r examples/gods_of_the_arena/player_server.nim
+```
