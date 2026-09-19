@@ -40,6 +40,17 @@ let bot = "examples/gods_of_the_arena/players/base.bas"
 let batch = newTrainingBatch(config, bot, bot, policy, 3, 120)
 for lane in batch.lanes:
   doAssert lane.transition.features[24] == 77
+  let firstSeat = lane.transition.seat
+  var controlledSeats: seq[int32]
+  controlledSeats.add firstSeat
+  while controlledSeats.len < 5:
+    lane.advance(0)
+    controlledSeats.add lane.transition.seat
+  var seen: array[10, bool]
+  for seat in controlledSeats:
+    doAssert seat div 5 == firstSeat div 5
+    doAssert not seen[seat], $controlledSeats
+    seen[seat] = true
 var scalar: seq[TrainingBatch]
 for index in 0 ..< 3:
   scalar.add newTrainingBatch(config, bot, bot, policy, 1, 120)
