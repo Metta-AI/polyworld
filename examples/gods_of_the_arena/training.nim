@@ -6,6 +6,7 @@ include bots
 const
   GotaSourceCommit {.strdefine.} = ""
   GotaFeatureCount* = 25
+  GotaActionCount* = 9
   GotaOutcomeReward* = 100'f32
   GotaActionRepeat* = 4
 
@@ -73,7 +74,7 @@ proc snapshot(lane: TrainingLane, terminal: bool) =
 proc advance*(lane: TrainingLane, action: int32 = 0) =
   let game = lane.game
   if lane.waiting:
-    doAssert action in 0 .. 7
+    doAssert action in 0 ..< GotaActionCount
     resumeHeroScript(game, int(lane.transition.seat), action)
     lane.waiting = false
     inc lane.nextHero

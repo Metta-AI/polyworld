@@ -66,7 +66,7 @@ for episode in 0 ..< 3:
   while true:
     var actions: array[3, int32]
     for index in 0 ..< 3:
-      actions[index] = int32((step + index) mod 8)
+      actions[index] = int32((step + index) mod GotaActionCount)
     batch.step(actions, transitions)
     for index in 0 ..< 3:
       scalar[index].step([actions[index]], reference)
@@ -93,7 +93,7 @@ for seed in [0, 10]:
   var opponentsDiffer = false
   for step in 0 ..< 100:
     var mixedTransition, baselineTransition, rushingTransition: array[1, Transition]
-    let action = [int32(step mod 8)]
+    let action = [int32(step mod GotaActionCount)]
     mixed.step(action, mixedTransition)
     baseline.step(action, baselineTransition)
     rushing.step(action, rushingTransition)
