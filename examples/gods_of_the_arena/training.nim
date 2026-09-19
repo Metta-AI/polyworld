@@ -7,6 +7,7 @@ const
   GotaSourceCommit {.strdefine.} = ""
   GotaFeatureCount* = 25
   GotaOutcomeReward* = 100'f32
+  GotaActionRepeat* = 4
 
 type
   Transition* {.bycopy.} = object
@@ -139,7 +140,11 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
   for index in 0 ..< GotaFeatureCount:
     featureArguments.add "f(" & $index & ")"
   let source = batch.policy.replace("' METTA_DECISION",
-    "decision = chooseAction(" & featureArguments.join(",") & ")")
+    "neuralActionCountdown = neuralActionCountdown - 1\n" &
+    "if neuralActionCountdown <= 0 then\n" &
+    "  neuralActionCountdown = " & $GotaActionRepeat & "\n" &
+    "  decision = chooseAction(" & featureArguments.join(",") & ")\n" &
+    "end if")
   for seat, hero in game.world.heroes:
     if hero.team == team:
       lane.installTrainingPolicy(seat, source)
