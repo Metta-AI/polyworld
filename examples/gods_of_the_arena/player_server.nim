@@ -2,7 +2,7 @@
 ##
 ## The game still executes BASIC for the nine fixed players.  The connected
 ## player receives the same native feature vector used by the training batch
-## and returns one of the eight actions at each hero decision.
+## and returns one of the nine actions at each hero decision.
 import std/[asynchttpserver, asyncdispatch, json, os, strutils]
 import ../awm/awmwebsocket
 import training
@@ -45,7 +45,7 @@ proc actionValue(data: JsonNode): int32 =
     data["action"].getInt
   else:
     -1
-  doAssert value in 0 .. 7, "player action must be an integer from 0 through 7"
+  doAssert value in 0 ..< GotaActionCount, "player action must be an integer from 0 through 8"
   int32(value)
 
 proc servePlayer*(options: PlayerServerOptions) {.async.} =
