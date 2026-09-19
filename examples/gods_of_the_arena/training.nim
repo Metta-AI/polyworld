@@ -6,7 +6,7 @@ include bots
 const
   GotaSourceCommit {.strdefine.} = ""
   GotaFeatureCount* = 25
-  GotaActionCount* = 9
+  GotaActionCount* = 18
   GotaOutcomeReward* = 100'f32
   GotaActionRepeat* = 4
 
