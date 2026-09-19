@@ -73,22 +73,50 @@ For viewer screenshots, build with `-d:takeScreenshot` and set
 
 ## GotA replay events
 
-GotA can emit a typed per-tick log when compiled with `-d:replayEvents`.
-`examples/gods_of_the_arena/tools/replay_extractor.nims` enables that flag
-and `headless` automatically for the extractor:
+GotA can emit typed per-tick diagnostics when compiled with
+`-d:replayEvents`. `examples/gods_of_the_arena/tools/replay_extractor.nims`
+enables that flag and `headless` automatically for the extractor. Run it on a
+retained replay before reading game logs or opening the visual viewer:
 
 ```sh
-nim r examples/gods_of_the_arena/tools/replay_extractor.nim
+nim r examples/gods_of_the_arena/tools/replay_extractor.nim path/to/match.replay
 ```
 
-The extractor is a short, top-level script intended for agents to copy and
-modify. Edit `ReplayPath` at the top to choose a recording. It has no
-command-line options, filters, helper functions, or output limits. It
-prints the configuration, then every god, building, hero, creep, spell,
-and event at tick zero and after every simulation tick. Both teams are
-included. Edit the loops directly to select fields or calculate statistics.
-It verifies each recorded hash and fails on incompatible or incomplete
-replays.
+With no path it uses the checked-in demo replay. The output is a bounded,
+plain-text handoff containing match metadata, two-minute team checkpoints,
+per-hero decision and combat totals, rejection reasons, first and last notable
+deaths, and replay verification. Both teams are included. The extractor
+resimulates every tick and verifies every recorded hash, so compact output
+does not mean sampled validation. It fails on incompatible, divergent, or
+incomplete replays.
+
+Use this order for agent investigations:
+
+1. Run the extractor once and preserve its small stdout as the factual handoff.
+   A coordinator or smaller analysis agent should reason from that handoff,
+   not ingest the replay, full state dumps, or an entire game log.
+2. Compare hero decisions, rejected-action reasons, progression checkpoints,
+   deaths, structure losses, and the final result. State one concrete question
+   before requesting more evidence.
+3. If the summary identifies a suspicious tick, request only that event window:
+
+   ```sh
+   nim r examples/gods_of_the_arena/tools/replay_extractor.nim \
+     --events 810:850 path/to/match.replay
+   ```
+
+   Raw windows are capped at 480 ticks and 200 records. Narrow the window if
+   records were omitted. `--checkpoint-seconds 0` suppresses progression, and
+   `--evidence N` changes the bounded first/last evidence count.
+4. Open the visual replay or inspect focused source only after the compact
+   evidence cannot answer the stated question. Do not paste repeated full-match
+   dumps into a long-lived coordinator conversation.
+
+For policy comparisons, summarize each replay separately and give the main
+agent only the summaries plus the policy diff. Use the same seeds and roster,
+and require more than one replay before treating a tactical outcome as a
+general improvement. Keep runtime recordings and generated summaries out of
+the repository.
 
 Records are flat value structs from
 `examples/gods_of_the_arena/events.nim`, with enums and fixed-width numbers.
