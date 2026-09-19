@@ -22,7 +22,8 @@ type
     game*: Game
     cursor: TickCursor
     inTick, waiting: bool
-    nextHero, seat, seed, maxTicks: int
+    nextHero, seed, maxTicks: int
+    team: Team
     previousScore: int64
     transition*: Transition
 
@@ -40,7 +41,7 @@ proc trainingReward*(previous, current: int64, outcome: int32): float32 =
 
 proc snapshot(lane: TrainingLane, terminal: bool) =
   let game = lane.game
-  let team = game.world.heroes[lane.seat].team
+  let team = lane.team
   lane.transition.xp = 0
   lane.transition.structureHp = 0
   for hero in game.world.heroes:
@@ -50,17 +51,16 @@ proc snapshot(lane: TrainingLane, terminal: bool) =
       lane.transition.structureHp += (if building.team == team: 1 else: -1) * max(building.hp, 0)
   for fort in game.world.forts:
     lane.transition.structureHp += (if fort.team == team: 1 else: -1) * max(fort.hp, 0)
-  let hero = game.world.heroes[lane.seat]
+  let hero = game.world.heroes[lane.transition.seat]
   lane.transition.heroXp = hero.totalXp
-  lane.transition.heroGold = game.world.stats.values[lane.seat][GoldMetric]
-  lane.transition.heroKills = game.world.stats.values[lane.seat][KillsMetric]
-  lane.transition.heroDeaths = game.world.stats.values[lane.seat][LossesMetric]
+  lane.transition.heroGold = game.world.stats.values[lane.transition.seat][GoldMetric]
+  lane.transition.heroKills = game.world.stats.values[lane.transition.seat][KillsMetric]
+  lane.transition.heroDeaths = game.world.stats.values[lane.transition.seat][LossesMetric]
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError
     lane.transition.maxWork = max(lane.transition.maxWork, vm.lastWork)
     lane.transition.maxInstructions = max(lane.transition.maxInstructions, vm.lastInstructions)
   lane.transition.tick = game.world.tick
-  lane.transition.seat = int32(lane.seat)
   lane.transition.terminal = int32(terminal)
   lane.transition.outcome =
     if not game.world.gameOver: 0
@@ -72,7 +72,7 @@ proc advance*(lane: TrainingLane, action: int32 = 0) =
   let game = lane.game
   if lane.waiting:
     doAssert action in 0 .. 7
-    resumeHeroScript(game, lane.seat, action)
+    resumeHeroScript(game, int(lane.transition.seat), action)
     lane.waiting = false
     inc lane.nextHero
   while true:
@@ -91,8 +91,9 @@ proc advance*(lane: TrainingLane, action: int32 = 0) =
     while lane.nextHero < game.world.heroes.len:
       let index = (game.world.heroTurnStart + lane.nextHero) mod game.world.heroes.len
       runHeroScript(game, index)
-      if index == lane.seat and game.heroVms[index].runtime.hostCallPaused:
+      if game.world.heroes[index].team == lane.team and game.heroVms[index].runtime.hostCallPaused:
         lane.waiting = true
+        lane.transition.seat = int32(index)
         lane.snapshot(false)
         return
       inc lane.nextHero
@@ -104,18 +105,8 @@ proc advance*(lane: TrainingLane, action: int32 = 0) =
       lane.transition.maxInstructions = max(lane.transition.maxInstructions, vm.lastInstructions)
     lane.inTick = false
 
-proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
-  let gameMap = generateMap(int32(seed), batch.config.mapPreset)
-  let game = newGame(gameMap, batch.config.spawnIntervalTicks, 10, false, ReplayData())
-  let seat = seed mod 10
-  let groups =
-    if seat < 5:
-      @[BotGroup(path: batch.bot, count: 5), BotGroup(path: batch.opponent, count: 5)]
-    else:
-      @[BotGroup(path: batch.opponent, count: 5), BotGroup(path: batch.bot, count: 5)]
-  loadBots(game, groups)
-  game.replayData = initReplayData(currentSetup(game, uint32(batch.maxTicks)), gameMap.preset)
-  let lane = TrainingLane(game: game, seat: seat, seed: seed, maxTicks: batch.maxTicks)
+proc installTrainingPolicy(lane: TrainingLane, seat: int, source: string) =
+  let game = lane.game
   var host = initHeroHost(game, game.world.heroes[seat].id)
   var limits = heroVmLimits()
   limits.maxParameters = GotaFeatureCount
@@ -125,17 +116,33 @@ proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
     for index, value in values:
       doAssert value in -100 .. 100
       callbackLane.transition.features[index] = float32(value)
-    callbackLane.game.heroVms[callbackLane.seat].runtime.pauseHostCall()
+    callbackLane.game.heroVms[seat].runtime.pauseHostCall()
     0'i32, 1)
   inc limits.maxHostFunctions
+  let program = compile(source, host, limits)
+  bindHeroData(program)
+  game.heroVms[seat] = HeroVm(runtime: initRuntime(program, host, limits), limits: limits, ready: true)
+
+proc newLane(batch: TrainingBatch, seed: int): TrainingLane =
+  let gameMap = generateMap(int32(seed), batch.config.mapPreset)
+  let game = newGame(gameMap, batch.config.spawnIntervalTicks, 10, false, ReplayData())
+  let team = Team((seed mod 10) div 5)
+  let groups =
+    if team == Team(0):
+      @[BotGroup(path: batch.bot, count: 5), BotGroup(path: batch.opponent, count: 5)]
+    else:
+      @[BotGroup(path: batch.opponent, count: 5), BotGroup(path: batch.bot, count: 5)]
+  loadBots(game, groups)
+  game.replayData = initReplayData(currentSetup(game, uint32(batch.maxTicks)), gameMap.preset)
+  let lane = TrainingLane(game: game, team: team, seed: seed, maxTicks: batch.maxTicks)
   var featureArguments: seq[string]
   for index in 0 ..< GotaFeatureCount:
     featureArguments.add "f(" & $index & ")"
   let source = batch.policy.replace("' METTA_DECISION",
     "decision = chooseAction(" & featureArguments.join(",") & ")")
-  let program = compile(source, host, limits)
-  bindHeroData(program)
-  game.heroVms[seat] = HeroVm(runtime: initRuntime(program, host, limits), limits: limits, ready: true)
+  for seat, hero in game.world.heroes:
+    if hero.team == team:
+      lane.installTrainingPolicy(seat, source)
   lane.advance()
   lane.previousScore = lane.transition.trainingPotential()
   result = lane
