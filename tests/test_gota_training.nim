@@ -1,5 +1,17 @@
 import ../examples/gods_of_the_arena/[training, presets]
 
+var potential = Transition(xp: 200, structureHp: -50, heroXp: 10_000,
+  heroGold: 20_000, heroKills: 100, heroDeaths: 0)
+doAssert potential.trainingPotential() == 150
+potential.heroXp = 0
+potential.heroGold = 0
+potential.heroKills = 0
+potential.heroDeaths = 100
+doAssert potential.trainingPotential() == 150
+doAssert trainingReward(100, 350, 0) == 0.25'f32
+doAssert trainingReward(100, 350, 1) == 100.25'f32
+doAssert trainingReward(100, 350, -1) == -99.75'f32
+
 let policy = """
 dim f(25)
 f(0) = selfHp * 100 / selfMaxHp
