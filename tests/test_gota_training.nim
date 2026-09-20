@@ -13,12 +13,13 @@ doAssert trainingReward(100, 350, 1) == 100.25'f32
 doAssert trainingReward(100, 350, -1) == -99.75'f32
 
 let policy = """
-dim f(32)
+dim f(33)
 f(0) = selfHp * 100 / selfMaxHp
 f(1) = selfTeam * 100
 f(2) = selfClass * 10
 f(24) = 77
 f(31) = -77
+f(32) = 55
 ' METTA_DECISION
 if decision = 0 then
   walkTo(10, 10)
@@ -42,6 +43,7 @@ let batch = newTrainingBatch(config, bot, bot, policy, 3, 120)
 for lane in batch.lanes:
   doAssert lane.transition.features[24] == 77
   doAssert lane.transition.features[31] == -77
+  doAssert lane.transition.features[32] == 55
   let firstSeat = lane.transition.seat
   var controlledSeats: seq[int32]
   controlledSeats.add firstSeat
