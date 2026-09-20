@@ -5,10 +5,10 @@ include bots
 
 const
   GotaSourceCommit {.strdefine.} = ""
-  GotaFeatureCount* = 39
-  GotaActionCount* = 24
+  GotaFeatureCount* {.intdefine.} = 8
+  GotaActionCount* {.intdefine.} = 8
   GotaOutcomeReward* = 100'f32
-  GotaActionRepeat* = 4
+  GotaActionRepeat* {.intdefine.} = 4
 
 type
   Transition* {.bycopy.} = object

@@ -1,5 +1,5 @@
 ' Minimal neural-player boundary. The host replaces METTA_DECISION with its action callback.
-dim f(33)
+dim f(8)
 f(0) = selfHp * 100 / selfMaxHp
 f(1) = 0
 if selfMaxMana > 0 then
@@ -12,7 +12,7 @@ f(5) = worldTick / 288
 f(6) = selfGold / 10
 f(7) = selfClass * 10
 index = 0
-while index < 33
+while index < 8
   if f(index) > 100 then
     f(index) = 100
   end if

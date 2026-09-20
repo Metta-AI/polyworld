@@ -12,19 +12,15 @@ doAssert trainingReward(100, 350, 0) == 0.25'f32
 doAssert trainingReward(100, 350, 1) == 100.25'f32
 doAssert trainingReward(100, 350, -1) == -99.75'f32
 
-let policy = """
-dim f(39)
+let policy = "dim f(" & $GotaFeatureCount & ")\n" & """
 f(0) = selfHp * 100 / selfMaxHp
 f(1) = selfTeam * 100
 f(2) = selfClass * 10
-f(24) = 77
-f(31) = -77
-f(32) = 55
-f(33) = -55
-f(35) = 44
-f(36) = -44
-f(37) = 33
-f(38) = -33
+f(3) = 77
+f(4) = -77
+f(5) = 55
+f(6) = -55
+f(7) = 44
 ' METTA_DECISION
 if decision = 0 then
   walkTo(10, 10)
@@ -46,14 +42,11 @@ let config = loadConfig("examples/gods_of_the_arena/presets/saved.json")
 let bot = "examples/gods_of_the_arena/players/base.bas"
 let batch = newTrainingBatch(config, bot, bot, policy, 3, 120)
 for lane in batch.lanes:
-  doAssert lane.transition.features[24] == 77
-  doAssert lane.transition.features[31] == -77
-  doAssert lane.transition.features[32] == 55
-  doAssert lane.transition.features[33] == -55
-  doAssert lane.transition.features[35] == 44
-  doAssert lane.transition.features[36] == -44
-  doAssert lane.transition.features[37] == 33
-  doAssert lane.transition.features[38] == -33
+  doAssert lane.transition.features[3] == 77
+  doAssert lane.transition.features[4] == -77
+  doAssert lane.transition.features[5] == 55
+  doAssert lane.transition.features[6] == -55
+  doAssert lane.transition.features[7] == 44
   let firstSeat = lane.transition.seat
   var controlledSeats: seq[int32]
   controlledSeats.add firstSeat
