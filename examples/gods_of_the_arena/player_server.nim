@@ -2,7 +2,7 @@
 ##
 ## The game still executes BASIC for the nine fixed players.  The connected
 ## player receives the same native feature vector used by the training batch
-## and returns one of the twenty-two combat/build actions at each hero decision.
+## and returns one of the twenty-four combat/build actions at each hero decision.
 import std/[asynchttpserver, asyncdispatch, json, os, strutils]
 import ../awm/awmwebsocket
 import training
