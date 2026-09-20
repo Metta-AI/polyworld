@@ -45,7 +45,8 @@ proc actionValue(data: JsonNode): int32 =
     data["action"].getInt
   else:
     -1
-  doAssert value in 0 ..< GotaActionCount, "player action must be an integer from 0 through 17"
+  doAssert value in 0 ..< GotaActionCount,
+    "player action must be an integer from 0 through " & $(GotaActionCount - 1)
   int32(value)
 
 proc servePlayer*(options: PlayerServerOptions) {.async.} =
