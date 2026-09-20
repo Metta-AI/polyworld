@@ -18,7 +18,7 @@ proc alive(outline: SelectionOutline, expected: bool) =
   doAssert (glIsBuffer(outline.vertexBuffer) == GL_TRUE) == expected
   doAssert (glIsFramebuffer(outline.framebuffer) == GL_TRUE) == expected
   doAssert (glIsTexture(outline.colorTexture) == GL_TRUE) == expected
-  doAssert (glIsRenderbuffer(outline.depthBuffer) == GL_TRUE) == expected
+  doAssert (glIsTexture(outline.depthTexture) == GL_TRUE) == expected
 
 proc alive(shapes: ShapeRenderer, expected: bool) =
   doAssert (glIsProgram(shapes.program) == GL_TRUE) == expected
