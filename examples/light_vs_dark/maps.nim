@@ -18,7 +18,8 @@
 
 import
   std/strformat,
-  polyworld/[fixed, hashes, noises, pathing, profiles, rngs],
+  fixxy,
+  polyworld/[hashes, noises, pathing, profiles, rngs],
   content
 
 static:

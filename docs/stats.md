@@ -173,3 +173,5 @@ Gameplay version 42 records the signed cast slot separately from action
 kind, including invalid slots. Playback regenerates the same failures and
 diagnostic state. This client accepts only version 42; older recordings
 require their archived client.
+
+Rejected movement and ground casts include `offsetX` and `offsetY`, signed Q16.16 offsets from the named tile center. Multiply by 1/65536 to read the fractional tile component.

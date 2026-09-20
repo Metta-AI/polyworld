@@ -2005,7 +2005,7 @@
       <p class="kicker">BASIC HOST</p>
       <h2>BASIC observations</h2>
       <p>Self data and visible objects are sampled for each decision and remain consistent during it, including after an action call. Spell queries read the pending casts, so a successful cast can append a spell during that decision. Object and spell indices are zero-based and may change next decision. Keep <code>objectId(i)</code> when tracking an object across decisions or calling <code>attackTarget</code>, rather than keeping its list index.</p>
-      <p>All values are integers. <code>worldScale = 60000</code> is the number of world units per tile, and <code>tickRate = 24</code> is the number of simulation ticks per second. <code>selfX</code>, <code>selfY</code>, <code>objectX(i)</code>, <code>objectY(i)</code>, <code>spellX(i)</code>, and <code>spellY(i)</code> use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.</p>
+      <p>Observations are integers. <code>worldScale = 60000</code> is the number of world units per tile, and <code>tickRate = 24</code> is the number of simulation ticks per second. <code>selfX</code>, <code>selfY</code>, <code>objectX(i)</code>, <code>objectY(i)</code>, <code>spellX(i)</code>, and <code>spellY(i)</code> use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.</p>
       <h3>Your hero</h3>
       <p>The existing <code>selfId</code>, <code>selfTeam</code>, <code>selfClass</code>, <code>selfX</code>, <code>selfY</code>, <code>selfHp</code>, <code>selfMaxHp</code>, <code>selfMana</code>, <code>selfMaxMana</code>, <code>selfGold</code>, <code>selfLevel</code>, <code>selfLayer</code>, and <code>worldTick</code> remain available. These additional read-only values describe the current hero:</p>
       <table class="spell-table api-table">
@@ -2058,6 +2058,12 @@
       <p>Read-only constants expose <code>mapWidth</code>, <code>mapHeight</code>, <code>mapLayers</code>, <code>GroundLayer</code>, <code>RedFortLayer</code>, <code>BlueFortLayer</code>, and <code>WaterLayer</code>. Terrain kinds are <code>TerrainNone</code>, <code>TerrainGrass</code>, <code>TerrainRoad</code>, <code>TerrainRock</code>, <code>TerrainTrees</code>, <code>TerrainMarsh</code>, <code>TerrainWall</code>, and <code>TerrainWater</code>.</p>
     </section>
 
+  <section id="basic-numbers">
+    <h2>BASIC numbers and coordinates</h2>
+    <p>BASIC uses <a href="https://github.com/treeform/bassy">Bassy</a> with <a href="https://github.com/treeform/fixxy">Fixxy</a> Q16.16 decimals enabled. Globals and arrays retain fractional values across decisions. <code>/</code> performs decimal division; <code>\</code> performs integer division. Decimal operands must fit -32768 through 32767.99998. Integer-only calculations retain the full signed 32-bit range. When converting large world-unit observations, divide them as integers first, for example <code>(selfAttackRange \ 100) / (worldScale \ 100)</code> in GotA.</p>
+    <p><code>and</code>, <code>or</code>, <code>xor</code>, and <code>not</code> are bitwise. Comparisons produce -1 for true and 0 for false; conditions accept any nonzero number. Host flags and action results remain 1 or 0, so use <code>flag = 0</code> instead of <code>not flag</code> to negate a host flag.</p>
+    <p><code>walkTo(x, y)</code>, <code>attackMove(x, y)</code>, and <code>castPoint(slot, x, y)</code> accept fractional tile coordinates. For example, <code>walkTo(selfX + 0.25, selfY - 0.25)</code> selects a point a quarter tile from the current tile center. Integers continue to name tile centers. IDs, slots, indices, and terrain queries still require exact integers. Fractional arguments are recorded without truncation.</p>
+  </section>
   </main>
 
   <script>

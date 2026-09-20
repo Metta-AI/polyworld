@@ -9,8 +9,9 @@
 ## VM type on `Game` but never runs a program.
 
 import
-  polyworld/[basic, bodies, fixed, hashes, metrics, noises, pathing, profiles, rngs,
-    tapes, visions],
+  bassy, fixxy,
+  polyworld/[bodies, hashes, metrics, noises, pathing, profiles, rngs, tapes,
+    visions],
   content, events,
   maps,
   replays
@@ -135,6 +136,7 @@ type
     movePathIndex*: int
     moveTileX*: int
     moveTileY*: int
+    moveOffset*: FixedVec2
     hasMoveTarget*: bool
     moveRevision*: int32
     stuckTicks*: int32
@@ -826,7 +828,8 @@ proc finishAction(
     heroId: int32,
     action: uint8,
     slot, first, second: int32,
-    error: ActionError
+    error: ActionError,
+    offset = FixedVec2Zero
 ): bool =
   ## Updates only the submitting hero's diagnostic and records failed commands.
   let index = world.heroIndex(heroId)
@@ -837,7 +840,8 @@ proc finishAction(
       world.emit GameEvent(
         kind: ActionRejected, actor: world.eventEntity(heroId),
         target: world.eventEntity(0), cause: Command, related: -1,
-        action: action, slot: slot, first: first, second: second, error: error
+        action: action, slot: slot, first: first, second: second, error: error,
+        offsetX: int32(offset.x), offsetY: int32(offset.y)
       )
   error == NoActionError
 
@@ -1952,7 +1956,8 @@ proc setHeroDestination(
     hero: Hero,
     mapX,
     mapY: int,
-    referenceY: int32
+    referenceY: int32,
+    offset = FixedVec2Zero
 ): bool =
   ## Computes and stores a server-side path for one hero destination.
   let
@@ -1960,7 +1965,8 @@ proc setHeroDestination(
     targetY = clamp(mapY, 0, mapTiles() - 1)
   if hero.moveRevision == navigationWorld.navigationRevision and
       hero.hasMoveTarget and hero.moveTileX == targetX and
-      hero.moveTileY == targetY and hero.movePathIndex < hero.movePath.len:
+      hero.moveTileY == targetY and hero.moveOffset == offset and
+      hero.movePathIndex < hero.movePath.len:
     return true
   var
     startTile: NavTile
@@ -1991,6 +1997,19 @@ proc setHeroDestination(
       int(tile.z)
     ))
     hero.movePathLayers[i] = tile.layer
+  if offset != FixedVec2Zero:
+    let center = hero.movePath[^1]
+    if mapCoordinate(center.x) == targetX and mapCoordinate(center.z) == targetY:
+      var target = center
+      target.x += tilesToWorld(offset.x, WorldScale)
+      target.z += tilesToWorld(offset.y, WorldScale)
+      target.y = fixedSurfaceHeightNear(target, referenceY)
+      let layer = hero.movePathLayers[^1]
+      if not navigationLineClear(center, target, layer, layer):
+        return false
+      hero.movePath.add target
+      hero.movePathLayers.add layer
+  hero.moveOffset = offset
   hero.moveRevision = navigationWorld.navigationRevision
   # Replanning must not send the hero back to its starting tile's center.
   hero.movePathIndex = if pulled.len > 1: 1 else: 0
@@ -2009,7 +2028,8 @@ proc stopHeroPath(hero: Hero) =
 proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
   if hero.hasMoveTarget and hero.moveRevision != navigationWorld.navigationRevision:
-    if not hero.setHeroDestination(hero.moveTileX, hero.moveTileY, hero.position.y):
+    if not hero.setHeroDestination(
+        hero.moveTileX, hero.moveTileY, hero.position.y, hero.moveOffset):
       hero.movePath.setLen(0)
       return false
   while hero.movePathIndex < hero.movePath.len:
@@ -2018,7 +2038,13 @@ proc followHeroPath(hero: Hero): bool =
       x: waypoint.x - hero.position.x,
       z: waypoint.z - hero.position.z
     )
-    var reached = within(hero.position, waypoint, PathPointRadius)
+    let radius =
+      if hero.movePathIndex == hero.movePath.high and
+          hero.moveOffset != FixedVec2Zero:
+        100'i32
+      else:
+        PathPointRadius
+    var reached = within(hero.position, waypoint, radius)
     if reached and hero.movePathIndex < hero.movePath.high:
       let
         next = hero.movePathIndex + 1
@@ -2047,8 +2073,12 @@ proc followHeroPath(hero: Hero): bool =
   hero.hasMoveTarget = false
   false
 
-proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
+proc applyWalkTo*(world: World, heroId, mapX, mapY: int32,
+    offset = FixedVec2Zero
+): bool =
   ## Applies one hero walk command using server-side pathfinding.
+  if not offset.validTileOffset:
+    return false
   navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
@@ -2058,7 +2088,8 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
       0,
       mapX,
       mapY,
-      ActionNotAlive
+      ActionNotAlive,
+      offset
     )
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = false
@@ -2070,7 +2101,8 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
     world.heroes[index],
     int(mapX),
     int(mapY),
-    world.heroes[index].position.y
+    world.heroes[index].position.y,
+    offset
   )
   world.finishAction(
     heroId,
@@ -2078,11 +2110,16 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
     0,
     mapX,
     mapY,
-    if accepted: NoActionError else: ActionNoRoute
+    (if accepted: NoActionError else: ActionNoRoute),
+    offset
   )
 
-proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
+proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
+    offset = FixedVec2Zero
+): bool =
   ## Walks toward a map tile and attacks enemies found along the way.
+  if not offset.validTileOffset:
+    return false
   navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
@@ -2092,7 +2129,8 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
       0,
       mapX,
       mapY,
-      ActionNotAlive
+      ActionNotAlive,
+      offset
     )
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = true
@@ -2104,7 +2142,8 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
     world.heroes[index],
     int(mapX),
     int(mapY),
-    world.heroes[index].position.y
+    world.heroes[index].position.y,
+    offset
   )
   world.finishAction(
     heroId,
@@ -2112,7 +2151,8 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
     0,
     mapX,
     mapY,
-    if accepted: NoActionError else: ActionNoRoute
+    (if accepted: NoActionError else: ActionNoRoute),
+    offset
   )
 
 proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
@@ -3151,7 +3191,8 @@ proc applyCastTarget*(world: World, heroId, slotId, targetId: int32): bool =
 
 proc applyCastPoint*(
     world: World,
-    heroId, slotId, mapX, mapY: int32
+    heroId, slotId, mapX, mapY: int32,
+    offset = FixedVec2Zero
 ): bool =
   ## Records explicit ground casts while preserving the raw input arguments.
   let index = world.heroIndex(heroId)
@@ -3162,7 +3203,8 @@ proc applyCastPoint*(
       slotId,
       mapX,
       mapY,
-      ActionNotAlive
+      ActionNotAlive,
+      offset
     )
   if slotId < 0 or slotId > HeroAbilitySlot.high.ord:
     return world.finishAction(
@@ -3171,22 +3213,27 @@ proc applyCastPoint*(
       slotId,
       mapX,
       mapY,
-      ActionInvalidSlot
+      ActionInvalidSlot,
+      offset
     )
-  if mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles():
+  if mapX < 0 or mapX >= mapTiles() or mapY < 0 or mapY >= mapTiles() or
+      not offset.validTileOffset:
     return world.finishAction(
       heroId,
       ActionCastPoint,
       slotId,
       mapX,
       mapY,
-      ActionInvalidPoint
+      ActionInvalidPoint,
+      offset
     )
   let hero = world.heroes[index]
   var point = WorldPoint(
     x: (mapX - mapTiles().int32 div 2) * WorldScale + WorldScale div 2,
     z: (mapY - mapTiles().int32 div 2) * WorldScale + WorldScale div 2
   )
+  point.x += tilesToWorld(offset.x, WorldScale)
+  point.z += tilesToWorld(offset.y, WorldScale)
   point.y = fixedSurfaceHeightNear(point, hero.position.y)
   world.finishAction(
     heroId,
@@ -3194,17 +3241,18 @@ proc applyCastPoint*(
     slotId,
     mapX,
     mapY,
-    world.castAbility(hero, HeroAbilitySlot(slotId), 0, point)
+    world.castAbility(hero, HeroAbilitySlot(slotId), 0, point),
+    offset
   )
 
 proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
   case action.kind
   of ActionWalkTo:
-    applyWalkTo(world, action.heroId, action.first, action.second)
+    applyWalkTo(world, action.heroId, action.first, action.second, action.offset)
   of ActionAttackMove:
     applyAttackMove(
-      world, action.heroId, action.first, action.second
+      world, action.heroId, action.first, action.second, action.offset
     )
   of ActionAttackTarget:
     applyAttackTarget(world, action.heroId, action.first)
@@ -3217,7 +3265,7 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
       action.slot, action.first)
   of ActionCastPoint:
     applyCastPoint(world, action.heroId,
-      action.slot, action.first, action.second)
+      action.slot, action.first, action.second, action.offset)
   of ActionManualSpells:
     let index = world.heroIndex(action.heroId)
     if index >= 0:
@@ -3687,6 +3735,8 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.stuckTicks)
     hash.addHashy(hero.moveTileX)
     hash.addHashy(hero.moveTileY)
+    hash.addHashy(int32(hero.moveOffset.x))
+    hash.addHashy(int32(hero.moveOffset.y))
     hash.addHashy(hero.hasMoveTarget)
     for slot in 0 ..< InventorySlots:
       hash.addHashy(hero.inventory[slot].ord)

@@ -4,15 +4,18 @@
 ## simulation hash per tick. It never stores bot source or private logs.
 
 import
-  polyworld/tapes,
+  fixxy,
+  polyworld/[bodies, tapes],
   content
+
+export fixxy
 
 const
   ReplayGame* = "heartleaf"
   ReplayFormatVersion* = 2'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 6'u16
+  ReplayGameVersion* = 7'u16
 
   ActionMove* = 1'u8
   ActionGather* = 2'u8
@@ -49,6 +52,8 @@ type
     playerId*: uint8
       ## The acting villager slot, 0 .. 8.
     kind*: uint8
+    offset*: FixedVec2
+      ## Movement and ground aim offsets from the named tile center.
     first*, second*: int32
       ## Payload interpreted per kind:
       ##   Move        x, y
@@ -92,6 +97,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
   if recorder == nil:
     return
+  if not action.offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:
     fail("replay action kind is invalid")
   if int(action.playerId) >= VillagerCount:
@@ -104,7 +111,8 @@ proc recordAction*(
     playerId: int32,
     kind: uint8,
     first = 0'i32,
-    second = 0'i32
+    second = 0'i32,
+    offset = FixedVec2Zero
 ) =
   ## Records one accepted command without any bot implementation detail.
   recorder.record ReplayAction(
@@ -112,7 +120,8 @@ proc recordAction*(
     playerId: uint8(playerId),
     kind: kind,
     first: first,
-    second: second
+    second: second,
+    offset: offset
   )
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
@@ -139,6 +148,8 @@ proc validateSetup(setup: Setup) =
 
 proc validateAction(action: ReplayAction, setup: Setup) =
   ## Validates one command's kind, actor, and payload bounds.
+  if not action.offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:
     fail("replay action kind is invalid")
   if int(action.playerId) >= VillagerCount:
