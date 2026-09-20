@@ -6,7 +6,8 @@
 ## that returns a float.
 
 import
-  polyworld/[basic, bodies, fixed, hashes, pathing, profiles, rngs, tapes],
+  bassy, fixxy,
+  polyworld/[bodies, hashes, pathing, profiles, rngs, tapes],
   content,
   maps,
   replays
@@ -40,6 +41,7 @@ type
     talkCircle*: bool                 # HASH: include
     talkCenter*, talkPosition*: FixedVec2 # HASH: include
     goal*: Tile2                      # HASH: include
+    goalOffset*: FixedVec2
     hasGoal*: bool                    # HASH: include
     path*: seq[Tile2]                 # HASH: include
     pathIndex*: int32                 # HASH: include
@@ -241,6 +243,7 @@ proc clearOrder(v: Villager, failed: bool) =
   v.talkCenter = FixedVec2Zero
   v.talkPosition = FixedVec2Zero
   v.hasGoal = false
+  v.goalOffset = FixedVec2Zero
   v.blockedTicks = 0
   v.clearPath()
   if v.animation == WalkAnimation:
@@ -264,10 +267,12 @@ proc requestPath(w: World, slot: int32) =
     w.villagers[dropped].orderFailed = true
   w.pathQueue.add PathRequest(slot: slot, goal: v.goal)
 
-proc setGoal(w: World, slot: int32, goal: Tile2) =
+proc setGoal(w: World, slot: int32, goal: Tile2,
+    offset = FixedVec2Zero) =
   ## Points a villager at a destination tile and asks for a route.
   let v = w.villagers[slot]
   v.goal = goal
+  v.goalOffset = offset
   v.hasGoal = true
   v.blockedTicks = 0
   v.repathCooldown = 0
@@ -314,9 +319,21 @@ proc moveSpeed(): Fixed =
   ## Tiles walked in one tick.
   FixedOne / fixed(StepTicks)
 
+proc waypointPosition(v: Villager, tile: Tile2): FixedVec2 =
+  ## Uses the exact destination for the last tile of a route.
+  result = tileCenter(tile)
+  if v.hasGoal and tile == v.goal:
+    result += v.goalOffset
+
 proc arrivedAt(v: Villager, tile: Tile2): bool =
-  ## True when the body is close enough to a tile centre.
-  length(tileCenter(tile) - v.body.pos) <= PathArrive
+  ## Keeps fractional destinations precise while allowing broad path turns.
+  let radius =
+    if v.hasGoal and tile == v.goal and
+        v.goalOffset != FixedVec2Zero:
+      fixed(1, 1000)
+    else:
+      PathArrive
+  length(v.waypointPosition(tile) - v.body.pos) <= radius
 
 proc steerVillager(w: World, slot: int32, toward: FixedVec2) =
   ## Turns and slides one villager, then syncs its tile.
@@ -340,6 +357,10 @@ proc advanceMovement(w: World, slot: int32) =
     return
   if v.arrivedAt(v.goal):
     return
+  if v.tile == v.goal:
+    w.steerVillager(
+      slot, v.waypointPosition(v.goal) - v.body.pos)
+    return
   if v.path.len == 0:
     w.requestPath(slot)
     return
@@ -348,7 +369,7 @@ proc advanceMovement(w: World, slot: int32) =
     if v.arrivedAt(waypoint):
       inc v.pathIndex
       continue
-    w.steerVillager(slot, tileCenter(waypoint) - v.body.pos)
+    w.steerVillager(slot, v.waypointPosition(waypoint) - v.body.pos)
     if v.blockedTicks >= RepathAfterTicks:
       v.blockedTicks = 0
       v.clearPath()
@@ -571,16 +592,18 @@ proc commandsOpen(w: World): bool =
   ## Whether villagers may act at all right now.
   not w.over and w.phase in {DaytimePhase, EveningPhase}
 
-proc applyMove*(w: World, player, x, y: int32): bool =
+proc applyMove*(w: World, player, x, y: int32,
+    offset = FixedVec2Zero): bool =
   ## Walks a villager to a tile.
-  if not w.commandsOpen or not validSlot(player):
+  if not w.commandsOpen or not validSlot(player) or
+      not offset.validTileOffset:
     return false
   let v = w.villagers[player]
   if v.inHouse >= 0 or not w.terrainOpen(x, y):
     return false
   v.clearOrder(false)
   v.order = MoveOrder
-  w.setGoal(player, tile2(x, y))
+  w.setGoal(player, tile2(x, y), offset)
   true
 
 proc applyGather*(w: World, player, garden: int32): bool =
@@ -791,7 +814,7 @@ proc applyReplayAction*(w: World, action: ReplayAction) =
   let player = int32(action.playerId)
   case action.kind
   of ActionMove:
-    discard w.applyMove(player, action.first, action.second)
+    discard w.applyMove(player, action.first, action.second, action.offset)
   of ActionGather:
     discard w.applyGather(player, action.first)
   of ActionInvite:
@@ -812,20 +835,21 @@ proc applyReplayAction*(w: World, action: ReplayAction) =
     raise newException(ReplayError, "replay action kind is invalid")
 
 proc record(game: Game, kind: uint8, player: int32,
-    first = 0'i32, second = 0'i32) =
+    first = 0'i32, second = 0'i32, offset = FixedVec2Zero) =
   ## Writes one accepted command. Skips when the tape is already past this
   ## tick.
   if game.recorder == nil or
       game.recorder.data.hashes.len >= game.world.tick:
     return
   game.recorder.recordAction(
-    uint32(game.world.tick), player, kind, first, second)
+    uint32(game.world.tick), player, kind, first, second, offset)
 
-proc applyMove*(game: Game, player, x, y: int32): bool =
+proc applyMove*(game: Game, player, x, y: int32,
+    offset = FixedVec2Zero): bool =
   ## Walks a villager and records the command when accepted.
-  result = game.world.applyMove(player, x, y)
+  result = game.world.applyMove(player, x, y, offset)
   if result:
-    game.record(ActionMove, player, x, y)
+    game.record(ActionMove, player, x, y, offset)
 
 proc applyGather*(game: Game, player, garden: int32): bool =
   ## Gathers a garden and records the command when accepted.
@@ -915,6 +939,8 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(int32(v.talkPosition.x))
     hash.addHashy(int32(v.talkPosition.y))
     hash.mixTile(v.goal)
+    hash.addHashy(int32(v.goalOffset.x))
+    hash.addHashy(int32(v.goalOffset.y))
     hash.addHashy(v.hasGoal)
     hash.addHashy(v.path.len)
     for step in v.path:

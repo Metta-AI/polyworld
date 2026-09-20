@@ -2,7 +2,8 @@
 
 import
   std/[os, strformat, tempfiles],
-  polyworld/[basic, cli, pathing],
+  bassy,
+  polyworld/[cli, pathing],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim, terrains]
 
 proc terrain(field: TerrainField, x, y: int, layer = GroundLayer): int32 =

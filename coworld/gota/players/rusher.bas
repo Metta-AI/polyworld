@@ -32,8 +32,8 @@ sub rush()
   if count = 0 then
     exit sub
   end if
-  centerX = sumX / count
-  centerY = sumY / count
+  centerX = sumX \ count
+  centerY = sumY \ count
   diameter = 0
   first = 0
   while first < count
@@ -87,8 +87,8 @@ sub rush()
   end if
 
   ' Pass through the middle before pushing onward to the enemy god.
-  middleX = mapWidth / 2
-  middleY = mapHeight / 2
+  middleX = mapWidth \ 2
+  middleY = mapHeight \ 2
   dx = selfX - homeX
   dy = selfY - homeY
   if dx * dx + dy * dy <= 100 then

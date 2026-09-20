@@ -5,7 +5,8 @@
 ## This module must not import anything that returns a float.
 
 import
-  polyworld/[basic, bodies, fixed, hashes, metrics, pathing, profiles, rngs, tapes,
+  bassy, fixxy,
+  polyworld/[bodies, hashes, metrics, pathing, profiles, rngs, tapes,
     visions],
   content,
   maps,
@@ -51,10 +52,12 @@ type
       ## Tree being chopped, when the resource is terrain rather than an
       ## entity. Also survives the round trip.
     goal*: Tile2
+    goalOffset*: FixedVec2
     hasGoal*: bool
     attackMove*: bool
       ## True while walking a destination that should stop to fight.
     attackMoveGoal*: Tile2
+    attackMoveOffset*: FixedVec2
       ## The destination to resume after a fight, or off-map when unset.
     path*: seq[Tile2]
       ## String-pulled waypoints in walk order.
@@ -667,8 +670,10 @@ proc clearOrder(unit: Unit, failed: bool) =
   ## Drops whatever the unit was doing and returns it to idle.
   unit.state = UnitIdle
   unit.hasGoal = false
+  unit.goalOffset = FixedVec2Zero
   unit.attackMove = false
   unit.attackMoveGoal = NoTile
+  unit.attackMoveOffset = FixedVec2Zero
   unit.targetId = NoEntity
   unit.sourceId = NoEntity
   unit.targetTile = NoTile
@@ -699,9 +704,11 @@ proc requestPath(w: World, index: int32) =
       w.units[droppedIndex].orderFailed = true
   w.pathQueue.add PathRequest(unitId: id, goal: w.units[index].goal)
 
-proc setGoal(w: World, index: int32, goal: Tile2) =
+proc setGoal(w: World, index: int32, goal: Tile2,
+    offset = FixedVec2Zero) =
   ## Points a unit at a destination tile and asks for a route.
   w.units[index].goal = goal
+  w.units[index].goalOffset = offset
   w.units[index].hasGoal = true
   w.units[index].blockedTicks = 0
   w.units[index].repathCooldown = 0
@@ -1050,9 +1057,21 @@ proc moveSpeed(unit: Unit): Fixed =
   let ticks = UnitTable[unit.owner][unit.kind].stepTicks
   FixedOne / fixed(max(ticks, 1))
 
+proc waypointPosition(unit: Unit, tile: Tile2): FixedVec2 =
+  ## Uses the exact destination for the last tile of a route.
+  result = tileCenter(tile)
+  if unit.hasGoal and tile == unit.goal:
+    result += unit.goalOffset
+
 proc arrivedAt(unit: Unit, tile: Tile2): bool =
-  ## True when the body is close enough to a tile centre.
-  length(tileCenter(tile) - unit.body.pos) <= PathArrive
+  ## Keeps fractional destinations precise while allowing broad path turns.
+  let radius =
+    if unit.hasGoal and tile == unit.goal and
+        unit.goalOffset != FixedVec2Zero:
+      fixed(1, 1000)
+    else:
+      PathArrive
+  length(unit.waypointPosition(tile) - unit.body.pos) <= radius
 
 proc steerUnit(w: World, index: int32, toward: FixedVec2) =
   ## Turns and slides one unit, then syncs its tile.
@@ -1083,6 +1102,10 @@ proc advanceMovement(w: World, index: int32) =
     ## Stay on the order. Clearing the goal here left harvest and build
     ## peons idle-not-idle after a shove off the ring.
     return
+  if w.units[index].tile == w.units[index].goal:
+    w.steerUnit(
+      index, w.units[index].waypointPosition(w.units[index].goal) - w.units[index].body.pos)
+    return
   if w.units[index].path.len == 0:
     w.requestPath(index)
     return
@@ -1091,7 +1114,7 @@ proc advanceMovement(w: World, index: int32) =
     if w.units[index].arrivedAt(waypoint):
       inc w.units[index].pathIndex
       continue
-    w.steerUnit(index, tileCenter(waypoint) - w.units[index].body.pos)
+    w.steerUnit(index, w.units[index].waypointPosition(waypoint) - w.units[index].body.pos)
     if w.units[index].blockedTicks >= RepathAfterTicks:
       w.units[index].blockedTicks = 0
       w.units[index].clearPath()
@@ -1127,7 +1150,7 @@ proc servePathQueue(w: World) {.measure.} =
         ):
       inc w.units[index].pathIndex
     if w.units[index].pathIndex < int32(w.units[index].path.len):
-      let toward = tileCenter(
+      let toward = w.units[index].waypointPosition(
         w.units[index].path[w.units[index].pathIndex]
       ) - w.units[index].body.pos
       if toward != FixedVec2Zero:
@@ -1324,13 +1347,20 @@ proc autoAcquire(w: World, index: int32) =
 
 proc finishCombat(w: World, index: int32, failed: bool) =
   ## Resumes an attack-move destination after a fight, or returns to idle.
-  let dest = w.units[index].attackMoveGoal
+  let
+    dest = w.units[index].attackMoveGoal
+    radius =
+      if w.units[index].attackMoveOffset != FixedVec2Zero:
+        fixed(1, 1000)
+      else:
+        PathArrive
   if w.units[index].attackMove and inGrid(dest) and
-      not w.units[index].arrivedAt(dest):
+      length(tileCenter(dest) + w.units[index].attackMoveOffset -
+        w.units[index].body.pos) > radius:
     w.units[index].targetId = NoEntity
     w.units[index].state = UnitMoving
     w.units[index].blockedTicks = 0
-    w.setGoal(index, dest)
+    w.setGoal(index, dest, w.units[index].attackMoveOffset)
     return
   w.units[index].clearOrder(failed)
 
@@ -1681,23 +1711,27 @@ proc ownedBuilding(w: World, player, buildingId: int32): int32 =
     return -1
   index
 
-proc applyMove*(w: World, player, unitId, x, y: int32): bool =
+proc applyMove*(w: World, player, unitId, x, y: int32,
+    offset = FixedVec2Zero): bool =
   ## Walks a unit to a tile.
   let index = w.ownedUnit(player, unitId)
-  if index < 0 or not inGrid(x, y) or not w.terrainOpen(x, y):
+  if index < 0 or not inGrid(x, y) or not w.terrainOpen(x, y) or
+      not offset.validTileOffset:
     return false
   if w.units[index].state == UnitInMine:
     return false
   w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
   w.units[index].state = UnitMoving
-  w.setGoal(index, tile2(x, y))
+  w.setGoal(index, tile2(x, y), offset)
   true
 
-proc applyAttackMove*(w: World, player, unitId, x, y: int32): bool =
+proc applyAttackMove*(w: World, player, unitId, x, y: int32,
+    offset = FixedVec2Zero): bool =
   ## Walks a unit to a tile, stopping to fight whoever enters its sight.
   let index = w.ownedUnit(player, unitId)
-  if index < 0 or not inGrid(x, y) or not w.terrainOpen(x, y):
+  if index < 0 or not inGrid(x, y) or not w.terrainOpen(x, y) or
+      not offset.validTileOffset:
     return false
   if w.units[index].state == UnitInMine:
     return false
@@ -1706,8 +1740,9 @@ proc applyAttackMove*(w: World, player, unitId, x, y: int32): bool =
   w.units[index].clearOrder(false)
   w.units[index].attackMove = true
   w.units[index].attackMoveGoal = dest
+  w.units[index].attackMoveOffset = offset
   w.units[index].state = UnitMoving
-  w.setGoal(index, dest)
+  w.setGoal(index, dest, offset)
   true
 
 proc applyAttack*(w: World, player, unitId, targetId: int32): bool =
@@ -1920,10 +1955,10 @@ proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
   let player = int32(action.playerId)
   case action.kind
   of ActionMove:
-    w.applyMove(player, action.entityId, action.first, action.second)
+    w.applyMove(player, action.entityId, action.first, action.second, action.offset)
   of ActionAttackMove:
     w.applyAttackMove(
-      player, action.entityId, action.first, action.second
+      player, action.entityId, action.first, action.second, action.offset
     )
   of ActionAttack:
     w.applyAttack(player, action.entityId, action.first)
@@ -1944,30 +1979,31 @@ proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
     raise newException(ReplayError, "replay action kind is invalid")
 
 proc record(game: Game, kind: uint8, player, entityId: int32,
-    first = 0'i32, second = 0'i32, third = 0'i32) =
+    first = 0'i32, second = 0'i32, third = 0'i32,
+    offset = FixedVec2Zero) =
   ## Writes one accepted command. Skips when the tape is already past this tick.
   if game.recorder == nil or game.recorder.data.hashes.len >= game.world.tick:
     return
   game.recorder.recordAction(uint32(game.world.tick), player, kind, entityId,
-    first, second, third)
+    first, second, third, offset)
 
 proc applyMove*(
-    game: Game, player, unitId, x, y: int32
+    game: Game, player, unitId, x, y: int32, offset = FixedVec2Zero
 ): bool =
   ## Walks a unit to a tile and records the command when accepted.
-  result = game.world.applyMove(player, unitId, x, y)
+  result = game.world.applyMove(player, unitId, x, y, offset)
   if result:
     game.metrics.command(int(player), game.world.tick)
-    game.record(ActionMove, player, unitId, x, y)
+    game.record(ActionMove, player, unitId, x, y, offset = offset)
 
 proc applyAttackMove*(
-    game: Game, player, unitId, x, y: int32
+    game: Game, player, unitId, x, y: int32, offset = FixedVec2Zero
 ): bool =
   ## Attack-moves a unit and records the command when accepted.
-  result = game.world.applyAttackMove(player, unitId, x, y)
+  result = game.world.applyAttackMove(player, unitId, x, y, offset)
   if result:
     game.metrics.command(int(player), game.world.tick)
-    game.record(ActionAttackMove, player, unitId, x, y)
+    game.record(ActionAttackMove, player, unitId, x, y, offset = offset)
 
 proc applyAttack*(
     game: Game, player, unitId, targetId: int32
@@ -2102,9 +2138,13 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(int32(unit.body.pos.y))
     hash.addHashy(int32(unit.body.facing))
     hash.mixTile(unit.goal)
+    hash.addHashy(int32(unit.goalOffset.x))
+    hash.addHashy(int32(unit.goalOffset.y))
     hash.addHashy(unit.hasGoal)
     hash.addHashy(unit.attackMove)
     hash.mixTile(unit.attackMoveGoal)
+    hash.addHashy(int32(unit.attackMoveOffset.x))
+    hash.addHashy(int32(unit.attackMoveOffset.y))
     hash.addHashy(unit.path.len)
     hash.addHashy(unit.pathIndex)
     for step in unit.path:

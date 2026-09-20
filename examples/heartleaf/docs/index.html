@@ -173,5 +173,11 @@ nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.
       recorded to a replay that verifies bit-exactly on playback.
     </footer>
   </div>
+<section id="basic-numbers">
+    <h2>BASIC numbers and coordinates</h2>
+    <p>Bots run on Bassy with Fixxy Q16.16 decimals enabled. Globals and arrays keep fractions across decisions. Use <code>/</code> for decimal division and <code>\</code> for integer division. Decimal operands must fit -32768 through 32767.99998. Integer-only calculations retain the full signed 32-bit range.</p>
+    <p><code>walkTo(x, y)</code> accepts fractional tile coordinates. Integers name tile centers; <code>walkTo(myX + 0.25, myY - 0.25)</code> moves a quarter tile from the current tile center. IDs, indices, and terrain queries require exact integers.</p>
+    <p>Comparisons return -1 or 0. Host flags return 1 or 0. Logical operators are bitwise, so use <code>flag = 0</code> to negate a host flag.</p>
+  </section>
 </body>
 </html>

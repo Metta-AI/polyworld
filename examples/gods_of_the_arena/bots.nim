@@ -2,8 +2,8 @@
 ## on the simulation.
 
 import
-  polyworld/[metrics, basic, bodies, cli, controllers, fixed, pathing,
-    profiles, tapes],
+  bassy, fixxy,
+  polyworld/[metrics, bodies, cli, controllers, pathing, profiles, tapes],
   content,
   maps,
   observations,
@@ -279,16 +279,19 @@ proc initHeroHost(heroId: int32): Host =
       worldObjectAt(activeGame.world, heroId, int(arguments[0]), value) and
         value.alive
     )
-  let walkToProc: HostProc = proc(
-      arguments: openArray[int32]
-  ): int32 =
+  let walkToProc: NumericHostProc = proc(
+      arguments: openArray[Value]
+  ): Value =
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[0].asFixed, arguments[1].asFixed))
     try:
       if activeGame.recorder != nil:
         activeGame.recorder.recordWalkTo(
           uint32(activeGame.world.tick),
           heroId,
-          arguments[0],
-          arguments[1]
+          x,
+          y,
+          offset
         )
     except ReplayError as error:
       activeGame.recordingError = error.msg
@@ -297,31 +300,34 @@ proc initHeroHost(heroId: int32): Host =
         "replay recording failed: " & error.msg
       )
     let accepted = applyWalkTo(
-      activeGame.world, heroId, arguments[0], arguments[1]
+      activeGame.world, heroId, x, y, offset
     )
     if accepted:
       activeGame.metrics.command(
         heroIndex(activeGame.world, heroId), activeGame.world.tick
       )
     int32(accepted)
-  let attackMoveProc: HostProc = proc(
-      arguments: openArray[int32]
-  ): int32 =
+  let attackMoveProc: NumericHostProc = proc(
+      arguments: openArray[Value]
+  ): Value =
     ## Records and applies the same attack-move order used by human players.
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[0].asFixed, arguments[1].asFixed))
     try:
       if activeGame.recorder != nil:
         activeGame.recorder.record ReplayAction(
           tick: uint32(activeGame.world.tick),
           heroId: heroId,
           kind: ActionAttackMove,
-          first: arguments[0],
-          second: arguments[1]
+          first: x,
+          second: y,
+          offset: offset
         )
     except ReplayError as error:
       activeGame.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
     let accepted = activeGame.world.applyAttackMove(
-      heroId, arguments[0], arguments[1]
+      heroId, x, y, offset
     )
     if accepted:
       activeGame.metrics.command(
@@ -433,23 +439,26 @@ proc initHeroHost(heroId: int32): Host =
         heroIndex(activeGame.world, heroId), activeGame.world.tick
       )
     int32(accepted)
-  let castPointProc: HostProc = proc(arguments: openArray[int32]): int32 =
+  let castPointProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
     ## Records and attempts a ground-aimed spell.
-    let slot = arguments[0]
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[1].asFixed, arguments[2].asFixed))
+    let slot = arguments[0].asInt
     try:
       activeGame.recorder.recordCast(
         uint32(activeGame.world.tick),
         heroId,
         slot,
-        arguments[1],
-        arguments[2],
-        true
+        x,
+        y,
+        true,
+        offset
       )
     except ReplayError as error:
       activeGame.recordingError = error.msg
       raise newException(BasicError, "replay recording failed: " & error.msg)
     let accepted = activeGame.world.applyCastPoint(
-      heroId, slot, arguments[1], arguments[2]
+      heroId, slot, x, y, offset
     )
     if accepted:
       activeGame.metrics.command(

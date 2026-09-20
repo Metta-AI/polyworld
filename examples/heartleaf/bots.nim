@@ -9,7 +9,8 @@
 ## commands only queue orders.
 
 import
-  polyworld/[basic, profiles],
+  bassy,
+  polyworld/[bodies, profiles],
   content,
   sim
 
@@ -293,8 +294,10 @@ proc buildVillagerHost*(slot: int32): Host =
 
   ## Commands. One per replay action kind, one per validator, each returning
   ## one on acceptance and zero on refusal.
-  let walkToProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    int32(activeGame.applyMove(slot, arguments[0], arguments[1]))
+  let walkToProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[0].asFixed, arguments[1].asFixed))
+    int32(activeGame.applyMove(slot, x, y, offset))
   discard result.addFunction("walkTo", 2, walkToProc, 400)
 
   let gatherProc: HostProc = proc(arguments: openArray[int32]): int32 =
