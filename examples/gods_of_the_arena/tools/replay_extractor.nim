@@ -52,7 +52,7 @@ Resimulate a GotA replay and print a compact diagnostic handoff.
 The default replay is examples/gods_of_the_arena/replays/demo.replay."""
 
 proc natural(value, flag: string): int =
-  if value.parseInt(result) != value.len or result < 0:
+  if value.len == 0 or value.parseInt(result) != value.len or result < 0:
     quit(flag & " requires a non-negative integer", 1)
 
 proc eventWindow(value: string): tuple[first, last: int] =
@@ -65,7 +65,7 @@ proc eventWindow(value: string): tuple[first, last: int] =
     result.last = natural(bounds[1], "--events")
   if result.last < result.first:
     quit("--events END must not precede START", 1)
-  if result.last - result.first + 1 > MaximumEventWindow:
+  if result.last - result.first >= MaximumEventWindow:
     quit("--events spans more than " & $MaximumEventWindow & " ticks", 1)
 
 proc options(): Options =
@@ -268,15 +268,17 @@ echo &"  path={opts.replayPath} version={ReplayGameVersion} " &
   &"actions={replay.actions.len}"
 echo "PROGRESSION red/blue"
 let tickRate = replay.header.setup.tickRate.int
-progression(game, 0, tickRate)
-let checkpointTicks = opts.checkpointSeconds * tickRate
+if opts.checkpointSeconds > 0:
+  progression(game, 0, tickRate)
 for tick in 1 .. replay.hashes.len:
   game.tickWorld(nil)
   game.hashCheck.requireReplayComplete(uint32(game.world.tick), tick)
   for event in game.world.events:
     summary.collect(replay, event, opts)
-  if checkpointTicks > 0 and
-      (tick mod checkpointTicks == 0 or tick == replay.hashes.len):
+  if opts.checkpointSeconds > 0 and
+      ((tick mod tickRate == 0 and
+        (tick div tickRate) mod opts.checkpointSeconds == 0) or
+        tick == replay.hashes.len):
     progression(game, tick, tickRate)
 
 if not game.replayPlayer.finished:
