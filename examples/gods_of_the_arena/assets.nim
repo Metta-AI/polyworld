@@ -48,13 +48,11 @@ const
     "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack"
   ]
   CreepTargetHeight* = 2.25'f
-  GodModels*: array[2, string] = [
-    DataRoot & "/characters/mini_legion/warband/warlock.glb",
-    DataRoot & "/characters/mini_legion/sentinel/druid.glb"
-  ]
-  GodTargetHeight* = 3.2'f
+  GodPresets* = ["Hades", "Zeus"]
+  GodClips* = ["Idle_Loop", "Death01", "Dance_Loop"]
   HeroModelPath* = DataRoot & "/characters/modular_chars/character.glb"
   HeroTargetHeight* = 1.7'f
+  GodTargetHeight* = HeroTargetHeight * 1.5'f
   HeroPortraitKeys*: array[HeroClass, string] = [
     "gota_vanguard_knight",
     "gota_ranger",
@@ -142,8 +140,8 @@ proc arenaDecorPaths*(): seq[string] =
   for i, pack in ArenaDecorPacks:
     result.add propPaths(pack, ArenaDecorNodes[i])
 
-proc creepAssets*(): seq[Asset] =
-  ## Packs preset metadata and only the generated creeps' meshes and clips.
+proc generatedCharacterAssets*(): seq[Asset] =
+  ## Packs the generated creeps and gods with only their meshes and clips.
   let
     directory = DataRoot / "characters/chargen"
     manifest = readManifest(directory)
@@ -155,7 +153,7 @@ proc creepAssets*(): seq[Asset] =
     for path in walkFiles(directory / category.directory / "*.json"):
       result.add fileAsset(path)
   result.add modelAsset(directory / manifest.rig)
-  for name in CreepPresets:
+  for name in @CreepPresets & @GodPresets:
     let inventory = manifest.presetManifest(manifest.namedPreset(name))
     for category in inventory.categories:
       for item in category.items:
@@ -165,7 +163,7 @@ proc creepAssets*(): seq[Asset] =
           if path.len > 0:
             result.add imageAsset(directory / path, 512)
   for clip in manifest.clips:
-    if clip.name in CreepClips:
+    if clip.name in CreepClips or clip.name in GodClips:
       result.add modelAsset(directory / clip.file)
 
 proc browserAssets*(): seq[Asset] =
@@ -193,13 +191,7 @@ proc browserAssets*(): seq[Asset] =
     clips = @["Run", "Idle", "Death", "Attack01", "Attack02"],
     textureSize = 512
   )
-  result.add creepAssets()
-  for path in GodModels:
-    result.add modelAsset(
-      path,
-      clips = @["Idle", "Death", "Victory"],
-      textureSize = 512
-    )
+  result.add generatedCharacterAssets()
   for path in HeroPortraitPaths:
     result.add fileAsset(path)
   for hero in HeroClass:

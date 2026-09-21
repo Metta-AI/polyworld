@@ -206,19 +206,28 @@ proc runGraphics*() =
     heroModels: array[HeroClass, CharacterModel]
     heroRenderClips: array[5, int]
   profileBlock "models":
-    let creepLibrary = readManifest(ChargenLibrary)
-    for team in Team:
+    let characterLibrary = readManifest(ChargenLibrary)
+
+    proc loadPresetModel(
+      name: string, clips: openArray[string], height: float32
+    ): CharacterModel =
+      ## Loads one generated character with its authored face materials.
       let
-        preset = creepLibrary.namedPreset(CreepPresets[ord(team)])
-        inventory = creepLibrary.presetManifest(preset)
-        model = loadCharacterModel(
-          readPresetCharacter(ChargenLibrary, creepLibrary, preset, CreepClips),
-          CreepTargetHeight
-        )
+        preset = characterLibrary.namedPreset(name)
+        inventory = characterLibrary.presetManifest(preset)
+      result = loadCharacterModel(
+        readPresetCharacter(ChargenLibrary, characterLibrary, preset, clips),
+        height
+      )
       for category in inventory.categories:
         if category.key in ["Eyes", "Mouth", "Brow"]:
           for item in category.items:
-            model.unlitParts.add item.nodes
+            result.unlitParts.add item.nodes
+
+    for team in Team:
+      let model = loadPresetModel(
+        CreepPresets[ord(team)], CreepClips, CreepTargetHeight
+      )
       footmanModels[team] = model
       footmanRenderClips[team] = [
         model.clipIndex("Jog_Fwd_Loop"),
@@ -228,12 +237,15 @@ proc runGraphics*() =
         model.clipIndex("Sword_Attack"),
         model.clipIndex("Sword_Attack")
       ]
-      let god = loadCharacterModel(GodModels[ord(team)], GodTargetHeight)
+      let god = loadPresetModel(
+        GodPresets[ord(team)], GodClips, GodTargetHeight
+      )
+      god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
       godModels[team] = god
       godRenderClips[team] = [
-        god.clipIndex("Idle"),
-        god.clipIndex("Death"),
-        god.clipIndex("Victory")
+        god.clipIndex("Idle_Loop"),
+        god.clipIndex("Death01"),
+        god.clipIndex("Dance_Loop")
       ]
     for class in HeroClass:
       heroModels[class] = loadModularCharacterModel(
