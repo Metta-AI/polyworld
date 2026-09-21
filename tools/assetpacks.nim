@@ -190,8 +190,24 @@ proc rejectExtensions(node: JsonNode) =
   case node.kind
   of JObject:
     for key, child in node:
-      if key == "extensions" and child.len > 0:
-        raise newException(AssetError, "Unsupported GLB extensions: " & $child)
+      if key == "extensions":
+        for name, extension in child:
+          # These material values contain no indices needing remapping.
+          var supported = extension.kind == JObject
+          case name
+          of "KHR_materials_unlit":
+            supported = supported and extension.len == 0
+          of "KHR_materials_specular":
+            if supported:
+              for field, value in extension:
+                supported = supported and
+                  field in ["specularFactor", "specularColorFactor"]
+          else:
+            supported = false
+          if not supported:
+            raise newException(
+              AssetError, "Unsupported GLB extension: " & name
+            )
       if key != "extras":
         rejectExtensions(child)
   of JArray:

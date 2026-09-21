@@ -1,5 +1,6 @@
 import
-  polyworld/[assets, common],
+  std/os,
+  polyworld/[assets, chargen, common],
   content
 
 const
@@ -42,11 +43,11 @@ const
   GotaDecorTextureSize* =
     when defined(emscripten): 256
     else: 512
-  FootmanModels*: array[2, string] = [
-    # Red/Dire uses undead; blue/Radiant uses humans, including nexus creeps.
-    DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb",
-    DataRoot & "/characters/mini_legion/human/footman.glb"
+  CreepPresets* = ["Purple Creep", "Blue Creep"]
+  CreepClips* = [
+    "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack"
   ]
+  CreepTargetHeight* = 2.25'f
   GodModels*: array[2, string] = [
     DataRoot & "/characters/mini_legion/warband/warlock.glb",
     DataRoot & "/characters/mini_legion/sentinel/druid.glb"
@@ -141,6 +142,32 @@ proc arenaDecorPaths*(): seq[string] =
   for i, pack in ArenaDecorPacks:
     result.add propPaths(pack, ArenaDecorNodes[i])
 
+proc creepAssets*(): seq[Asset] =
+  ## Packs preset metadata and only the generated creeps' meshes and clips.
+  let
+    directory = DataRoot / "characters/chargen"
+    manifest = readManifest(directory)
+  for path in ["manifest.json", manifest.skinPalette, manifest.hairPalette,
+      manifest.pupilPalette, manifest.hatPalette]:
+    result.add fileAsset(directory / path)
+  # Discovery reads part descriptors, but only selected meshes are loaded.
+  for category in manifest.categories:
+    for path in walkFiles(directory / category.directory / "*.json"):
+      result.add fileAsset(path)
+  result.add modelAsset(directory / manifest.rig)
+  for name in CreepPresets:
+    let inventory = manifest.presetManifest(manifest.namedPreset(name))
+    for category in inventory.categories:
+      for item in category.items:
+        for path in item.files:
+          result.add modelAsset(directory / path, textureSize = 512)
+        for path in [item.texture, item.pupilMask]:
+          if path.len > 0:
+            result.add imageAsset(directory / path, 512)
+  for clip in manifest.clips:
+    if clip.name in CreepClips:
+      result.add modelAsset(directory / clip.file)
+
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
@@ -166,8 +193,7 @@ proc browserAssets*(): seq[Asset] =
     clips = @["Run", "Idle", "Death", "Attack01", "Attack02"],
     textureSize = 512
   )
-  for path in FootmanModels:
-    result.add modelAsset(path, textureSize = 512)
+  result.add creepAssets()
   for path in GodModels:
     result.add modelAsset(
       path,
