@@ -64,16 +64,58 @@ proc heroSummary*(summary, appearances: JsonNode): JsonNode =
     scope["version"] = version["version"].copy()
     result["versions"].add(scope)
 
+proc heroCatalog*(): JsonNode =
+  ## Reads hero identities and every learnable spell rank from live tuning.
+  result = newJObject()
+  for class in HeroClass:
+    let
+      spec = class.heroSpec
+      abilities = newJArray()
+    for slot in HeroAbilitySlot:
+      let
+        ability = heroAbility(class, slot)
+        base = ability.abilitySpec
+        ranks = newJArray()
+        effect =
+          case base.kind
+          of Strike: "Damage"
+          of Heal: "Healing"
+          of Restore: "Mana restored"
+      for rank in 1'i32 .. slot.abilityMaxLevel:
+        let
+          tuning = ability.abilitySpec(rank)
+          amount =
+            case tuning.kind
+            of Strike: tuning.damage
+            of Heal: tuning.heal
+            of Restore: tuning.restore
+        ranks.add %*{
+          "rank": rank,
+          "required_level": slot.abilityRequiredLevel(rank),
+          "amount": amount,
+          "mana_cost": tuning.manaCost
+        }
+      abilities.add %*{
+        "slot": slot.ord,
+        "key": ["Q", "W", "E", "R"][slot.ord],
+        "name": base.name,
+        "icon": "hero_assets/" & ability.abilityIconKey & ".png",
+        "ultimate": slot == UltimateAbility,
+        "effect": effect,
+        "charges": base.charges,
+        "cooldown_seconds": base.cooldownTicks.float64 / TickRate.float64,
+        "recharge_seconds": base.rechargeTicks.float64 / TickRate.float64,
+        "ranks": ranks
+      }
+    result[spec.name] = %*{"name": spec.name, "role": spec.role,
+      "slug": slug(spec.name),
+      "portrait": "hero_assets/" & slug(spec.name) & ".png",
+      "abilities": abilities}
+
 proc renderHeroStats*(summary, appearances: JsonNode): string =
   ## Builds a static hero explorer using relative artwork and font paths.
-  let catalog = newJObject()
-  for class in HeroClass:
-    let spec = class.heroSpec
-    catalog[spec.name] = %*{"name": spec.name, "role": spec.role,
-      "slug": slug(spec.name),
-      "portrait": "hero_assets/" & slug(spec.name) & ".png"}
   let payload = %*{"summary": heroSummary(summary, appearances),
-    "catalog": catalog}
+    "catalog": heroCatalog()}
   result = Template.replace("@@data@@", payload.toJson.multiReplace(
     ("<", "\\u003c"), ("&", "\\u0026")))
   for (key, source, target) in Assets:
@@ -91,6 +133,11 @@ proc writeHeroStats*(path: string, summary, appearances: JsonNode,
       dataRoot / "characters/modular_chars" / ("character.preset_" &
         $Portraits[class.ord] & ".profile.png"),
       assets / (slug(class.heroSpec.name) & ".png")
+    )
+  for ability in Ability:
+    copyFile(
+      dataRoot / "abilities" / (ability.abilitySpec.icon & ".png"),
+      assets / (ability.abilityIconKey & ".png")
     )
   writeFile(path & ".tmp", renderHeroStats(summary, appearances))
   moveFile(path & ".tmp", path)

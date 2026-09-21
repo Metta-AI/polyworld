@@ -117,6 +117,7 @@ replay payloads and state hashes, and never accumulates a match history.
 | `GoldSpent`, `LevelChanged` | Actual resource changes. Spent amounts are negative. |
 | `HealthAdjusted`, `ManaChanged` | Equipment, level, respawn, regeneration, consumable, or ability changes, distinguished by cause. Stat adjustments are not healing. |
 | `SpellReleased` | Successful automatic or explicit cast with caster, aim target ID if any, slot, and ability ID. |
+| `AbilityLeveled` | Explicit unlock or upgrade with hero, ability ID, and rank before/after. |
 | `ItemPurchased`, `ItemConsumed` | Item ID and stack count before/after. Consumption amounts are negative. |
 | `ActionRejected` | Explicit command, original numeric arguments, and typed rejection reason. Internal auto-cast candidate failures are omitted. |
 | `EntitySpawned`, `EntityRespawned`, `EntityRemoved` | Entity lifecycle; corpse expiration is distinct from death. |

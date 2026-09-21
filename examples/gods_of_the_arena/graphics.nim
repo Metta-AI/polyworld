@@ -1530,6 +1530,12 @@ proc runGraphics*() =
     for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
       if window.buttonPressed[key]:
         let hero = heroById(run.world, playerHeroId())
+        if window.buttonDown[KeyLeftShift] or window.buttonDown[KeyRightShift]:
+          queueLevelAbility(hero.id, slot.int32)
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+          continue
         var
           aimX = mapCoordinate(hero.position.x + hero.facing.x)
           aimY = mapCoordinate(hero.position.z + hero.facing.z)

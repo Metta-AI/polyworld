@@ -44,6 +44,9 @@ type
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY
   SpellField = enum
     SpellAbility, SpellCasterId, SpellX, SpellY, SpellImpactTick
+  AbilityField = enum
+    AbilityLevel, AbilityMaximum, AbilityRequirement, AbilityCanLevel,
+    AbilityDamage, AbilityHeal, AbilityRestore, AbilityManaCost
 
 const
   HeroDataNames: array[HeroDataSlot, string] = [
@@ -90,8 +93,8 @@ proc heroVmLimits(): Limits =
   result.maxArrays = 32
   result.maxArrayElements = 4096
   result.maxGlobals = 256
-  result.maxHostData = 64
-  result.maxHostFunctions = 64
+  result.maxHostData = 96
+  result.maxHostFunctions = 96
   result.maxRoutines = 64
   result.maxParameters = 16
   result.maxRegisters = 256
@@ -196,6 +199,28 @@ proc spellProc(heroId: int32, field: SpellField): HostProc =
       mapCoordinate(value.position.z)
     of SpellImpactTick:
       value.impact
+
+proc abilityProc(heroId: int32, field: AbilityField): HostProc =
+  ## Binds live rank and effect observations to this hero's ability slots.
+  result = proc(arguments: openArray[int32]): int32 =
+    ## Returns zero for invalid slots without changing command feedback.
+    let index = activeGame.world.heroIndex(heroId)
+    if index < 0 or arguments[0] < 0 or arguments[0] > HeroAbilitySlot.high.ord:
+      return 0
+    let
+      hero = activeGame.world.heroes[index]
+      slot = HeroAbilitySlot(arguments[0])
+      rank = hero.abilityLevels[slot]
+      spec = heroAbility(hero.class, slot).abilitySpec(rank)
+    case field
+    of AbilityLevel: rank
+    of AbilityMaximum: slot.abilityMaxLevel
+    of AbilityRequirement: slot.abilityRequiredLevel(rank + 1)
+    of AbilityCanLevel: int32(hero.abilityLevelError(slot) == NoActionError)
+    of AbilityDamage: spec.damage
+    of AbilityHeal: spec.heal
+    of AbilityRestore: spec.restore
+    of AbilityManaCost: spec.manaCost
 
 proc initHeroHost(heroId: int32): Host =
   ## Builds the bounded world-query and action interface for one hero.
@@ -462,6 +487,41 @@ proc initHeroHost(heroId: int32): Host =
         heroIndex(activeGame.world, heroId), activeGame.world.tick
       )
     int32(accepted)
+
+  let levelAbilityProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Records and spends a point through the shared upgrade validator.
+    try:
+      activeGame.recorder.recordLevelAbility(
+        uint32(activeGame.world.tick), heroId, arguments[0]
+      )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyLevelAbility(heroId, arguments[0])
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
+  let abilityPointsProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads unspent points immediately, including after an upgrade.
+    let index = activeGame.world.heroIndex(heroId)
+    if index < 0:
+      return 0
+    activeGame.world.heroes[index].abilityPoints
+  discard result.addFunction("levelAbility", 1, levelAbilityProc, 20)
+  discard result.addFunction("abilityPoints", 0, abilityPointsProc, 4)
+  for (field, name) in [
+    (AbilityLevel, "abilityLevel"),
+    (AbilityMaximum, "abilityMaxLevel"),
+    (AbilityRequirement, "abilityRequiredLevel"),
+    (AbilityCanLevel, "canLevelAbility"),
+    (AbilityDamage, "abilityDamage"),
+    (AbilityHeal, "abilityHeal"),
+    (AbilityRestore, "abilityRestore"),
+    (AbilityManaCost, "abilityManaCost")
+  ]:
+    discard result.addFunction(name, 1, abilityProc(heroId, field), 4)
 
   let castTargetProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Records and attempts an explicit object-targeted spell.

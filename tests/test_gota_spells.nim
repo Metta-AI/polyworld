@@ -16,6 +16,7 @@ proc spellGame(class: HeroClass): Game =
     tower.hp = 0
   let hero = result.world.heroes[0]
   hero.class = class
+  hero.abilityLevels = [1'i32, 1, 1, 1]
   hero.spellsReady = false
   hero.refreshHeroStats()
   hero.state = Marching

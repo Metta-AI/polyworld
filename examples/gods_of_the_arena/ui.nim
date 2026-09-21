@@ -75,6 +75,8 @@ type
     portalCooldown, channelTicks: int32
     itemCooldowns: array[InventorySlots, int32]
     abilities: array[HeroAbilitySlot, Ability]
+    abilityLevels: array[HeroAbilitySlot, int32]
+    abilityPoints: int32
     cooldowns: array[HeroAbilitySlot, int32]
     charges: array[HeroAbilitySlot, int32]
     recharges: array[HeroAbilitySlot, int32]
@@ -305,6 +307,8 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         portalCooldown: max(0'i32, hero.portalCooldownEnds - run.world.tick),
         channelTicks: max(0'i32, hero.portalEnds - run.world.tick),
         abilities: spec.abilities,
+        abilityLevels: hero.abilityLevels,
+        abilityPoints: hero.abilityPoints,
         charges: hero.charges,
         recharges: hero.recharges,
         cooldowns: hero.cooldowns
@@ -970,7 +974,9 @@ proc drawUi*(
         let
           i = slot.ord
           well = details.abilities[i]
-          spec = selection.abilities[slot].abilitySpec
+          spec = selection.abilities[slot].abilitySpec(
+            selection.abilityLevels[slot]
+          )
           empty = selection.charges[slot] == 0
           remaining =
             if empty: max(selection.cooldowns[slot], selection.recharges[slot])
@@ -978,7 +984,7 @@ proc drawUi*(
         sk.drawAbilityIcon(
           well,
           abilityIconKey(selection.abilities[slot]),
-          if remaining > 0:
+          if remaining > 0 or selection.abilityLevels[slot] == 0:
             rgbx(150, 150, 158, 255)
           else:
             rgbx(255, 255, 255, 255)
@@ -988,9 +994,25 @@ proc drawUi*(
         )
         if options.playerSlot > 0 and not run.replayMode and
           selection.id == run.world.heroes[options.playerSlot - 1].id:
+            let
+              hero = run.world.heroes[options.playerSlot - 1]
+              upgrade = GameUiPanel(
+                origin: well.origin + vec2(well.size.x - 23, 2),
+                size: vec2(21, 20)
+              )
+              clickedUpgrade = hero.abilityLevelError(slot) == NoActionError and
+                window.hudClicked(sk, upgrade)
             if window.hudClicked(sk, well):
-              armedAbility = slot.ord.int32
               armedItem = -1
+              armedAbility = -1
+              if clickedUpgrade or window.buttonDown[KeyLeftShift] or
+                window.buttonDown[KeyRightShift]:
+                  queueLevelAbility(selection.id, slot.ord.int32)
+                  armedAbility = -1
+              elif selection.abilityLevels[slot] > 0:
+                armedAbility = slot.ord.int32
+              else:
+                queueCastTarget(selection.id, slot.ord.int32, selection.id)
             if armedAbility == slot.ord.int32:
               let color = rgbx(255, 223, 133, 255)
               sk.drawRect(well.origin, vec2(well.size.x, 3), color)
@@ -1054,6 +1076,16 @@ proc drawUi*(
       hpBar = details.hp
       manaBar = details.mana
       xpBar = details.xp
+    if selection.kind == SelectedHero and selection.abilityPoints > 0:
+      let count = selection.abilityPoints
+      sk.drawLabel(
+        $count & (if count == 1: " ability point" else: " ability points") &
+          " | Shift + Q/W/E/R to learn",
+        hpBar.origin - vec2(0, 26),
+        vec2(hpBar.size.x, 20),
+        rgbx(247, 221, 143, 255),
+        "Small"
+      )
     sk.drawBadge(badge.origin, badge.size, $selection.level, font = "Bold")
     sk.drawLabel(
       selection.callsign,
@@ -1141,17 +1173,51 @@ proc drawUi*(
             CenterAlign
           )
         let
-          spec = selection.abilities[slot].abilitySpec
+          rank = selection.abilityLevels[slot]
+          spec = selection.abilities[slot].abilitySpec(rank)
           badge = well.origin + vec2(3, 2)
-        sk.drawRect(badge, vec2(28, 20), rgbx(0, 0, 0, 190))
+        sk.drawRect(badge, vec2(42, 20), rgbx(0, 0, 0, 190))
         sk.drawLabel(
-          $selection.charges[slot] & "/" & $spec.charges,
+          "L" & $rank & "/" & $slot.abilityMaxLevel,
           badge,
-          vec2(28, 20),
-          rgbx(255, 255, 255, 255),
+          vec2(42, 20),
+          rgbx(247, 221, 143, 255),
           "Small",
           CenterAlign
         )
+        if rank == 0:
+          let required = slot.abilityRequiredLevel(1)
+          sk.drawLabel(
+            if selection.level < required: "Needs L" & $required else: "Locked",
+            well.origin + vec2(0, 23),
+            vec2(well.size.x, 20),
+            rgbx(247, 221, 143, 255),
+            "Small",
+            CenterAlign
+          )
+        else:
+          sk.drawRect(badge + vec2(0, 22), vec2(28, 20), rgbx(0, 0, 0, 190))
+          sk.drawLabel(
+            $selection.charges[slot] & "/" & $spec.charges,
+            badge + vec2(0, 22),
+            vec2(28, 20),
+            rgbx(255, 255, 255, 255),
+            "Small",
+            CenterAlign
+          )
+        if options.playerSlot > 0 and not run.replayMode and
+          selection.id == run.world.heroes[options.playerSlot - 1].id:
+            let hero = run.world.heroes[options.playerSlot - 1]
+            if hero.abilityLevelError(slot) == NoActionError:
+              let upgrade = GameUiPanel(
+                origin: well.origin + vec2(well.size.x - 23, 2),
+                size: vec2(21, 20)
+              )
+              sk.drawRect(upgrade.origin, upgrade.size, rgbx(80, 62, 20, 255))
+              sk.drawLabel(
+                "+", upgrade.origin, upgrade.size,
+                rgbx(255, 223, 133, 255), "Small", CenterAlign
+              )
         if selection.recharges[slot] > 0:
           let progress = 1 - selection.recharges[slot].float32 /
             max(1, spec.rechargeTicks).float32

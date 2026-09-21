@@ -26,6 +26,7 @@ proc arena(): World =
   )
   for i, hero in result.heroes:
     hero.refreshHeroStats()
+    hero.abilityLevels = [1'i32, 1, 1, 1]
     result.stats.teams[i] = hero.team.ord
     hero.inventory[0] = PoisonPotion
     hero.itemCounts[0] = 3
@@ -221,6 +222,7 @@ proc quietGame(class: HeroClass): Game =
   hero.place(result.world.forts[0].center)
   hero.state = Marching
   hero.spellsReady = false
+  hero.abilityLevels = [1'i32, 1, 1, 1]
 
 proc quietStep(game: Game) =
   ## Suppresses unrelated idle attacks while allowing spell impacts and regen.
