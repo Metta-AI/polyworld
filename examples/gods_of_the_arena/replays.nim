@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 45'u16
+  ReplayGameVersion* = 46'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -25,6 +25,7 @@ const
   ActionCastPoint* = 10'u8
   ActionManualSpells* = 14'u8
   ActionUseItemAt* = 15'u8
+  ActionLevelAbility* = 16'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -104,7 +105,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionAttackMove and
       action.kind != ActionCastTarget and
       action.kind != ActionCastPoint and
-      action.kind != ActionManualSpells:
+      action.kind != ActionManualSpells and
+      action.kind != ActionLevelAbility:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
 
@@ -120,6 +122,14 @@ proc recordCast*(
     tick: tick, heroId: heroId,
     kind: (if ground: ActionCastPoint else: ActionCastTarget), slot: slot,
     first: first, second: second, offset: offset
+  )
+
+proc recordLevelAbility*(
+    recorder: ReplayRecorder, tick: uint32, heroId, slot: int32
+) =
+  ## Records an explicit unlock or upgrade, including rejected attempts.
+  recorder.record ReplayAction(
+    tick: tick, heroId: heroId, kind: ActionLevelAbility, slot: slot
   )
 
 proc recordWalkTo*(
@@ -279,7 +289,8 @@ proc validate*(data: ReplayData) =
         action.kind != ActionAttackMove and
         action.kind != ActionCastTarget and
         action.kind != ActionCastPoint and
-        action.kind != ActionManualSpells:
+        action.kind != ActionManualSpells and
+        action.kind != ActionLevelAbility:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:

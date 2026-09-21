@@ -8,14 +8,17 @@ type
     ActionFullHealth, ActionFullMana, ActionTargetUnavailable,
     ActionOutOfRange, ActionNoRoute, ActionInvalidPoint, ActionCooldown,
     ActionNoCharges, ActionInsufficientMana, ActionSpellLimit,
-    ActionChanneling, ActionStunned, ActionRooted, ActionOutsideKeep
+    ActionChanneling, ActionStunned, ActionRooted, ActionOutsideKeep,
+    ActionAbilityLocked, ActionNoAbilityPoints, ActionAbilityMaxLevel,
+    ActionHeroLevelRequired
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
     Assist, XpGained, GoldGained, GoldSpent, LevelChanged, HealthAdjusted,
     ManaChanged, SpellReleased, ItemPurchased, ItemConsumed, ActionRejected,
     MatchEnded, PortalStarted, PortalCompleted, PortalInterrupted,
-    Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted
+    Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted,
+    AbilityLeveled
 
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
@@ -69,3 +72,7 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionStunned: "Stunned"
   of ActionRooted: "Rooted"
   of ActionOutsideKeep: "Return to your keep"
+  of ActionAbilityLocked: "Ability is locked"
+  of ActionNoAbilityPoints: "No ability points"
+  of ActionAbilityMaxLevel: "Ability is at maximum level"
+  of ActionHeroLevelRequired: "Higher hero level required"

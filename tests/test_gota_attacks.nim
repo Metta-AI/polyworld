@@ -163,6 +163,7 @@ block:
   doAssert hero.hasMoveTarget
   other.hp = 1
   hero.manualSpells = false
+  doAssert game.world.applyLevelAbility(hero.id, PrimaryAbility.ord.int32)
   for slot in HeroAbilitySlot:
     hero.charges[slot] = 0
   hero.charges[PrimaryAbility] = 1

@@ -41,7 +41,19 @@ block:
     for slot in HeroAbilitySlot:
       let ability = spec.abilities[slot]
       doAssert ability notin used, "ability is assigned twice"
+      doAssert ability.abilitySpec.slot == slot,
+        $ability & " metadata disagrees with its hero kit slot"
       used.incl ability
+  doAssert used == {Ability.low .. Ability.high}
+
+echo "Testing spell ranks clamp to the declared slot limit"
+block:
+  doAssert FirebrandSword.abilitySpec(4).damage == 100
+  doAssert FirebrandSword.abilitySpec(int32.high) ==
+    FirebrandSword.abilitySpec(4)
+  doAssert BlazingBlade.abilitySpec(3).damage == 180
+  doAssert BlazingBlade.abilitySpec(4) == BlazingBlade.abilitySpec(3)
+  doAssert BlazingBlade.abilitySpec(int32.high) == BlazingBlade.abilitySpec(3)
 
 echo "Testing every kit ability has a distinct usable spec"
 block:

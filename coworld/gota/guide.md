@@ -14,6 +14,58 @@ Every hero has a free single-target melee or ranged basic attack in addition to 
 
 The bundled `players/rusher.bas` sends all five heroes down mid together. It regroups toward the living team's center when any pair is more than 10 tiles apart, closing to 8 tiles before resuming. It attacks visible, vulnerable enemies within 20 tiles, favoring the enemy closest to the group's center. Otherwise it attack-moves through the middle and toward the opposing god. Dead allies are ignored until they respawn. Automatic abilities remain enabled.
 
+## Ability progression
+
+Heroes start at level 1 with one ability point and all four abilities locked.
+Each hero level grants another point. Points remain banked until a command
+spends them. `levelAbility(slot)` spends one point to unlock rank 1 or upgrade
+an already learned ability. Slots 0, 1, 2, and 3 correspond to Q, W, E, and R.
+
+Q, W, and E have four ranks requiring hero levels 1, 3, 5, and 7.
+R has three ranks requiring hero levels 6, 12, and 18. Each additional rank
+adds 50% of the rank-1 damage, healing, or mana restoration, rounded down.
+Mana costs, range, charge capacity, and timing stay the same. An upgrade
+preserves spent charges and running cooldowns. Pending spells retain the
+rank they had when cast. Respawning preserves learned ranks and banked
+points and refills only learned abilities.
+
+Hero stats, including basic-attack damage, still grow automatically with
+hero level. Ability ranks never increase automatically. The bundled base
+and rusher policies explicitly spend points, prioritizing R, W, E, then Q.
+Their existing automatic casting uses only learned abilities. Custom
+policies can bank points or choose another order. At level 20, fully ranking
+all four abilities leaves five banked points.
+
+| BASIC function | Meaning |
+| --- | --- |
+| `levelAbility(slot)` | Unlock or upgrade. Returns 1 on success, 0 on rejection. |
+| `abilityPoints()` | Current unspent points. |
+| `abilityLevel(slot)` | Current rank, with 0 meaning locked. |
+| `abilityMaxLevel(slot)` | Rank limit: 4 for slots 0-2, 3 for slot 3. |
+| `abilityRequiredLevel(slot)` | Hero level required for the next rank, or 0 at maximum rank. |
+| `canLevelAbility(slot)` | 1 when alive with a point and the required level, otherwise 0. |
+| `abilityDamage(slot)` | Damage per target at the learned rank, or 0 when locked. |
+| `abilityHeal(slot)` | Healing per target at the learned rank, or 0 when locked. |
+| `abilityRestore(slot)` | Mana restoration at the learned rank, or 0 when locked. |
+| `abilityManaCost(slot)` | Mana cost of a cast, including while locked. |
+
+These queries update immediately after commands and return 0 for invalid
+slots. `abilityCharges(slot)`, `abilityCooldown(slot)`, and
+`abilityRecharge(slot)` remain available. Locked abilities have no charges.
+Upgrade actions and rejected attempts are recorded for deterministic replays.
+
+```basic
+if canLevelAbility(3) then
+  levelAbility(3)
+elseif canLevelAbility(1) then
+  levelAbility(1)
+end if
+```
+
+Player controls use Shift+Q/W/E/R, Shift-click on an ability, or its gold
+"+" button to spend a point. The HUD shows current ranks, locked abilities,
+and available points.
+
 ## BASIC observations
 
 Self data and visible objects are sampled for each decision and remain consistent during it, including after an action call. Spell queries read the pending casts, so a successful cast can append a spell during that decision. Object and spell indices are zero-based and may change next decision. Keep `objectId(i)` when tracking an object across decisions or calling `attackTarget`, rather than keeping its list index.
@@ -137,7 +189,9 @@ Read-only reason constants are `NoActionError`, `ActionNotAlive`,
 `ActionTargetUnavailable`, `ActionOutOfRange`, `ActionNoRoute`,
 `ActionInvalidPoint`, `ActionCooldown`, `ActionNoCharges`,
 `ActionInsufficientMana`, `ActionSpellLimit`, `ActionChanneling`,
-`ActionStunned`, and `ActionRooted` (values 0 through 22).
+`ActionStunned`, `ActionRooted`, `ActionOutsideKeep`, `ActionAbilityLocked`,
+`ActionNoAbilityPoints`, `ActionAbilityMaxLevel`, and
+`ActionHeroLevelRequired` (values 0 through 27).
 Unavailable targets share a generic error without exposing hidden state.
 This feedback is recorded deterministically through submitted replay actions.
 

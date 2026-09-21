@@ -72,6 +72,8 @@ block:
   for slot in 0'i32 .. 3'i32:
     spells.recordCast(2, 100, slot, 105, 0, false)
     spells.recordCast(2, 100, slot, 64, 42, true)
+  for slot in [-7'i32, 0, 1, 2, 3, int32.high]:
+    spells.recordLevelAbility(2, 100, slot)
   spells.recordCast(2, 100, -7, 105, 0, false)
   spells.recordCast(2, 100, int32.high, -20, 42, true)
   spells.recordHash(123)

@@ -196,6 +196,7 @@ block:
 shop = canShop()
 spawn = inOwnSpawn()
 if started = 0 then
+  learned = levelAbility(1)
   bought = buyItem(22)
   boughtAgain = buyItem(22)
   started = 1
@@ -215,6 +216,7 @@ castPoint(1, selfX, selfY)
   var consumed = false
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError
+    doAssert vm.runtime.getGlobal("learned") == 1
     doAssert vm.runtime.getGlobal("bought") == 1
     doAssert vm.runtime.getGlobal("boughtAgain") == 1
     doAssert vm.runtime.getGlobal("shop") == 1

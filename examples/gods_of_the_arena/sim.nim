@@ -142,6 +142,7 @@ type
     stuckTicks*: int32
     inventory*: array[InventorySlots, Item]
     itemCounts*: array[InventorySlots, int32]
+    abilityLevels*: array[HeroAbilitySlot, int32]
     cooldowns*: array[HeroAbilitySlot, int32]
     charges*: array[HeroAbilitySlot, int32]
     recharges*: array[HeroAbilitySlot, int32]
@@ -201,6 +202,7 @@ type
 
   SpellCast* = object
     ability*: Ability
+    level*: int32
     heroId*: int32
     targetId*: int32
     origin*: WorldPoint
@@ -1011,6 +1013,51 @@ proc refreshHeroStats*(
 proc heroAttackDamage*(hero: Hero): int32 =
   ## Returns basic-attack damage including held equipment.
   heroDamage(hero.class, hero.level) + hero.heroItemBonus().damage
+
+proc abilityPoints*(hero: Hero): int32 =
+  ## Returns banked points, including the first point granted at hero level one.
+  result = int32(clamp(hero.level, 0, HeroMaxLevel))
+  for rank in hero.abilityLevels:
+    result -= rank
+  result = max(0'i32, result)
+
+proc abilityLevelError*(hero: Hero, slot: HeroAbilitySlot): ActionError =
+  ## Checks an upgrade without spending points or changing action feedback.
+  if hero.hp <= 0 or hero.state == Dying:
+    return ActionNotAlive
+  let rank = hero.abilityLevels[slot]
+  if rank >= slot.abilityMaxLevel:
+    return ActionAbilityMaxLevel
+  if hero.abilityPoints == 0:
+    return ActionNoAbilityPoints
+  if hero.level < slot.abilityRequiredLevel(rank + 1):
+    return ActionHeroLevelRequired
+  NoActionError
+
+proc applyLevelAbility*(world: World, heroId, slotId: int32): bool =
+  ## Spends one point to unlock or upgrade a slot after validating all gates.
+  let index = world.heroIndex(heroId)
+  var error = NoActionError
+  if index < 0:
+    error = ActionNotAlive
+  elif slotId < 0 or slotId > HeroAbilitySlot.high.ord:
+    error = ActionInvalidSlot
+  else:
+    let
+      hero = world.heroes[index]
+      slot = HeroAbilitySlot(slotId)
+    error = hero.abilityLevelError(slot)
+    if error == NoActionError:
+      inc hero.abilityLevels[slot]
+      if hero.abilityLevels[slot] == 1:
+        hero.charges[slot] = heroAbility(hero.class, slot).abilitySpec.charges
+      when defined(replayEvents):
+        world.valueEvent(
+          AbilityLeveled, hero.id, hero.id, Command,
+          heroAbility(hero.class, slot).ord.int32,
+          hero.abilityLevels[slot] - 1, hero.abilityLevels[slot], 1
+        )
+  world.finishAction(heroId, ActionLevelAbility, slotId, 0, 0, error)
 
 proc heroAttackTicks*(world: World, hero: Hero): int32 =
   ## Returns the hero class's current basic-attack cadence.
@@ -2793,9 +2840,11 @@ proc respawn(world: World, hero: Hero) =
     world.lifecycleEvent(EntityRespawned, 0, hero.id, Respawn)
 
 proc initHeroCharges(hero: Hero) =
-  ## Starts a new life with every ability fully charged.
+  ## Starts a new life with every learned ability fully charged.
   for slot in HeroAbilitySlot:
-    hero.charges[slot] = heroAbility(hero.class, slot).abilitySpec.charges
+    hero.charges[slot] = heroAbility(hero.class, slot).abilitySpec(
+      hero.abilityLevels[slot]
+    ).charges
     hero.recharges[slot] = 0
   hero.spellsReady = true
 
@@ -2809,7 +2858,9 @@ proc tickHeroCooldowns(world: World, hero: Hero) =
     if hero.recharges[slot] > 0:
       dec hero.recharges[slot]
       if hero.recharges[slot] == 0:
-        let spec = heroAbility(hero.class, slot).abilitySpec
+        let spec = heroAbility(hero.class, slot).abilitySpec(
+          hero.abilityLevels[slot]
+        )
         hero.charges[slot] = min(hero.charges[slot] + 1, spec.charges)
         if hero.charges[slot] < spec.charges:
           hero.recharges[slot] = spec.rechargeTicks
@@ -3215,7 +3266,7 @@ proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
   ## Applies one effect, checking living targets and structure protection again.
   let
     caster = heroIndex(world, spell.heroId)
-    spec = spell.ability.abilitySpec
+    spec = spell.ability.abilitySpec(spell.level)
   var target: WorldObject
   if caster < 0 or not world.spellTarget(id, target) or not target.alive:
     return
@@ -3253,7 +3304,7 @@ proc spellContains*(spell: SpellCast, area: FxArea, point: WorldPoint): bool =
 proc resolveSpell(world: World, spell: var SpellCast) =
   ## Resolves one area or single-target impact exactly once.
   spell.resolved = true
-  let spec = spell.ability.abilitySpec
+  let spec = spell.ability.abilitySpec(spell.level)
   if spec.casting == SelfCast:
     world.hitSpellTarget(spell, spell.heroId)
     return
@@ -3300,7 +3351,7 @@ proc resolveSpell(world: World, spell: var SpellCast) =
 proc advanceGroundShot(world: World, spell: var SpellCast) =
   ## Sweeps one tick of projectile travel and stops at the first enemy.
   let
-    spec = spell.ability.abilitySpec
+    spec = spell.ability.abilitySpec(spell.level)
     start = spell.started + spec.castTicks
     duration = max(1'i32, spell.impact - start)
     elapsed = clamp(world.tick - start, 0'i32, duration)
@@ -3392,13 +3443,15 @@ proc castAbility(
   let error = world.heroActionError(hero)
   if error != NoActionError:
     return error
+  if hero.abilityLevels[slot] == 0:
+    return ActionAbilityLocked
   if world.casts.len >= 512:
     return ActionSpellLimit
   if not hero.spellsReady:
     hero.initHeroCharges()
   let
     ability = heroAbility(hero.class, slot)
-    spec = ability.abilitySpec
+    spec = ability.abilitySpec(hero.abilityLevels[slot])
   if hero.cooldowns[slot] > 0:
     return ActionCooldown
   if hero.charges[slot] <= 0:
@@ -3440,7 +3493,8 @@ proc castAbility(
   if direction.x == 0 and direction.z == 0:
     direction.z = WorldScale
   var spell = SpellCast(
-    ability: ability, heroId: hero.id, targetId: selected,
+    ability: ability, level: hero.abilityLevels[slot],
+    heroId: hero.id, targetId: selected,
     origin: hero.position, position: point,
     direction: heading(direction.x, direction.z),
     started: world.tick, impact: world.tick + spec.castTicks
@@ -3590,6 +3644,8 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
   of ActionCastPoint:
     applyCastPoint(world, action.heroId,
       action.slot, action.first, action.second, action.offset)
+  of ActionLevelAbility:
+    applyLevelAbility(world, action.heroId, action.slot)
   of ActionManualSpells:
     let index = world.heroIndex(action.heroId)
     if index >= 0:
@@ -3605,7 +3661,9 @@ proc tryCastAbility(
     targetFootman, targetHero, targetBuilding, fortIndex: int
 ): bool =
   ## Attempts an automatic cast using the current spell rules.
-  let spec = heroAbility(hero.class, slot).abilitySpec
+  if hero.abilityLevels[slot] == 0:
+    return false
+  let spec = heroAbility(hero.class, slot).abilitySpec(hero.abilityLevels[slot])
   var targetId = 0'i32
   if spec.kind != Strike:
     if spec.casting == SelfCast:
@@ -4107,6 +4165,8 @@ proc stateHash*(game: Game): uint64 =
       hash.addHashy(hero.charges[slot])
       hash.addHashy(hero.recharges[slot])
     hash.addHashy(hero.spellsReady)
+    for rank in hero.abilityLevels:
+      hash.addHashy(rank)
     hash.addHashy(hero.manualSpells)
     hash.addHashy(hero.lastActionError.ord)
     for kind in RecoveryKind:
@@ -4153,6 +4213,7 @@ proc stateHash*(game: Game): uint64 =
   hash.addHashy(world.casts.len)
   for spell in world.casts:
     hash.addHashy(spell.ability.ord)
+    hash.addHashy(spell.level)
     hash.addHashy(spell.heroId)
     hash.addHashy(spell.targetId)
     hash.addHashy(spell.origin)

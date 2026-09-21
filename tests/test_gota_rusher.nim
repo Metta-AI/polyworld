@@ -40,7 +40,11 @@ proc decide(game: Game): ReplayAction =
   for vm in game.heroVms:
     if vm != nil:
       doAssert not vm.failed, vm.lastError
-  doAssert game.recorder.data.actions.len == before + 1
+  var orders = 0
+  for i in before ..< game.recorder.data.actions.len:
+    if game.recorder.data.actions[i].kind != ActionLevelAbility:
+      inc orders
+  doAssert orders == 1
   game.recorder.data.actions[^1]
 
 echo "Testing rusher cohesion, radius boundaries, vision, and middle routing"

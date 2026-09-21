@@ -505,6 +505,7 @@ block:
     removeDir(directory)
   hero.class = Arcanist
   hero.spellsReady = false
+  doAssert game.world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
   hero.refreshHeroStats()
   hero.manualSpells = true
   writeFile(path, "accepted = castPoint(2.0, selfX + 0.25, selfY - 0.25)\n")

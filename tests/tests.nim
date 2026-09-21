@@ -35,6 +35,7 @@ import
   test_gota_portals,
   test_gota_potions,
   test_gota_presets,
+  test_gota_progression,
   test_gota_replays,
   test_gota_rusher,
   test_gota_sizes,

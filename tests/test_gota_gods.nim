@@ -64,6 +64,9 @@ for defender in Team:
     hero.state = Marching
     hero.maxHp = 100_000
     hero.hp = hero.maxHp
+    hero.level = 2
+    doAssert world.applyLevelAbility(hero.id, PrimaryAbility.ord.int32)
+    doAssert world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
     hero.mana = 10_000
     hero.maxMana = 10_000
     hero.place(fort.center)

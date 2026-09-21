@@ -17,6 +17,7 @@ type
     CommandUseAt
     CommandCastTarget
     CommandCastPoint
+    CommandLevelAbility
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -111,6 +112,12 @@ proc queueCastPoint*(heroId, slot, mapX, mapY: int32) =
     first: mapX, second: mapY
   )
 
+proc queueLevelAbility*(heroId, slot: int32) =
+  ## Queues a player-selected unlock or upgrade for the next decision tick.
+  pending.add PlayerCommand(
+    kind: CommandLevelAbility, heroId: heroId, slot: slot
+  )
+
 proc activatePlayerAbility*(
     world: World,
     heroId, slotId, selectedId, aimX, aimY: int32
@@ -123,6 +130,9 @@ proc activatePlayerAbility*(
   let spec = heroAbility(hero.class, HeroAbilitySlot(slotId)).abilitySpec
   armedAbility = -1
   armedItem = -1
+  if hero.abilityLevels[HeroAbilitySlot(slotId)] == 0:
+    queueCastTarget(heroId, slotId, heroId)
+    return true
   if spec.casting == SelfCast:
     queueCastTarget(heroId, slotId, heroId)
     return true
@@ -175,6 +185,8 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     game.recorder.recordUseItemAt(
       tick, command.heroId, command.slot, command.first, command.second
     )
+  of CommandLevelAbility:
+    game.recorder.recordLevelAbility(tick, command.heroId, command.slot)
 
   of CommandCastTarget, CommandCastPoint:
     game.recorder.recordCast(
@@ -203,6 +215,8 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
     applyUseItemAt(
       game.world, command.heroId, command.slot, command.first, command.second
     )
+  of CommandLevelAbility:
+    applyLevelAbility(game.world, command.heroId, command.slot)
 
   of CommandCastTarget:
     applyCastTarget(game.world, command.heroId, command.slot, command.first)

@@ -3,6 +3,20 @@
 ' Attack visible, vulnerable enemies within 20 tiles; otherwise attack-move.
 ' Use this policy for all five heroes on a team. Automatic spells stay enabled.
 
+
+' Spend points explicitly, prioritizing the ultimate and primary spell.
+for upgrade = 1 to 4
+  if canLevelAbility(3) then
+    levelAbility(3)
+  elseif canLevelAbility(1) then
+    levelAbility(1)
+  elseif canLevelAbility(2) then
+    levelAbility(2)
+  elseif canLevelAbility(0) then
+    levelAbility(0)
+  end if
+next upgrade
+
 dim allyX(9)
 dim allyY(9)
 
