@@ -29,6 +29,7 @@ import
   test_gota_host,
   test_gota_landscapes,
   test_gota_lanes,
+  test_gota_lighting,
   test_gota_mapgen,
   test_gota_observations,
   test_gota_presets,

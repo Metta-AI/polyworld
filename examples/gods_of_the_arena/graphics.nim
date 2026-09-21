@@ -4,7 +4,7 @@ import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  cameras, controls, faces, spelleffects,
+  cameras, controls, faces, lighting, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -1951,11 +1951,9 @@ proc runGraphics*() =
       updatePlayerOrder(viewProjection)
 
       profileBlock "drawWorld":
-        # One clock for the whole frame: the palette, the sun's position,
-        # and its shadow map all follow the in-game hour. The fractional
-        # tick keeps the sun gliding between simulation steps instead of
-        # visibly stepping shadow positions a few times a second.
-        scene.setToonHour(
+        # The clock changes palettes while the light stays fixed for
+        # readable silhouettes and shadows on both sides of the map.
+        scene.toon.setArenaHour(
           clockHour(float32(run.world.tick) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
