@@ -36,6 +36,7 @@ type
       ## Index of the causal event in this tick, or -1 when absent.
     action*: uint8
     slot*, first*, second*: int32
+    offsetX*, offsetY*: int32
       ## Original command arguments, including invalid signed slots.
     error*: ActionError
 

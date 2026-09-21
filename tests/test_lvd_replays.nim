@@ -172,7 +172,7 @@ for version in 12'u16 .. 15'u16:
     doAssert false, "old simulation versions must fail before playback"
   except ReplayError as error:
     doAssert error.msg.contains("version " & $version)
-    doAssert error.msg.contains("expected 16")
+    doAssert error.msg.contains("expected " & $ReplayGameVersion)
 
 invalid = decoded
 invalid.header.setup.contentHash = 0

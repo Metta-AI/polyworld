@@ -5,15 +5,18 @@
 
 import
   std/os,
-  polyworld/[tapes, metrics],
+  fixxy,
+  polyworld/[bodies, tapes, metrics],
   content
+
+export fixxy
 
 const
   ReplayGame* = "light_vs_dark"
   ReplayFormatVersion* = 3'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 16'u16
+  ReplayGameVersion* = 17'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -55,6 +58,8 @@ type
     tick*: uint32
     playerId*: uint8
     kind*: uint8
+    offset*: FixedVec2
+      ## Movement and ground aim offsets from the named tile center.
     entityId*: int32
       ## The acting unit or structure, always owned by `playerId`.
     first*, second*, third*: int32
@@ -97,6 +102,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
   if recorder == nil:
     return
+  if not action.offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:
     fail("replay action kind is invalid")
   if int(action.playerId) >= PlayerCount:
@@ -111,7 +118,8 @@ proc recordAction*(
     entityId: int32,
     first = 0'i32,
     second = 0'i32,
-    third = 0'i32
+    third = 0'i32,
+    offset = FixedVec2Zero
 ) =
   ## Records one accepted command without any bot implementation detail.
   recorder.record ReplayAction(
@@ -121,7 +129,8 @@ proc recordAction*(
     entityId: entityId,
     first: first,
     second: second,
-    third: third
+    third: third,
+    offset: offset
   )
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
@@ -157,6 +166,8 @@ proc validateSetup(setup: Setup) =
 
 proc validateAction(action: ReplayAction, setup: Setup) =
   ## Validates one command's kind, ownership range, and payload bounds.
+  if not action.offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:
     fail("replay action kind is invalid")
   if int(action.playerId) >= PlayerCount:

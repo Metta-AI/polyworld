@@ -513,6 +513,22 @@ front, side, and back captures. The head review renderer supports
 `REVIEW_HEAD=1`, `REVIEW_ANGLE`, and `REVIEW_PBR=1`. Regenerate the final
 comparison with `review_gota_hoods.py --stage after --render`.
 
+## Gota gods
+
+The Character panel's God presets button offers Zeus and Hades. The
+Animations panel's Gota gods option displays both together. Start directly
+in that lineup with `GODS_LINEUP=1`.
+
+Each preset reuses the shared body, rig, and eyes, with ten separate outfit
+and equipment slots. Their repeatable builders are `gota_zeus.py` and
+`gota_hades.py`. Build through `gota_common.py -- zeus` or `-- hades`, then
+run `register_gota.py`. The registration preserves other preset groups.
+
+`render_gota.nim` accepts `REVIEW_ALL_PARTS=1` to capture every clothing,
+hair, beard, cape, and equipment slot as well as complete animated outfits.
+Source concepts, prompts, models, and reviews live in `source/gota/zeus`
+and `source/gota/hades`. The independent review is in `source/gota/gods`.
+
 ## Creep sword grips
 
 Blue Creep equips the Vanguard sword and Purple Creep equips the Death

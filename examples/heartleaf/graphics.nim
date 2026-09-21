@@ -6,12 +6,10 @@
 
 import
   std/[json, math, os, strutils, times],
-  chroma, opengl, pixie, vmath, windy, silky,
-  polyworld/[
-    actioncam, characters, chrome, clickmarks, common, fixed, gameuis, inputs,
-    pathing, player, profiles, quadterrain, rtscameras, shadows, shapes, tapes,
-    viewers
-  ],
+  chroma, fixxy, opengl, pixie, vmath, windy, silky,
+  polyworld/[actioncam, characters, chrome, clickmarks, common, gameuis,
+    inputs, pathing, player, profiles, quadterrain, rtscameras, shadows,
+    shapes, tapes, viewers],
   content,
   maps as mapgen,
   sim,

@@ -5,7 +5,8 @@
 ## floors. Overlapping geometry on some other layer is not a hole.
 
 import
-  polyworld/[bodies, fixed, pathing]
+  fixxy,
+  polyworld/[bodies, pathing]
 
 const
   BodySpeed = 0.2'fx

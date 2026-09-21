@@ -5,7 +5,7 @@
 ## a tile grid; this module turns, walks, slides, and separates circles.
 
 import
-  polyworld/fixed
+  fixxy
 
 type
   Body* = object
@@ -15,6 +15,21 @@ type
     radius*: Fixed
   Walkable* = proc (pos: FixedVec2): bool {.nimcall.}
     ## Returns whether a planar point is legal to stand on.
+
+proc splitTilePoint*(
+    point: FixedVec2
+): tuple[x, y: int32, offset: FixedVec2] =
+  ## Splits tile-center coordinates into the nearest cell and signed offset.
+  result.x = int32((int64(int32(point.x)) + FixedScale div 2) shr 16)
+  result.y = int32((int64(int32(point.y)) + FixedScale div 2) shr 16)
+  result.offset = fixedVec2(
+    Fixed(int32(int64(int32(point.x)) - int64(result.x) * FixedScale)),
+    Fixed(int32(int64(int32(point.y)) - int64(result.y) * FixedScale)))
+
+proc validTileOffset*(offset: FixedVec2): bool =
+  ## Keeps a destination inside its named cell, including the lower edge.
+  offset.x >= -FixedHalf and offset.x < FixedHalf and
+    offset.y >= -FixedHalf and offset.y < FixedHalf
 
 proc worldToTiles*(world, worldScale: int32): Fixed {.inline.} =
   ## Converts one world-integer axis into tile-space fixed-point.
