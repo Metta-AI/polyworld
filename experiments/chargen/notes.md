@@ -57,6 +57,15 @@ individual transparent cutouts. Eyes and mouths remain unlit. Iris masks tint
 only the iris, preserving the white and dark details. White eyebrows follow the
 hair color unless the viewer's white eyebrow option is selected.
 
+`Eyes: Dead X` is a shared cartoon death expression. Select it after any
+character preset, including heroes, enemies, and gnomes. Default eyes and
+outfit presets remain unchanged. Its charcoal X marks
+stay unlit and are not affected by skin, hair, or pupil colors. The separate
+`eyes/dead_x.json`, `.glb`, and `.png` files can be included in game packs.
+Launch a preview with `EYES="Dead X" nim r experiments/chargen/chargen.nim`.
+The generated source and prompt live in `source/eyes/dead_x_v1`. To rebuild
+only this expression, run Blender with `source/scripts/build_expressions.py`.
+
 ## Shared gnome features
 
 Select `Gnome 01` through `Gnome 09` in the preset picker, or enable
