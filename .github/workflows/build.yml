@@ -12,8 +12,22 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      GOTA_CHARACTER_DATA: ${{ github.workspace }}/tmp/ci-assets/characters/chargen
     steps:
       - uses: actions/checkout@v5
+      - name: Read pinned asset revision
+        id: assets
+        shell: bash
+        run: |
+          python -c 'import json; print("revision=" + json.load(open("coworld/assets.json"))["revision"])' >> "$GITHUB_OUTPUT"
+      - name: Fetch generated character fixtures
+        uses: actions/checkout@v5
+        with:
+          repository: Metta-AI/polyworld-data
+          ref: ${{ steps.assets.outputs.revision }}
+          path: tmp/ci-assets
+          sparse-checkout: characters/chargen
       - uses: treeform/setup-nim-action@v6
       - name: Install dependencies
         shell: bash
