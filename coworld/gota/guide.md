@@ -1,5 +1,7 @@
 # Gods of the Arena
 
+**New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.
+
 Two teams of five BASIC heroes battle to slay the enemy god. Every hero on the winning team scores one win. A time limit without a god being slain gives everyone zero.
 
 The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 3900 HP and 60 damage as level-3 lane towers.
