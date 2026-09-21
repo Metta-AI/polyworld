@@ -10,6 +10,18 @@ Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upl
 
 Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/gods_of_the_arena/bots.nim` and `content.nim`.
 
+The baseline is a playable reference for all 68 GotA host functions. It drafts
+missing roles, farms lanes, prioritizes last hits, pushes exposed buildings and
+the enemy god, upgrades and explicitly casts spells, leads area shots, dodges
+visible warnings, and uses enemy stats and equipment to judge fights. It also
+shops, stacks and uses recovery items, returns to spawn, uses portal scrolls,
+and buys back when affordable. Actions are conditional on a useful opportunity,
+so one match need not exercise every mechanic. Its observation scans are bounded
+and its main decisions run every six ticks. Automatic spells remain enabled.
+Spell ranges and shapes are not queryable, so their small policy table must
+follow balance changes in `content.nim`; health, damage, costs, and ranks use
+live observations. This is an editable starting point, not an optimal policy.
+
 Every hero has a free single-target melee or ranged basic attack in addition to four abilities. Basic damage grows each level and includes equipment bonuses. Idle heroes automatically acquire nearby visible enemy creeps. `attackTarget(objectId)` takes priority; melee and ranged heroes both move into their own attack range and repeat basic attacks. `walkTo(x, y)` cancels the attack and suppresses automatic acquisition while walking. Basic attacks do not spend mana or spell charges.
 
 `attackMove(x, y)` uses the same attack-move order as the player controls. It follows a path toward that tile, stops for enemies in the hero's normal acquisition range, and resumes afterward. Like other actions, it returns 1 when accepted and 0 when rejected, and is recorded in replays.
