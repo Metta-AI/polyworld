@@ -42,4 +42,38 @@ for class in HeroClass:
         doAssert bounds.max[axis] > bounds.min[axis], name & ": " & animation
   echo name, ": outfit, scale, and animations verified."
 
-echo "GotA generated hero integration passed: ", directory
+for team in 0 ..< CreepPresets.len:
+  let original = manifest.namedPreset(CreepPresets[team])
+  for kind in CreepKind:
+    let
+      preset = manifest.creepPreset(team, kind)
+      inventory = manifest.presetManifest(preset)
+      file = readPresetCharacter(directory, manifest, preset, CreepClips)
+      model = loadCharacterModel(file, CreepTargetHeight)
+      names = kind.creepAnimationNames()
+    var weapon = ""
+    for category in inventory.categories:
+      if category.key == "Right hand":
+        doAssert category.items.len == 1
+        weapon = category.items[0].name
+    doAssert weapon.len > 0
+    doAssert (weapon == "Arcanist staff") == (kind == RangedCreep)
+    for name in names:
+      let clip = model.clipIndex(name)
+      doAssert model.clipDuration(clip) > 0
+    let attack = model.clipIndex(names[4])
+    doAssert kind.creepStrikeTime() < model.clipDuration(attack)
+    file.root.activeClips = @[attack]
+    file.root.animTime = kind.creepStrikeTime()
+    file.root.updateAnimation(0)
+    file.root.updateTransforms(model.baseTransform)
+    let bounds = posedBounds(file.root, visibleOnly = true)
+    for axis in 0 ..< 3:
+      doAssert classify(bounds.min[axis]) notin {fcNan, fcInf, fcNegInf}
+      doAssert classify(bounds.max[axis]) notin {fcNan, fcInf, fcNegInf}
+      doAssert bounds.max[axis] > bounds.min[axis]
+    echo preset.name, " ", kind, ": weapon and animation verified."
+  doAssert manifest.namedPreset(CreepPresets[team]) == original,
+    "Equipping a caster must not change the shared melee preset."
+
+echo "GotA generated character integration passed: ", directory

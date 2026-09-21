@@ -116,7 +116,11 @@ block:
   doAssert world.last(Death).actor.id == 20
   doAssert world.last(Death).actor.kind == 4
   doAssert world.last(Death).target.kind == 3
-  doAssert world.count(XpGained) == 1
+  doAssert world.count(XpGained) == 3
+  doAssert world.last(XpGained).cause == NearbyKill
+  doAssert world.last(XpGained).amount == CreepNearbyXp div 2
+  doAssert world.events[world.last(XpGained).related].kind == Death
+  doAssert world.count(GoldGained) == 1
 
 echo "Testing command validation order, raw arguments and hidden target privacy"
 block:

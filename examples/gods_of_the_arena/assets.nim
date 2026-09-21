@@ -45,7 +45,8 @@ const
     else: 512
   CreepPresets* = ["Purple Creep", "Blue Creep"]
   CreepClips* = [
-    "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack"
+    "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack",
+    "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot"
   ]
   CreepTargetHeight* = 2.25'f
   GodPresets* = ["Hades", "Zeus"]
@@ -90,6 +91,34 @@ const
 proc draftedPortraitKey*(class: HeroClass): string {.raises: [].} =
   ## Names the desaturated portrait used for unavailable draft choices.
   HeroPortraitKeys[class] & ".drafted"
+
+proc creepPreset*(manifest: Manifest, team: int, kind: CreepKind): Preset =
+  ## Equips ranged creeps with an existing staff while preserving team colors.
+  result = manifest.namedPreset(CreepPresets[team])
+  if kind == RangedCreep:
+    result.pose = "Spell_Simple_Idle_Loop"
+    for part in result.parts.mitems:
+      if part.category == "Right hand":
+        part.item = "Arcanist staff"
+
+proc creepAnimationNames*(kind: CreepKind): array[6, string] =
+  ## Maps creep simulation slots to sword swings or staff spell releases.
+  result = [
+    "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop",
+    "Sword_Attack", "Sword_Attack"
+  ]
+  if kind == RangedCreep:
+    result[1] = "Spell_Simple_Idle_Loop"
+    result[4] = "Spell_Simple_Shoot"
+    result[5] = "Spell_Simple_Shoot"
+
+proc creepStrikeTime*(kind: CreepKind): float32 =
+  ## Returns the authored sword impact or staff spell release time.
+  case kind
+  of MeleeCreep:
+    19'f / 30
+  of RangedCreep:
+    6'f / 30
 
 proc heroAnimationNames*(class: HeroClass): array[5, string] =
   ## Maps deterministic animation slots to each class's weapon style.
@@ -148,8 +177,14 @@ proc generatedCharacterAssets*(): seq[Asset] =
   result.add modelAsset(directory / manifest.rig)
   for path in manifest.deathEyesPart().files:
     result.add modelAsset(directory / path, textureSize = 512)
-  for name in @CreepPresets & @GodPresets & @HeroPresets:
-    let inventory = manifest.presetManifest(manifest.namedPreset(name))
+  var presets: seq[Preset]
+  for team in 0 ..< CreepPresets.len:
+    for kind in CreepKind:
+      presets.add manifest.creepPreset(team, kind)
+  for name in @GodPresets & @HeroPresets:
+    presets.add manifest.namedPreset(name)
+  for preset in presets:
+    let inventory = manifest.presetManifest(preset)
     for category in inventory.categories:
       for item in category.items:
         for path in item.files:

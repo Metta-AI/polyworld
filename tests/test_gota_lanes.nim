@@ -43,6 +43,12 @@ for size in [64, 116, 256]:
   game.world.spawnTimerTicks = 1
   game.tickWorld(nil)
   doAssert game.world.footmen.len == 12 * CreepsPerBarracks
+  for i in countup(0, game.world.footmen.high, CreepsPerBarracks):
+    for j in 0 ..< CreepsPerBarracks:
+      let expected =
+        if j < MeleeCreepsPerBarracks: MeleeCreep
+        else: RangedCreep
+      doAssert game.world.footmen[i + j].kind == expected
   for creep in game.world.footmen:
     let tile = creep.standingTile()
     doAssert navigationOpen(int(tile.layer), int(tile.x), int(tile.z)),
@@ -108,7 +114,7 @@ block:
     for tile in building.footprint:
       doAssert not navigationOpen(int(tile.layer), int(tile.x), int(tile.z))
 
-echo "Testing barracks protection and three creeps per surviving barracks"
+echo "Testing barracks protection and mixed waves per surviving barracks"
 block:
   let game = quietGame()
   let index = 18
@@ -124,11 +130,13 @@ block:
   game.world.spawnTimerTicks = 1
   game.tickWorld(nil)
   doAssert game.world.footmen.len == 11 * CreepsPerBarracks
+  doAssert game.world.footmen.countIt(it.kind == RangedCreep) == 11
   let snapshot = game.world.clone()
   game.world.restore(snapshot)
   game.world.spawnTimerTicks = 1
   game.tickWorld(nil)
   doAssert game.world.footmen.len == 22 * CreepsPerBarracks
+  doAssert game.world.footmen.countIt(it.kind == RangedCreep) == 22
 
 echo "Testing waypoint radius and progress during pursuit"
 block:

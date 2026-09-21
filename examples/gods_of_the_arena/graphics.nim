@@ -208,15 +208,15 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   var
-    footmanModels: array[Team, CharacterModel]
-    footmanRenderClips: array[Team, array[6, int]]
+    footmanModels: array[Team, array[CreepKind, CharacterModel]]
+    footmanRenderClips: array[Team, array[CreepKind, array[6, int]]]
     godModels: array[Team, CharacterModel]
     godRenderClips: array[Team, array[GodAnimation, int]]
     heroModels: array[HeroClass, CharacterModel]
     heroRenderClips: array[HeroClass, array[5, int]]
     heroCastClips: array[HeroClass, int]
     heroPortalClips: array[HeroClass, int]
-    footmanEyes: array[Team, DeathEyes]
+    footmanEyes: array[Team, array[CreepKind, DeathEyes]]
     godEyes: array[Team, DeathEyes]
     heroEyes: array[HeroClass, DeathEyes]
   profileBlock "models":
@@ -225,15 +225,13 @@ proc runGraphics*() =
       deadEyes = characterLibrary.deathEyesPart()
 
     proc loadPresetModel(
-      name: string,
+      preset: Preset,
       clips: openArray[string],
       height: float32,
       eyes: var DeathEyes
     ): CharacterModel =
       ## Loads one generated character with its authored face materials.
-      let
-        preset = characterLibrary.namedPreset(name)
-        inventory = characterLibrary.presetManifest(preset)
+      let inventory = characterLibrary.presetManifest(preset)
       result = loadCharacterModel(
         readPresetCharacter(ChargenLibrary, characterLibrary, preset, clips),
         height
@@ -245,23 +243,21 @@ proc runGraphics*() =
       eyes = initDeathEyes(result, ChargenLibrary, inventory, deadEyes)
 
     for team in Team:
-      let model = loadPresetModel(
-        CreepPresets[ord(team)],
-        CreepClips,
-        CreepTargetHeight,
-        footmanEyes[team]
-      )
-      footmanModels[team] = model
-      footmanRenderClips[team] = [
-        model.clipIndex("Jog_Fwd_Loop"),
-        model.clipIndex("Sword_Idle"),
-        model.clipIndex("Death01"),
-        model.clipIndex("Dance_Loop"),
-        model.clipIndex("Sword_Attack"),
-        model.clipIndex("Sword_Attack")
-      ]
+      for kind in CreepKind:
+        let model = loadPresetModel(
+          characterLibrary.creepPreset(team.ord, kind),
+          CreepClips,
+          CreepTargetHeight,
+          footmanEyes[team][kind]
+        )
+        footmanModels[team][kind] = model
+        for i, name in kind.creepAnimationNames():
+          footmanRenderClips[team][kind][i] = model.clipIndex(name)
       let god = loadPresetModel(
-        GodPresets[ord(team)], GodClips, GodTargetHeight, godEyes[team]
+        characterLibrary.namedPreset(GodPresets[ord(team)]),
+        GodClips,
+        GodTargetHeight,
+        godEyes[team]
       )
       god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
       godModels[team] = god
@@ -272,7 +268,10 @@ proc runGraphics*() =
       ]
     for class in HeroClass:
       let model = loadPresetModel(
-        HeroPresets[class], HeroClips, HeroTargetHeight, heroEyes[class]
+        characterLibrary.namedPreset(HeroPresets[class]),
+        HeroClips,
+        HeroTargetHeight,
+        heroEyes[class]
       )
       model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
       heroModels[class] = model
@@ -563,24 +562,24 @@ proc runGraphics*() =
       result.time = unitRenderTime(hero.animTicks)
 
   proc creepRenderTime(footman: Footman): float32 =
-    ## Fits authored sword impacts and death poses to simulation timing.
+    ## Fits authored attack impacts and death poses to simulation timing.
     let
-      model = footmanModels[footman.team]
-      clip = footmanRenderClips[footman.team][footman.animClip]
+      model = footmanModels[footman.team][footman.kind]
+      clip = footmanRenderClips[footman.team][footman.kind][footman.animClip]
       duration = model.clipDuration(clip)
     if footman.state == Dying:
       return min(footman.deathTicks.float32 / FootmanDeathTicks.float32, 1) *
         duration
     if footman.animClip in attackClips:
-      const StrikeTime = 19'f / 30
       let
+        strike = footman.kind.creepStrikeTime()
         tick = footman.animTicks.float32 + animationAlpha
         hit = footmanHitTicks(footman.animClip).float32
         finish = footmanAttackTicks(footman.animClip).float32
       if tick <= hit:
-        return tick / hit * StrikeTime
-      return StrikeTime + min((tick - hit) / (finish - hit), 1) *
-        (duration - StrikeTime)
+        return tick / hit * strike
+      return strike + min((tick - hit) / (finish - hit), 1) *
+        (duration - strike)
     unitRenderTime(footman.animTicks)
 
   proc visibleInView(team: Team, position: WorldPoint): bool =
@@ -817,9 +816,9 @@ proc runGraphics*() =
           not visibleInView(footman.team, footman.position):
         continue
       let
-        model = footmanModels[footman.team]
-        clip = footmanRenderClips[footman.team][footman.animClip]
-      footmanEyes[footman.team].setDead(false)
+        model = footmanModels[footman.team][footman.kind]
+        clip = footmanRenderClips[footman.team][footman.kind][footman.animClip]
+      footmanEyes[footman.team][footman.kind].setDead(false)
       consider(
         footman.id,
         pickCharacter(
@@ -1197,16 +1196,16 @@ proc runGraphics*() =
     for footman in run.world.footmen:
       if footman.id != id:
         continue
-      footmanEyes[footman.team].setDead(
+      footmanEyes[footman.team][footman.kind].setDead(
         footman.hp <= 0 or footman.state == Dying
       )
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
-        footmanModels[footman.team],
+        footmanModels[footman.team][footman.kind],
         unitRenderPoint(footman.id, footman.position),
         unitRenderFacing(footman.id, footman.facing),
-        footmanRenderClips[footman.team][footman.animClip],
+        footmanRenderClips[footman.team][footman.kind][footman.animClip],
         creepRenderTime(footman)
       )
       finishCharacters(scene)
@@ -1774,8 +1773,12 @@ proc runGraphics*() =
           run.world.forts[0].id
       let target = particleTargetPosition(targetId)
       if target.found:
-        particles.emitParticleBurst(
-          CombatSparks,
+        let style =
+          if footman.kind == RangedCreep: MagicAttack
+          else: MeleeAttack
+        emitAttackParticles(
+          style,
+          renderPoint(footman.position) + vec3(0, 1.4'f, 0),
           target.position
         )
     for i, tower in run.world.buildings:
@@ -2044,9 +2047,10 @@ proc runGraphics*() =
             if livingOnly and (footman.hp <= 0 or footman.state == Dying):
               continue
             let
-              model = footmanModels[footman.team]
-              clip = footmanRenderClips[footman.team][footman.animClip]
-            footmanEyes[footman.team].setDead(
+              model = footmanModels[footman.team][footman.kind]
+              clip =
+                footmanRenderClips[footman.team][footman.kind][footman.animClip]
+            footmanEyes[footman.team][footman.kind].setDead(
               footman.hp <= 0 or footman.state == Dying
             )
             drawCharacter(

@@ -363,21 +363,26 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
       let
         moveSpeed = FootmanMovePerTick.float32 *
           TickRate.float32 / WorldScale.float32
-        meleeRange = FootmanMeleeRange.float32 / WorldScale.float32
+        attackRange = footman.kind.footmanAttackRange.float32 /
+          WorldScale.float32
       return SelectedUnit(
         id: footman.id,
         kind: SelectedMob,
         team: footman.team,
-        callsign: "FOOTMAN",
-        classLabel: "MINION",
-        status: if footman.state == Dying: "Dying" else: "Marching",
+        callsign: if footman.kind == RangedCreep: "CASTER" else: "FOOTMAN",
+        classLabel: if footman.kind == RangedCreep: "RANGED" else: "MELEE",
+        status:
+          case footman.state
+          of Dying: "Dying"
+          of Fighting: "Fighting"
+          of Marching: "Marching",
         hp: max(footman.hp, 0'i32).float32,
         maxHp: FootmanHp.float32,
         level: 1,
         damage: FootmanDamage,
         moveSpeed: moveSpeed,
-        attackSpeed: 1.0'f32,
-        attackRange: meleeRange
+        attackSpeed: TickRate.float32 / footmanAttackTicks(attackClips[0]).float32,
+        attackRange: attackRange
       )
   for tower in run.world.buildings:
     if tower.id == id:

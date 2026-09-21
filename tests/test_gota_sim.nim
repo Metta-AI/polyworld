@@ -498,6 +498,7 @@ block:
   let
     savedWorld = run.world.clone()
     savedRecorder = run.recorder
+    savedReplayData = run.replayData
     savedError = run.recordingError
     recorder = initReplayRecorder(
       currentSetup(run, uint32(run.world.tick) + 200), run.map.preset
@@ -511,10 +512,13 @@ block:
   doAssert recorder.data.hashes.len == 200
   doAssert recorder.data.hashes == expected
   run.world.restore(savedWorld)
+  # Both runs need the same configuration, including the battle duration.
+  run.replayData = recorder.data
   run.recorder = nil
   for tick in 0 ..< 200:
     run.tickWorld(proc() = discard)
     doAssert run.stateHash() == expected[tick], "unrecorded tick " & $tick
   run.world.restore(savedWorld)
   run.recorder = savedRecorder
+  run.replayData = savedReplayData
   run.recordingError = savedError
