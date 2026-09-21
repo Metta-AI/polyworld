@@ -16,14 +16,17 @@ counters.
 {"type":"observation","features":[0,0,0,0,0,0,0,0],"tick":0,"seat":0,"reward":0,"terminal":false}
 ```
 
-Reply with one action before the next observation:
+Reply to each nonterminal observation with an integer action:
 
 ```json
 {"action":0}
 ```
 
+After a terminal observation, the server sends the next match’s initial
+observation without waiting for an action. Invalid actions end the connection.
+
 Run the server from the repository root:
 
 ```sh
-nim r examples/gods_of_the_arena/player_server.nim
+nim r -d:headless examples/gods_of_the_arena/player_server.nim
 ```
