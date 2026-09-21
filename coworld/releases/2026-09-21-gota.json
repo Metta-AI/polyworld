@@ -1,0 +1,120 @@
+{
+  "date": "2026-09-21",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "version": "2026.9.21.2",
+  "source": {
+    "commit": "e8fa7abc391718172f5d534ee161f4c205f65e21",
+    "gameplay_commit": "cfcbe98",
+    "assets": "566157a815773002255ebc559f7ddb4e4ce37ef1",
+    "version": "2026.9.21.2",
+    "replay_version": 51,
+    "dependencies_sha256": "b4074cf2ce3f1ab56e67f0cf28ccfdaba46b6ec4b2f17999f305ee2d9be32790"
+  },
+  "coworld_id": "cow_a2ac6cd6-898a-494f-b3b9-7bf2bbacd91f",
+  "canonical": true,
+  "manifest_hash": "sha256:7d5a241b331cc1b4842ae74a1f07d766b74503108c12550ccd922a4884295dc2",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:9918f826117650cab121cc13e8438817d7401888eee904e856f36a0f55416ea3",
+  "viewer_bundle": "sha256:b64032f301730f6df9523b22e90c56d3992e58edaa983820cc1a6b8cfe935362",
+  "results_max_ticks": 43200,
+  "battle_max_ticks": 28800,
+  "checks": {
+    "local_certification": "10 steps passed; final 43200-tick schema boundary separately verified",
+    "hosted_certification": "certified",
+    "hosted_smoke_episodes": [
+      {
+        "id": "ereq_700168a1-deb8-417c-b072-01eb320cc105",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_9fe42711-fdf6-4ec7-853a-eb01027c57e9",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_a78b086a-f873-4552-8a6a-04fa52f7adb5",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_c9ccda43-31d7-4493-9610-71099b722b73",
+        "status": "completed",
+        "error": null
+      },
+      {
+        "id": "ereq_f81a85e6-c5b3-473d-bb80-6e895eaa5a6f",
+        "status": "completed",
+        "error": null
+      }
+    ],
+    "native_hosted_replay": "All 308010 actions replayed; final hash FBA2C143.",
+    "browser": "Hosted viewer rendered the new characters without console errors; served WASM, JS, and data hashes match the local build.",
+    "tests": "Default headless suite and private character asset suite passed.",
+    "guide": "Hosted guide matches current source, including bot-update warning."
+  },
+  "viewer_files": {
+    "index.html": {
+      "bytes": 4671,
+      "sha256": "6033b700ae5be7b998a561198a478dc70f1dcdffba87813701611f2f72a55da2"
+    },
+    "gota.wasm": {
+      "bytes": 12218903,
+      "sha256": "43183422119f81675aa3a40b2aa898940bdd1129aa09844917c82c71470bb4c2"
+    },
+    "loading-logo.png": {
+      "bytes": 138624,
+      "sha256": "978ce63fe97fbf4852d58ed43372918f50fa62ca1b20e680dbf10f4792c3c3a1"
+    },
+    "gota.js": {
+      "bytes": 402237,
+      "sha256": "cf737c0853817c8d74dfaf0901168cb9db0754eb3383e514031ae459581c37f0"
+    },
+    "gota.data": {
+      "bytes": 32339301,
+      "sha256": "4b5fb6a6f8c0a8181a99cab24bfaa523aa344b552f717e88b61fa11b35a1c559"
+    }
+  },
+  "artifacts": {
+    "episode": "ereq_700168a1-deb8-417c-b072-01eb320cc105",
+    "results": {
+      "bytes": 175,
+      "sha256": "174f685d1c9b6e185453bc9dd81454bc79eb7929b9231e4426b630426d5fc177"
+    },
+    "logs": {
+      "bytes": 1397,
+      "sha256": "cf4198352ecbdfe40de41aae714cf02dbd620df736e2019e9db224f40c3832fc"
+    },
+    "replay": {
+      "bytes": 10151331,
+      "sha256": "a2086941786f703f0eadd0d425f7f7a6ecfc1fe224d385620812806f55b92850"
+    },
+    "replay_version": 51,
+    "wasm": {
+      "bytes": 12218903,
+      "sha256": "43183422119f81675aa3a40b2aa898940bdd1129aa09844917c82c71470bb4c2"
+    },
+    "data": {
+      "bytes": 32339301,
+      "sha256": "4b5fb6a6f8c0a8181a99cab24bfaa523aa344b552f717e88b61fa11b35a1c559"
+    },
+    "js": {
+      "bytes": 402237,
+      "sha256": "cf737c0853817c8d74dfaf0901168cb9db0754eb3383e514031ae459581c37f0"
+    },
+    "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_700168a1-deb8-417c-b072-01eb320cc105/watch"
+  },
+  "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "fillers": [
+    {
+      "policy_version_id": "5a71b33a-8749-437f-9fec-e12a092104e2",
+      "policy_id": "8eff73fb-c067-496c-a9ea-9e0e524a07c0",
+      "policy_name": "Polyworld GOTA Baseline Filler",
+      "version": 2,
+      "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+      "player_name": "Andre von Houck",
+      "display_name": "GOTA Baseline",
+      "persistent": null
+    }
+  ],
+  "changelog": "2026-09-21-gota.md"
+}
