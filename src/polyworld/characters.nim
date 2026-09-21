@@ -249,6 +249,35 @@ proc setCharacterPose(model: CharacterModel, player: ClipPlayer) =
   # this player's owned pose immediately before every transform query or draw.
   player.pose()
 
+proc fitCharacterHeight*(
+  model: CharacterModel, targetHeight: float32, clip: int
+) =
+  ## Sizes visible skinned geometry in a reference pose, with feet grounded.
+  model.setCharacterPose(clip, 0)
+  let root = model.file.root
+  root.updateTransforms()
+  var bounds = AABounds(
+    min: vec3(float32.high), max: vec3(float32.low)
+  )
+  for node in root.walkNodes:
+    if node.mesh == nil or not node.visible:
+      continue
+    let joints = root.skinMatrices(node)
+    for primitive in node.mesh.primitives:
+      for i, point in primitive.points:
+        var posed = point
+        if joints.len > 0:
+          posed = vec3(0)
+          for j in 0 ..< 4:
+            let weight = primitive.jointWeights[i][j]
+            if weight != 0:
+              posed += joints[primitive.jointIds[i][j].int] * point * weight
+        let position = node.mat * posed
+        bounds.min = min(bounds.min, position)
+        bounds.max = max(bounds.max, position)
+  doAssert bounds.max.y > bounds.min.y, "Character has no visible height."
+  model.baseTransform = baseTransformFor(bounds, targetHeight)
+
 proc characterTransform(
     model: CharacterModel,
     position: Vec3, facing, sizeFactor: float32
