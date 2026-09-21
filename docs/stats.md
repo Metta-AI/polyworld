@@ -82,7 +82,8 @@ retained replay before reading game logs or opening the visual viewer:
 nim r examples/gods_of_the_arena/tools/replay_extractor.nim path/to/match.replay
 ```
 
-With no path it uses the checked-in demo replay. The output is a bounded,
+With no path it uses `tmp/replays/gota.replay`, which you can generate with
+`nim r tools/gen_replays.nim gota`. The output is a bounded,
 plain-text handoff containing match metadata, two-minute team checkpoints,
 per-hero decision and combat totals, rejection reasons, first and last notable
 deaths, and replay verification. Both teams are included. The extractor
