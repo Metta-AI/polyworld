@@ -114,6 +114,7 @@ type
     xp*: int
     totalXp*: int
     gold*: int
+    deaths*: int32
     state*: FootmanState
     waypointIndex*: int
     targetFootmanId*: int32
@@ -404,6 +405,9 @@ const
     ## Attack-move melee chase radius, much larger than idle aggro.
   HeroLanes = [0, 0, 1, 2, 2]
   HeroRespawnTicks = 8 * TickRate
+  HeroRespawnGrowthTicks = 5 * TickRate
+  HeroMaxRespawnTicks = 60 * TickRate
+  HeroBuybackGold = 100'i32
   HeroMaxLevel* = 20
   FootmanXpReward = 25
   FootmanGoldReward = 15
@@ -2479,6 +2483,43 @@ proc purchaseReason*(world: World, heroId, itemId: int32): string =
   ## Formats the same purchase validator for the shop UI.
   world.purchaseError(heroId, itemId).actionErrorMessage()
 
+proc respawnTicks*(hero: Hero): int32 =
+  ## Returns the remaining respawn ticks, including the death animation.
+  if hero.state != Dying:
+    return 0
+  max(
+    0'i32,
+    min(
+      HeroMaxRespawnTicks,
+      HeroDeathTicks + HeroRespawnTicks +
+        max(0'i32, hero.deaths - 1) * HeroRespawnGrowthTicks
+    ) - hero.deathTicks
+  )
+
+proc buybackPrice*(world: World, heroId: int32): int32 =
+  ## Returns this dead hero's gold price, or zero when buyback is unavailable.
+  let index = world.heroIndex(heroId)
+  if index < 0 or world.heroes[index].state != Dying or world.gameOver:
+    return 0
+  max(1'i32, world.heroes[index].deaths) * HeroBuybackGold
+
+proc buybackError(world: World, heroId: int32): ActionError =
+  ## Validates a buyback without changing the hero or spending gold.
+  let index = world.heroIndex(heroId)
+  if index < 0:
+    return ActionTargetUnavailable
+  if world.gameOver:
+    return ActionMatchEnded
+  if world.heroes[index].state != Dying:
+    return ActionNotDead
+  if world.heroes[index].gold < world.buybackPrice(heroId):
+    return ActionInsufficientGold
+  NoActionError
+
+proc buybackReason*(world: World, heroId: int32): string =
+  ## Formats the shared buyback validator for the HUD.
+  world.buybackError(heroId).actionErrorMessage()
+
 proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
   ## Spends gold to put one validated shop item into a hero inventory.
   let error = world.purchaseError(heroId, itemId)
@@ -2847,6 +2888,32 @@ proc initHeroCharges(hero: Hero) =
     ).charges
     hero.recharges[slot] = 0
   hero.spellsReady = true
+
+proc applyBuyback*(world: World, heroId: int32): bool =
+  ## Spends a fallen hero's gold and immediately restores them at spawn.
+  let error = world.buybackError(heroId)
+  if error != NoActionError:
+    return world.finishAction(heroId, ActionBuyback, 0, 0, 0, error)
+  let
+    hero = world.heroes[world.heroIndex(heroId)]
+    price = world.buybackPrice(heroId)
+  when defined(replayEvents):
+    let beforeGold = hero.gold
+  hero.gold -= price
+  when defined(replayEvents):
+    world.valueEvent(
+      GoldSpent,
+      heroId,
+      heroId,
+      Buyback,
+      0,
+      beforeGold,
+      hero.gold,
+      -price
+    )
+  world.respawn(hero)
+  hero.initHeroCharges()
+  world.finishAction(heroId, ActionBuyback, 0, 0, 0, NoActionError)
 
 proc tickHeroCooldowns(world: World, hero: Hero) =
   ## Advances spell cooldowns and restores spent charges one at a time.
@@ -3633,6 +3700,8 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     applyAttackTarget(world, action.heroId, action.first)
   of ActionBuyItem:
     applyBuyItem(world, action.heroId, action.first)
+  of ActionBuyback:
+    applyBuyback(world, action.heroId)
   of ActionUseItem:
     applyUseItem(world, action.heroId, action.first)
   of ActionUseItemAt:
@@ -3806,13 +3875,14 @@ proc updateHero(world: World, hero: Hero) =
     inc hero.deathTicks
     hero.animClip = heroDeathClip
     hero.animTicks = min(hero.deathTicks, HeroDeathTicks)
-    if hero.deathTicks >= HeroDeathTicks + HeroRespawnTicks:
+    if hero.respawnTicks() == 0:
       world.respawn(hero)
     return
 
   if hero.hp <= 0:
     world.interruptPortal(hero)
     hero.state = Dying
+    inc hero.deaths
     hero.deathTicks = 0
     hero.targetFootmanId = 0
     hero.targetHeroId = 0
@@ -4129,6 +4199,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.xp)
     hash.addHashy(hero.totalXp)
     hash.addHashy(hero.gold)
+    hash.addHashy(hero.deaths)
     hash.addHashy(hero.state.ord)
     hash.addHashy(hero.waypointIndex)
     hash.addHashy(hero.targetFootmanId)

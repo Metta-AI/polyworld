@@ -2471,6 +2471,24 @@
           <tr><td><code>selfAttacksLanded</code></td><td>Lifetime count of successful basic hits, preserved across respawns. Spells do not increment it.</td></tr>
         </tbody>
       </table>
+      <h3>Death and buyback</h3>
+      <p>The first death takes 9 seconds to respawn, including the 1-second death animation. Each subsequent death adds 5 seconds, up to a total of 60 seconds. Counts belong to each hero and persist after respawning. BASIC decisions continue while dead.</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Value or function</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>selfDeaths</code></td><td>This hero's total death count.</td></tr>
+          <tr><td><code>selfRespawnTicks</code></td><td>Remaining respawn delay in ticks, or zero while alive.</td></tr>
+          <tr><td><code>buybackPrice()</code></td><td>100 gold times this hero's death count. Returns zero while alive or after the match ends. The price stays fixed during each death.</td></tr>
+          <tr><td><code>buyback()</code></td><td>Spends this hero's gold and immediately respawns them with full health, mana, and spell charges. Returns 1 when accepted or 0 when rejected. Inventory, level, XP, and death count are preserved.</td></tr>
+        </tbody>
+      </table>
+      <p>A living hero, an ended match, or insufficient gold rejects buyback without spending gold. Use <code>lastActionError()</code> for the reason. The HUD displays the respawn countdown and buyback price while dead. Buyback attempts are recorded for replay and seeking. The bundled <code>players/base.bas</code> buys back as soon as it can afford the price, skipping normal commands while dead and resuming them on the decision after buyback.</p>
+      <pre><code>if selfRespawnTicks &gt; 0 then
+  price = buybackPrice()
+  if price &gt; 0 and selfGold &gt;= price then
+    accepted = buyback()
+  end if
+end if</code></pre>
       <h3>Visible objects</h3>
       <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
       <table class="spell-table api-table">
@@ -2503,7 +2521,7 @@
       <p><code>players/rusher.bas</code> pushes all five heroes down mid together. When any pair of living allies is more than 10 tiles apart, the team regroups toward its center until the gap is at most 8 tiles. Otherwise it attacks visible, vulnerable enemies within 20 tiles or attack-moves through the middle toward the enemy god. Dead allies are ignored until they respawn. Automatic abilities stay enabled.</p>
       <h3>Action feedback</h3>
       <p><code>lastActionError()</code> reports your hero's latest submitted command error. Success clears it to <code>NoActionError</code> (0). Rejection preserves the command's 0 return value and records the first failed check. Read-only queries and automatic casts do not overwrite it. Read the error immediately after the command; unlike sampled self data, it updates during a decision.</p>
-      <p>Read-only constants (values 0 through 27): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>, <code>ActionChanneling</code>, <code>ActionStunned</code>, <code>ActionRooted</code>, <code>ActionOutsideKeep</code>, <code>ActionAbilityLocked</code>, <code>ActionNoAbilityPoints</code>, <code>ActionAbilityMaxLevel</code>, <code>ActionHeroLevelRequired</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
+      <p>Read-only constants (values 0 through 29): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>, <code>ActionChanneling</code>, <code>ActionStunned</code>, <code>ActionRooted</code>, <code>ActionOutsideKeep</code>, <code>ActionAbilityLocked</code>, <code>ActionNoAbilityPoints</code>, <code>ActionAbilityMaxLevel</code>, <code>ActionHeroLevelRequired</code>, <code>ActionNotDead</code>, <code>ActionMatchEnded</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
       <p>The <a href="../../../docs/stats.md#gota-replay-events">replay extractor</a> provides typed post-match events for both teams. Detailed capture is compiled in with <code>-d:replayEvents</code> and is unavailable to live BASIC policies.</p>
       <h3 id="terrain-api">Terrain API</h3>
       <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>

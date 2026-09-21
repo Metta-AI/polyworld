@@ -315,6 +315,29 @@ block:
     game.quietStep()
     doAssert world.count(EntityRespawned) == 0
 
+echo "Testing buyback spending, respawn, and duplicate rejection events"
+block:
+  let
+    game = quietGame(Ranger)
+    world = game.world
+    hero = world.heroes[0]
+  hero.hp = 0
+  game.tickWorld(nil)
+  doAssert hero.deaths == 1
+  hero.gold = 100
+  doAssert world.applyBuyback(hero.id)
+  doAssert world.count(GoldSpent) == 1
+  doAssert world.last(GoldSpent).cause == Buyback
+  doAssert world.last(GoldSpent).amount == -100
+  doAssert world.last(GoldSpent).before == 100
+  doAssert world.last(GoldSpent).after == 0
+  doAssert world.count(EntityRespawned) == 1
+  doAssert world.last(EntityRespawned).target.id == hero.id
+  doAssert not world.applyBuyback(hero.id)
+  world.error(ActionNotDead)
+  doAssert world.last(ActionRejected).action == ActionBuyback
+  doAssert world.count(GoldSpent) == 1
+
 echo "Testing initialization, tick boundaries, host queries and replay events"
 block:
   let

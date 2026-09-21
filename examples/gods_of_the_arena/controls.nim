@@ -18,6 +18,7 @@ type
     CommandCastTarget
     CommandCastPoint
     CommandLevelAbility
+    CommandBuyback
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -79,6 +80,10 @@ proc queueUseItem*(heroId, slot: int32) =
     heroId: heroId,
     first: slot
   )
+
+proc queueBuyback*(heroId: int32) =
+  ## Queues one buyback through the shared simulation validator.
+  pending.add PlayerCommand(kind: CommandBuyback, heroId: heroId)
 
 proc queueCastTarget*(heroId, slot, targetId: int32) =
   ## Queues one ability on the object under the player's pointer.
@@ -187,6 +192,8 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     )
   of CommandLevelAbility:
     game.recorder.recordLevelAbility(tick, command.heroId, command.slot)
+  of CommandBuyback:
+    game.recorder.recordBuyback(tick, command.heroId)
 
   of CommandCastTarget, CommandCastPoint:
     game.recorder.recordCast(
@@ -217,6 +224,8 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
     )
   of CommandLevelAbility:
     applyLevelAbility(game.world, command.heroId, command.slot)
+  of CommandBuyback:
+    applyBuyback(game.world, command.heroId)
 
   of CommandCastTarget:
     applyCastTarget(game.world, command.heroId, command.slot, command.first)

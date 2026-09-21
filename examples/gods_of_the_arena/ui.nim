@@ -151,6 +151,60 @@ proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
   not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
 
+proc drawBuyback(
+    sk: Silky,
+    window: Window,
+    panel: GameUiPanel,
+    hero: Hero,
+    controlled, playing: bool
+) =
+  ## Shows the death countdown and a priced buyback in the inventory area.
+  let
+    price = run.world.buybackPrice(hero.id)
+    reason = run.world.buybackReason(hero.id)
+    enabled = controlled and reason.len == 0 and not run.historyPlayback
+    seconds = (hero.respawnTicks() + TickRate - 1) div TickRate
+    gold = rgbx(247, 221, 143, 255)
+    muted = rgbx(163, 175, 192, 255)
+  sk.drawRect(panel.origin, panel.size, rgbx(8, 12, 20, 255))
+  var rows = panel.stack(TopToBottom, vec2(4))
+  let
+    countdown = rows.takeRow(28, 8)
+    button = rows.takeRow(44, 8)
+    status = rows.takeRest()
+  sk.drawLabel(
+    "Respawn in " & $seconds & "s",
+    countdown.origin,
+    countdown.size,
+    gold,
+    "Bold",
+    CenterAlign
+  )
+  sk.drawTab(button, hovered = enabled and sk.hovered(button))
+  sk.drawLabel(
+    "BUYBACK  " & $price & " gold",
+    button.origin,
+    button.size,
+    if enabled: gold else: muted,
+    "Small",
+    CenterAlign
+  )
+  sk.drawLabel(
+    if reason.len > 0: reason
+    elif not controlled or run.historyPlayback: "Awaiting respawn"
+    elif not playing: "Resume to complete buyback"
+    else: "Return to your spawn now",
+    status.origin,
+    status.size,
+    muted,
+    "Small",
+    CenterAlign
+  )
+  if enabled and window.hudClicked(sk, button):
+    queueBuyback(hero.id)
+    armedAbility = -1
+    armedItem = -1
+
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
@@ -1061,8 +1115,9 @@ proc drawUi*(
         item.itemSpec.cooldownTicks)
     else:
       sk.drawSlot(slotPanel)
-    if playerHero and window.hudClicked(sk, slotPanel):
-      activatePlayerItem(run.world, playerHeroId, int32(slot))
+    if playerHero and inventoryHero != nil and inventoryHero.hp > 0 and
+      window.hudClicked(sk, slotPanel):
+        activatePlayerItem(run.world, playerHeroId, int32(slot))
 
   if selection != nil:
     let
@@ -1249,6 +1304,12 @@ proc drawUi*(
           "Small", CenterAlign)
       if item != NoItem and item.itemSpec.kind == Consumable:
         sk.drawItemCount(well, inventoryHero.itemCounts[slot])
+  if inventoryHero != nil and inventoryHero.kind == SelectedHero:
+    let hero = run.world.heroById(inventoryHero.id)
+    if hero.state == Dying:
+      sk.drawBuyback(
+        window, inventory.contents, hero, playerHero, transport.playing
+      )
   sk.drawLabel(
     if playerHero and armedItem >= 0: "RIGHT-CLICK MAP"
     elif inventoryHero != nil and inventoryHero.channelTicks > 0:
