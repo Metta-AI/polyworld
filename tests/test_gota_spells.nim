@@ -4,7 +4,14 @@ import
 
 proc spellGame(class: HeroClass): Game =
   ## Creates a quiet arena where only explicit test casts can deal damage.
-  result = newGame(generateMap(2026), 240, 10, false, ReplayData())
+  result = newGame(
+    generateMap(2026),
+    240,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:

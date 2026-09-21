@@ -7,7 +7,14 @@ proc quietGame(size = 116, heroes = 0): Game =
   ## Creates a deterministic arena with no recurring waves or bot decisions.
   var preset = defaultConfig()
   preset.mapSize = size
-  result = newGame(generateMap(2026, preset), 100_000, heroes, false, ReplayData())
+  result = newGame(
+    generateMap(2026, preset),
+    100_000,
+    heroes,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.heroTurnTicks = 100_000
   result.world.spawnTimerTicks = 100_000
 

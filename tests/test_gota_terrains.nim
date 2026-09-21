@@ -82,7 +82,14 @@ proc checkBasicTerrain() =
   let
     directory = createTempDir("gota-terrain-", "")
     path = directory / "terrain.bas"
-    game = newGame(generateMap(1988), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(1988),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
   defer:
     removeDir(directory)
   var

@@ -11,7 +11,9 @@ type
     ActionChanneling, ActionStunned, ActionRooted, ActionOutsideKeep,
     ActionAbilityLocked, ActionNoAbilityPoints, ActionAbilityMaxLevel,
     ActionHeroLevelRequired,
-    ActionNotDead, ActionMatchEnded
+    ActionNotDead, ActionMatchEnded,
+    ActionDrafting, ActionNotDrafting, ActionNotDraftTurn,
+    ActionUnknownHero, ActionHeroTaken
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
@@ -19,7 +21,8 @@ type
     ManaChanged, SpellReleased, ItemPurchased, ItemConsumed, ActionRejected,
     MatchEnded, PortalStarted, PortalCompleted, PortalInterrupted,
     Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted,
-    AbilityLeveled
+    AbilityLeveled,
+    HeroDrafted
 
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
@@ -79,3 +82,8 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionHeroLevelRequired: "Higher hero level required"
   of ActionNotDead: "Available when dead"
   of ActionMatchEnded: "Match has ended"
+  of ActionDrafting: "Waiting for all players to draft"
+  of ActionNotDrafting: "Draft is complete"
+  of ActionNotDraftTurn: "Wait for your draft turn"
+  of ActionUnknownHero: "Unknown hero"
+  of ActionHeroTaken: "Hero already drafted"

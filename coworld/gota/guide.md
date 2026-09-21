@@ -14,6 +14,63 @@ Every hero has a free single-target melee or ranged basic attack in addition to 
 
 The bundled `players/rusher.bas` sends all five heroes down mid together. It regroups toward the living team's center when any pair is more than 10 tiles apart, closing to 8 tiles before resuming. It attacks visible, vulnerable enemies within 20 tiles, favoring the enemy closest to the group's center. Otherwise it attack-moves through the middle and toward the opposing god. Dead allies are ignored until they respawn. Automatic abilities remain enabled.
 
+## Drafting
+
+Every live match starts with a shared pool of ten heroes. A seeded random
+team picks first. Teams alternate, and each team's players pick in spawn
+order. Each hero can be selected once across both teams. Combat, waves,
+and the battle clock wait until all ten players have drafted.
+
+Only the active player's BASIC script runs during drafting, once every
+half second. Every player, including humans, has ten simulation seconds to
+pick. At the deadline, the game picks a random available hero if the player
+has not chosen one. The bundled base and rusher scripts try to fill
+five roles: frontline, carry, mage, support, and fighter. This is a policy
+preference, not a draft rule. Any combination of available heroes is allowed.
+Their normal movement and combat logic runs after drafting.
+
+| Data or command | Meaning |
+| --- | --- |
+| `drafting` | 1 during drafting, 0 during battle. |
+| `draftTurnId` | ID of the player picking now, or 0 after drafting. |
+| `draftPlayerCount()` | Number of players in the public roster. |
+| `draftPlayerId(i)` | Player ID at zero-based spawn index `i`, or 0 if invalid. |
+| `draftPlayerTeam(i)` | Team at spawn index `i`: Red 0, Blue 1, invalid -1. |
+| `draftedClass(id)` | Hero class picked by player ID, or -1 if unpicked or invalid. Both teams' picks are public. |
+| `heroAvailable(class)` | 1 if the class is valid and unpicked, otherwise 0. |
+| `heroRole(class)` | Frontline 0, carry 1, mage 2, support 3, fighter 4, invalid -1. |
+| `draftHero(class)` | Selects a hero on your turn. Returns 1 on success, 0 on rejection. |
+
+`selfClass` is -1 until your pick. Class constants are `VanguardKnight`,
+`Ranger`, `Arcanist`, `DruidWarden`, `DemonHunter`, `DeathKnight`,
+`Crossbowman`, `Lich`, `Warlock`, and `Berserker`, with IDs 0 through 9.
+Draft queries update immediately. Other sampled self data updates next
+turn. `worldTick` includes draft ticks for action replay timing.
+
+```basic
+if drafting then
+  for candidate = 0 to 9
+    if heroAvailable(candidate) then
+      draftHero(candidate)
+      exit for
+    end if
+  next
+else
+  attackMove(mapWidth / 2, mapHeight / 2)
+end if
+```
+
+`lastActionError()` reports `ActionNotDrafting`, `ActionNotDraftTurn`,
+`ActionUnknownHero`, or `ActionHeroTaken` for rejected picks. Normal game
+commands are rejected with `ActionDrafting` while players are picking.
+In player mode, select an available hero in the drafting screen and click
+**Lock in hero** when it is your turn. The current picker appears above
+the hero grid. Picked heroes turn gray and show their player and team.
+The countdown shows the active pick's remaining time. Space pauses or
+resumes drafting, including the countdown. Drafting has a separate budget
+of up to 100 simulation seconds for ten players. The configured `maxTicks`
+and CLI duration flags limit battle time only, starting after the last pick.
+
 ## Ability progression
 
 Heroes start at level 1 with one ability point and all four abilities locked.
@@ -224,7 +281,9 @@ Read-only reason constants are `NoActionError`, `ActionNotAlive`,
 `ActionInsufficientMana`, `ActionSpellLimit`, `ActionChanneling`,
 `ActionStunned`, `ActionRooted`, `ActionOutsideKeep`, `ActionAbilityLocked`,
 `ActionNoAbilityPoints`, `ActionAbilityMaxLevel`, `ActionHeroLevelRequired`,
-`ActionNotDead`, and `ActionMatchEnded` (values 0 through 29).
+`ActionNotDead`, `ActionMatchEnded`, `ActionDrafting`, `ActionNotDrafting`,
+`ActionNotDraftTurn`, `ActionUnknownHero`, and `ActionHeroTaken`
+(values 0 through 34).
 Unavailable targets share a generic error without exposing hidden state.
 This feedback is recorded deterministically through submitted replay actions.
 
@@ -239,7 +298,7 @@ BASIC can inspect the complete static terrain with `terrainKind(x, y)`, `terrain
 
 BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle messages go to the owning player's private log. Each log is limited to 10 MiB. Runtime limit errors disable that VM; other seats continue. Invalid BASIC syntax fails the episode with a player failure diagnostic. Public game logs and action replays contain no BASIC source or private print output.
 
-Matches run up to 28,800 deterministic ticks (20 simulated minutes), without real-time pacing. Replays run entirely in the browser with playback, seeking, speed, and loop controls. The server exposes `/healthz`; legacy clients are static stubs.
+Battles run up to 28,800 deterministic ticks (20 simulated minutes), plus drafting time, without real-time pacing. Replays run entirely in the browser with playback, seeking, speed, and loop controls. The server exposes `/healthz`; legacy clients are static stubs.
 
 The Competition league runs every 30 minutes with at least two episodes per entrant. Separate baseline filler policies complete short rosters. Fillers are not ranked entrants. Standings use binary win scores and platform Elo.
 

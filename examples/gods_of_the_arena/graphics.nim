@@ -107,12 +107,21 @@ proc runGraphics*() =
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     for class in HeroClass:
-      if not builder.addImage(
-          HeroPortraitKeys[class], readImage(HeroPortraitPaths[class])):
-        raise newException(
-          GraphicsError,
-          "the UI atlas is too small for hero portraits"
-        )
+      let
+        portrait = readImage(HeroPortraitPaths[class])
+        drafted = portrait.copy()
+      for pixel in drafted.data.mitems:
+        let gray = uint8((pixel.r.int * 54 + pixel.g.int * 183 +
+          pixel.b.int * 19) shr 8)
+        pixel.r = gray
+        pixel.g = gray
+        pixel.b = gray
+      if not builder.addImage(HeroPortraitKeys[class], portrait) or
+        not builder.addImage(class.draftedPortraitKey(), drafted):
+          raise newException(
+            GraphicsError,
+            "the UI atlas is too small for hero portraits"
+          )
     addHudIcons(builder)
     addAbilityIcons(builder)
     addItemIcons(builder)
@@ -903,31 +912,28 @@ proc runGraphics*() =
     )
     transport = initPlayer(
       live = not run.replayMode,
-      durationTicks =
-        if run.replayMode:
-          int32(run.replayData.hashes.len)
-        else:
-          options.maximumTicks,
+      durationTicks = run.durationTicks(),
       playing = not options.pauseOnStart,
       speed = options.speed,
       repeating = true
     )
 
   window.onButtonPress = proc(button: Button) =
-    if options.playerSlot > 0 and not run.replayMode:
-      if button == KeyB:
-        shopOpen = not shopOpen
-        armedAbility = -1
-        armedItem = -1
-        return
-      if button == KeyEscape:
-        shopOpen = false
-        armedAbility = -1
-        armedItem = -1
-        attackMoveArmed = false
-        return
-      if shopOpen and button != KeySpace:
-        return
+    if options.playerSlot > 0 and not run.replayMode and
+      run.world.phase != Drafting:
+        if button == KeyB:
+          shopOpen = not shopOpen
+          armedAbility = -1
+          armedItem = -1
+          return
+        if button == KeyEscape:
+          shopOpen = false
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+          return
+        if shopOpen and button != KeySpace:
+          return
     if handleChromeKey(button):
       return
     if button == KeySpace:
@@ -1347,7 +1353,7 @@ proc runGraphics*() =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
     syncViewMode()
-    if shopOpen:
+    if shopOpen or run.world.phase == Drafting:
       selectionStarted = false
       rightOrderStarted = false
       minimapPanning = false
@@ -1525,7 +1531,7 @@ proc runGraphics*() =
 
   proc updatePlayerSpells(viewProjection: Mat4) =
     ## Casts quick actions and current targets, or selects an aimed ability.
-    if not playerMode() or shopOpen:
+    if not playerMode() or shopOpen or run.world.phase == Drafting:
       return
     for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
       if window.buttonPressed[key]:
@@ -1859,7 +1865,7 @@ proc runGraphics*() =
           replayCheckpoints.add captureCheckpoint()
 
   if not run.replayMode:
-    startReplayRecording(uint32(transport.durationTicks))
+    startReplayRecording(uint32(options.maximumTicks))
   replayCheckpoints = @[captureCheckpoint()]
 
   let cleanScreenshot =
@@ -1953,11 +1959,13 @@ proc runGraphics*() =
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
-      transport.sync(int32(run.world.tick), recorded, run.world.gameOver)
+      transport.durationTicks = run.durationTicks()
+      transport.sync(int32(run.world.tick), recorded, run.finished())
       let restoreTick = transport.takeRestore()
       if restoreTick >= 0:
         restoreTo(restoreTick)
-        transport.sync(int32(run.world.tick), recorded, run.world.gameOver)
+        transport.durationTicks = run.durationTicks()
+        transport.sync(int32(run.world.tick), recorded, run.finished())
       feedGotaActions(observeTick = true)
       transport.startFrame(dt, TickRate)
       let frameStart = epochTime()
@@ -1975,7 +1983,8 @@ proc runGraphics*() =
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
             else: int32(run.replayPlayer.data.hashes.len)
-          transport.sync(int32(run.world.tick), recordedNow, run.world.gameOver)
+          transport.durationTicks = run.durationTicks()
+          transport.sync(int32(run.world.tick), recordedNow, run.finished())
       let active = simulationActive(transport)
       if active:
         renderAlpha = clamp(
@@ -2024,7 +2033,7 @@ proc runGraphics*() =
         # The clock changes palettes while the light stays fixed for
         # readable silhouettes and shadows on both sides of the map.
         scene.toon.setArenaHour(
-          clockHour(float32(run.world.tick) + renderAlpha, TickRate))
+          clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
         proc drawWorldCharacters(livingOnly = false) =

@@ -48,6 +48,7 @@ var
 
 type
   Team* = enum RedTeam, BlueTeam
+  MatchPhase* = enum Playing, Drafting
   FootmanState* = enum Marching, Fighting, Dying
   TowerTier* = enum OuterTower, InnerTower, GateTower
   BuildingKind* = enum TowerBuilding, BarracksBuilding
@@ -101,6 +102,7 @@ type
     slot*: int
     lane*: int
     class*: HeroClass
+    drafted*: bool
     position*: WorldPoint
     spawnPosition*: WorldPoint
     facing*: Heading
@@ -235,6 +237,13 @@ type
     rng*: Rng
     nextFootmanId*: int32
     tick*: int32
+    phase*: MatchPhase
+    drafting*: bool
+      ## Preserves the initial setup when capturing a replay after drafting.
+    draftOrder*: seq[int]
+    draftTurn*: int
+    draftTicks*: int32
+    draftTurnTicks*: int32
     heroTurnTicks*: int32
     heroTurnStart*: int
     teamHeroKills*: array[2, int]
@@ -1040,6 +1049,10 @@ proc abilityLevelError*(hero: Hero, slot: HeroAbilitySlot): ActionError =
 
 proc applyLevelAbility*(world: World, heroId, slotId: int32): bool =
   ## Spends one point to unlock or upgrade a slot after validating all gates.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionLevelAbility, slotId, 0, 0, ActionDrafting
+    )
   let index = world.heroIndex(heroId)
   var error = NoActionError
   if index < 0:
@@ -1649,7 +1662,8 @@ proc currentSetup*(game: Game, maximumTicks: uint32): Setup =
     tickRate: uint16(TickRate),
     gridTiles: uint16(game.map.resolution),
     spawnIntervalTicks: uint32(game.world.spawnIntervalTicks),
-    maximumTicks: maximumTicks
+    maximumTicks: maximumTicks,
+    drafting: game.world.drafting
   )
   for hero in game.world.heroes:
     result.heroes.add ReplayHero(
@@ -1657,7 +1671,12 @@ proc currentSetup*(game: Game, maximumTicks: uint32): Setup =
       team: uint8(hero.team.ord),
       slot: uint8(hero.slot),
       lane: uint8(hero.lane),
-      class: uint8(hero.class.ord)
+      class: uint8(
+        if game.world.drafting:
+          heroClassForTeam(hero.team.ord, hero.slot).ord
+        else:
+          hero.class.ord
+      )
     )
 
 proc validateReplayWorld(game: Game) =
@@ -2297,6 +2316,10 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32,
     offset = FixedVec2Zero
 ): bool =
   ## Applies one hero walk command using server-side pathfinding.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionWalkTo, 0, mapX, mapY, ActionDrafting, offset
+    )
   if not offset.validTileOffset:
     return false
   navigationWorld = world
@@ -2341,6 +2364,10 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
     offset = FixedVec2Zero
 ): bool =
   ## Walks toward a map tile and attacks enemies found along the way.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionAttackMove, 0, mapX, mapY, ActionDrafting, offset
+    )
   if not offset.validTileOffset:
     return false
   navigationWorld = world
@@ -2410,6 +2437,10 @@ proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
 
 proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   ## Applies one hero attack command after validating its target.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionAttackTarget, 0, targetId, 0, ActionDrafting
+    )
   navigationWorld = world
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
@@ -2452,6 +2483,8 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
 
 proc purchaseError(world: World, heroId, itemId: int32): ActionError =
   ## Returns the first failing purchase check without allocating a string.
+  if world.phase == Drafting:
+    return ActionDrafting
   let index = heroIndex(world, heroId)
   if index < 0 or world.heroes[index].state == Dying:
     return ActionNotAlive
@@ -2498,6 +2531,8 @@ proc respawnTicks*(hero: Hero): int32 =
 
 proc buybackPrice*(world: World, heroId: int32): int32 =
   ## Returns this dead hero's gold price, or zero when buyback is unavailable.
+  if world.phase == Drafting:
+    return 0
   let index = world.heroIndex(heroId)
   if index < 0 or world.heroes[index].state != Dying or world.gameOver:
     return 0
@@ -2505,6 +2540,8 @@ proc buybackPrice*(world: World, heroId: int32): int32 =
 
 proc buybackError(world: World, heroId: int32): ActionError =
   ## Validates a buyback without changing the hero or spending gold.
+  if world.phase == Drafting:
+    return ActionDrafting
   let index = world.heroIndex(heroId)
   if index < 0:
     return ActionTargetUnavailable
@@ -2915,6 +2952,105 @@ proc applyBuyback*(world: World, heroId: int32): bool =
   hero.initHeroCharges()
   world.finishAction(heroId, ActionBuyback, 0, 0, 0, NoActionError)
 
+proc battleTick*(world: World): int32 {.raises: [].} =
+  ## Excludes drafting from the elapsed battle clock.
+  world.tick - world.draftTicks
+
+proc finished*(game: Game): bool =
+  ## Ends a battle on victory or after its full configured battle duration.
+  game.world.gameOver or (game.world.phase == Playing and
+    game.world.battleTick() >= game.config.maxTicks)
+
+proc durationTicks*(game: Game): int32 =
+  ## Includes the remaining pick deadlines before the full battle budget.
+  if game.replayMode:
+    return game.replayData.hashes.len.int32
+  let world = game.world
+  result = game.config.maxTicks + world.draftTicks
+  if world.phase == Drafting:
+    result += (world.draftOrder.len - world.draftTurn).int32 *
+      DraftPickTicks - world.draftTurnTicks
+
+proc draftTicksLeft*(world: World): int32 =
+  ## Returns the active pick's remaining time, or zero during battle.
+  if world.phase == Drafting:
+    return max(DraftPickTicks - world.draftTurnTicks, 0)
+
+proc draftHeroId*(world: World): int32 =
+  ## Returns the player currently picking, or zero after drafting.
+  if world.phase == Drafting and world.draftTurn < world.draftOrder.len:
+    return world.heroes[world.draftOrder[world.draftTurn]].id
+
+proc draftedClass*(world: World, heroId: int32): int32 =
+  ## Reads a public pick by player ID, or minus one before their pick.
+  let index = world.heroIndex(heroId)
+  if index < 0 or not world.heroes[index].drafted:
+    return -1
+  world.heroes[index].class.ord.int32
+
+proc heroAvailable*(world: World, classId: int32): bool =
+  ## Checks the shared hero pool without exposing any hidden world state.
+  if classId < 0 or classId > HeroClass.high.ord:
+    return false
+  for hero in world.heroes:
+    if hero.drafted and hero.class.ord == classId:
+      return false
+  true
+
+proc initDraft(world: World) =
+  ## Alternates teams, preserving each team's original spawn order.
+  world.drafting = true
+  world.phase = Drafting
+  var
+    team = Team(world.rng.below(2))
+    next: array[Team, int]
+  while world.draftOrder.len < world.heroes.len:
+    while next[team] < world.heroes.len:
+      let index = next[team]
+      inc next[team]
+      if world.heroes[index].team == team:
+        world.draftOrder.add(index)
+        break
+    team = Team(1 - team.ord)
+  for hero in world.heroes:
+    hero.drafted = false
+    hero.animClip = heroIdleClip
+  if world.draftOrder.len == 0:
+    world.phase = Playing
+
+proc applyDraft*(
+    world: World, heroId, classId: int32, cause = Command
+): bool =
+  ## Locks a unique hero for the active player and advances the draft.
+  let error =
+    if world.phase != Drafting: ActionNotDrafting
+    elif world.draftHeroId() != heroId: ActionNotDraftTurn
+    elif classId < 0 or classId > HeroClass.high.ord: ActionUnknownHero
+    elif not world.heroAvailable(classId): ActionHeroTaken
+    else: NoActionError
+  if error != NoActionError:
+    return world.finishAction(heroId, ActionDraft, 0, classId, 0, error)
+  let hero = world.heroes[world.heroIndex(heroId)]
+  hero.class = HeroClass(classId)
+  hero.drafted = true
+  hero.maxHp = heroMaxHp(hero.class, hero.level)
+  hero.hp = hero.maxHp
+  hero.maxMana = heroMaxMana(hero.class, hero.level)
+  hero.mana = hero.maxMana
+  hero.initHeroCharges()
+  world.scriptObjectsTick = -1
+  inc world.draftTurn
+  world.draftTurnTicks = 0
+  if world.draftTurn == world.draftOrder.len:
+    world.phase = Playing
+    world.heroTurnTicks = 0
+  when defined(replayEvents):
+    world.emit GameEvent(
+      kind: HeroDrafted, cause: cause, actor: world.eventEntity(heroId),
+      target: world.eventEntity(heroId), detail: classId, related: -1
+    )
+  world.finishAction(heroId, ActionDraft, 0, classId, 0, NoActionError)
+
 proc tickHeroCooldowns(world: World, hero: Hero) =
   ## Advances spell cooldowns and restores spent charges one at a time.
   if not hero.spellsReady:
@@ -3075,6 +3211,10 @@ proc canHitTarget(
 
 proc applyUseItem*(world: World, heroId, slotId: int32): bool =
   ## Spends one consumable for a heal, mana restore, or poison strike.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionUseItem, slotId, slotId, 0, ActionDrafting
+    )
   let
     index = heroIndex(world, heroId)
     slot = int(slotId)
@@ -3249,6 +3389,10 @@ proc applyUseItemAt*(
     offset = FixedVec2Zero
 ): bool =
   ## Spends a scroll and channels toward an open allied tower landing.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionUseItemAt, slotId, mapX, mapY, ActionDrafting, offset
+    )
   let hero = world.heroById(heroId)
   var error = world.heroActionError(hero, movement = true)
   if hero.id == 0:
@@ -3602,6 +3746,10 @@ proc castAbility(
 
 proc applyCastTarget*(world: World, heroId, slotId, targetId: int32): bool =
   ## Records the first failure of an explicit object-targeted spell.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionCastTarget, slotId, targetId, 0, ActionDrafting
+    )
   let index = world.heroIndex(heroId)
   if index < 0:
     return world.finishAction(
@@ -3637,6 +3785,10 @@ proc applyCastPoint*(
     offset = FixedVec2Zero
 ): bool =
   ## Records explicit ground casts while preserving the raw input arguments.
+  if world.phase == Drafting:
+    return world.finishAction(
+      heroId, ActionCastPoint, slotId, mapX, mapY, ActionDrafting, offset
+    )
   let index = world.heroIndex(heroId)
   if index < 0:
     return world.finishAction(
@@ -3715,6 +3867,8 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
       action.slot, action.first, action.second, action.offset)
   of ActionLevelAbility:
     applyLevelAbility(world, action.heroId, action.slot)
+  of ActionDraft:
+    applyDraft(world, action.heroId, action.first)
   of ActionManualSpells:
     let index = world.heroIndex(action.heroId)
     if index >= 0:
@@ -4145,6 +4299,14 @@ proc stateHash*(game: Game): uint64 =
   var hash = HashySeed
   hash.addHashy(game.map.hash)
   hash.addHashy(world.tick)
+  hash.addHashy(world.phase.ord)
+  hash.addHashy(world.drafting)
+  hash.addHashy(world.draftTurn)
+  hash.addHashy(world.draftTicks)
+  hash.addHashy(world.draftTurnTicks)
+  hash.addHashy(world.draftOrder.len)
+  for index in world.draftOrder:
+    hash.addHashy(index)
   hash.addHashy(world.spawnTimerTicks)
   hash.addHashy(world.heroTurnTicks)
   hash.addHashy(world.heroTurnStart)
@@ -4186,6 +4348,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.slot)
     hash.addHashy(hero.lane)
     hash.addHashy(hero.class.ord)
+    hash.addHashy(hero.drafted)
     hash.addHashy(hero.position)
     hash.addHashy(hero.spawnPosition)
     hash.addHashy(hero.facing)
@@ -4310,6 +4473,18 @@ proc checkReplayHash(game: Game, hash: uint64) =
     else: game.replayPlayer.data.hashes
   hashes.checkReplayHash(uint32(game.world.tick), hash, game.hashCheck)
 
+proc finishTick(game: Game) =
+  ## Records or validates the authoritative hash for either match phase.
+  let world = game.world
+  if game.historyPlayback:
+    checkReplayHash(game, stateHash(game))
+  elif game.recorder != nil and game.recordingError.len == 0 and
+      game.recorder.data.hashes.len < world.tick:
+    try:
+      game.recorder.recordHash(stateHash(game))
+    except ReplayError as error:
+      game.recordingError = error.msg
+
 proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   ## Advances exactly one authoritative integer simulation tick.
   let world = game.world
@@ -4317,10 +4492,37 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     world.events.setLen(0)
     world.eventTick = world.tick + 1
   world.syncBuildings()
-  if world.gameOver:
+  if game.finished():
     return
   if game.replayMode and
       world.tick >= game.replayData.hashes.len:
+    return
+
+  if world.phase == Drafting:
+    inc world.tick
+    inc world.draftTicks
+    inc world.draftTurnTicks
+    dec world.heroTurnTicks
+    let decide = world.heroTurnTicks <= 0
+    if decide:
+      world.heroTurnTicks = TickRate div 2
+    if game.historyPlayback:
+      if game.recorder != nil:
+        game.replayPlayer.data = game.recorder.data
+      var action: ReplayAction
+      while game.replayPlayer.takeActionAt(uint32(world.tick), action):
+        if world.applyReplayAction(action):
+          game.metrics.command(world.heroIndex(action.heroId), world.tick)
+    elif decide and onHeroTurn != nil:
+      onHeroTurn()
+    if world.phase == Drafting and world.draftTicksLeft() == 0:
+      var available: seq[HeroClass]
+      for class in HeroClass:
+        if world.heroAvailable(class.ord.int32):
+          available.add(class)
+      let class = available[world.rng.below(available.len.int32)]
+      discard world.applyDraft(world.draftHeroId(), class.ord.int32, TimeLimit)
+    game.finishTick()
     return
 
   dec world.spawnTimerTicks
@@ -4350,7 +4552,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       world.heroTurnStart = (world.heroTurnStart + 1) mod world.heroes.len
     else:
       profileBlock "decisions":
-        onHeroTurn()
+        if onHeroTurn != nil:
+          onHeroTurn()
 
   profileBlock "footmen":
     for footman in world.footmen.mitems:
@@ -4458,20 +4661,13 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
         kind: MatchEnded, cause: GodDestroyed, amount: world.winner.ord,
         actor: world.eventEntity(0), target: world.eventEntity(0), related: -1
       )
-    elif world.tick == game.config.maxTicks:
+    elif world.battleTick() == game.config.maxTicks:
       world.emit GameEvent(
         kind: MatchEnded, cause: TimeLimit, amount: -1,
         actor: world.eventEntity(0), target: world.eventEntity(0), related: -1
       )
 
-  if game.historyPlayback:
-    checkReplayHash(game, stateHash(game))
-  elif game.recorder != nil and game.recordingError.len == 0 and
-      game.recorder.data.hashes.len < world.tick:
-    try:
-      game.recorder.recordHash(stateHash(game))
-    except ReplayError as error:
-      game.recordingError = error.msg
+  game.finishTick()
 
 proc initLanePaths(map: MapData) =
   ## Samples symmetric lane goals without baking live buildings into roads.
@@ -4579,7 +4775,8 @@ proc newGame*(
     spawnInterval: int32,
     botCount: int,
     replayMode: bool,
-    replayData: ReplayData
+    replayData: ReplayData,
+    drafting = true
 ): Game =
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
@@ -4662,6 +4859,7 @@ proc newGame*(
       liveHeroSetup(botCount)
   spawnHeroes(world, heroSetup)
   for hero in world.heroes:
+    hero.drafted = true
     hero.initHeroCharges()
   world.stats = newCombatStats(world.heroes.len)
   result.metrics = newMetrics(world.heroes.len, TickRate)
@@ -4671,6 +4869,8 @@ proc newGame*(
   rebuildVision(world)
   world.updateKnownBuildings()
   world.heroTurnStart = seededHeroTurnStart(world)
+  if (if replayMode: replayData.header.setup.drafting else: drafting):
+    world.initDraft()
   if replayMode:
     validateReplayWorld(result)
   result.sampleMetrics(true)

@@ -8,7 +8,14 @@ proc attackGame(class: HeroClass): Game =
   var preset = defaultConfig()
   preset.mapSize = 128
   preset.roadWidth = 62
-  result = newGame(generateMap(2026, preset), 240, 10, false, ReplayData())
+  result = newGame(
+    generateMap(2026, preset),
+    240,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:

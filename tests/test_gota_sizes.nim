@@ -33,7 +33,7 @@ for size in [64, 96, 100, 116, 128, 192, 256]:
       z = ((point.z + half) div PathUnitsPerTile).int
     doAssert findTilePath(0, first.x, first.z, 0, x, z).len > 0,
       "Camp cannot reach the lanes at size " & $size & ": " & $(x, z)
-  let game = newGame(map, 240, 10, false, ReplayData())
+  let game = newGame(map, 240, 10, false, ReplayData(), drafting = false)
   game.world.heroTurnTicks = 100_000
   game.recorder = initReplayRecorder(game.currentSetup(60), preset)
   for hero in game.world.heroes:

@@ -130,7 +130,14 @@ block:
   doAssert not world.applyBuyItem(hero.id, -1)
   world.error(ActionUnknownItem)
   let
-    shopGame = newGame(generateMap(54), 100_000, 10, false, ReplayData())
+    shopGame = newGame(
+      generateMap(54),
+      100_000,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     originalPosition = hero.position
   for team in Team:
     world.teamVisible[team.ord].setLen(mapTiles() * mapTiles())
@@ -203,7 +210,14 @@ block:
 
 proc quietGame(class: HeroClass): Game =
   ## Keeps only explicit test combat active on a real generated map.
-  result = newGame(generateMap(54), 240, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54),
+    240,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
@@ -343,7 +357,14 @@ block:
   let
     directory = createTempDir("gota-events-", "")
     path = directory / "diagnostics.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     world = game.world
   defer:
     removeDir(directory)

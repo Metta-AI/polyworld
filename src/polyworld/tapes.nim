@@ -188,7 +188,7 @@ type
     setup*: Setup
 
   ActionTape*[Setup, Action; Metrics = void; Config = GameConfig] = object
-    ## Hash count is the recorded duration, up to `setup.maximumTicks`.
+    ## Hash count is the recorded duration, bounded by the game's time limits.
     ## Setup stays unchanged when a match ends early or playback rewinds.
     header*: TapeHeader[Setup]
     config*: Config

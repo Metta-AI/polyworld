@@ -5,7 +5,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
-  content, sim, game, controls, layouts, shops, maps, events
+  assets, content, sim, game, controls, layouts, shops, maps, events, drafts
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -20,18 +20,6 @@ const
   CooldownFill = rgbx(8, 10, 16, 180)
   IconTint = rgbx(245, 230, 190, 255)
   ManaColor* = rgbx(238, 202, 65, 255)
-  HeroPortraitKeys: array[HeroClass, string] = [
-    "gota_vanguard_knight",
-    "gota_ranger",
-    "gota_arcanist",
-    "gota_druid_warden",
-    "gota_demon_hunter",
-    "gota_death_knight",
-    "gota_crossbowman",
-    "gota_lich",
-    "gota_warlock",
-    "gota_berserker"
-  ]
 
 type
   HudChrome = object
@@ -122,7 +110,7 @@ proc currentStats(): StatsTable =
   ## Adapts the actual roster and outcome to the shared table.
   run.sampleMetrics()
   result = StatsTable(kind: GotaStats, tick: run.world.tick,
-    complete: run.world.gameOver or run.world.tick >= run.config.maxTicks,
+    complete: run.finished(),
     winner: if run.world.gameOver: run.world.winner.ord else: -1,
     kills: run.world.teamHeroKills)
   for team in [BlueTeam, RedTeam]:
@@ -215,8 +203,9 @@ proc mouseOverUi*(
     primaryId = 0'i32
 ): bool =
   ## Returns whether the pointer is over a visible game UI panel.
-  if shopOpen or window.statsContains(mouse) or mouseOverDebugMenu(mouse):
-    return true
+  if run.world.phase == Drafting or shopOpen or
+    window.statsContains(mouse) or mouseOverDebugMenu(mouse):
+      return true
   let chrome = currentChrome(window)
   if primaryId == 0:
     result = mouseOverPanels(
@@ -286,11 +275,11 @@ proc remainingTowers(team: Team): int =
 proc clockHour*(): float32 =
   ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction:
   ## the match starts at 8:00 and a day is five minutes long.
-  clockHour(run.world.tick, TickRate)
+  clockHour(run.world.battleTick(), TickRate)
 
 proc currentHudTime(): tuple[day, hour, minute: int] =
   ## Converts simulation ticks into the accelerated spectator clock.
-  hudClock(run.world.tick, TickRate)
+  hudClock(run.world.battleTick(), TickRate)
 
 proc visibleInView(
     viewMode: int32,
@@ -800,6 +789,13 @@ proc drawUi*(
     focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  if run.world.phase == Drafting:
+    sk.drawDraft(window, currentLayout(window).gameAreaSize, transport.playing)
+    transport.drawTransport(
+      sk, window, currentLayout(window).transportPanel, actionCam,
+      followSelection, addr statsState.toggled
+    )
+    return
   if shopOpen and options.playerSlot > 0 and not run.replayMode:
     sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
       currentLayout(window).size, transport.playing)
@@ -1367,7 +1363,7 @@ proc drawUi*(
 
 proc drawStatsOverlay*(sk: Silky, window: Window) =
   ## Presents readable statistics above the HUD at every window width.
-  if shopOpen:
+  if shopOpen or run.world.phase == Drafting:
     return
   sk.drawStatsOverlay(
     window, currentLayout(window), statsState, currentStats(), run.history

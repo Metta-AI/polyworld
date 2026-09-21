@@ -6,7 +6,14 @@ import
 
 proc quietGame(class = VanguardKnight): Game =
   ## Creates a quiet arena with one living hero and no automatic casts.
-  result = newGame(generateMap(54), 100_000, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54),
+    100_000,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
@@ -260,7 +267,14 @@ block:
   let
     directory = createTempDir("gota-progression-", "")
     path = directory / "progression.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
   defer:
     removeDir(directory)
   writeFile(path, """
