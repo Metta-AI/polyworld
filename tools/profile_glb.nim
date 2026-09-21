@@ -24,11 +24,12 @@
 ##   nim r tools/profile_glb.nim ../polyworld_data/characters/rpg_monsters/*.glb
 ##   nim r tools/profile_glb.nim ../polyworld_data/terrain/low_poly_village.glb:house_lvl7
 ##   nim r tools/profile_glb.nim "../polyworld_data/characters/modular_chars/character.glb:Preset 5"
+##   nim r tools/profile_glb.nim "../polyworld_data/characters/chargen/manifest.json:Ranger"
 
 import
   std/[json, math, os, sets, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, vmath, windy,
-  posedbounds, polyworld/[characters, toon]
+  posedbounds, polyworld/[characters, chargen, toon]
 
 const
   ProfileSize = 256     ## what lands on disk
@@ -54,14 +55,17 @@ if args.len == 0:
 type Shot = object
   path: string
   prop: string
+  generated: bool
 
 proc parseShot(arg: string): Shot =
-  ## Splits `file.glb` or `file.glb:node` into a render job.
-  const Marker = ".glb:"
-  let split = arg.find(Marker)
+  ## Splits a GLB or a generated `manifest.json:preset` into a render job.
+  let
+    marker = if arg.contains(".json:"): ".json:" else: ".glb:"
+    split = arg.find(marker)
   if split >= 0:
-    result.path = arg[0 .. split + 3]
-    result.prop = arg[split + Marker.len .. ^1]
+    result.path = arg[0 ..< split + marker.len - 1]
+    result.prop = arg[split + marker.len .. ^1]
+    result.generated = marker == ".json:"
     if result.prop.len == 0:
       quit("missing node name in " & arg, 1)
   else:
@@ -208,12 +212,15 @@ proc isFacePart(name: string): bool =
       return true
   false
 
-proc presetFaceBounds(root: Node, parts: seq[string]): AABounds =
+proc presetFaceBounds(
+  root: Node, parts: seq[string], generatedFace: seq[string] = @[]
+): AABounds =
   ## Posed bounds of the preset's face parts alone.
-  var faceParts: seq[string]
-  for part in parts:
-    if isFacePart(part):
-      faceParts.add part
+  var faceParts = generatedFace
+  if faceParts.len == 0:
+    for part in parts:
+      if isFacePart(part):
+        faceParts.add part
   isolatePreset(root, faceParts)
   result = posedBounds(root, visibleOnly = true)
   isolatePreset(root, parts)
@@ -305,8 +312,26 @@ proc cropToSubject(rendered: Image): Image =
 proc profile(file: GltfFile, shot: Shot) =
   ## Renders one character file, one named prop from an already posed pack,
   ## or one modular preset.
-  let preset =
-    if shot.prop.len > 0: presetParts(shot.path, shot.prop) else: @[]
+  var
+    preset: seq[string]
+    generatedFace: seq[string]
+    generatedUnlit: seq[string]
+  if shot.generated:
+    let
+      manifest = readManifest(shot.path.parentDir)
+      inventory = manifest.presetManifest(manifest.namedPreset(shot.prop))
+    for node in file.root.walkNodes:
+      if node.mesh != nil and node.visible:
+        preset.add node.name
+    for category in inventory.categories:
+      for item in category.items:
+        if category.key in ["Face", "Eyes", "Mouth", "Brow", "Nose",
+            "Ears", "Hair", "Beard", "Headgear", "Earring", "Eyewear"]:
+          generatedFace.add item.nodes
+        if category.key in ["Eyes", "Mouth", "Brow"]:
+          generatedUnlit.add item.nodes
+  elif shot.prop.len > 0:
+    preset = presetParts(shot.path, shot.prop)
   if preset.len > 0:
     isolatePreset(file.root, preset)
   elif shot.prop.len > 0:
@@ -322,7 +347,7 @@ proc profile(file: GltfFile, shot: Shot) =
     pitch = getEnv("PITCH", "0.12").parseFloat.float32
 
   if preset.len > 0:
-    let faceBox = presetFaceBounds(file.root, preset)
+    let faceBox = presetFaceBounds(file.root, preset, generatedFace)
     if faceBox.min.x <= faceBox.max.x:
       bounds = faceBox
     framing = "preset face"
@@ -370,6 +395,8 @@ proc profile(file: GltfFile, shot: Shot) =
   toonContext.tint = color(1, 1, 1, 1)
   toonContext.cameraPosition = eye
   toonContext.unlitNodes.clear()
+  for name in generatedUnlit:
+    toonContext.unlitNodes.incl name
   for part in preset:
     if part.startsWith("Eye_") or part.startsWith("Mouth_") or
         part.startsWith("Brow_"):
@@ -392,19 +419,30 @@ proc profile(file: GltfFile, shot: Shot) =
   # Render large and box down so antialiasing survives the crop.
   let image = cropToSubject(rendered).resize(ProfileSize, ProfileSize)
   let profilePath =
-    if preset.len > 0:
+    if shot.generated:
+      shot.path.parentDir / "portraits" /
+        (shot.prop.toLowerAscii.replace(" ", "_") & ".profile.png")
+    elif preset.len > 0:
       shot.path.changeFileExt(
         shot.prop.toLowerAscii.replace(" ", "_") & ".profile.png")
     elif shot.prop.len > 0:
       shot.path.changeFileExt(shot.prop & ".profile.png")
     else:
       shot.path.changeFileExt("profile.png")
+  createDir(profilePath.parentDir)
   image.writeFile(profilePath)
   echo &"{profilePath.lastPathPart:34s} {framing}"
 
-proc loadShotFile(path: string): GltfFile =
+proc loadShotFile(shot: Shot): GltfFile =
   ## Loads one GLB and poses it at Idle, or bind pose when it has no clips.
-  result = readGltfFile(path)
+  if shot.generated:
+    let manifest = readManifest(shot.path.parentDir)
+    result = readPresetCharacter(
+      shot.path.parentDir, manifest, manifest.namedPreset(shot.prop),
+      ["Idle_Loop"]
+    )
+  else:
+    result = readGltfFile(shot.path)
   var clip = -1
   for i, animation in result.root.animations:
     if animation.name.startsWith(IdlePrefix):
@@ -416,7 +454,8 @@ proc loadShotFile(path: string): GltfFile =
 
 var files: OrderedTable[string, GltfFile]
 for shot in shots:
-  if shot.path notin files:
-    files[shot.path] = loadShotFile(shot.path)
-  profile(files[shot.path], shot)
+  let key = if shot.generated: shot.path & ":" & shot.prop else: shot.path
+  if key notin files:
+    files[key] = loadShotFile(shot)
+  profile(files[key], shot)
 echo &"wrote {shots.len} profile(s)"

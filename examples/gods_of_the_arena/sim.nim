@@ -413,7 +413,7 @@ const
   UnitCap = 120 * CreepsPerBarracks
   CorpseLingerTicks = 60'i32
   FootmanDeathTicks* = 24'i32
-  HeroDeathTicks = 24'i32
+  HeroDeathTicks* = 24'i32
   FortHp* = 400'i32
 
 proc startingForts(map: MapData): array[2, Fort] =
@@ -988,13 +988,17 @@ proc heroAttackTicks*(world: World, hero: Hero): int32 =
   ## Returns the hero class's current basic-attack cadence.
   heroAttackTicks(hero.class)
 
+proc heroHitTicks*(world: World, hero: Hero): int32 =
+  ## Returns the basic-attack impact tick shared with its visual animation.
+  world.heroAttackTicks(hero) * 45 div 100
+
 proc heroAttackCooldown*(world: World, hero: Hero): int32 =
   ## Returns ticks until the next basic hit, assuming uninterrupted range.
   if hero.hp <= 0 or hero.state == Dying:
     return 0
   let
     duration = world.heroAttackTicks(hero)
-    windup = duration * 45 div 100
+    windup = world.heroHitTicks(hero)
   if hero.swingTicks < 0:
     return windup
   if not hero.damageLanded:
@@ -3606,7 +3610,7 @@ proc updateHero(world: World, hero: Hero) =
       let duration = world.heroAttackTicks(hero)
       inc hero.swingTicks
       if not hero.damageLanded and
-          hero.swingTicks >= duration * 45 div 100:
+          hero.swingTicks >= world.heroHitTicks(hero):
         hero.damageLanded = true
         let damage = hero.heroAttackDamage
         if damage > 0:

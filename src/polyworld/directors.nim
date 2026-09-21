@@ -23,7 +23,7 @@ type
     radius*, height*: float32
     visible*, alive*: bool
     hp*, maxHp*, activity*, progress*, gold*: int32
-    fighting*, complete*, returned*, damageOnly*: bool
+    fighting*, complete*, returned*, damageOnly*, combatOnly*: bool
     idleScore*, combatScore*: float32
   EventKind* = enum
     AttackEvent, DamageEvent, DeathEvent, HealEvent, ProgressEvent,
@@ -172,12 +172,17 @@ proc eventScore(director: Director, event: DirectorEvent): float32 =
   event.score * (1 - 0.35'f * age / event.lifetime)
 
 proc eligible(director: Director, subject: Subject): bool =
-  ## Requires recent direct damage for subjects excluded from idle shots.
-  if not subject.damageOnly:
+  ## Requires the requested events for subjects excluded from idle shots.
+  if not subject.damageOnly and not subject.combatOnly:
     return true
   for event in director.events:
-    if event.subject == subject.id and event.kind == DamageEvent and
-      director.eventScore(event) > 0:
+    if director.eventScore(event) <= 0:
+      continue
+    if subject.damageOnly:
+      if event.subject == subject.id and event.kind == DamageEvent:
+        return true
+    elif event.kind in {AttackEvent, DamageEvent, DeathEvent} and
+      event.related(subject):
         return true
 
 proc score(director: Director, subject: Subject): float32 =
@@ -224,12 +229,12 @@ proc advance*(director: var Director, dt: float32, enabled: bool,
     neighborScore = -1.0'f
     major = false
     sceneMajor = false
-    waitingForDamage = false
+    waitingForEvent = false
   for i, subject in director.subjects:
     if not subject.valid:
       continue
     if not director.eligible(subject):
-      waitingForDamage = true
+      waitingForEvent = true
       continue
     let score = director.score(subject)
     if subject.id == director.subject.id:
@@ -253,7 +258,7 @@ proc advance*(director: var Director, dt: float32, enabled: bool,
     director.lastMajor = director.time
   if sceneMajor:
     director.sceneUntil = director.time + AftermathSeconds
-  let finished = complete or (best < 0 and not waitingForDamage)
+  let finished = complete or (best < 0 and not waitingForEvent)
   if finished and not director.completed:
     if not director.finalResults:
       director.finalStarted = director.time
