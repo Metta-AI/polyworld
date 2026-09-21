@@ -167,6 +167,39 @@ Loop over `0` through `spellCount() - 1`. This list contains unresolved casts fr
 
 Other invalid spell queries return zero. Visibility of an enemy warning does not reveal its hidden caster's identity.
 
+## Death and buyback
+
+The first death takes 9 seconds to respawn, including the 1-second death
+animation. Each subsequent death adds 5 seconds, up to a total of 60 seconds.
+Death counts belong to each hero and persist after respawning.
+
+`selfDeaths` is the hero's death count. `selfRespawnTicks` is the remaining
+respawn delay in ticks, or zero while alive. BASIC decisions continue while
+dead so a policy can request buyback.
+
+`buybackPrice()` returns the dead hero's price: 100 gold times their death
+count. It returns zero while alive or after the match ends. The price stays
+fixed during a death, even as the respawn timer counts down.
+
+`buyback()` returns 1 when accepted and 0 when rejected. It spends the
+hero's gold and immediately respawns them with full health, mana, and spell
+charges. It preserves inventory, level, XP, and death count. A living hero,
+an ended match, or insufficient gold causes rejection without spending gold.
+The HUD shows the countdown, buyback price, and any rejection reason while
+dead. Buyback attempts are recorded for replay and seeking.
+
+The bundled `players/base.bas` buys back as soon as it can afford the price.
+While dead it skips normal commands, resuming them on the decision after buyback.
+
+```basic
+if selfRespawnTicks > 0 then
+  price = buybackPrice()
+  if price > 0 and selfGold >= price then
+    accepted = buyback()
+  end if
+end if
+```
+
 ## Action feedback
 
 `lastActionError()` returns the reason for your hero's latest submitted
@@ -190,8 +223,8 @@ Read-only reason constants are `NoActionError`, `ActionNotAlive`,
 `ActionInvalidPoint`, `ActionCooldown`, `ActionNoCharges`,
 `ActionInsufficientMana`, `ActionSpellLimit`, `ActionChanneling`,
 `ActionStunned`, `ActionRooted`, `ActionOutsideKeep`, `ActionAbilityLocked`,
-`ActionNoAbilityPoints`, `ActionAbilityMaxLevel`, and
-`ActionHeroLevelRequired` (values 0 through 27).
+`ActionNoAbilityPoints`, `ActionAbilityMaxLevel`, `ActionHeroLevelRequired`,
+`ActionNotDead`, and `ActionMatchEnded` (values 0 through 29).
 Unavailable targets share a generic error without exposing hidden state.
 This feedback is recorded deterministically through submitted replay actions.
 

@@ -38,7 +38,9 @@ type
     DataSelfPortalCooldown,
     DataSelfChannelTicks,
     DataSelfStunTicks,
-    DataSelfRootTicks
+    DataSelfRootTicks,
+    DataSelfDeaths,
+    DataSelfRespawnTicks
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY
@@ -72,7 +74,9 @@ const
     "selfPortalCooldown",
     "selfChannelTicks",
     "selfStunTicks",
-    "selfRootTicks"
+    "selfRootTicks",
+    "selfDeaths",
+    "selfRespawnTicks"
   ]
 
 var
@@ -443,6 +447,24 @@ proc initHeroHost(heroId: int32): Host =
         heroIndex(activeGame.world, heroId), activeGame.world.tick
       )
     int32(accepted)
+  let buybackPriceProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads this hero's current buyback price from the shared rules.
+    activeGame.world.buybackPrice(heroId)
+  let buybackProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Records and attempts a buyback using only this hero's gold.
+    try:
+      activeGame.recorder.recordBuyback(
+        uint32(activeGame.world.tick), heroId
+      )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyBuyback(heroId)
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
   let useItemProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -642,6 +664,8 @@ proc initHeroHost(heroId: int32): Host =
   discard result.addFunction("canShop", 0, canShopProc, 4)
   discard result.addFunction("inOwnSpawn", 0, inOwnSpawnProc, 4)
   discard result.addFunction("buyItem", 1, buyItemProc, 20)
+  discard result.addFunction("buybackPrice", 0, buybackPriceProc, 4)
+  discard result.addFunction("buyback", 0, buybackProc, 20)
   discard result.addFunction("useItem", 1, useItemProc, 20)
   discard result.addFunction("useItemAt", 3, useItemAtProc, 800)
   for (field, name) in [
@@ -697,13 +721,13 @@ proc loadBots*(
       game.heroVms[i].output = playerPrinter(int(i))
 
 proc runHeroScript(game: Game, index: int) =
-  ## Runs one bounded persistent BASIC decision for a living hero.
+  ## Runs one bounded BASIC decision, including while awaiting respawn.
   if index < 0 or index >= game.heroVms.len:
     return
   let
     hero = game.world.heroes[index]
     vm = game.heroVms[index]
-  if vm == nil or vm.failed or hero.state == Dying:
+  if vm == nil or vm.failed:
     return
   vm.runtime.restart()
   try:
@@ -748,6 +772,8 @@ proc runHeroScript(game: Game, index: int) =
       max(0'i32, hero.stunnedUntil - game.world.tick))
     vm.runtime.setData(heroDataIds[DataSelfRootTicks],
       max(0'i32, hero.rootedUntil - game.world.tick))
+    vm.runtime.setData(heroDataIds[DataSelfDeaths], hero.deaths)
+    vm.runtime.setData(heroDataIds[DataSelfRespawnTicks], hero.respawnTicks())
     discard vm.runtime.run(vm.output)
     inc vm.decisions
   except BasicError as error:

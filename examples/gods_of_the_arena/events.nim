@@ -10,7 +10,8 @@ type
     ActionNoCharges, ActionInsufficientMana, ActionSpellLimit,
     ActionChanneling, ActionStunned, ActionRooted, ActionOutsideKeep,
     ActionAbilityLocked, ActionNoAbilityPoints, ActionAbilityMaxLevel,
-    ActionHeroLevelRequired
+    ActionHeroLevelRequired,
+    ActionNotDead, ActionMatchEnded
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
@@ -23,7 +24,7 @@ type
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
     EquipmentChange, LevelUp, Regeneration, Respawn, Command, GodDestroyed,
-    TimeLimit, CorpseExpired
+    TimeLimit, CorpseExpired, Buyback
 
   EventEntity* = object
     id*, kind*, team*, class*, player*: int32
@@ -76,3 +77,5 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionNoAbilityPoints: "No ability points"
   of ActionAbilityMaxLevel: "Ability is at maximum level"
   of ActionHeroLevelRequired: "Higher hero level required"
+  of ActionNotDead: "Available when dead"
+  of ActionMatchEnded: "Match has ended"

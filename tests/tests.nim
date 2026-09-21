@@ -21,6 +21,7 @@ import
   test_gota_abilities,
   test_gota_attacks,
   test_gota_brushes,
+  test_gota_buybacks,
   test_gota_cameras,
   test_gota_characters,
   test_gota_content,

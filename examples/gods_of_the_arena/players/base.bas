@@ -38,6 +38,15 @@
 '   walkTo(x, y), attackTarget(objectId), buyItem(itemId), useItem(slot)
 
 
+' Buy back as soon as affordable, then wait for fresh observations.
+if selfHp <= 0 then
+  price = buybackPrice()
+  if price > 0 and selfGold >= price then
+    buyback()
+  end if
+  end
+end if
+
 ' Spend points explicitly, prioritizing the ultimate and primary spell.
 for upgrade = 1 to 4
   if canLevelAbility(3) then
