@@ -2,8 +2,10 @@
 ##
 ## One client supplies actions for all five heroes on one team. The opposing
 ## team continues to run BASIC. Observations match the native training batch.
-import std/[asynchttpserver, asyncdispatch, json, os, strutils]
-import ../awm/awmwebsocket
+import std/[asynchttpserver, asyncdispatch, json, strutils]
+import ws
+when isMainModule:
+  import std/os
 import training
 import presets
 
@@ -36,43 +38,58 @@ proc observationJson(transition: Transition): string =
     "heroXp": transition.heroXp,
     "heroGold": transition.heroGold,
     "heroKills": transition.heroKills,
-    "heroDeaths": transition.heroDeaths
+    "heroDeaths": transition.heroDeaths,
+    "maxWork": transition.maxWork,
+    "maxInstructions": transition.maxInstructions
   })
 
 proc actionValue(data: JsonNode): int32 =
-  let value = if data.kind == JObject and data.hasKey("action"):
+  let value = if data.kind == JObject and data.hasKey("action") and
+      data["action"].kind == JInt:
     data["action"].getInt
   else:
     -1
-  doAssert value in 0 ..< GotaActionCount,
-    "player action must be an integer from 0 through " & $(GotaActionCount - 1)
+  if value notin 0 ..< GotaActionCount:
+    raise newException(ValueError,
+      "player action must be an integer from 0 through " & $(GotaActionCount - 1))
   int32(value)
 
 proc servePlayer*(options: PlayerServerOptions) {.async.} =
   let config = loadConfig(options.config)
+  let policy = readFile(options.policy)
   let listener = newAsyncHttpServer()
   proc requestHandler(request: Request) {.async, gcsafe.} =
     if request.url.path != "/player" or
         request.headers.getOrDefault("Upgrade").toLowerAscii() != "websocket":
       await request.respond(Http404, "GotA player endpoint is /player\n")
       return
-    let ws = await upgradeWebSocket(request)
-    {.cast(gcsafe).}:
-      let batch = newTrainingBatch(config, options.bot, options.opponent,
-        options.policy, 1, options.maxTicks)
-      defer: batch.close()
-      batch.reset(options.seed)
-      await ws.send(observationJson(batch.lanes[0].transition))
-      while not ws.closed:
-        let message = await ws.recv()
-        if message.opcode == WsClose:
-          break
-        if message.opcode != WsText:
-          continue
-        let action = actionValue(parseJson(message.data))
-        var transitions: array[1, Transition]
-        batch.step([action], transitions)
-        await ws.send(observationJson(transitions[0]))
+    let ws = await newWebSocket(request)
+    defer: ws.close()
+    try:
+      {.cast(gcsafe).}:
+        let batch = newTrainingBatch(config, options.bot, options.opponent,
+          policy, 1, options.maxTicks)
+        defer: batch.close()
+        batch.reset(options.seed)
+        await ws.send(observationJson(batch.lanes[0].transition))
+        while ws.readyState == Open:
+          let (opcode, message) = await ws.receivePacket()
+          case opcode
+          of Text: discard
+          of Ping:
+            await ws.send(message, Pong)
+            continue
+          of Pong: continue
+          else: break
+          let action = actionValue(parseJson(message))
+          var transitions: array[1, Transition]
+          batch.step([action], transitions)
+          await ws.send(observationJson(transitions[0]))
+          if transitions[0].terminal != 0:
+            await ws.send(observationJson(batch.lanes[0].transition))
+    except CatchableError:
+      discard
+
   await listener.serve(Port(options.port), requestHandler, options.host)
 
 when isMainModule:
