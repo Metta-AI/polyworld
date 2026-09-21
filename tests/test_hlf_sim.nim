@@ -3,7 +3,8 @@
 
 import
   std/strformat,
-  polyworld/[fixed, rngs],
+  fixxy,
+  polyworld/[rngs],
   ../examples/heartleaf/content,
   ../examples/heartleaf/maps,
   ../examples/heartleaf/sim,
@@ -533,3 +534,21 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
   doAssert anyParty, "the final night had no valid party at all"
 
 echo "test_hlf_sim: all checks passed"
+
+echo "Testing Heartleaf bot decimals reach precise same-cell destinations"
+block:
+  let
+    game = newGame(gameMap, 1)
+    villager = game.world.villagers[0]
+    origin = villager.body.pos
+  var sources = newSeq[string](VillagerCount)
+  sources[0] = "accepted = walkTo(myX + 0.25, myY - 0.25)\n"
+  loadBots(game, sources)
+  runBotDecisions(game)
+  doAssert not game.brains[0].failed
+  doAssert villager.goalOffset == fixedVec2(0.25'fx, -0.25'fx)
+  for tick in 0 ..< 60:
+    game.world.tickWorld(proc(w: World) = discard)
+  doAssert villager.order == NoOrder
+  doAssert length(villager.body.pos - origin -
+    fixedVec2(0.25'fx, -0.25'fx)) <= fixed(1, 1000)

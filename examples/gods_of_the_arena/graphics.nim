@@ -4,10 +4,10 @@ import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  controls, spelleffects,
+  cameras, controls, faces, lighting, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
-  polyworld/common, polyworld/pathing,
+  polyworld/chargen, polyworld/common, polyworld/pathing,
   polyworld/tapes, polyworld/toon,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
   polyworld/profiles,
@@ -107,12 +107,21 @@ proc runGraphics*() =
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     for class in HeroClass:
-      if not builder.addImage(
-          HeroPortraitKeys[class], readImage(HeroPortraitPaths[class])):
-        raise newException(
-          GraphicsError,
-          "the UI atlas is too small for hero portraits"
-        )
+      let
+        portrait = readImage(HeroPortraitPaths[class])
+        drafted = portrait.copy()
+      for pixel in drafted.data.mitems:
+        let gray = uint8((pixel.r.int * 54 + pixel.g.int * 183 +
+          pixel.b.int * 19) shr 8)
+        pixel.r = gray
+        pixel.g = gray
+        pixel.b = gray
+      if not builder.addImage(HeroPortraitKeys[class], portrait) or
+        not builder.addImage(class.draftedPortraitKey(), drafted):
+          raise newException(
+            GraphicsError,
+            "the UI atlas is too small for hero portraits"
+          )
     addHudIcons(builder)
     addAbilityIcons(builder)
     addItemIcons(builder)
@@ -199,45 +208,77 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   var
-    footmanModels: array[Team, CharacterModel]
-    footmanRenderClips: array[Team, array[6, int]]
+    footmanModels: array[Team, array[CreepKind, CharacterModel]]
+    footmanRenderClips: array[Team, array[CreepKind, array[6, int]]]
     godModels: array[Team, CharacterModel]
     godRenderClips: array[Team, array[GodAnimation, int]]
     heroModels: array[HeroClass, CharacterModel]
-    heroRenderClips: array[5, int]
+    heroRenderClips: array[HeroClass, array[5, int]]
+    heroCastClips: array[HeroClass, int]
+    heroPortalClips: array[HeroClass, int]
+    footmanEyes: array[Team, array[CreepKind, DeathEyes]]
+    godEyes: array[Team, DeathEyes]
+    heroEyes: array[HeroClass, DeathEyes]
   profileBlock "models":
+    let
+      characterLibrary = readManifest(ChargenLibrary)
+      deadEyes = characterLibrary.deathEyesPart()
+
+    proc loadPresetModel(
+      preset: Preset,
+      clips: openArray[string],
+      height: float32,
+      eyes: var DeathEyes
+    ): CharacterModel =
+      ## Loads one generated character with its authored face materials.
+      let inventory = characterLibrary.presetManifest(preset)
+      result = loadCharacterModel(
+        readPresetCharacter(ChargenLibrary, characterLibrary, preset, clips),
+        height
+      )
+      for category in inventory.categories:
+        if category.key in ["Eyes", "Mouth", "Brow"]:
+          for item in category.items:
+            result.unlitParts.add item.nodes
+      eyes = initDeathEyes(result, ChargenLibrary, inventory, deadEyes)
+
     for team in Team:
-      let model = loadCharacterModel(FootmanModels[ord(team)], 1.15)
-      footmanModels[team] = model
-      footmanRenderClips[team] = [
-        model.clipIndex("Run"),
-        model.clipIndex("Idle"),
-        model.clipIndex("Death"),
-        model.clipIndex("Victory"),
-        model.clipIndex("Attack01"),
-        model.clipIndex("Attack02")
-      ]
-      let god = loadCharacterModel(GodModels[ord(team)], GodTargetHeight)
+      for kind in CreepKind:
+        let model = loadPresetModel(
+          characterLibrary.creepPreset(team.ord, kind),
+          CreepClips,
+          CreepTargetHeight,
+          footmanEyes[team][kind]
+        )
+        footmanModels[team][kind] = model
+        for i, name in kind.creepAnimationNames():
+          footmanRenderClips[team][kind][i] = model.clipIndex(name)
+      let god = loadPresetModel(
+        characterLibrary.namedPreset(GodPresets[ord(team)]),
+        GodClips,
+        GodTargetHeight,
+        godEyes[team]
+      )
+      god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
       godModels[team] = god
       godRenderClips[team] = [
-        god.clipIndex("Idle"),
-        god.clipIndex("Death"),
-        god.clipIndex("Victory")
+        god.clipIndex("Idle_Loop"),
+        god.clipIndex("Death01"),
+        god.clipIndex("Dance_Loop")
       ]
     for class in HeroClass:
-      heroModels[class] = loadModularCharacterModel(
-        HeroModelPath,
-        HeroLooks[class],
-        HeroTargetHeight
+      let model = loadPresetModel(
+        characterLibrary.namedPreset(HeroPresets[class]),
+        HeroClips,
+        HeroTargetHeight,
+        heroEyes[class]
       )
-    let heroModel = heroModels[VanguardKnight]
-    heroRenderClips = [
-      heroModel.clipIndex("Run"),
-      heroModel.clipIndex("Idle"),
-      heroModel.clipIndex("Death"),
-      heroModel.clipIndex("Attack01"),
-      heroModel.clipIndex("Attack02")
-    ]
+      model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
+      heroModels[class] = model
+      for i, name in class.heroAnimationNames():
+        heroRenderClips[class][i] = model.clipIndex(name)
+      heroCastClips[class] = model.clipIndex("Spell_Simple_Shoot")
+      heroPortalClips[class] = model.clipIndex("Spell_Simple_Idle_Loop")
   var
     particles = initParticleSystem()
     spellEffects = initSpellRenderer()
@@ -255,6 +296,11 @@ proc runGraphics*() =
       sk.atlas.size,
       run.config.players
     )
+    portalLabels = [
+      layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 1s"),
+      layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 2s"),
+      layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 3s")
+    ]
     damageTrails: DamageTrailTracker
 
   const
@@ -262,18 +308,6 @@ proc runGraphics*() =
     TallTowerScale = 4.5'f
     GateTowerScale = 6.0'f
     BarracksScale = 1.65'f
-
-  const
-    # Preserve the undead footprint adjustment and enlarge Radiant humans 21%.
-    FootmanSizeIncrease = 1.1'f32
-    FootmanSizeFactors: array[Team, float32] = [
-      RedTeam: 1.15'f32 * FootmanSizeIncrease,
-      BlueTeam: 1.21'f32 * FootmanSizeIncrease
-    ]
-
-  proc footmanSizeFactor(team: Team): float32 =
-    ## Matches the apparent body size of both lane-creep models.
-    FootmanSizeFactors[team]
 
   proc towerPropName(tier: TowerTier): string =
     ## Returns the matching fort model for one tower tier.
@@ -493,19 +527,60 @@ proc runGraphics*() =
     ## Samples authoritative animation state continuously between ticks.
     (ticks.float32 + animationAlpha) / TickRate.float32
 
-  proc holdClipTime(
-      model: CharacterModel, clip: int, ticks: int32, hold: bool
-  ): float32 =
-    ## Samples animation time. One-shot clips hold the last pose; the
-    ## sampler wraps with `mod`, so a death would otherwise loop. Held
-    ## poses ignore the interpolant, or a corpse wiggles between ticks.
-    if hold:
-      min(
-        ticks.float32 / TickRate.float32,
-        clipDuration(model, clip)
-      )
+  proc heroRenderPose(hero: Hero): tuple[clip: int, time: float32] =
+    ## Shares one pose across rendering, shadows, picking, and outlines.
+    let model = heroModels[hero.class]
+    result.clip = heroRenderClips[hero.class][hero.animClip]
+    let duration = model.clipDuration(result.clip)
+    if hero.state == Dying:
+      result.time = min(hero.animTicks.float32 / HeroDeathTicks.float32, 1) *
+        duration
+      return
+    if hero.portalEnds > run.world.tick:
+      result.clip = heroPortalClips[hero.class]
+      result.time = unitRenderTime(hero.animTicks)
+      return
+    for spell in run.world.casts:
+      let age = run.world.tick - spell.started
+      if spell.heroId == hero.id and age >= 0 and age < 12:
+        result.clip = heroCastClips[hero.class]
+        result.time = min((age.float32 + animationAlpha) / 12, 1) *
+          model.clipDuration(result.clip)
+        return
+    if hero.animClip in heroAttackClips:
+      let
+        strike = hero.class.heroStrikeTime()
+        tick = hero.animTicks.float32 + animationAlpha
+        hit = run.world.heroHitTicks(hero).float32
+        finish = run.world.heroAttackTicks(hero).float32
+      result.time =
+        if tick <= hit:
+          tick / hit * strike
+        else:
+          strike + min((tick - hit) / (finish - hit), 1) * (duration - strike)
     else:
-      unitRenderTime(ticks)
+      result.time = unitRenderTime(hero.animTicks)
+
+  proc creepRenderTime(footman: Footman): float32 =
+    ## Fits authored attack impacts and death poses to simulation timing.
+    let
+      model = footmanModels[footman.team][footman.kind]
+      clip = footmanRenderClips[footman.team][footman.kind][footman.animClip]
+      duration = model.clipDuration(clip)
+    if footman.state == Dying:
+      return min(footman.deathTicks.float32 / FootmanDeathTicks.float32, 1) *
+        duration
+    if footman.animClip in attackClips:
+      let
+        strike = footman.kind.creepStrikeTime()
+        tick = footman.animTicks.float32 + animationAlpha
+        hit = footmanHitTicks(footman.animClip).float32
+        finish = footmanAttackTicks(footman.animClip).float32
+      if tick <= hit:
+        return tick / hit * strike
+      return strike + min((tick - hit) / (finish - hit), 1) *
+        (duration - strike)
+    unitRenderTime(footman.animTicks)
 
   proc visibleInView(team: Team, position: WorldPoint): bool =
     ## Applies the current omniscient or team visibility spectator mode.
@@ -612,6 +687,22 @@ proc runGraphics*() =
         gap = DefaultGap * HeroWorldBarScale,
         border = DefaultBorder * HeroWorldBarScale
       )
+      if hero.portalEnds > run.world.tick:
+        renderer.addText(
+          portalLabels[clamp((hero.portalEnds - run.world.tick - 1) div
+            TickRate, 0, 2)],
+          anchor + vec3(0, 0.5'f, 0)
+        )
+        renderer.addResourceBars(
+          anchor - vec3(0, 0.4'f, 0), HeroWorldBarWidth,
+          [WorldResourceBar(
+            value: (PortalChannelTicks - hero.portalEnds +
+              run.world.tick).float32,
+            maximum: PortalChannelTicks.float32,
+            height: 0.12'f * HeroWorldBarScale,
+            color: rgbx(167, 128, 255, 255)
+          )]
+        )
     for tower in run.world.buildings:
       if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
         continue
@@ -705,7 +796,8 @@ proc runGraphics*() =
         continue
       let
         model = heroModels[hero.class]
-        clip = heroRenderClips[hero.animClip]
+        pose = heroRenderPose(hero)
+      heroEyes[hero.class].setDead(false)
       consider(
         hero.id,
         pickCharacter(
@@ -714,10 +806,8 @@ proc runGraphics*() =
           dir,
           unitRenderPoint(hero.id, hero.position),
           unitRenderFacing(hero.id, hero.facing),
-          clip,
-          holdClipTime(
-            model, clip, hero.animTicks, hero.state == Dying
-          ),
+          pose.clip,
+          pose.time,
           hero.heroSizeFactor()
         )
       )
@@ -726,8 +816,9 @@ proc runGraphics*() =
           not visibleInView(footman.team, footman.position):
         continue
       let
-        model = footmanModels[footman.team]
-        clip = footmanRenderClips[footman.team][footman.animClip]
+        model = footmanModels[footman.team][footman.kind]
+        clip = footmanRenderClips[footman.team][footman.kind][footman.animClip]
+      footmanEyes[footman.team][footman.kind].setDead(false)
       consider(
         footman.id,
         pickCharacter(
@@ -737,10 +828,7 @@ proc runGraphics*() =
           unitRenderPoint(footman.id, footman.position),
           unitRenderFacing(footman.id, footman.facing),
           clip,
-          holdClipTime(
-            model, clip, footman.animTicks, footman.state == Dying
-          ),
-          footmanSizeFactor(footman.team)
+          creepRenderTime(footman)
         )
       )
     for tower in run.world.buildings:
@@ -823,29 +911,28 @@ proc runGraphics*() =
     )
     transport = initPlayer(
       live = not run.replayMode,
-      durationTicks =
-        if run.replayMode:
-          int32(run.replayData.hashes.len)
-        else:
-          options.maximumTicks,
+      durationTicks = run.durationTicks(),
       playing = not options.pauseOnStart,
       speed = options.speed,
       repeating = true
     )
 
   window.onButtonPress = proc(button: Button) =
-    if options.playerSlot > 0 and not run.replayMode:
-      if button == KeyB:
-        shopOpen = not shopOpen
-        armedAbility = -1
-        return
-      if button == KeyEscape:
-        shopOpen = false
-        armedAbility = -1
-        attackMoveArmed = false
-        return
-      if shopOpen and button != KeySpace:
-        return
+    if options.playerSlot > 0 and not run.replayMode and
+      run.world.phase != Drafting:
+        if button == KeyB:
+          shopOpen = not shopOpen
+          armedAbility = -1
+          armedItem = -1
+          return
+        if button == KeyEscape:
+          shopOpen = false
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+          return
+        if shopOpen and button != KeySpace:
+          return
     if handleChromeKey(button):
       return
     if button == KeySpace:
@@ -859,7 +946,8 @@ proc runGraphics*() =
     elif (button == KeyF or button == KeyG) and
         options.playerSlot > 0 and
         not run.replayMode:
-      queueUseItem(
+      activatePlayerItem(
+        run.world,
         run.world.heroes[options.playerSlot - 1].id,
         int32(if button == KeyF: 0 else: 1)
       )
@@ -1091,19 +1179,16 @@ proc runGraphics*() =
     for hero in run.world.heroes:
       if hero.id != id:
         continue
+      let pose = heroRenderPose(hero)
+      heroEyes[hero.class].setDead(hero.hp <= 0 or hero.state == Dying)
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
         heroModels[hero.class],
         unitRenderPoint(hero.id, hero.position),
         unitRenderFacing(hero.id, hero.facing),
-        heroRenderClips[hero.animClip],
-        holdClipTime(
-          heroModels[hero.class],
-          heroRenderClips[hero.animClip],
-          hero.animTicks,
-          hero.state == Dying
-        ),
+        pose.clip,
+        pose.time,
         sizeFactor = hero.heroSizeFactor()
       )
       finishCharacters(scene)
@@ -1111,26 +1196,24 @@ proc runGraphics*() =
     for footman in run.world.footmen:
       if footman.id != id:
         continue
+      footmanEyes[footman.team][footman.kind].setDead(
+        footman.hp <= 0 or footman.state == Dying
+      )
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
-        footmanModels[footman.team],
+        footmanModels[footman.team][footman.kind],
         unitRenderPoint(footman.id, footman.position),
         unitRenderFacing(footman.id, footman.facing),
-        footmanRenderClips[footman.team][footman.animClip],
-        holdClipTime(
-          footmanModels[footman.team],
-          footmanRenderClips[footman.team][footman.animClip],
-          footman.animTicks,
-          footman.state == Dying
-        ),
-        sizeFactor = footmanSizeFactor(footman.team)
+        footmanRenderClips[footman.team][footman.kind][footman.animClip],
+        creepRenderTime(footman)
       )
       finishCharacters(scene)
       return
     for i, god in gods:
       if run.world.forts[i].id != id:
         continue
+      godEyes[god.team].setDead(run.world.forts[i].hp <= 0)
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
@@ -1214,9 +1297,9 @@ proc runGraphics*() =
         hp: hero.hp, maxHp: hero.maxHp, complete: true,
         participant: max(hero.targetHeroId, hero.targetBuildingId),
         fighting: hero.state == Fighting, activity: hero.swingTicks,
-        idleScore: (if hero.hasMoveTarget: 22.0'f else: 12.0'f),
         combatScore: 100
       )
+    let livingHeroes = prioritizeHeroes(run.world, subjects)
     for footman in run.world.footmen:
       subjects.add Subject(
         id: footman.id, owner: int32(footman.team),
@@ -1227,7 +1310,7 @@ proc runGraphics*() =
         participant: max(footman.targetHeroId, footman.targetBuildingId),
         fighting: footman.state == Fighting, activity: footman.swingTicks,
         idleScore: (if footman.state == Marching: 22.0'f else: 8.0'f),
-        combatScore: 70
+        combatScore: 70, combatOnly: livingHeroes
       )
     for tower in run.world.buildings:
       subjects.add Subject(
@@ -1236,7 +1319,8 @@ proc runGraphics*() =
         visible: visibleInView(tower.team, tower.position), alive: tower.hp > 0,
         hp: tower.hp, maxHp: tower.maxHp, complete: true,
         participant: tower.targetId, fighting: tower.targetId != 0,
-        activity: tower.attackTicks, idleScore: 4, combatScore: 110
+        activity: tower.attackTicks, idleScore: 4, combatScore: 110,
+        combatOnly: true
       )
     for i, fort in run.world.forts:
       subjects.add Subject(
@@ -1246,17 +1330,6 @@ proc runGraphics*() =
         alive: fort.hp > 0, hp: fort.hp, maxHp: FortHp, complete: true,
         damageOnly: true, combatScore: 165
       )
-    # Approaching opponents deserve a shot anchored on an advancing hero.
-    for subject in subjects.mitems:
-      let other = heroById(run.world, subject.id)
-      if other == nil or other.id == 0 or not subject.alive:
-        continue
-      for hero in run.world.heroes:
-        if hero.id == subject.id or hero.hp <= 0:
-          continue
-        if other.team != hero.team and
-            (renderPoint(hero.position) - subject.position).length < 14:
-          subject.idleScore = 28
     if observeTick and not viewingSeeking:
       actionCam.director.observe(subjects)
     actionCam.director.refresh(subjects)
@@ -1279,7 +1352,7 @@ proc runGraphics*() =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
     syncViewMode()
-    if shopOpen:
+    if shopOpen or run.world.phase == Drafting:
       selectionStarted = false
       rightOrderStarted = false
       minimapPanning = false
@@ -1308,7 +1381,9 @@ proc runGraphics*() =
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    if window.mousePressed(MouseRight) and not overUi:
+    var minimapPoint: Vec2
+    if window.mousePressed(MouseRight) and (not overUi or
+      (armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint))):
       rightPressPosition = window.mousePos.vec2
       rightOrderStarted = true
     if window.mousePressed(MouseMiddle) and
@@ -1455,11 +1530,17 @@ proc runGraphics*() =
 
   proc updatePlayerSpells(viewProjection: Mat4) =
     ## Casts quick actions and current targets, or selects an aimed ability.
-    if not playerMode() or shopOpen:
+    if not playerMode() or shopOpen or run.world.phase == Drafting:
       return
     for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
       if window.buttonPressed[key]:
         let hero = heroById(run.world, playerHeroId())
+        if window.buttonDown[KeyLeftShift] or window.buttonDown[KeyRightShift]:
+          queueLevelAbility(hero.id, slot.int32)
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+          continue
         var
           aimX = mapCoordinate(hero.position.x + hero.facing.x)
           aimY = mapCoordinate(hero.position.z + hero.facing.z)
@@ -1511,6 +1592,16 @@ proc runGraphics*() =
     if not rightOrderStarted:
       return
     rightOrderStarted = false
+    var minimapPoint: Vec2
+    if armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint):
+      queueUseItemAt(
+        playerHeroId(), armedItem,
+        mapCoordinate(int32(minimapPoint.x * WorldScale.float32)),
+        mapCoordinate(int32(minimapPoint.y * WorldScale.float32))
+      )
+      armedItem = -1
+      attackMoveArmed = false
+      return
     if mouseOverUi(window, sk.mousePos, primaryId):
       return
     if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
@@ -1518,6 +1609,23 @@ proc runGraphics*() =
     let
       heroId = playerHeroId()
       picked = pickEntity(viewProjection)
+    if armedItem >= 0:
+      let
+        (origin, direction) = mouseRay(
+          window.mousePos.vec2, window.size.vec2, viewProjection
+        )
+        ground = pickTile(origin, direction)
+      if not ground.hit:
+        return
+      queueUseItemAt(
+        heroId, armedItem,
+        int32(layers[ground.layer].originX + ground.x - mapOrigin()),
+        int32(layers[ground.layer].originZ + ground.z - mapOrigin())
+      )
+      armedItem = -1
+      attackMoveArmed = false
+      selectEntity(heroId)
+      return
     if armedAbility >= 0:
       let
         hero = heroById(run.world, heroId)
@@ -1665,8 +1773,12 @@ proc runGraphics*() =
           run.world.forts[0].id
       let target = particleTargetPosition(targetId)
       if target.found:
-        particles.emitParticleBurst(
-          CombatSparks,
+        let style =
+          if footman.kind == RangedCreep: MagicAttack
+          else: MeleeAttack
+        emitAttackParticles(
+          style,
+          renderPoint(footman.position) + vec3(0, 1.4'f, 0),
           target.position
         )
     for i, tower in run.world.buildings:
@@ -1696,16 +1808,21 @@ proc runGraphics*() =
     let wasGameOver = run.world.gameOver
     var
       oldHeroLanded = newSeq[bool](run.world.heroes.len)
+      oldPortalEnds = newSeq[int32](run.world.heroes.len)
       oldFootmanLanded: Table[int32, bool]
       oldTowerTicks = newSeq[int32](run.world.buildings.len)
     for i, hero in run.world.heroes:
       oldHeroLanded[i] = hero.damageLanded
+      oldPortalEnds[i] = hero.portalEnds
     for footman in run.world.footmen:
       oldFootmanLanded[footman.id] = footman.damageLanded
     for i, tower in run.world.buildings:
       oldTowerTicks[i] = tower.attackTicks
     captureUnitPositions()
     advanceGame()
+    for i, hero in run.world.heroes:
+      if oldPortalEnds[i] > 0 and hero.portalEnds == 0:
+        previousUnitPositions[hero.id] = renderPoint(hero.position)
     feedGotaActions(observeTick = true)
     emitTickParticles(
       oldHeroLanded,
@@ -1751,7 +1868,7 @@ proc runGraphics*() =
           replayCheckpoints.add captureCheckpoint()
 
   if not run.replayMode:
-    startReplayRecording(uint32(transport.durationTicks))
+    startReplayRecording(uint32(options.maximumTicks))
   replayCheckpoints = @[captureCheckpoint()]
 
   let cleanScreenshot =
@@ -1845,11 +1962,13 @@ proc runGraphics*() =
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
-      transport.sync(int32(run.world.tick), recorded, run.world.gameOver)
+      transport.durationTicks = run.durationTicks()
+      transport.sync(int32(run.world.tick), recorded, run.finished())
       let restoreTick = transport.takeRestore()
       if restoreTick >= 0:
         restoreTo(restoreTick)
-        transport.sync(int32(run.world.tick), recorded, run.world.gameOver)
+        transport.durationTicks = run.durationTicks()
+        transport.sync(int32(run.world.tick), recorded, run.finished())
       feedGotaActions(observeTick = true)
       transport.startFrame(dt, TickRate)
       let frameStart = epochTime()
@@ -1867,7 +1986,8 @@ proc runGraphics*() =
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
             else: int32(run.replayPlayer.data.hashes.len)
-          transport.sync(int32(run.world.tick), recordedNow, run.world.gameOver)
+          transport.durationTicks = run.durationTicks()
+          transport.sync(int32(run.world.tick), recordedNow, run.finished())
       let active = simulationActive(transport)
       if active:
         renderAlpha = clamp(
@@ -1913,12 +2033,10 @@ proc runGraphics*() =
       updatePlayerOrder(viewProjection)
 
       profileBlock "drawWorld":
-        # One clock for the whole frame: the palette, the sun's position,
-        # and its shadow map all follow the in-game hour. The fractional
-        # tick keeps the sun gliding between simulation steps instead of
-        # visibly stepping shadow positions a few times a second.
-        scene.setToonHour(
-          clockHour(float32(run.world.tick) + renderAlpha, TickRate))
+        # The clock changes palettes while the light stays fixed for
+        # readable silhouettes and shadows on both sides of the map.
+        scene.toon.setArenaHour(
+          clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
         proc drawWorldCharacters(livingOnly = false) =
@@ -1929,43 +2047,32 @@ proc runGraphics*() =
             if livingOnly and (footman.hp <= 0 or footman.state == Dying):
               continue
             let
-              model = footmanModels[footman.team]
-              clip = footmanRenderClips[footman.team][footman.animClip]
+              model = footmanModels[footman.team][footman.kind]
+              clip =
+                footmanRenderClips[footman.team][footman.kind][footman.animClip]
+            footmanEyes[footman.team][footman.kind].setDead(
+              footman.hp <= 0 or footman.state == Dying
+            )
             drawCharacter(
               scene, model, unitRenderPoint(footman.id, footman.position),
               unitRenderFacing(footman.id, footman.facing),
               clip,
-              holdClipTime(
-                model, clip, footman.animTicks, footman.state == Dying),
-              sizeFactor = footmanSizeFactor(footman.team)
+              creepRenderTime(footman)
             )
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
               continue
             if livingOnly and (hero.hp <= 0 or hero.state == Dying):
               continue
-            var
-              animation = hero.animClip
-              ticks = hero.animTicks
-            if hero.hp > 0 and hero.state != Dying:
-              for spell in run.world.casts:
-                let age = run.world.tick - spell.started
-                if spell.heroId == hero.id and age >= 0 and age < 12:
-                  animation = heroAttackClips[0]
-                  ticks = age * 2
-            let clip = heroRenderClips[animation]
+            let pose = heroRenderPose(hero)
+            heroEyes[hero.class].setDead(hero.hp <= 0 or hero.state == Dying)
             drawCharacter(
               scene,
               heroModels[hero.class],
               unitRenderPoint(hero.id, hero.position),
               unitRenderFacing(hero.id, hero.facing),
-              clip,
-              holdClipTime(
-                heroModels[hero.class],
-                clip,
-                ticks,
-                hero.state == Dying
-              ),
+              pose.clip,
+              pose.time,
               sizeFactor = hero.heroSizeFactor()
             )
           for god in gods:
@@ -1977,6 +2084,7 @@ proc runGraphics*() =
             let
               model = godModels[god.team]
               clip = godRenderClips[god.team][god.godClip]
+            godEyes[god.team].setDead(run.world.forts[god.team.ord].hp <= 0)
             var animTime = god.animTime
             if run.world.gameOver and god.team != run.world.winner:
               animTime = min(animTime, clipDuration(model, clip))
@@ -2052,8 +2160,41 @@ proc runGraphics*() =
           run.world, viewProjection, animationAlpha, viewMode
         )
         clickMarks.drawClickMarks(viewProjection)
+        worldShapes.clear()
+        for hero in run.world.heroes:
+          if hero.portalEnds <= run.world.tick or hero.hp <= 0:
+            continue
+          for point in [hero.position, hero.portalDestination]:
+            if not visibleInView(hero.team, point):
+              continue
+            var ring: array[49, Vec3]
+            let
+              center = renderPoint(point)
+              radius = 0.5'f + (hero.portalEnds - run.world.tick).float32 /
+                PortalChannelTicks.float32
+            for i in 0 .. ring.high:
+              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+              ring[i] = center + vec3(cos(angle) * radius, 0.12'f,
+                sin(angle) * radius)
+            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.06'f)
+        if playerMode() and armedItem >= 0:
+          let hero = run.world.heroById(playerHeroId())
+          for tower in run.world.buildings:
+            if tower.kind != TowerBuilding or tower.hp <= 0 or
+              tower.team != hero.team:
+                continue
+            var ring: array[65, Vec3]
+            let
+              center = renderPoint(tower.position)
+              radius = tower.tier.towerSightTiles.float32
+            for i in 0 .. ring.high:
+              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+              ring[i] = center + vec3(cos(angle) * radius, 0,
+                sin(angle) * radius)
+              ring[i].y = groundHeight(ring[i].x, ring[i].z) +
+                groundOffset(ring[i].x, ring[i].z) + 0.12'f
+            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.04'f)
         if showPaths:
-          worldShapes.clear()
           for hero in run.world.heroes:
             if hero.state == Dying or hero.hp <= 0:
               continue
@@ -2072,7 +2213,7 @@ proc runGraphics*() =
               points.add vec3(p.x, p.y + 0.2'f32, p.z)
             if points.len >= 2:
               worldShapes.addPolyline(points, color)
-          worldShapes.draw(viewProjection)
+        worldShapes.draw(viewProjection)
         if not cleanScreenshot:
           drawWorldUnitBars(
             worldBarRenderer,

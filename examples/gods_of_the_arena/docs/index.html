@@ -279,6 +279,48 @@
     }
     .ability-stats dt { margin: 0 0 4px; color: var(--muted); font-size: 11px; }
     .ability-stats dd { margin: 0; font-size: 13px; line-height: 1.4; }
+    .progression {
+      margin: 22px 0;
+      padding: 22px;
+      background: var(--well);
+      border: 1px solid var(--gold-dim);
+      border-radius: 12px;
+    }
+    .progression h3 { margin: 0 0 12px; color: var(--gold); }
+    .progression p:last-child { margin-bottom: 0; }
+    .progression-table caption {
+      text-align: left;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 0 0 8px;
+    }
+    .ability-levels {
+      width: 100%;
+      margin: 0 0 14px;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .ability-levels caption {
+      padding-bottom: 8px;
+      text-align: left;
+      color: var(--gold);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .ability-levels th, .ability-levels td {
+      padding: 7px 4px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+    .ability-levels thead th { color: var(--muted); font-size: 11px; }
+    .ability-levels tbody th { color: var(--gold); font-weight: 400; }
+    .ability-levels td:last-child { font-weight: 700; }
+    @media (max-width: 600px) {
+      .progression { padding: 14px; }
+      .progression .spell-table { font-size: 12px; }
+      .progression .spell-table th, .progression .spell-table td { padding: 8px 4px; }
+    }
     .ability-charges { display: flex; align-items: center; gap: 8px; }
     .ability-charge-pips { display: inline-flex; gap: 4px; }
     .ability-charge-pips > span {
@@ -407,38 +449,41 @@
         <div>
           <p>
             Gods of the Arena is a 5v5 lane battler. Red brings
-            the living roster. Blue brings the undead warband. Each side
+            one drafted roster and Blue another. Each side
             starts with five heroes, six barracks, nine lane towers,
             two god guards, and a god to defend.
           </p>
           <p>
-            The 128 by 128 arena uses the map editor's saved seed 54 preset.
+            The 116 by 116 arena uses the map editor's saved seed 54 preset.
             Blue starts in the southwest and Red in the northeast. Roads
             carve the forest and cross cliffs at short ramps. Each fort has
             three exits, two barracks per exit, and a separate walled spawn.
             Match seeds control gameplay randomness without changing this layout.
           </p>
           <p>
-            Footmen spawn two per lane every ten seconds and march until they
-            meet the enemy. Heroes start at level 1 with 150 gold and their
-            full four-ability kit already unlocked. Kills grant gold and XP.
-            Heroes grow to level 20, then spend gold in a six-slot inventory.
+            Each barracks spawns three melee creeps and one ranged caster
+            every twenty seconds: six melee and two ranged creeps per lane
+            for each team. They march until they meet the enemy.
+            Heroes start at level 1 with 150 gold and their
+            four abilities locked and one point to spend. Kills grant gold and XP.
+            Each hero level grants another ability point, up to level 20.
+            Gold buys items for a six-slot inventory.
           </p>
           <p>
             Outer towers fall first, then inner, then the gate. Clearing a
             lane exposes the two level-3 towers guarding that team's god.
             Both guards must fall before the god can take any damage.
-            Red defends a warlock and Blue defends a druid. The first god
+            Red defends Hades and Blue defends Zeus. The first god
             to reach zero health loses.
           </p>
         </div>
         <div class="lanes">
-          <div class="chip"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>Footmen</b><div class="muted">60 HP, 12 damage, 15 gold</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">HP: outer 950, inner 1300, gate 1950. Damage: 18, 24, 30.</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>Creeps</b><div class="muted">60 HP, 12 damage, 15 last-hit gold. Casters attack from four tiles.</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">HP: outer 1900, inner 2600, gate 3900. Damage: 36, 48, 60.</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/fort.png" alt=""><div><b>Gods</b><div class="muted">400 HP, exposed after both god guards fall</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/kills.png" alt=""><div><b>Hero bounty</b><div class="muted">150 XP and 100 gold</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>Level curve</b><div class="muted">100 XP, then +75 each level</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">20 minute match</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">20 minute battle, plus drafting</div></div></div>
         </div>
       </div>
     </section>
@@ -447,11 +492,32 @@
       <p class="kicker">THE ROSTER</p>
       <h2>Heroes and ability kits</h2>
       <p class="lede">Each ability shows what it affects beside its artwork. Footprints describe the hit area; visual effects describe its appearance. Arc and cone effects share a sector footprint. Every area spell leaves a warning on the map until impact.</p>
-      <p>
-        Every hero enters with Q, W, E, and R ready at <b>level 1</b>. There is
-        no skill-point tree. Stats climb through level 20. Cooldowns and ranges
-        below use the live HUD units: seconds and tiles.
-      </p>
+      <div class="progression" aria-labelledby="progression-title">
+        <h3 id="progression-title">Hero levels and spell progression</h3>
+        <p>Heroes start at <b>level 1</b> with <b>one ability point</b> and all
+          four spells locked at rank 0. Each hero level grants another point,
+          up to level 20. Spend one point to unlock a spell at rank 1 or to
+          raise it by one rank. Points stay banked until you choose to spend them.</p>
+        <table class="spell-table progression-table">
+          <caption>Minimum hero level required for each spell rank</caption>
+          <thead><tr><th scope="col">Spell slot</th><th scope="col">Rank 1</th><th scope="col">Rank 2</th><th scope="col">Rank 3</th><th scope="col">Rank 4</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Q / W / E</th><td>Level 1</td><td>Level 3</td><td>Level 5</td><td>Level 7</td></tr>
+            <tr><th scope="row">R · Ultimate</th><td>Level 6</td><td>Level 12</td><td>Level 18</td><td>—</td></tr>
+          </tbody>
+        </table>
+        <p><b>Choose each upgrade:</b> press Shift + Q/W/E/R, Shift-click an
+          ability, or click its gold + button. BASIC bots use
+          <a href="#ability-progression"><code>levelAbility(slot)</code></a>.
+          Reaching the required hero level does not unlock or upgrade a spell
+          automatically. Fully ranking all four spells costs 15 points.</p>
+        <p><b>Hero stats grow automatically.</b> Basic-attack damage scales as
+          base damage + (hero level − 1) × damage per level, plus equipment.
+          Spell damage, healing, and mana restoration grow only with spell rank:
+          100%, 150%, 200%, then 250% of rank 1, rounded down.
+          Mana costs, charges, cooldowns, and ranges stay the same across ranks.
+          Each spell below lists its exact values and required hero levels.</p>
+      </div>
 
       <div class="roster">
         <!-- Vanguard Knight -->
@@ -493,8 +559,17 @@
               </div>
               <h4>Lion Guard</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Lion Guard spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>28 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>42 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>56 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>70 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+28 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -516,8 +591,17 @@
               </div>
               <h4>Firebrand Sword</h4>
               <p class="cast-type">Melee</p>
+              <table class="ability-levels" aria-label="Firebrand Sword spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>40</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>60</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>80</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>100</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>40</dd></div>
                 <div><dt>Mana cost</dt><dd>20</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -540,8 +624,17 @@
               </div>
               <h4>Inferno Aegis</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Inferno Aegis spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>50 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>75 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>100 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>125 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+50 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>35</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>10s</dd></div>
@@ -566,8 +659,16 @@
               </div>
               <h4>Blazing Blade</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Blazing Blade spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>90</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>135</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>180</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>90</dd></div>
                 <div><dt>Mana cost</dt><dd>70</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>20s</dd></div>
@@ -622,8 +723,17 @@
               </div>
               <h4>Dragon Sight</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Dragon Sight spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>16</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>24</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>32</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>40</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>16</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>9s</dd></div>
@@ -646,8 +756,17 @@
               </div>
               <h4>Verdant Arrow</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Verdant Arrow spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>32</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>48</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>64</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>80</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>32</dd></div>
                 <div><dt>Mana cost</dt><dd>18</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -670,8 +789,17 @@
               </div>
               <h4>Ricochet Disc</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Ricochet Disc spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>48</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>72</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>96</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>120</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>48</dd></div>
                 <div><dt>Mana cost</dt><dd>32</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -696,8 +824,16 @@
               </div>
               <h4>Storm Eagle</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Storm Eagle spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>95</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>142</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>190</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>95</dd></div>
                 <div><dt>Mana cost</dt><dd>80</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>24s</dd></div>
@@ -751,8 +887,17 @@
               </div>
               <h4>Mana Crystal</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Mana Crystal spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Mana restored</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>28 mana</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>42 mana</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>56 mana</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>70 mana</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Restores</dt><dd>+28 mana</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>6s</dd></div>
@@ -774,8 +919,17 @@
               </div>
               <h4>Frost Lance</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Frost Lance spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>42</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>63</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>84</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>105</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>42</dd></div>
                 <div><dt>Mana cost</dt><dd>28</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -798,8 +952,17 @@
               </div>
               <h4>Meteor Strike</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Meteor Strike spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>70</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>105</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>140</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>175</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>70</dd></div>
                 <div><dt>Mana cost</dt><dd>50</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>9s</dd></div>
@@ -824,8 +987,16 @@
               </div>
               <h4>Arcane Meteor</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Arcane Meteor spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>120</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>180</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>240</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>120</dd></div>
                 <div><dt>Mana cost</dt><dd>100</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>25s</dd></div>
@@ -879,8 +1050,17 @@
               </div>
               <h4>Nature Talisman</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Nature Talisman spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>22 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>33 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>44 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>55 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+22 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -902,8 +1082,17 @@
               </div>
               <h4>Healing Bloom</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Healing Bloom spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>55 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>82 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>110 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>137 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+55 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>30</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>7s</dd></div>
@@ -928,8 +1117,17 @@
               </div>
               <h4>Kindred Wisps</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Kindred Wisps spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>80 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>120 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>160 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>200 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+80 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>45</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>12s</dd></div>
@@ -954,8 +1152,16 @@
               </div>
               <h4>Golem Seed</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Golem Seed spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>85</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>127</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>170</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>85</dd></div>
                 <div><dt>Mana cost</dt><dd>75</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>22s</dd></div>
@@ -1009,8 +1215,17 @@
               </div>
               <h4>Shadow Cloak</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Shadow Cloak spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>18 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>27 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>36 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>45 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+18 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>10s</dd></div>
@@ -1032,8 +1247,17 @@
               </div>
               <h4>Void Blade</h4>
               <p class="cast-type">Melee</p>
+              <table class="ability-levels" aria-label="Void Blade spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>38</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>57</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>76</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>95</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>38</dd></div>
                 <div><dt>Mana cost</dt><dd>16</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -1056,8 +1280,17 @@
               </div>
               <h4>Gale Slash</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Gale Slash spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>52</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>78</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>104</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>130</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>52</dd></div>
                 <div><dt>Mana cost</dt><dd>28</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>7s</dd></div>
@@ -1083,8 +1316,16 @@
               </div>
               <h4>Shadow Comet</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Shadow Comet spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>100</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>150</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>200</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>100</dd></div>
                 <div><dt>Mana cost</dt><dd>65</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>21s</dd></div>
@@ -1136,8 +1377,17 @@
               </div>
               <h4>Sanguine Chalice</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Sanguine Chalice spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>36 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>54 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>72 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>90 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+36 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -1159,8 +1409,17 @@
               </div>
               <h4>Afterlight Sickle</h4>
               <p class="cast-type">Melee</p>
+              <table class="ability-levels" aria-label="Afterlight Sickle spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>42</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>63</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>84</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>105</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>42</dd></div>
                 <div><dt>Mana cost</dt><dd>18</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -1183,8 +1442,17 @@
               </div>
               <h4>Withering Idol</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Withering Idol spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>60</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>90</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>120</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>150</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>60</dd></div>
                 <div><dt>Mana cost</dt><dd>36</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>9s</dd></div>
@@ -1209,8 +1477,16 @@
               </div>
               <h4>Dark Eclipse</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Dark Eclipse spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>110</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>165</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>220</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>110</dd></div>
                 <div><dt>Mana cost</dt><dd>80</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>26s</dd></div>
@@ -1265,8 +1541,17 @@
               </div>
               <h4>Final Measure</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Final Measure spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>20</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>30</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>40</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>50</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>20</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>9s</dd></div>
@@ -1289,8 +1574,17 @@
               </div>
               <h4>Siege Scarab</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Siege Scarab spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>50</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>75</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>100</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>125</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>50</dd></div>
                 <div><dt>Mana cost</dt><dd>22</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -1313,8 +1607,17 @@
               </div>
               <h4>Lodestone Surge</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Lodestone Surge spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>68</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>102</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>136</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>170</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>68</dd></div>
                 <div><dt>Mana cost</dt><dd>40</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>10s</dd></div>
@@ -1340,8 +1643,16 @@
               </div>
               <h4>Clockwork Charge</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Clockwork Charge spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>115</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>172</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>230</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>115</dd></div>
                 <div><dt>Mana cost</dt><dd>70</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>23s</dd></div>
@@ -1395,8 +1706,17 @@
               </div>
               <h4>Frost Sigil</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Frost Sigil spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>14</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>21</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>28</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>35</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>14</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -1419,8 +1739,17 @@
               </div>
               <h4>Ice Spear</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Ice Spear spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>48</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>72</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>96</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>120</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>48</dd></div>
                 <div><dt>Mana cost</dt><dd>30</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -1443,8 +1772,17 @@
               </div>
               <h4>Bone Marionette</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Bone Marionette spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>66</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>99</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>132</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>165</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>66</dd></div>
                 <div><dt>Mana cost</dt><dd>48</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>9s</dd></div>
@@ -1469,8 +1807,16 @@
               </div>
               <h4>Bound Void</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Bound Void spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>125</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>187</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>250</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>125</dd></div>
                 <div><dt>Mana cost</dt><dd>110</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>27s</dd></div>
@@ -1525,8 +1871,17 @@
               </div>
               <h4>Aether Siphon</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Aether Siphon spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Mana restored</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>30 mana</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>45 mana</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>60 mana</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>75 mana</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Restores</dt><dd>+30 mana</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>7s</dd></div>
@@ -1548,8 +1903,17 @@
               </div>
               <h4>Moth Hex</h4>
               <p class="cast-type">Projectile</p>
+              <table class="ability-levels" aria-label="Moth Hex spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>36</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>54</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>72</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>90</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>36</dd></div>
                 <div><dt>Mana cost</dt><dd>24</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -1572,8 +1936,17 @@
               </div>
               <h4>Dread Totem</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Dread Totem spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>58</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>87</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>116</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>145</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>58</dd></div>
                 <div><dt>Mana cost</dt><dd>42</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>9s</dd></div>
@@ -1598,8 +1971,16 @@
               </div>
               <h4>Void Portal</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Void Portal spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>105</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>157</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>210</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>105</dd></div>
                 <div><dt>Mana cost</dt><dd>90</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>24s</dd></div>
@@ -1654,8 +2035,17 @@
               </div>
               <h4>Rage Crucible</h4>
               <p class="cast-type">Self cast</p>
+              <table class="ability-levels" aria-label="Rage Crucible spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>20 HP</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>30 HP</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>40 HP</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>50 HP</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Healing</dt><dd>+20 HP</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -1677,8 +2067,17 @@
               </div>
               <h4>Molten Fist</h4>
               <p class="cast-type">Melee</p>
+              <table class="ability-levels" aria-label="Molten Fist spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>45</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>67</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>90</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>112</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>45</dd></div>
                 <div><dt>Mana cost</dt><dd>0</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>3</span><span class="ability-charge-pips" aria-hidden="true"><span></span><span></span><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>2s</dd></div>
@@ -1701,8 +2100,17 @@
               </div>
               <h4>Winged Boot</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Winged Boot spell levels">
+                <caption>Spell levels · 4 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>1</td><td>40</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>60</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>80</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>100</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>40</dd></div>
                 <div><dt>Mana cost</dt><dd>12</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>8s</dd></div>
@@ -1728,8 +2136,16 @@
               </div>
               <h4>Volcanic Eruption</h4>
               <p class="cast-type">Area cast</p>
+              <table class="ability-levels" aria-label="Volcanic Eruption spell levels">
+                <caption>Spell levels · 3 ranks</caption>
+                <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1</th><td>6</td><td>100</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>150</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>200</td></tr>
+                </tbody>
+              </table>
               <dl class="ability-stats">
-                <div><dt>Damage</dt><dd>100</dd></div>
                 <div><dt>Mana cost</dt><dd>24</dd></div>
                 <div><dt>Charges</dt><dd class="ability-charges"><span>1</span><span class="ability-charge-pips" aria-hidden="true"><span></span></span></dd></div>
                 <div><dt>Cast cooldown</dt><dd>20s</dd></div>
@@ -1750,40 +2166,50 @@
       <p class="kicker">THE SHOP</p>
       <h2>Items, costs, and bonuses</h2>
       <p>
-        Six inventory slots. Consumables stack to 8. Heroes start with 150 gold.
+        Six inventory slots. Consumables stack to 8 and show their count on the icon. Heroes start with 150 gold. Purchases require being inside your own keep, including its spawn room.
         Footmen drop 15, towers 75, heroes 100.
       </p>
       <h3 style="margin: 8px 0 12px; color: var(--gold);">Consumables</h3>
       <div class="shop">
         <article class="item-card">
           <div class="item-top">
-            <img class="icon" src="../../../../polyworld_data/items/ironroot_ration.png" alt="Ironroot Ration">
+            <img class="icon" src="../../../../polyworld_data/items/health_leaf.png" alt="Health Potion">
             <div>
-              <h3>Ironroot Ration</h3>
+              <h3>Health Potion</h3>
               <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">30</div>
             </div>
           </div>
-          <p class="bonus">Use: restore 40 health.</p>
+          <p class="bonus">Use: restore 120 health over 10 seconds. Damage interrupts regeneration.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/items/vitality_elixir.png" alt="Vitality Elixir">
             <div>
               <h3>Vitality Elixir</h3>
-              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">50</div>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">75</div>
             </div>
           </div>
-          <p class="bonus">Use: restore 90 health.</p>
+          <p class="bonus">Use: restore 90 health instantly.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
-            <img class="icon" src="../../../../polyworld_data/items/mana_potion.png" alt="Mana Potion">
+            <img class="icon" src="../../../../polyworld_data/items/mana_flower.png" alt="Mana Potion">
             <div>
               <h3>Mana Potion</h3>
               <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">45</div>
             </div>
           </div>
-          <p class="bonus">Use: restore 60 mana.</p>
+          <p class="bonus">Use: restore 90 mana over 10 seconds. Damage interrupts regeneration.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/mana_potion.png" alt="Mana Elixir">
+            <div>
+              <h3>Mana Elixir</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">90</div>
+            </div>
+          </div>
+          <p class="bonus">Use: restore 60 mana instantly.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
@@ -1796,6 +2222,15 @@
           <p class="bonus">Use: deal 35 strike damage to a living, visible enemy within your hero's attack range. Tower order and god protection still apply.</p>
         </article>
       </div>
+
+      <p>Health potions and elixirs share a 10-second cooldown. Mana potions and elixirs share a separate 10-second cooldown. Cooldowns begin on use and survive damage and death. Both slow regeneration effects stop on any positive incoming damage; moving and attacking do not interrupt them. Rejected uses consume nothing.</p>
+      <p>BASIC: item IDs are 1 Health Potion, 2 Vitality Elixir, 22 Mana Potion, and 3 Mana Elixir. <code>itemCooldown(slot)</code> reports live remaining ticks (24 per second), or zero for an empty/invalid slot. <code>canShop()</code> reports whether purchases are allowed. Buying elsewhere returns <code>ActionOutsideKeep</code>.</p>
+      <p>Inside your own spawn room, health and mana each recover at 20% of maximum per second. This is separate from potions and continues under attack. It does not apply elsewhere in the keep or in the enemy spawn, and cannot revive a dead hero. <code>inOwnSpawn()</code> reports whether your living hero is in this recovery area.</p>
+
+      <h3>Portal Scroll</h3>
+      <p><img class="icon" src="../../../../polyworld_data/items/waystone_scroll.png" alt="Portal Scroll"> Item 21 costs 100 gold and stacks to eight. Click the scroll, then right-click the map or minimap. It consumes one scroll and channels for 3 seconds, teleporting to visible, walkable ground within a living allied tower's sight (7 tiles for outer/inner towers, 8 for gate/guard towers). Distant destinations are clamped into tower range. Barracks cannot anchor a teleport.</p>
+      <p>You cannot move, attack, or cast during the channel, but can still take damage and die. Stun, root, death, or destruction of the selected tower cancels it. Damage alone does not cancel it. Completion or interruption starts a shared 60-second cooldown, preserved through death. Existing spells do not currently stun or root; those simulation effects interrupt teleport when applied.</p>
+      <p>BASIC: <code>useItemAt(slot, x, y)</code> accepts fractional coordinates and returns 1 on success, 0 on rejection. <code>selfPortalCooldown</code>, <code>selfChannelTicks</code>, <code>selfStunTicks</code>, and <code>selfRootTicks</code> report remaining ticks. <code>useItem(slot)</code> rejects scrolls because they require a destination.</p>
 
       <h3 style="margin: 22px 0 12px; color: var(--gold);">Equipment</h3>
       <div class="shop">
@@ -1962,6 +2397,17 @@
       </div>
     </section>
 
+    <section id="drafting" class="panel">
+      <p class="kicker">BEFORE THE BATTLE</p>
+      <h2>Draft your team</h2>
+      <p>A seeded random team picks first. Teams then alternate, with each team's players picking in spawn order. All ten heroes share one pool, and each can be picked once. Combat, waves, and the battle clock wait for every player to pick.</p>
+      <p>In player mode, select an available hero and click <strong>Lock in hero</strong> on your turn. The active player appears above the hero grid. Picked heroes turn gray and show their player and team. Space pauses or resumes drafting.</p>
+      <p>Every player, including humans, has ten simulation seconds to pick. The countdown pauses with the game. If the deadline expires, the game picks a random available hero. Drafting takes at most 100 simulation seconds for ten players and does not consume battle time: <code>maxTicks</code> and the CLI duration flags start counting after the last pick.</p>
+      <p>BASIC scripts read <code>drafting</code> and <code>draftTurnId</code>, then call <code>draftHero(class)</code>. Only the active player's script runs during drafting, every half second. The bundled base and rusher scripts try to fill frontline, carry, mage, support, and fighter roles. The draft itself allows any combination of available heroes, including multiple supports or carries.</p>
+      <p>Use <code>draftPlayerCount()</code>, <code>draftPlayerId(i)</code>, and <code>draftPlayerTeam(i)</code> to inspect the public roster in spawn order. <code>draftedClass(playerId)</code> returns the selected class or -1 if unpicked. <code>heroAvailable(class)</code> checks the shared pool. <code>heroRole(class)</code> returns frontline 0, carry 1, mage 2, support 3, or fighter 4.</p>
+      <p><code>draftHero</code> returns 1 on success, 0 on rejection. <code>lastActionError()</code> reports <code>ActionNotDrafting</code>, <code>ActionNotDraftTurn</code>, <code>ActionUnknownHero</code>, or <code>ActionHeroTaken</code>. Normal commands report <code>ActionDrafting</code> until drafting finishes. <code>selfClass</code> is -1 before your pick. <code>worldTick</code> includes drafting for replay timing.</p>
+    </section>
+
     <section id="casting" class="panel">
       <p class="kicker">ACTIONS AND SPELLS</p>
       <h2>Aim, cast, impact, recharge</h2>
@@ -1973,7 +2419,7 @@
       </div>
       <p><strong>Mana</strong> is paid when a cast is accepted. Basic attacks cost zero mana, as does Molten Fist. Other spells have their own mana costs. Invalid casts do not spend mana or charges; a valid shot into empty space does.</p>
       <div class="spell-grid">
-        <article class="spell-rule"><h3>Charges</h3><p>The number of casts held in reserve. You need at least one charge. Each hero starts with a full set; a respawn restores the set.</p></article>
+        <article class="spell-rule"><h3>Charges</h3><p>The number of casts held in reserve. You need at least one charge. Unlocking an ability grants its full charges. Respawning refills learned abilities. Locked abilities have no charges. Upgrading preserves spent charges and running cooldowns.</p></article>
         <article class="spell-rule"><h3>Cast cooldown</h3><p>The minimum time between uses of the same action, even if charges remain. It is separate from the effect's cast delay and from its recharge timer.</p></article>
         <article class="spell-rule"><h3>Recharge cooldown</h3><p>Charges refill one at a time. The timer starts with the first spent charge. Spending another does not restart it. When a charge returns, the next missing charge starts its own full recharge.</p></article>
       </div>
@@ -1987,14 +2433,16 @@
         <button id="charge-wait" type="button">Advance 10 seconds</button>
         <button id="charge-reset" type="button">Reset</button>
       </div>
-      <p><strong>Refill resources:</strong> Ironroot Ration costs 30 gold and heals 40 HP; Vitality Elixir costs 50 gold and heals 90 HP; Mana Potion costs 45 gold and restores 60 mana. Buy them in the <a href="#shop">shop</a>. Healing cannot revive a hero at zero HP.</p>
+      <p><strong>Refill resources:</strong> Return to your own spawn room for fast health and mana recovery. Buy slow potions or instant elixirs in your own <a href="#shop">keep shop</a>. Damage interrupts slow potion regeneration. Healing cannot revive a hero at zero HP.</p>
     </section>
     <section id="controls" class="panel">
       <p class="kicker">PLAYER CONTROLS</p>
       <h2>Control your hero</h2>
       <p>Idle heroes automatically attack the closest visible enemy creep nearby. Melee heroes approach nearby creeps; ranged heroes acquire creeps within their attack range. Select an enemy or right-click it to make it take priority. Both melee and ranged heroes move toward that target until they reach their own basic-attack range, then stop and attack repeatedly. When the target dies or is lost in fog, they return to nearby creeps. A ground move order cancels the attack and takes priority over automatic acquisition. These rules also apply with zero mana or all four abilities on cooldown.</p>
+      <p>Spend points with Shift+Q/W/E/R, Shift-click on an ability, or its gold + button. The HUD shows ranks, locked abilities, and available points. Unlocks and upgrades are always explicit. Points and ranks survive death.</p>
       <p>You control your four extra abilities; they only cast when you use them. Q/W/E/R cast immediately at your current valid target. Self actions always fire on key press and affect you. Melee actions also fire immediately: they strike a nearby target, or swing toward the pointer when there is none. For other abilities with no valid target, the key selects the ability and right-click casts at an object or the ground. Escape cancels the selection. With no ability selected, right-click moves or attacks. Click SHOP in the inventory, or press B, to open the full-screen item shop; click an item to buy it. Space pauses or resumes the battle, including while shopping. The HUD shows remaining charges and the wait until an empty action can be used again. A blue bar tracks progress toward the next charge.</p>
       <table class="spell-table"><thead><tr><th>Input</th><th>Action</th></tr></thead><tbody>
+        <tr><td>Shift + Q / W / E / R</td><td>Spend one ability point to unlock or upgrade the corresponding slot.</td></tr>
         <tr><td>Q / W / E / R</td><td>Your four extra abilities. Self and melee actions fire immediately; other actions use your current target or select right-click aiming.</td></tr>
         <tr><td>F / G</td><td>Use the first two inventory items, including health and mana potions.</td></tr>
         <tr><td>O</td><td>Toggle character outlines behind scenery. Enabled by default; hidden portions are outlined without revealing enemies in fog of war.</td></tr>
@@ -2004,8 +2452,33 @@
     <section id="basic" class="panel api-section">
       <p class="kicker">BASIC HOST</p>
       <h2>BASIC observations</h2>
+      <p>The <a href="../players/base.bas">base policy</a> is a playable reference
+        for all 68 GotA host functions: drafting, ability upgrades and casting,
+        last hits, objective pushing, enemy assessment, warning dodges, shopping,
+        recovery, portals, and buyback. Calls are made when useful, so not every
+        mechanic must occur in each match. Main decisions run every six ticks
+        with bounded observation scans, while automatic spells remain enabled.
+        Spell ranges and shapes have no host query and use a small table that
+        must follow changes in <code>content.nim</code>.</p>
       <p>Self data and visible objects are sampled for each decision and remain consistent during it, including after an action call. Spell queries read the pending casts, so a successful cast can append a spell during that decision. Object and spell indices are zero-based and may change next decision. Keep <code>objectId(i)</code> when tracking an object across decisions or calling <code>attackTarget</code>, rather than keeping its list index.</p>
-      <p>All values are integers. <code>worldScale = 60000</code> is the number of world units per tile, and <code>tickRate = 24</code> is the number of simulation ticks per second. <code>selfX</code>, <code>selfY</code>, <code>objectX(i)</code>, <code>objectY(i)</code>, <code>spellX(i)</code>, and <code>spellY(i)</code> use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.</p>
+      <p>Observations are integers. <code>worldScale = 60000</code> is the number of world units per tile, and <code>tickRate = 24</code> is the number of simulation ticks per second. <code>selfX</code>, <code>selfY</code>, <code>objectX(i)</code>, <code>objectY(i)</code>, <code>spellX(i)</code>, and <code>spellY(i)</code> use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.</p>
+      <h3 id="ability-progression">Ability progression</h3>
+      <p><code>levelAbility(slot)</code> spends one point to unlock or upgrade a spell, returning 1 on success or 0 on rejection. Slots 0-3 correspond to Q/W/E/R. Points are earned at level 1 and each later hero level, and remain banked until spent. All four fully ranked abilities cost 15 points. Basic-attack damage continues scaling with hero level.</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Function</th><th>Result</th></tr></thead>
+        <tbody>
+        <tr><td><code>levelAbility(slot)</code></td><td>Spend one point. Returns 1 on success, 0 on rejection.</td></tr>
+        <tr><td><code>abilityPoints()</code></td><td>Unspent points.</td></tr>
+        <tr><td><code>abilityLevel(slot)</code></td><td>Current rank, or 0 when locked.</td></tr>
+        <tr><td><code>abilityMaxLevel(slot)</code></td><td>4 for Q/W/E, 3 for R.</td></tr>
+        <tr><td><code>abilityRequiredLevel(slot)</code></td><td>Hero level needed for the next rank, or 0 at maximum.</td></tr>
+        <tr><td><code>canLevelAbility(slot)</code></td><td>1 when alive and eligible to spend a point, otherwise 0.</td></tr>
+        <tr><td><code>abilityDamage(slot)</code>, <code>abilityHeal(slot)</code>, <code>abilityRestore(slot)</code></td><td>Effect per target at the learned rank, or 0 when locked.</td></tr>
+        <tr><td><code>abilityManaCost(slot)</code></td><td>Mana cost, including while locked.</td></tr>
+        </tbody>
+      </table>
+      <p>These queries read live state, including changes earlier in the same decision. Invalid slots return 0. Upgrades preserve cooldowns and charges. Spells already in flight retain their cast rank. The base and rusher policies explicitly spend points in R/W/E/Q priority order; automatic casting uses only learned abilities.</p>
+      <p>Read <code>lastActionError()</code> after a rejected command. Progression errors include <code>ActionNoAbilityPoints</code>, <code>ActionAbilityMaxLevel</code>, and <code>ActionHeroLevelRequired</code>. Casting a locked spell returns <code>ActionAbilityLocked</code>.</p>
       <h3>Your hero</h3>
       <p>The existing <code>selfId</code>, <code>selfTeam</code>, <code>selfClass</code>, <code>selfX</code>, <code>selfY</code>, <code>selfHp</code>, <code>selfMaxHp</code>, <code>selfMana</code>, <code>selfMaxMana</code>, <code>selfGold</code>, <code>selfLevel</code>, <code>selfLayer</code>, and <code>worldTick</code> remain available. These additional read-only values describe the current hero:</p>
       <table class="spell-table api-table">
@@ -2019,8 +2492,26 @@
           <tr><td><code>selfAttacksLanded</code></td><td>Lifetime count of successful basic hits, preserved across respawns. Spells do not increment it.</td></tr>
         </tbody>
       </table>
+      <h3>Death and buyback</h3>
+      <p>The first death takes 9 seconds to respawn, including the 1-second death animation. Each subsequent death adds 5 seconds, up to a total of 60 seconds. Counts belong to each hero and persist after respawning. BASIC decisions continue while dead.</p>
+      <table class="spell-table api-table">
+        <thead><tr><th>Value or function</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>selfDeaths</code></td><td>This hero's total death count.</td></tr>
+          <tr><td><code>selfRespawnTicks</code></td><td>Remaining respawn delay in ticks, or zero while alive.</td></tr>
+          <tr><td><code>buybackPrice()</code></td><td>100 gold times this hero's death count. Returns zero while alive or after the match ends. The price stays fixed during each death.</td></tr>
+          <tr><td><code>buyback()</code></td><td>Spends this hero's gold and immediately respawns them with full health, mana, and spell charges. Returns 1 when accepted or 0 when rejected. Inventory, level, XP, and death count are preserved.</td></tr>
+        </tbody>
+      </table>
+      <p>A living hero, an ended match, or insufficient gold rejects buyback without spending gold. Use <code>lastActionError()</code> for the reason. The HUD displays the respawn countdown and buyback price while dead. Buyback attempts are recorded for replay and seeking. The bundled <code>players/base.bas</code> buys back as soon as it can afford the price, skipping normal commands while dead and resuming them on the decision after buyback.</p>
+      <pre><code>if selfRespawnTicks &gt; 0 then
+  price = buybackPrice()
+  if price &gt; 0 and selfGold &gt;= price then
+    accepted = buyback()
+  end if
+end if</code></pre>
       <h3>Visible objects</h3>
-      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
+      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged caster per wave, giving six melee and two ranged creeps per lane for each team. Destroying a barracks stops its four creeps from spawning. For creeps, <code>objectClass(i)</code> is 0 for melee and 1 for ranged. Casters attack from up to four tiles away. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
       <table class="spell-table api-table">
         <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -2034,6 +2525,7 @@
         </tbody>
       </table>
       <p>These new object queries return zero for invalid indices or fields that do not apply to that object. Invalid inventory slots also return zero. Hero level, mana, and inventory queries return zero for non-heroes. An object's ID is not a valid substitute for its list index.</p>
+      <p>Each enemy creep death provides a shared pool of 15 XP to living heroes within six tiles on the same navigation floor, regardless of starting lane. A nearby hero who lands the last hit receives 15% of that pool first; the remaining 85% is split equally among all nearby heroes, including the last hitter. With three heroes, the last hitter earns 6.5 XP and each teammate earns 4.25 XP. Fractional XP carries forward between kills. Without an eligible hero last hitter, the full pool is shared equally. Hero last hits also award 15 gold; tower and creep last hits grant no gold to heroes.</p>
       <h3>Pending spells and warnings</h3>
       <p>Loop over <code>0</code> through <code>spellCount() - 1</code>. This list contains unresolved casts from their start through impact, including projectiles and area warnings. Allied casts are observable; enemy casts require their aim position to be visible, matching the viewer's warning visibility. Completed effects are omitted.</p>
       <table class="spell-table api-table">
@@ -2051,13 +2543,19 @@
       <p><code>players/rusher.bas</code> pushes all five heroes down mid together. When any pair of living allies is more than 10 tiles apart, the team regroups toward its center until the gap is at most 8 tiles. Otherwise it attacks visible, vulnerable enemies within 20 tiles or attack-moves through the middle toward the enemy god. Dead allies are ignored until they respawn. Automatic abilities stay enabled.</p>
       <h3>Action feedback</h3>
       <p><code>lastActionError()</code> reports your hero's latest submitted command error. Success clears it to <code>NoActionError</code> (0). Rejection preserves the command's 0 return value and records the first failed check. Read-only queries and automatic casts do not overwrite it. Read the error immediately after the command; unlike sampled self data, it updates during a decision.</p>
-      <p>Read-only constants (values 0 through 19): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
+      <p>Read-only constants (values 0 through 34): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>, <code>ActionChanneling</code>, <code>ActionStunned</code>, <code>ActionRooted</code>, <code>ActionOutsideKeep</code>, <code>ActionAbilityLocked</code>, <code>ActionNoAbilityPoints</code>, <code>ActionAbilityMaxLevel</code>, <code>ActionHeroLevelRequired</code>, <code>ActionNotDead</code>, <code>ActionMatchEnded</code>, <code>ActionDrafting</code>, <code>ActionNotDrafting</code>, <code>ActionNotDraftTurn</code>, <code>ActionUnknownHero</code>, <code>ActionHeroTaken</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
       <p>The <a href="../../../docs/stats.md#gota-replay-events">replay extractor</a> provides typed post-match events for both teams. Detailed capture is compiled in with <code>-d:replayEvents</code> and is unavailable to live BASIC policies.</p>
       <h3 id="terrain-api">Terrain API</h3>
       <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>
       <p>Read-only constants expose <code>mapWidth</code>, <code>mapHeight</code>, <code>mapLayers</code>, <code>GroundLayer</code>, <code>RedFortLayer</code>, <code>BlueFortLayer</code>, and <code>WaterLayer</code>. Terrain kinds are <code>TerrainNone</code>, <code>TerrainGrass</code>, <code>TerrainRoad</code>, <code>TerrainRock</code>, <code>TerrainTrees</code>, <code>TerrainMarsh</code>, <code>TerrainWall</code>, and <code>TerrainWater</code>.</p>
     </section>
 
+  <section id="basic-numbers">
+    <h2>BASIC numbers and coordinates</h2>
+    <p>BASIC uses <a href="https://github.com/treeform/bassy">Bassy</a> with <a href="https://github.com/treeform/fixxy">Fixxy</a> Q16.16 decimals enabled. Globals and arrays retain fractional values across decisions. <code>/</code> performs decimal division; <code>\</code> performs integer division. Decimal operands must fit -32768 through 32767.99998. Integer-only calculations retain the full signed 32-bit range. When converting large world-unit observations, divide them as integers first, for example <code>(selfAttackRange \ 100) / (worldScale \ 100)</code> in GotA.</p>
+    <p><code>and</code>, <code>or</code>, <code>xor</code>, and <code>not</code> are bitwise. Comparisons produce -1 for true and 0 for false; conditions accept any nonzero number. Host flags and action results remain 1 or 0, so use <code>flag = 0</code> instead of <code>not flag</code> to negate a host flag.</p>
+    <p><code>walkTo(x, y)</code>, <code>attackMove(x, y)</code>, and <code>castPoint(slot, x, y)</code> accept fractional tile coordinates. For example, <code>walkTo(selfX + 0.25, selfY - 0.25)</code> selects a point a quarter tile from the current tile center. Integers continue to name tile centers. IDs, slots, indices, and terrain queries still require exact integers. Fractional arguments are recorded without truncation.</p>
+  </section>
   </main>
 
   <script>

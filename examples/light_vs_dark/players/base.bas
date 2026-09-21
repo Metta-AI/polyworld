@@ -31,9 +31,8 @@
 ' obsIdle is true for a unit taking no orders or a finished building.
 ' For a tree, obsId is a tile index and obsResource is the wood left.
 '
-' WATCH OUT. `and`, `or` and `not` here are LOGICAL, not bitwise: 16 and 1
-' is 1, not 0. There is no way to test a bit, which is why every condition
-' above is its own call instead of a packed flags word.
+' Bassy `and`, `or`, and `not` are bitwise. Comparisons return -1 or 0.
+' Host condition readers return 1 or 0; use reader(i) = 0 to negate one.
 '
 ' QUERIES
 '   distance(x1, y1, x2, y2)   nearestEnemy(unitId)

@@ -97,9 +97,21 @@
     .methods p {break-inside:avoid;margin:0 0 13px}
     footer {display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:20px 0 32px;color:var(--muted);gap:20px}
     .back {display:inline-block;margin-bottom:18px}
+    .spell-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}
+    .spell-card {overflow:hidden;min-width:0}
+    .spell-heading {display:flex;align-items:center;gap:14px;padding:18px 20px}
+    .spell-heading img {width:54px;height:54px;object-fit:contain;border:1px solid var(--line);border-radius:6px;background:var(--well)}
+    .spell-heading h3 {margin-top:4px}
+    .spell-key {color:var(--gold);font-weight:700;margin-right:8px}
+    .spell-card th,.spell-card td {padding:10px 16px}
+    .spell-card td:first-child {color:var(--gold)}
+    .spell-timing {display:flex;flex-wrap:wrap;gap:6px 18px;padding:14px 20px;border-top:1px solid var(--line);color:var(--muted)}
+    .spell-intro {max-width:950px}
+    .spell-intro code {color:var(--gold);white-space:nowrap}
     [hidden] {display:none!important}
     @media(max-width:1000px) {.wrap{width:calc(100% - 32px)}.roster{grid-template-columns:repeat(5,1fr)}.hero-banner .facts{grid-template-columns:repeat(2,1fr)}.detail-grid{grid-template-columns:1fr}.mast nav{gap:15px}.metric-grid{grid-template-columns:repeat(3,1fr)}}
     @media(max-width:660px) {.logo{width:160px}.mast nav{display:none}.heading{display:block;padding-top:24px}.heading .status{margin-top:12px}.facts{grid-template-columns:repeat(2,1fr)}.fact{padding:14px;gap:10px}.roster{grid-template-columns:repeat(2,1fr)}.hero-banner{padding:16px;gap:16px;align-items:flex-start}.large-portrait{width:94px;height:125px}.hero-banner .facts{grid-template-columns:repeat(2,1fr)}.hero-banner .fact{padding:8px}.metric-grid{grid-template-columns:repeat(2,1fr)}.scope{width:100%;justify-content:space-between}.methods{columns:1}.toolbar{align-items:flex-start}.controls{width:100%}.controls input{flex:1;min-width:120px}footer{display:block}.pad{padding:17px}}
+    @media(max-width:800px) {.spell-grid{grid-template-columns:1fr}.spell-heading{padding:16px}.spell-card th,.spell-card td{padding:10px}.spell-section .section-title{align-items:flex-start;flex-direction:column;gap:4px}}
     /* Five shared type styles keep labels and table text readable. */
     body,input,button,select,td,.outline,.controls,.rankline {
       font:var(--body);
@@ -218,12 +230,38 @@
     function metric(value,label,sub,color='') {
       return `<div class="metric"><span class="label">${label}</span><b class="${color}">${value}</b><small>${sub}</small></div>`;
     }
+    function spellLevels(hero) {
+      return `<section class="spell-section" aria-labelledby="spell-title">
+        <div class="section-title"><h2 id="spell-title">Spell levels</h2><span class="label">Current spell tuning</span></div>
+        <div class="spell-intro">
+          <p>All four spells start locked at rank 0. You receive one ability point at hero level 1 and one per level after that. Spend a point to unlock rank 1 or upgrade a learned spell. Meeting the hero-level requirement does not unlock it automatically.</p>
+          <p>Q, W, and E have four ranks at hero levels 1 / 3 / 5 / 7. R has three at 6 / 12 / 18. Each extra rank adds 50% of the rank-1 effect, rounded down. Values below are per affected target.</p>
+          <p class="small">Use Shift+Q/W/E/R, an ability's + button, or BASIC <code>levelAbility(slot)</code> with slots 0-3. Upgrading preserves charges and cooldowns. Pending casts keep their original rank, and learned ranks survive death.</p>
+          <p class="small">These are the current game rules. The match-version filter changes historical performance statistics, not this spell reference.</p>
+        </div>
+        <div class="spell-grid">${hero.abilities.map(ability => `
+          <article class="panel spell-card">
+            <header class="spell-heading">
+              <img src="${ability.icon}" alt="" loading="lazy">
+              <div><span class="spell-key">${ability.key}</span><span class="label">${ability.ultimate ? 'Ultimate' : 'Ability'} · ${ability.ranks.length} ranks</span><h3>${escape(ability.name)}</h3></div>
+            </header>
+            <div class="scroll"><table aria-label="${escape(ability.name)} spell levels">
+              <thead><tr><th scope="col">Spell rank</th><th scope="col">Hero level</th><th scope="col">${escape(ability.effect)}</th><th scope="col">Mana cost</th></tr></thead>
+              <tbody>${ability.ranks.map(rank => `<tr><td>${rank.rank}${rank.rank === 1 ? ' · Unlock' : ''}</td><td>${rank.required_level}</td><td>${number(rank.amount)}</td><td>${number(rank.mana_cost)}</td></tr>`).join('')}</tbody>
+            </table></div>
+            <div class="spell-timing small"><span><b>${ability.charges}</b> ${ability.charges === 1 ? 'charge' : 'charges'}</span><span><b>${number(ability.cooldown_seconds,1)}s</b> cast cooldown</span><span><b>${number(ability.recharge_seconds,1)}s</b> per charge</span></div>
+          </article>`).join('')}</div>
+      </section>`;
+    }
     function detail(hero) {
       const row = rows().find(r => r.hero === hero.name);
-      if (!row) {$('detail').innerHTML='<p class="empty">No verified appearances for this hero in the selected version.</p>';return;}
+      if (!row) {
+        $('detail').innerHTML=`<a class="back" href="#">← All hero statistics</a><h1>${escape(hero.name)}</h1><p class="empty">No verified appearances for this hero in the selected version.</p>${spellLevels(hero)}`;
+        return;
+      }
       const ci = row.win_rate_ci95;
       $('detail').innerHTML = `<a class="back" href="#">← All hero statistics</a><div class="panel hero-banner"><img class="large-portrait" src="${hero.portrait}" alt="${escape(hero.name)}"><div class="hero-bio"><span class="kicker ${teamColor(row.team)}">${teamName(row.team)}</span><h1>${escape(hero.name)}</h1><p>${escape(hero.role)}</p><div class="facts">${fact(number(row.games),'Games','')}${fact(percent(row.win_rate),'Win rate',ci?`95% interval ${percent(ci[0])}–${percent(ci[1])}`:'')}${fact(number(row.avg_level,2),'Avg final level','')}${fact(number(row.avg_minutes,1)+' min','Avg duration','')}</div></div></div>${insight()}
-        <div id="hero-panel"></div>`;
+        ${spellLevels(hero)}<div class="section-title"><h2>Match statistics</h2><span class="label">Selected analysis window</span></div><div id="hero-panel"></div>`;
       const bins = row.level_bins;
       const maximum = Math.max(1,...bins);
       const rank = key => [...rows()].sort((a,b)=>b[key]-a[key]).findIndex(r=>r.hero===hero.name)+1;

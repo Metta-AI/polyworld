@@ -4,7 +4,8 @@
 
 import
   std/strformat,
-  polyworld/[basic, bodies, metrics, tapes],
+  bassy,
+  polyworld/[bodies, metrics, tapes],
   ../examples/light_vs_dark/bots,
   ../examples/light_vs_dark/content,
   ../examples/light_vs_dark/maps,
@@ -1054,3 +1055,30 @@ block:
       game.world.damageEntity(building.id, 100_000, LightPlayer)
       break
   doAssert game.world.stats.values[0][StructuresMetric] == 1
+
+echo "Testing LVD decimal move orders and replay payloads"
+block:
+  let
+    game = newGame(map, MatchTicks)
+    unit = game.world.units[0]
+    origin = unit.body.pos
+    offset = fixedVec2(0.25'fx, -0.25'fx)
+  loadBots(game, ["accepted = moveUnit(" & $unit.id & ", " &
+    $unit.tile.x & " + 0.25, " & $unit.tile.y & " - 0.25)\n", ""])
+  game.world.tick = DecisionTicks
+  game.recorder = initReplayRecorder(Setup())
+  runBotDecisions(game)
+  doAssert not game.brains[0].failed
+  doAssert unit.goalOffset == offset
+  doAssert game.recorder.data.actions.len == 1
+  let action = game.recorder.data.actions[0]
+  doAssert action.offset == offset
+  let snapshot = game.world.clone()
+  for pass in 0 .. 1:
+    if pass == 1:
+      game.world.restore(snapshot)
+      doAssert game.world.applyReplayAction(action)
+    game.world.run(60)
+    doAssert game.world.units[0].state == UnitIdle
+    doAssert length(game.world.units[0].body.pos - origin - offset) <=
+      fixed(1, 1000)

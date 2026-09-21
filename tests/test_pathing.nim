@@ -219,6 +219,9 @@ block:
     let (origin, dir) = tileRay(2, 2, 4)
     let hit = pickWalkableTile(origin, dir)
     doAssert not hit.hit, "an impassable tile must not be a walk target"
+    let aimed = pickTile(origin, dir)
+    doAssert aimed.hit and aimed.x == 2 and aimed.z == 2,
+      "targeting may pick blocked terrain before clamping a portal landing"
 
 echo "Testing tile borders include changing tree and building blockers"
 block:

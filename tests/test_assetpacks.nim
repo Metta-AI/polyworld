@@ -264,6 +264,30 @@ block:
     ## Rejects extensions whose references cannot be preserved.
     discard packAssets(@[declaration], source, output)
   )
+  var unlit = parseGlb(original)
+  unlit.doc["extensionsUsed"] = %*["KHR_materials_unlit"]
+  unlit.doc["materials"][0]["extensions"] = %*{"KHR_materials_unlit": {}}
+  writeFile(source / "pack.glb", encodeGlb(unlit.doc, unlit.binary))
+  discard packAssets(@[declaration], source, output)
+  let packedUnlit = parseGlb(readFile(output / "stage/pack.glb"))
+  doAssert "KHR_materials_unlit" in
+    packedUnlit.doc["materials"][0]["extensions"]
+  unlit.doc["materials"][0]["extensions"]["KHR_materials_specular"] =
+    %*{"specularFactor": 0.24}
+  writeFile(source / "pack.glb", encodeGlb(unlit.doc, unlit.binary))
+  discard packAssets(@[declaration], source, output)
+  let
+    packedSpecular = parseGlb(readFile(output / "stage/pack.glb"))
+    extensions = packedSpecular.doc["materials"][0]["extensions"]
+    specular = extensions["KHR_materials_specular"]
+  doAssert specular["specularFactor"].getFloat == 0.24
+  let extension = unlit.doc["materials"][0]["extensions"]
+  extension["KHR_materials_specular"]["specularTexture"] = %*{"index": 0}
+  writeFile(source / "pack.glb", encodeGlb(unlit.doc, unlit.binary))
+  expectAssetError(proc() =
+    ## Rejects extension texture references that would need remapping.
+    discard packAssets(@[declaration], source, output)
+  )
 
 echo "Testing cached bakes and content-based invalidation"
 block:

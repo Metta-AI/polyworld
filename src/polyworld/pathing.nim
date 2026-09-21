@@ -352,12 +352,12 @@ proc tileTopHit(origin, dir: Vec3, layer: QuadLayer, x, z: int): float32 =
     if distance > 0 and (result < 0 or distance < result):
       result = distance
 
-proc pickWalkableTile*(
+proc pickTile*(
     origin, dir: Vec3,
     minLayer = 0,
     maxLayer = -1
 ): tuple[hit: bool, layer, x, z: int] =
-  ## Nearest existing tile top the ray hits, if that tile is walkable.
+  ## Returns the nearest existing tile top hit by a ray.
   ## Missing tiles do not block, so a shaft hole picks the ramp below.
   if dir.length < 1e-8:
     return
@@ -386,8 +386,18 @@ proc pickWalkableTile*(
           hitLayer = li
           hitX = x
           hitZ = z
-  if found and isWalkable(hitLayer, hitX, hitZ):
+  if found:
     result = (true, hitLayer, hitX, hitZ)
+
+proc pickWalkableTile*(
+    origin, dir: Vec3,
+    minLayer = 0,
+    maxLayer = -1
+): tuple[hit: bool, layer, x, z: int] =
+  ## Accepts a picked tile only when its top is walkable.
+  result = pickTile(origin, dir, minLayer, maxLayer)
+  if result.hit and not isWalkable(result.layer, result.x, result.z):
+    result = default(typeof(result))
 
 proc worldWalkable*(layerIndex, worldX, worldZ: int): bool =
   ## Walkability at a world tile, converted into that layer's local grid.

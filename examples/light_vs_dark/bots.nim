@@ -11,7 +11,8 @@
 ## kill things, and it is where fog of war is applied.
 
 import
-  polyworld/[metrics, basic, profiles],
+  bassy,
+  polyworld/[bodies, metrics, profiles],
   content,
   sim
 
@@ -299,10 +300,7 @@ proc buildOverlordHost*(playerId: int32): Host =
   reader("obsState", state)
   reader("obsResource", resource)
 
-  ## Each condition gets its own reader rather than packing them into one
-  ## bitfield. This BASIC's `and` is logical, not bitwise, so a script has no
-  ## way to pick a bit out of a mask without `div` and `mod` games, and the
-  ## obvious-looking attempt silently reads as true.
+  ## Exposes each observed condition as an integer 1 or 0.
   template flagReader(readerName: string, bit: int32) =
     let callback: HostProc = proc(arguments: openArray[int32]): int32 =
       int32((observedAt(arguments[0]).flags and bit) != 0)
@@ -471,14 +469,20 @@ proc buildOverlordHost*(playerId: int32): Host =
   ## Commands. One per replay action kind, one per validator, each returning
   ## one on acceptance and zero on refusal, and each refusing outright if the
   ## named entity is not this player's.
-  let moveUnitProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    int32(activeGame.applyMove(playerId, arguments[0], arguments[1],
-      arguments[2]))
+  let moveUnitProc: NumericHostProc = proc(
+      arguments: openArray[Value]
+  ): Value =
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[1].asFixed, arguments[2].asFixed))
+    int32(activeGame.applyMove(playerId, arguments[0].asInt, x, y, offset))
   discard result.addFunction("moveUnit", 3, moveUnitProc, 400)
 
-  let attackMoveProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    int32(activeGame.applyAttackMove(playerId, arguments[0], arguments[1],
-      arguments[2]))
+  let attackMoveProc: NumericHostProc = proc(
+      arguments: openArray[Value]
+  ): Value =
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[1].asFixed, arguments[2].asFixed))
+    int32(activeGame.applyAttackMove(playerId, arguments[0].asInt, x, y, offset))
   discard result.addFunction("attackMove", 3, attackMoveProc, 400)
 
   let attackUnitProc: HostProc = proc(arguments: openArray[int32]): int32 =

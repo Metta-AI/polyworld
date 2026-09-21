@@ -79,6 +79,13 @@ report. The template is source for the generator, not the page to open.
 Shared site styling comes from `polyworld-buff/GOTA/site.css` when the
 website checkout is selected.
 
+Each hero profile includes a spell-level reference generated directly from
+`content.nim`: every learnable rank, its required hero level, effect amount,
+mana cost, charge capacity, and cooldowns. Spell icons travel with the
+report's other assets. These are current tuning values, independent of the
+historical match-version filter. Updating spell tuning and regenerating the
+report updates the reference without editing the HTML by hand.
+
 Outputs include:
 
 - `report.html` and `hero_assets/`: a static page with GOTA portraits, fonts,
