@@ -544,8 +544,9 @@ proc testClothing() =
             player.seek(0.3)
             for name in pants.nodes:
               doAssert nodes[name].visible == (name notin boots.hides)
-            doAssert not nodes["Foot.Left"].visible
-            doAssert not nodes["Foot.Right"].visible
+            for foot in ["Foot.Left", "Foot.Right"]:
+              doAssert nodes[foot].visible ==
+                (foot notin boots.hides and foot notin pants.hides)
             doAssert nodes["Body"].visible
           manifest.selectPart(selection, "Foot", "None")
           nodes.applySelection(manifest, selection)
@@ -1090,6 +1091,52 @@ proc testGota() =
               doAssert node.pos == source.pos
               doAssert node.rot == source.rot
 
+proc testGods() =
+  ## Checks both modular god presets on the shared rig and their budgets.
+  let
+    manifest = readManifest(AssetDir)
+    model = readCharacter(AssetDir, manifest)
+    nodes = partNodes(model.root)
+    actors = readLineup(AssetDir, manifest, model.root, "Gota Gods")
+  doAssert actors.len == 2
+  doAssert actors[0].name == "Zeus" and actors[1].name == "Hades"
+  var selection = manifest.defaultSelection()
+  for preset in manifest.presets:
+    if preset.group != "Gota Gods":
+      continue
+    manifest.applyPreset(selection, preset)
+    nodes.applySelection(manifest, selection)
+    doAssert nodes["Head"].visible
+    doAssert nodes["GotaSkinUpper"].visible
+    doAssert not nodes["Body"].visible
+    for foot in ["GotaFoot.Left", "GotaFoot.Right"]:
+      doAssert nodes[foot].visible == (preset.name == "Zeus"),
+        "Open sandals must retain the existing feet."
+    var total, parts = 0
+    for node in nodes.values:
+      if node.visible:
+        for primitive in node.mesh.primitives:
+          total += (primitive.indices16.len + primitive.indices32.len) div 3
+    doAssert total > 0 and total < 20_000, preset.name
+    for i, category in manifest.categories:
+      if category.key notin ["Chest", "Belt", "Back", "Headgear", "Hair",
+                             "Beard", "Leg", "Foot", "Right hand", "Left hand"]:
+        continue
+      doAssert selection[i] >= 0, preset.name & " missing " & category.key
+      let item = category.items[selection[i]]
+      doAssert item.id.contains("gota_" & preset.name.toLowerAscii() & "_")
+      doAssert item.files.len == 1
+      var triangles = 0
+      for name in item.nodes:
+        doAssert nodes[name].visible
+        for primitive in nodes[name].mesh.primitives:
+          triangles += (primitive.indices16.len + primitive.indices32.len) div 3
+      doAssert triangles > 0 and triangles < 5_000,
+        preset.name & " " & category.key
+      inc parts
+    doAssert parts == 10
+    echo preset.name, ": ", total, " triangles, ten modular parts verified."
+
 proc testSwordSockets() =
   ## Checks fixed grips and arm alignment at the reported attack frame.
   let manifest = readManifest(AssetDir)
@@ -1226,6 +1273,7 @@ else:
   testGarments()
   testGnomes()
   testGota()
+  testGods()
   testSwordSockets()
   testWeights()
   testReference()

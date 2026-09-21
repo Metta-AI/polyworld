@@ -12,6 +12,7 @@ proc run() =
     presetName = getEnv("REVIEW_PRESET", manifest.presets[0].name)
     equipment = getEnv("REVIEW_EQUIPMENT", "0") == "1"
     headOnly = getEnv("REVIEW_HEAD", "0") == "1"
+    allParts = getEnv("REVIEW_ALL_PARTS", "0") == "1"
     smoothLighting = getEnv("REVIEW_PBR", "0") == "1"
     angle = parseFloat(getEnv("REVIEW_ANGLE", "0")).float32
   var
@@ -60,7 +61,9 @@ proc run() =
   var
     original: Table[string, bool]
     categories: seq[string]
-  for key in (if headOnly: @["Headgear"]
+  for key in (if allParts: @["Foot", "Leg", "Belt", "Chest", "Hand", "Back",
+                            "Headgear", "Hair", "Beard", "Left hand", "Right hand"]
+              elif headOnly: @["Headgear"]
               elif equipment: @["Left hand", "Right hand", "Back"]
               else: @["Foot", "Leg", "Belt", "Chest", "Headgear"]):
     for category in inventory.categories:

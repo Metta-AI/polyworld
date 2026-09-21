@@ -108,8 +108,10 @@ proc readLineup*(
     let index = result.len
     actor.transform = translate(vec3(
       if group == "Gota": (index mod 5 - 2).float32 * 3.7
+      elif group == "Gota Gods": (index.float32 - 0.5) * 4.6
       else: (index mod 3 - 1).float32 * 3.45,
       if group == "Gota": (1 - index div 5).float32 * 4.1
+      elif group == "Gota Gods": 0'f
       else: (2 - index div 3).float32 * 4.05,
       0
     ))
