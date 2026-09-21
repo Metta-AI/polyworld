@@ -173,7 +173,8 @@ proc advanceGame*() =
       runBotDecisions(run)
   )
 
-  run.sampleMetrics(run.finished())
+  run.sampleMetrics(run.finished() or
+    (run.replayMode and run.world.tick == run.replayData.hashes.len))
   run.metrics.finishTick(run.world.tick)
 
 ## Headless reporting and replay recording.
