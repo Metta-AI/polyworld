@@ -2278,7 +2278,6 @@ proc runGraphics*() =
   clickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
   worldBarRenderer.closeWorldBarRenderer()
-  selectionOutline.closeSelectionOutline()
   particles.closeParticles()
   spellEffects.closeSpellRenderer()
   selectionOutline.closeSelectionOutline()
