@@ -185,7 +185,7 @@
         "ticks": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 28800
+          "maximum": 31200
         },
         "seed": {
           "type": "integer"
