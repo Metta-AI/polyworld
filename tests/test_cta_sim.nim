@@ -1,7 +1,8 @@
 ## Call to Adventure simulation: hashing, claims, movement, and restore.
 
 import
-  polyworld/[fixed, metrics, pathing, rngs, tapes],
+  fixxy,
+  polyworld/[metrics, pathing, rngs, tapes],
   ../examples/call_to_adventure/[content, sim, replays]
 
 proc testSetup(): Setup =

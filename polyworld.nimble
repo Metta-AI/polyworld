@@ -6,6 +6,8 @@ license     = "MIT"
 srcDir = "src"
 
 requires "nim >= 2.2.10"
+requires "https://github.com/treeform/bassy"
+requires "https://github.com/treeform/fixxy"
 requires "silky"
 requires "windy"
 requires "pixie"

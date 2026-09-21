@@ -5,7 +5,8 @@
 ## cannot write world fields directly.
 
 import
-  polyworld/[metrics, basic, cli, controllers, pathing, profiles],
+  bassy,
+  polyworld/[bodies, metrics, cli, controllers, pathing, profiles],
   content,
   sim,
   replays
@@ -84,7 +85,8 @@ proc issueHeroAction(action: ReplayAction): int32 =
       action.kind,
       action.first,
       action.second,
-      action.third
+      action.third,
+      action.offset
     )
   int32(activeGame.applyHeroAction(activeHeroSlot, action))
 
@@ -166,14 +168,17 @@ proc buildHeroHost(heroId: int32): Host =
         result = target.id
   discard result.addFunction("woundedAlly", 0, woundedAllyProc, 12)
 
-  let walkToProc: HostProc = proc(arguments: openArray[int32]): int32 =
+  let walkToProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
+    let (x, z, offset) = splitTilePoint(fixedVec2(
+      arguments[1].asFixed, arguments[2].asFixed))
     issueHeroAction(ReplayAction(
       tick: uint32(activeGame.world.tick),
       heroId: heroId,
       kind: ActionWalkTo,
-      first: arguments[0],
-      second: arguments[1],
-      third: arguments[2]
+      first: arguments[0].asInt,
+      second: x,
+      third: z,
+      offset: offset
     ))
   discard result.addFunction("walkTo", 3, walkToProc, 300)
 

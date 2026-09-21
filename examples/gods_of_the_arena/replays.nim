@@ -2,17 +2,20 @@
 
 import
   std/os,
-  polyworld/[tapes, metrics],
+  fixxy,
+  polyworld/[bodies, tapes, metrics],
   content, presets
 
 export presets
+
+export fixxy
 
 const
   ReplayGame* = "gods_of_the_arena"
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 42'u16
+  ReplayGameVersion* = 43'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -47,6 +50,8 @@ type
     tick*: uint32
     heroId*: int32
     kind*: uint8
+    offset*: FixedVec2
+      ## Movement and ground aim offsets from the named tile center.
     slot*: int32
     first*: int32
     second*: int32
@@ -88,6 +93,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one bot action in deterministic tick order.
   if recorder == nil:
     return
+  if not action.offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if action.kind != ActionWalkTo and
       action.kind != ActionAttackTarget and
       action.kind != ActionBuyItem and
@@ -103,13 +110,14 @@ proc recordCast*(
     recorder: ReplayRecorder,
     tick: uint32,
     heroId, slot, first, second: int32,
-    ground: bool
+    ground: bool,
+    offset = FixedVec2Zero
 ) =
   ## Records every submitted cast, including invalid signed slot arguments.
   recorder.record ReplayAction(
     tick: tick, heroId: heroId,
     kind: (if ground: ActionCastPoint else: ActionCastTarget), slot: slot,
-    first: first, second: second
+    first: first, second: second, offset: offset
   )
 
 proc recordWalkTo*(
@@ -117,7 +125,8 @@ proc recordWalkTo*(
     tick: uint32,
     heroId,
     x,
-    y: int32
+    y: int32,
+    offset = FixedVec2Zero
 ) =
   ## Records one walkTo action without bot implementation details.
   recorder.record ReplayAction(
@@ -125,7 +134,8 @@ proc recordWalkTo*(
     heroId: heroId,
     kind: ActionWalkTo,
     first: x,
-    second: y
+    second: y,
+    offset: offset
   )
 
 proc recordAttackMove*(
@@ -133,7 +143,8 @@ proc recordAttackMove*(
     tick: uint32,
     heroId,
     x,
-    y: int32
+    y: int32,
+    offset = FixedVec2Zero
 ) =
   ## Records one attack-move action without bot implementation details.
   recorder.record ReplayAction(
@@ -141,7 +152,8 @@ proc recordAttackMove*(
     heroId: heroId,
     kind: ActionAttackMove,
     first: x,
-    second: y
+    second: y,
+    offset: offset
   )
 
 proc recordAttackTarget*(
@@ -243,6 +255,8 @@ proc validate*(data: ReplayData) =
       fail("replay actions move backward in time")
     if setup.maximumTicks > 0 and action.tick > setup.maximumTicks:
       fail("replay action exceeds the configured duration")
+    if not action.offset.validTileOffset:
+      fail("replay point offset is outside its tile")
     if action.kind != ActionWalkTo and
         action.kind != ActionAttackTarget and
         action.kind != ActionBuyItem and

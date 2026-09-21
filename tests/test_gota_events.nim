@@ -2,7 +2,8 @@
 
 import
   std/[os, tempfiles],
-  polyworld/[basic, cli, metrics, pathing, tapes],
+  bassy,
+  polyworld/[cli, metrics, pathing, tapes],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
 proc arena(): World =
@@ -314,7 +315,7 @@ block:
   defer:
     removeDir(directory)
   const Policy = """
-rejected = castTarget(-7, selfId)
+rejected = castPoint(-7, selfX + 0.25, selfY - 0.25)
 reason = lastActionError()
 query = objectCount()
 unchanged = lastActionError() = reason and reason = ActionInvalidSlot
@@ -338,6 +339,7 @@ cleared = lastActionError() = NoActionError
       doAssert event.tick == tick
       if event.kind == ActionRejected:
         doAssert event.slot == -7 and event.error == ActionInvalidSlot
+        doAssert event.offsetX == 16384 and event.offsetY == -16384
     peak = max(peak, world.events.len)
     expected.add world.events
   doAssert peak < 1000
@@ -345,8 +347,8 @@ cleared = lastActionError() = NoActionError
   doAssert game.recorder.data.actions[0].slot == -7
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError
-    doAssert vm.runtime.getGlobal("unchanged") == 1
-    doAssert vm.runtime.getGlobal("cleared") == 1
+    doAssert vm.runtime.getGlobal("unchanged") != 0
+    doAssert vm.runtime.getGlobal("cleared") != 0
   let replay = decodeReplay(encodeReplay(game.recorder.data))
   let playback = newGame(
     generateMap(replay.config.seed, replay.config.mapPreset),

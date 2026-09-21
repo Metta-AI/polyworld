@@ -54,7 +54,7 @@ remains and samples `surfaceHeight` for the vertical. `surfaceHeight` is called
 in exactly one place, and its result never flows back. `sim.nim` must not
 import anything that returns a float.
 
-`polyworld/fixed` is available and deliberately unused: with tile positions and
+`fixxy` is available and deliberately unused: with tile positions and
 tick timers there is nothing that needs a fractional part.
 
 ## Movement and the one-unit-per-tile rule

@@ -1,6 +1,6 @@
 ## Shared FX shape identities and deterministic ground footprints.
 
-import fixed
+import fixxy
 
 type
   FxShape* = enum

@@ -33,7 +33,7 @@ let setup = Setup(
 
 echo "Testing Flatty action replay round trip"
 let recorder = initReplayRecorder(setup)
-recorder.recordWalkTo(12, 100, 64, 42)
+recorder.recordWalkTo(12, 100, 64, 42, fixedVec2(0.25'fx, -0.5'fx))
 recorder.recordAttackTarget(12, 105, 100)
 recorder.recordAttackMove(15, 100, 70, 80)
 recorder.recordAttackTarget(19, 100, 105)
@@ -56,6 +56,7 @@ doAssert decoded.header.setup.heroes[1].class == uint8(VanguardKnight.ord)
 doAssert decoded.actions.len == 4
 doAssert decoded.actions[0].kind == ActionWalkTo
 doAssert decoded.actions[0].first == 64
+doAssert decoded.actions[0].offset == fixedVec2(0.25'fx, -0.5'fx)
 doAssert decoded.actions[1].kind == ActionAttackTarget
 doAssert decoded.actions[2].kind == ActionAttackMove
 doAssert decoded.actions[2].first == 70
@@ -182,3 +183,14 @@ except ReplayError:
   discard
 
 echo "test_gota_replays: all checks passed"
+
+
+echo "Testing replay points stay inside their canonical destination tile"
+block:
+  var invalidPoint = decoded
+  invalidPoint.actions[0].offset.x = 0.5'fx
+  try:
+    discard invalidPoint.encodeReplay()
+    doAssert false, "an offset in the next tile must be rejected"
+  except ReplayError:
+    discard

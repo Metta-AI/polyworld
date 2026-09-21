@@ -2,16 +2,18 @@
 
 import
   std/os,
-  polyworld/pathing,
-  polyworld/[tapes, metrics],
+  fixxy,
+  polyworld/[bodies, pathing, tapes, metrics],
   content
+
+export fixxy
 
 const
   ReplayGame* = "call_to_adventure"
   ReplayFormatVersion* = 3'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 21'u16
+  ReplayGameVersion* = 22'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionPickupTarget* = 3'u8
@@ -28,6 +30,8 @@ type
     tick*: uint32
     heroId*: int32
     kind*: uint8
+    offset*: FixedVec2
+      ## Movement and ground aim offsets from the named tile center.
     first*, second*, third*: int32
       ## Walk uses level, x, z. Target actions use `first` as the target ID.
       ## Use and drop use `first` as the inventory slot.
@@ -65,11 +69,14 @@ proc recordAction*(
     kind: uint8,
     first = 0'i32,
     second = 0'i32,
-    third = 0'i32
+    third = 0'i32,
+    offset = FixedVec2Zero
 ) =
   ## Records one attempted hero command without storing its BASIC source.
   if recorder == nil:
     return
+  if not offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if kind == 0 or kind > ActionKindHigh:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(
@@ -79,7 +86,8 @@ proc recordAction*(
       kind: kind,
       first: first,
       second: second,
-      third: third
+      third: third,
+      offset: offset
     ),
     MaxReplayActions
   )
@@ -113,6 +121,8 @@ proc validateAction(action: ReplayAction, setup: Setup) =
     fail("replay action did not land on a decision tick")
   if action.heroId < 100 or action.heroId >= 100 + PartySize:
     fail("replay action names an unknown hero")
+  if not action.offset.validTileOffset:
+    fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:
     fail("replay action kind is invalid")
   if action.kind == ActionWalkTo:

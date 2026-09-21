@@ -9,7 +9,8 @@
 ## VM type on `Game` but never runs a program.
 
 import
-  polyworld/[basic, bodies, fixed, hashes, metrics, pathing, profiles, rngs, tapes,
+  bassy, fixxy,
+  polyworld/[bodies, hashes, metrics, pathing, profiles, rngs, tapes,
     visions],
   content,
   maps,
@@ -644,12 +645,15 @@ proc ctaPathWalkable(layer, x, z: int): bool {.nimcall.} =
   let holder = pathWorld.claimant(tile)
   holder < 0 or holder == pathSlot
 
-proc setPath*(world: World, slot: int32, goal: TileRef): bool =
+proc setPath*(world: World, slot: int32, goal: TileRef,
+    offset = FixedVec2Zero): bool =
   ## Asks the engine for a route around other occupants and stores it as
   ## tiles to walk. The path crosses layers wherever a ramp does.
   let actor = world.actors[slot]
   if actor.home == goal:
     world.clearPath(slot)
+    if offset != FixedVec2Zero:
+      actor.path.add PathStep(tile: goal, offset: offset)
     return true
   pathWorld = world
   pathSlot = slot
@@ -685,6 +689,8 @@ proc setPath*(world: World, slot: int32, goal: TileRef): bool =
       direction: facingToward(previous, tile)
     )
     previous = tile
+  if actor.path[^1].tile == goal:
+    actor.path[^1].offset = offset
   actor.pathIndex = 0
   actor.stuckTicks = 0
   true
@@ -702,9 +708,16 @@ proc followPath*(world: World, slot: int32): bool =
     ctaWalkDestLayer = int(world.actors[slot].home.level)
     world.applyActorBody(slot)
     return false
-  let waypoint = world.actors[slot].path[world.actors[slot].pathIndex].tile
-  let dest = planarCenter(waypoint)
-  if length(dest - world.actors[slot].body.pos) <= PathArrive:
+  let
+    step = world.actors[slot].path[world.actors[slot].pathIndex]
+    waypoint = step.tile
+    dest = planarCenter(waypoint) + step.offset
+    radius =
+      if step.offset != FixedVec2Zero:
+        fixed(1, 1000)
+      else:
+        PathArrive
+  if length(dest - world.actors[slot].body.pos) <= radius:
     world.actors[slot].home = waypoint
     inc world.actors[slot].pathIndex
     world.actors[slot].stuckTicks = 0
@@ -728,8 +741,9 @@ proc followPath*(world: World, slot: int32): bool =
     if world.actors[slot].stuckTicks mod RepathAfterStuckTicks == 0:
       let
         goal = world.pathGoal(slot)
+        offset = world.actors[slot].path[^1].offset
         stuck = world.actors[slot].stuckTicks
-      if not world.setPath(slot, goal):
+      if not world.setPath(slot, goal, offset):
         world.clearPath(slot)
         return false
       world.actors[slot].stuckTicks = stuck
@@ -741,12 +755,14 @@ proc advancePath*(world: World, slot: int32): bool =
   ## Advances one path tick along the current pulled route.
   world.followPath(slot)
 
-proc stepToward*(world: World, slot: int32, goal: TileRef): bool =
+proc stepToward*(world: World, slot: int32, goal: TileRef,
+    offset = FixedVec2Zero): bool =
   ## Sets or updates a walk path. Movement happens in `advancePath`.
   if world.actors[slot].path.len == 0 or
       world.actors[slot].pathIndex >= int32(world.actors[slot].path.len) or
-      not (world.pathGoal(slot) == goal):
-    if not world.setPath(slot, goal):
+      world.pathGoal(slot) != goal or
+      world.actors[slot].path[^1].offset != offset:
+    if not world.setPath(slot, goal, offset):
       return false
   true
 
@@ -1425,6 +1441,8 @@ proc applyHeroAction*(
       game.metrics.command(int(slot), game.world.tick)
   case action.kind
   of ActionWalkTo:
+    if not action.offset.validTileOffset:
+      return false
     if action.first < 0 or action.first >= LevelCount or
         action.second < 0 or action.second >= GridTiles or
         action.third < 0 or action.third >= GridTiles:
@@ -1436,7 +1454,7 @@ proc applyHeroAction*(
     )
     if not tile.walkable:
       return false
-    game.world.stepToward(slot, tile)
+    game.world.stepToward(slot, tile, action.offset)
   of ActionAttackTarget:
     let targetSlot = game.world.actorSlot(action.first)
     if targetSlot < 0:

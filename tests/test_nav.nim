@@ -1,5 +1,6 @@
 import
-  polyworld/[bodies, fixed]
+  fixxy,
+  polyworld/[bodies]
 
 proc openGround(pos: FixedVec2): bool =
   ## Accepts every planar point.

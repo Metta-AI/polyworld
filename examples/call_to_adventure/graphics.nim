@@ -9,11 +9,11 @@
 
 import
   std/[math, tables, times],
-  chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, clickmarks, common, fixed, inputs,
-    particles, particleshaders,
-    chrome, pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
-    shadows, shapes, tapes, viewers, visions, worldbars, worldtexts],
+  chroma, fixxy, opengl, pixie, silky, vmath, windy,
+  polyworld/[actioncam, assets, characters, clickmarks, common, inputs,
+    particles, particleshaders, chrome, pathing, player, profiles,
+    quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
+    viewers, visions, worldbars, worldtexts],
   assets, content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
