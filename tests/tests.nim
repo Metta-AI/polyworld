@@ -23,11 +23,9 @@ import
   test_gota_brushes,
   test_gota_buybacks,
   test_gota_cameras,
-  test_gota_characters,
   test_gota_content,
   test_gota_creeps,
   test_gota_drafts,
-  test_gota_faces,
   test_gota_gods,
   test_gota_host,
   test_gota_landscapes,
@@ -77,5 +75,10 @@ import
   test_viewers,
   test_visions,
   test_worldtexts
+
+when defined(gotaAssets):
+  import test_gota_characters, test_gota_faces
+else:
+  echo "Skipping private character asset checks; run with -d:gotaAssets."
 
 echo "All tests passed"
