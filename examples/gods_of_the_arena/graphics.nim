@@ -4,7 +4,7 @@ import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  controls, spelleffects,
+  cameras, controls, faces, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -204,12 +204,21 @@ proc runGraphics*() =
     godModels: array[Team, CharacterModel]
     godRenderClips: array[Team, array[GodAnimation, int]]
     heroModels: array[HeroClass, CharacterModel]
-    heroRenderClips: array[5, int]
+    heroRenderClips: array[HeroClass, array[5, int]]
+    heroCastClips: array[HeroClass, int]
+    footmanEyes: array[Team, DeathEyes]
+    godEyes: array[Team, DeathEyes]
+    heroEyes: array[HeroClass, DeathEyes]
   profileBlock "models":
-    let characterLibrary = readManifest(ChargenLibrary)
+    let
+      characterLibrary = readManifest(ChargenLibrary)
+      deadEyes = characterLibrary.deathEyesPart()
 
     proc loadPresetModel(
-      name: string, clips: openArray[string], height: float32
+      name: string,
+      clips: openArray[string],
+      height: float32,
+      eyes: var DeathEyes
     ): CharacterModel =
       ## Loads one generated character with its authored face materials.
       let
@@ -223,10 +232,14 @@ proc runGraphics*() =
         if category.key in ["Eyes", "Mouth", "Brow"]:
           for item in category.items:
             result.unlitParts.add item.nodes
+      eyes = initDeathEyes(result, ChargenLibrary, inventory, deadEyes)
 
     for team in Team:
       let model = loadPresetModel(
-        CreepPresets[ord(team)], CreepClips, CreepTargetHeight
+        CreepPresets[ord(team)],
+        CreepClips,
+        CreepTargetHeight,
+        footmanEyes[team]
       )
       footmanModels[team] = model
       footmanRenderClips[team] = [
@@ -238,7 +251,7 @@ proc runGraphics*() =
         model.clipIndex("Sword_Attack")
       ]
       let god = loadPresetModel(
-        GodPresets[ord(team)], GodClips, GodTargetHeight
+        GodPresets[ord(team)], GodClips, GodTargetHeight, godEyes[team]
       )
       god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
       godModels[team] = god
@@ -248,19 +261,14 @@ proc runGraphics*() =
         god.clipIndex("Dance_Loop")
       ]
     for class in HeroClass:
-      heroModels[class] = loadModularCharacterModel(
-        HeroModelPath,
-        HeroLooks[class],
-        HeroTargetHeight
+      let model = loadPresetModel(
+        HeroPresets[class], HeroClips, HeroTargetHeight, heroEyes[class]
       )
-    let heroModel = heroModels[VanguardKnight]
-    heroRenderClips = [
-      heroModel.clipIndex("Run"),
-      heroModel.clipIndex("Idle"),
-      heroModel.clipIndex("Death"),
-      heroModel.clipIndex("Attack01"),
-      heroModel.clipIndex("Attack02")
-    ]
+      model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
+      heroModels[class] = model
+      for i, name in class.heroAnimationNames():
+        heroRenderClips[class][i] = model.clipIndex(name)
+      heroCastClips[class] = model.clipIndex("Spell_Simple_Shoot")
   var
     particles = initParticleSystem()
     spellEffects = initSpellRenderer()
@@ -504,19 +512,35 @@ proc runGraphics*() =
     ## Samples authoritative animation state continuously between ticks.
     (ticks.float32 + animationAlpha) / TickRate.float32
 
-  proc holdClipTime(
-      model: CharacterModel, clip: int, ticks: int32, hold: bool
-  ): float32 =
-    ## Samples animation time. One-shot clips hold the last pose; the
-    ## sampler wraps with `mod`, so a death would otherwise loop. Held
-    ## poses ignore the interpolant, or a corpse wiggles between ticks.
-    if hold:
-      min(
-        ticks.float32 / TickRate.float32,
-        clipDuration(model, clip)
-      )
+  proc heroRenderPose(hero: Hero): tuple[clip: int, time: float32] =
+    ## Shares one pose across rendering, shadows, picking, and outlines.
+    let model = heroModels[hero.class]
+    result.clip = heroRenderClips[hero.class][hero.animClip]
+    let duration = model.clipDuration(result.clip)
+    if hero.state == Dying:
+      result.time = min(hero.animTicks.float32 / HeroDeathTicks.float32, 1) *
+        duration
+      return
+    for spell in run.world.casts:
+      let age = run.world.tick - spell.started
+      if spell.heroId == hero.id and age >= 0 and age < 12:
+        result.clip = heroCastClips[hero.class]
+        result.time = min((age.float32 + animationAlpha) / 12, 1) *
+          model.clipDuration(result.clip)
+        return
+    if hero.animClip in heroAttackClips:
+      let
+        strike = hero.class.heroStrikeTime()
+        tick = hero.animTicks.float32 + animationAlpha
+        hit = run.world.heroHitTicks(hero).float32
+        finish = run.world.heroAttackTicks(hero).float32
+      result.time =
+        if tick <= hit:
+          tick / hit * strike
+        else:
+          strike + min((tick - hit) / (finish - hit), 1) * (duration - strike)
     else:
-      unitRenderTime(ticks)
+      result.time = unitRenderTime(hero.animTicks)
 
   proc creepRenderTime(footman: Footman): float32 =
     ## Fits authored sword impacts and death poses to simulation timing.
@@ -737,7 +761,8 @@ proc runGraphics*() =
         continue
       let
         model = heroModels[hero.class]
-        clip = heroRenderClips[hero.animClip]
+        pose = heroRenderPose(hero)
+      heroEyes[hero.class].setDead(false)
       consider(
         hero.id,
         pickCharacter(
@@ -746,10 +771,8 @@ proc runGraphics*() =
           dir,
           unitRenderPoint(hero.id, hero.position),
           unitRenderFacing(hero.id, hero.facing),
-          clip,
-          holdClipTime(
-            model, clip, hero.animTicks, hero.state == Dying
-          ),
+          pose.clip,
+          pose.time,
           hero.heroSizeFactor()
         )
       )
@@ -760,6 +783,7 @@ proc runGraphics*() =
       let
         model = footmanModels[footman.team]
         clip = footmanRenderClips[footman.team][footman.animClip]
+      footmanEyes[footman.team].setDead(false)
       consider(
         footman.id,
         pickCharacter(
@@ -1120,19 +1144,16 @@ proc runGraphics*() =
     for hero in run.world.heroes:
       if hero.id != id:
         continue
+      let pose = heroRenderPose(hero)
+      heroEyes[hero.class].setDead(hero.hp <= 0 or hero.state == Dying)
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
         heroModels[hero.class],
         unitRenderPoint(hero.id, hero.position),
         unitRenderFacing(hero.id, hero.facing),
-        heroRenderClips[hero.animClip],
-        holdClipTime(
-          heroModels[hero.class],
-          heroRenderClips[hero.animClip],
-          hero.animTicks,
-          hero.state == Dying
-        ),
+        pose.clip,
+        pose.time,
         sizeFactor = hero.heroSizeFactor()
       )
       finishCharacters(scene)
@@ -1140,6 +1161,9 @@ proc runGraphics*() =
     for footman in run.world.footmen:
       if footman.id != id:
         continue
+      footmanEyes[footman.team].setDead(
+        footman.hp <= 0 or footman.state == Dying
+      )
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
@@ -1154,6 +1178,7 @@ proc runGraphics*() =
     for i, god in gods:
       if run.world.forts[i].id != id:
         continue
+      godEyes[god.team].setDead(run.world.forts[i].hp <= 0)
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
@@ -1237,9 +1262,9 @@ proc runGraphics*() =
         hp: hero.hp, maxHp: hero.maxHp, complete: true,
         participant: max(hero.targetHeroId, hero.targetBuildingId),
         fighting: hero.state == Fighting, activity: hero.swingTicks,
-        idleScore: (if hero.hasMoveTarget: 22.0'f else: 12.0'f),
         combatScore: 100
       )
+    let livingHeroes = prioritizeHeroes(run.world, subjects)
     for footman in run.world.footmen:
       subjects.add Subject(
         id: footman.id, owner: int32(footman.team),
@@ -1250,7 +1275,7 @@ proc runGraphics*() =
         participant: max(footman.targetHeroId, footman.targetBuildingId),
         fighting: footman.state == Fighting, activity: footman.swingTicks,
         idleScore: (if footman.state == Marching: 22.0'f else: 8.0'f),
-        combatScore: 70
+        combatScore: 70, combatOnly: livingHeroes
       )
     for tower in run.world.buildings:
       subjects.add Subject(
@@ -1259,7 +1284,8 @@ proc runGraphics*() =
         visible: visibleInView(tower.team, tower.position), alive: tower.hp > 0,
         hp: tower.hp, maxHp: tower.maxHp, complete: true,
         participant: tower.targetId, fighting: tower.targetId != 0,
-        activity: tower.attackTicks, idleScore: 4, combatScore: 110
+        activity: tower.attackTicks, idleScore: 4, combatScore: 110,
+        combatOnly: true
       )
     for i, fort in run.world.forts:
       subjects.add Subject(
@@ -1269,17 +1295,6 @@ proc runGraphics*() =
         alive: fort.hp > 0, hp: fort.hp, maxHp: FortHp, complete: true,
         damageOnly: true, combatScore: 165
       )
-    # Approaching opponents deserve a shot anchored on an advancing hero.
-    for subject in subjects.mitems:
-      let other = heroById(run.world, subject.id)
-      if other == nil or other.id == 0 or not subject.alive:
-        continue
-      for hero in run.world.heroes:
-        if hero.id == subject.id or hero.hp <= 0:
-          continue
-        if other.team != hero.team and
-            (renderPoint(hero.position) - subject.position).length < 14:
-          subject.idleScore = 28
     if observeTick and not viewingSeeking:
       actionCam.director.observe(subjects)
     actionCam.director.refresh(subjects)
@@ -1954,6 +1969,9 @@ proc runGraphics*() =
             let
               model = footmanModels[footman.team]
               clip = footmanRenderClips[footman.team][footman.animClip]
+            footmanEyes[footman.team].setDead(
+              footman.hp <= 0 or footman.state == Dying
+            )
             drawCharacter(
               scene, model, unitRenderPoint(footman.id, footman.position),
               unitRenderFacing(footman.id, footman.facing),
@@ -1965,28 +1983,15 @@ proc runGraphics*() =
               continue
             if livingOnly and (hero.hp <= 0 or hero.state == Dying):
               continue
-            var
-              animation = hero.animClip
-              ticks = hero.animTicks
-            if hero.hp > 0 and hero.state != Dying:
-              for spell in run.world.casts:
-                let age = run.world.tick - spell.started
-                if spell.heroId == hero.id and age >= 0 and age < 12:
-                  animation = heroAttackClips[0]
-                  ticks = age * 2
-            let clip = heroRenderClips[animation]
+            let pose = heroRenderPose(hero)
+            heroEyes[hero.class].setDead(hero.hp <= 0 or hero.state == Dying)
             drawCharacter(
               scene,
               heroModels[hero.class],
               unitRenderPoint(hero.id, hero.position),
               unitRenderFacing(hero.id, hero.facing),
-              clip,
-              holdClipTime(
-                heroModels[hero.class],
-                clip,
-                ticks,
-                hero.state == Dying
-              ),
+              pose.clip,
+              pose.time,
               sizeFactor = hero.heroSizeFactor()
             )
           for god in gods:
@@ -1998,6 +2003,7 @@ proc runGraphics*() =
             let
               model = godModels[god.team]
               clip = godRenderClips[god.team][god.godClip]
+            godEyes[god.team].setDead(run.world.forts[god.team.ord].hp <= 0)
             var animTime = god.animTime
             if run.world.gameOver and god.team != run.world.winner:
               animTime = min(animTime, clipDuration(model, clip))
