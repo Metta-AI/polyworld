@@ -82,9 +82,9 @@ type
     restore*: int32
   Item* = enum
     NoItem,
-    IronrootRation,
+    HealthPotion,
     VitalityElixir,
-    ManaPotion,
+    ManaElixir,
     PoisonPotion,
     SteelHelmet,
     SteelBuckler,
@@ -101,9 +101,13 @@ type
     ThornwoodStaff,
     BattleAxe,
     RuneCrossbow,
-    ArcaneSpellbook
+    ArcaneSpellbook,
+    PortalScroll,
+    ManaPotion
   ItemKind* = enum
     Consumable, Equipment
+  RecoveryKind* = enum
+    HealthRecovery, ManaRecovery
   ItemSpec* = object
     name*: string
     icon*: string
@@ -116,9 +120,15 @@ type
     heal*: int32
     restore*: int32
     strike*: int32
+    channelTicks*, cooldownTicks*, recoveryTicks*: int32
 
 const
   MaxItemStack* = 8
+  PotionCooldownTicks* = 10 * TickRate
+  PotionRecoveryTicks* = 10 * TickRate
+  SpawnRecoverySeconds* = 5
+  PortalChannelTicks* = 3 * TickRate
+  PortalCooldownTicks* = 60 * TickRate
   HeroClassCount* = HeroClass.high.ord + 1
   HeroClassesPerTeam* = 5
   RedHeroClasses*: array[HeroClassesPerTeam, HeroClass] = [
@@ -512,16 +522,19 @@ const
   ItemSpecs*: array[Item, ItemSpec] = [
     ItemSpec(),
     ItemSpec(
-      name: "Ironroot Ration", icon: "ironroot_ration",
-      kind: Consumable, cost: 30, heal: 40
+      name: "Health Potion", icon: "health_leaf",
+      kind: Consumable, cost: 30, heal: 120,
+      recoveryTicks: PotionRecoveryTicks, cooldownTicks: PotionCooldownTicks
     ),
     ItemSpec(
       name: "Vitality Elixir", icon: "vitality_elixir",
-      kind: Consumable, cost: 50, heal: 90
+      kind: Consumable, cost: 75, heal: 90,
+      cooldownTicks: PotionCooldownTicks
     ),
     ItemSpec(
-      name: "Mana Potion", icon: "mana_potion",
-      kind: Consumable, cost: 45, restore: 60
+      name: "Mana Elixir", icon: "mana_potion",
+      kind: Consumable, cost: 90, restore: 60,
+      cooldownTicks: PotionCooldownTicks
     ),
     ItemSpec(
       name: "Poison Potion", icon: "poison_potion",
@@ -590,8 +603,26 @@ const
     ItemSpec(
       name: "Arcane Spellbook", icon: "arcane_spellbook",
       kind: Equipment, cost: 190, maxMana: 30, damage: 12
+    ),
+    ItemSpec(
+      name: "Portal Scroll", icon: "waystone_scroll",
+      kind: Consumable, cost: 100,
+      channelTicks: PortalChannelTicks, cooldownTicks: PortalCooldownTicks
+    ),
+    ItemSpec(
+      name: "Mana Potion", icon: "mana_flower",
+      kind: Consumable, cost: 45, restore: 90,
+      recoveryTicks: PotionRecoveryTicks, cooldownTicks: PotionCooldownTicks
     )
   ]
+
+const ShopItems* = [
+  HealthPotion, VitalityElixir, ManaPotion, ManaElixir, PoisonPotion,
+  PortalScroll, SteelHelmet, SteelBuckler, LeatherGauntlets, RangerBoots,
+  RubyAmulet, SapphireRing, CrimsonDagger, AmethystWand, SunsteelLongsword,
+  RangerBow, IronbarkPauldrons, KnightArmor, ThornwoodStaff, BattleAxe,
+  RuneCrossbow, ArcaneSpellbook
+]
 
 proc heroClassForTeam*(team, slot: int): HeroClass =
   ## Assigns one of five stable class identities to a team's local slot.
@@ -739,7 +770,7 @@ proc itemIconKey*(item: Item): string =
   ## Returns the atlas name packed from one item art file.
   if item == NoItem:
     return ""
-  "item_" & item.itemSpec.icon
+  "item_" & $item
 
 proc heroMaxHp*(class: HeroClass, level: int): int32 =
   ## Returns class hit points at one level.

@@ -29,10 +29,10 @@ proc arena(): World =
     result.stats.teams[i] = hero.team.ord
     hero.inventory[0] = PoisonPotion
     hero.itemCounts[0] = 3
-    hero.inventory[1] = IronrootRation
+    hero.inventory[1] = VitalityElixir
     hero.itemCounts[1] = 3
   for team in Team:
-    result.teamVisible[team.ord] = newSeq[uint8](GridTiles * GridTiles)
+    result.teamVisible[team.ord] = newSeq[uint8](mapTiles() * mapTiles())
     for cell in result.teamVisible[team.ord].mitems:
       cell = 255
 
@@ -128,8 +128,14 @@ block:
   world.error(ActionInvalidPoint)
   doAssert not world.applyBuyItem(hero.id, -1)
   world.error(ActionUnknownItem)
+  let
+    shopGame = newGame(generateMap(54), 100_000, 10, false, ReplayData())
+    originalPosition = hero.position
+  for team in Team:
+    world.teamVisible[team.ord].setLen(mapTiles() * mapTiles())
+  hero.place(shopGame.world.heroes[0].spawnPosition)
   hero.gold = 0
-  doAssert not world.applyBuyItem(hero.id, IronrootRation.ord.int32)
+  doAssert not world.applyBuyItem(hero.id, VitalityElixir.ord.int32)
   world.error(ActionInsufficientGold)
   hero.gold = 1000
   doAssert world.applyBuyItem(hero.id, RangerBoots.ord.int32)
@@ -145,18 +151,19 @@ block:
   world.error(ActionEmptySlot)
   doAssert not world.applyUseItem(hero.id, 1)
   world.error(ActionFullHealth)
-  hero.inventory[3] = ManaPotion
+  hero.inventory[3] = ManaElixir
   hero.itemCounts[3] = 1
   doAssert not world.applyUseItem(hero.id, 3)
   world.error(ActionFullMana)
   hero.itemCounts[1] = MaxItemStack
-  doAssert not world.applyBuyItem(hero.id, IronrootRation.ord.int32)
+  doAssert not world.applyBuyItem(hero.id, VitalityElixir.ord.int32)
   world.error(ActionStackFull)
   for slot in 0 ..< InventorySlots:
-    hero.inventory[slot] = IronrootRation
+    hero.inventory[slot] = HealthPotion
     hero.itemCounts[slot] = 1
-  doAssert not world.applyBuyItem(hero.id, ManaPotion.ord.int32)
+  doAssert not world.applyBuyItem(hero.id, ManaElixir.ord.int32)
   world.error(ActionInventoryFull)
+  hero.place(originalPosition)
   hero.spellsReady = true
   hero.cooldowns[PrimaryAbility] = 1
   hero.charges[PrimaryAbility] = 0
@@ -211,6 +218,7 @@ proc quietGame(class: HeroClass): Game =
   hero.hp = hero.maxHp
   hero.mana = 10_000
   hero.maxMana = 10_000
+  hero.place(result.world.forts[0].center)
   hero.state = Marching
   hero.spellsReady = false
 
@@ -321,6 +329,9 @@ query = objectCount()
 unchanged = lastActionError() = reason and reason = ActionInvalidSlot
 accepted = attackMove(mapWidth / 2, mapHeight / 2)
 cleared = lastActionError() = NoActionError
+if selfHp = 0 then
+  cleared = lastActionError() = ActionNotAlive
+end if
 """
   writeFile(path, Policy)
   game.loadBots([BotGroup(path: path, count: 10)])
@@ -338,8 +349,13 @@ cleared = lastActionError() = NoActionError
     for event in world.events:
       doAssert event.tick == tick
       if event.kind == ActionRejected:
-        doAssert event.slot == -7 and event.error == ActionInvalidSlot
-        doAssert event.offsetX == 16384 and event.offsetY == -16384
+        if event.action == ActionCastPoint:
+          doAssert event.slot == -7 and event.error == ActionInvalidSlot
+          doAssert event.offsetX == 16384 and event.offsetY == -16384
+        else:
+          doAssert event.action == ActionAttackMove
+          doAssert event.error == ActionNotAlive
+          doAssert world.heroById(event.actor.id).hp <= 0
     peak = max(peak, world.events.len)
     expected.add world.events
   doAssert peak < 1000

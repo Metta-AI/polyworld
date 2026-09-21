@@ -206,6 +206,7 @@ proc runGraphics*() =
     heroModels: array[HeroClass, CharacterModel]
     heroRenderClips: array[HeroClass, array[5, int]]
     heroCastClips: array[HeroClass, int]
+    heroPortalClips: array[HeroClass, int]
     footmanEyes: array[Team, DeathEyes]
     godEyes: array[Team, DeathEyes]
     heroEyes: array[HeroClass, DeathEyes]
@@ -269,6 +270,7 @@ proc runGraphics*() =
       for i, name in class.heroAnimationNames():
         heroRenderClips[class][i] = model.clipIndex(name)
       heroCastClips[class] = model.clipIndex("Spell_Simple_Shoot")
+      heroPortalClips[class] = model.clipIndex("Spell_Simple_Idle_Loop")
   var
     particles = initParticleSystem()
     spellEffects = initSpellRenderer()
@@ -286,6 +288,11 @@ proc runGraphics*() =
       sk.atlas.size,
       run.config.players
     )
+    portalLabels = [
+      layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 1s"),
+      layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 2s"),
+      layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 3s")
+    ]
     damageTrails: DamageTrailTracker
 
   const
@@ -521,6 +528,10 @@ proc runGraphics*() =
       result.time = min(hero.animTicks.float32 / HeroDeathTicks.float32, 1) *
         duration
       return
+    if hero.portalEnds > run.world.tick:
+      result.clip = heroPortalClips[hero.class]
+      result.time = unitRenderTime(hero.animTicks)
+      return
     for spell in run.world.casts:
       let age = run.world.tick - spell.started
       if spell.heroId == hero.id and age >= 0 and age < 12:
@@ -668,6 +679,22 @@ proc runGraphics*() =
         gap = DefaultGap * HeroWorldBarScale,
         border = DefaultBorder * HeroWorldBarScale
       )
+      if hero.portalEnds > run.world.tick:
+        renderer.addText(
+          portalLabels[clamp((hero.portalEnds - run.world.tick - 1) div
+            TickRate, 0, 2)],
+          anchor + vec3(0, 0.5'f, 0)
+        )
+        renderer.addResourceBars(
+          anchor - vec3(0, 0.4'f, 0), HeroWorldBarWidth,
+          [WorldResourceBar(
+            value: (PortalChannelTicks - hero.portalEnds +
+              run.world.tick).float32,
+            maximum: PortalChannelTicks.float32,
+            height: 0.12'f * HeroWorldBarScale,
+            color: rgbx(167, 128, 255, 255)
+          )]
+        )
     for tower in run.world.buildings:
       if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
         continue
@@ -891,10 +918,12 @@ proc runGraphics*() =
       if button == KeyB:
         shopOpen = not shopOpen
         armedAbility = -1
+        armedItem = -1
         return
       if button == KeyEscape:
         shopOpen = false
         armedAbility = -1
+        armedItem = -1
         attackMoveArmed = false
         return
       if shopOpen and button != KeySpace:
@@ -912,7 +941,8 @@ proc runGraphics*() =
     elif (button == KeyF or button == KeyG) and
         options.playerSlot > 0 and
         not run.replayMode:
-      queueUseItem(
+      activatePlayerItem(
+        run.world,
         run.world.heroes[options.playerSlot - 1].id,
         int32(if button == KeyF: 0 else: 1)
       )
@@ -1346,7 +1376,9 @@ proc runGraphics*() =
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    if window.mousePressed(MouseRight) and not overUi:
+    var minimapPoint: Vec2
+    if window.mousePressed(MouseRight) and (not overUi or
+      (armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint))):
       rightPressPosition = window.mousePos.vec2
       rightOrderStarted = true
     if window.mousePressed(MouseMiddle) and
@@ -1549,6 +1581,16 @@ proc runGraphics*() =
     if not rightOrderStarted:
       return
     rightOrderStarted = false
+    var minimapPoint: Vec2
+    if armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint):
+      queueUseItemAt(
+        playerHeroId(), armedItem,
+        mapCoordinate(int32(minimapPoint.x * WorldScale.float32)),
+        mapCoordinate(int32(minimapPoint.y * WorldScale.float32))
+      )
+      armedItem = -1
+      attackMoveArmed = false
+      return
     if mouseOverUi(window, sk.mousePos, primaryId):
       return
     if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
@@ -1556,6 +1598,23 @@ proc runGraphics*() =
     let
       heroId = playerHeroId()
       picked = pickEntity(viewProjection)
+    if armedItem >= 0:
+      let
+        (origin, direction) = mouseRay(
+          window.mousePos.vec2, window.size.vec2, viewProjection
+        )
+        ground = pickTile(origin, direction)
+      if not ground.hit:
+        return
+      queueUseItemAt(
+        heroId, armedItem,
+        int32(layers[ground.layer].originX + ground.x - mapOrigin()),
+        int32(layers[ground.layer].originZ + ground.z - mapOrigin())
+      )
+      armedItem = -1
+      attackMoveArmed = false
+      selectEntity(heroId)
+      return
     if armedAbility >= 0:
       let
         hero = heroById(run.world, heroId)
@@ -1734,16 +1793,21 @@ proc runGraphics*() =
     let wasGameOver = run.world.gameOver
     var
       oldHeroLanded = newSeq[bool](run.world.heroes.len)
+      oldPortalEnds = newSeq[int32](run.world.heroes.len)
       oldFootmanLanded: Table[int32, bool]
       oldTowerTicks = newSeq[int32](run.world.buildings.len)
     for i, hero in run.world.heroes:
       oldHeroLanded[i] = hero.damageLanded
+      oldPortalEnds[i] = hero.portalEnds
     for footman in run.world.footmen:
       oldFootmanLanded[footman.id] = footman.damageLanded
     for i, tower in run.world.buildings:
       oldTowerTicks[i] = tower.attackTicks
     captureUnitPositions()
     advanceGame()
+    for i, hero in run.world.heroes:
+      if oldPortalEnds[i] > 0 and hero.portalEnds == 0:
+        previousUnitPositions[hero.id] = renderPoint(hero.position)
     feedGotaActions(observeTick = true)
     emitTickParticles(
       oldHeroLanded,
@@ -2077,8 +2141,41 @@ proc runGraphics*() =
           run.world, viewProjection, animationAlpha, viewMode
         )
         clickMarks.drawClickMarks(viewProjection)
+        worldShapes.clear()
+        for hero in run.world.heroes:
+          if hero.portalEnds <= run.world.tick or hero.hp <= 0:
+            continue
+          for point in [hero.position, hero.portalDestination]:
+            if not visibleInView(hero.team, point):
+              continue
+            var ring: array[49, Vec3]
+            let
+              center = renderPoint(point)
+              radius = 0.5'f + (hero.portalEnds - run.world.tick).float32 /
+                PortalChannelTicks.float32
+            for i in 0 .. ring.high:
+              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+              ring[i] = center + vec3(cos(angle) * radius, 0.12'f,
+                sin(angle) * radius)
+            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.06'f)
+        if playerMode() and armedItem >= 0:
+          let hero = run.world.heroById(playerHeroId())
+          for tower in run.world.buildings:
+            if tower.kind != TowerBuilding or tower.hp <= 0 or
+              tower.team != hero.team:
+                continue
+            var ring: array[65, Vec3]
+            let
+              center = renderPoint(tower.position)
+              radius = tower.tier.towerSightTiles.float32
+            for i in 0 .. ring.high:
+              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+              ring[i] = center + vec3(cos(angle) * radius, 0,
+                sin(angle) * radius)
+              ring[i].y = groundHeight(ring[i].x, ring[i].z) +
+                groundOffset(ring[i].x, ring[i].z) + 0.12'f
+            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.04'f)
         if showPaths:
-          worldShapes.clear()
           for hero in run.world.heroes:
             if hero.state == Dying or hero.hp <= 0:
               continue
@@ -2097,7 +2194,7 @@ proc runGraphics*() =
               points.add vec3(p.x, p.y + 0.2'f32, p.z)
             if points.len >= 2:
               worldShapes.addPolyline(points, color)
-          worldShapes.draw(viewProjection)
+        worldShapes.draw(viewProjection)
         if not cleanScreenshot:
           drawWorldUnitBars(
             worldBarRenderer,

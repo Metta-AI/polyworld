@@ -16,6 +16,12 @@ var
   receiptSerial = 0
   feedback = "Click an item to buy it."
 
+proc drawItemCount*(sk: Silky, well: GameUiPanel, count: int32) =
+  ## Keeps stack counts legible without covering the icon or cooldown.
+  let corner = well.origin + vec2(well.size.x - 25, 2)
+  sk.drawRect(corner, vec2(23, 20), rgbx(0, 0, 0, 210))
+  sk.drawLabel($count, corner, vec2(23, 20), Gold, "Bold", CenterAlign)
+
 proc itemDescription(spec: ItemSpec): string =
   ## Summarizes actual item effects without duplicating balance numbers.
   var lines: seq[string]
@@ -23,8 +29,17 @@ proc itemDescription(spec: ItemSpec): string =
     lines.add("Heal " & $spec.heal & " health")
   if spec.restore > 0:
     lines.add("Restore " & $spec.restore & " mana")
+  if spec.recoveryTicks > 0:
+    lines[0].add(" / " & $(spec.recoveryTicks div TickRate) & "s")
+    lines.add("Damage interrupts")
+  if spec.cooldownTicks > 0 and spec.channelTicks == 0:
+    lines.add($(spec.cooldownTicks div TickRate) & "s cooldown")
   if spec.strike > 0:
     lines.add($spec.strike & " damage to target")
+  if spec.channelTicks > 0:
+    lines.add("Near allied tower")
+    lines.add($(spec.channelTicks div TickRate) & "s channel / " &
+      $(spec.cooldownTicks div TickRate) & "s CD")
   if spec.maxHp > 0:
     lines.add("+" & $spec.maxHp & " max health")
   if spec.maxMana > 0:
@@ -71,14 +86,14 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   sk.drawSprite("shop", title.origin + vec2(0, 4), vec2(64))
   sk.drawLabel("ITEM SHOP", title.origin + vec2(84, 0),
     vec2(title.size.x - 84, 40), White, "H1")
-  sk.drawLabel("Consumables stack to 8. Equipment is unique and active immediately.",
+  sk.drawLabel(
+    if hero.canShop: "Consumables stack to 8. Buy inside your own keep."
+    else: "Return to your own keep to buy items.",
     title.origin + vec2(84, 44), vec2(title.size.x - 84, 24), Muted)
-  for item in Item:
-    if item == NoItem:
-      continue
+  for index, item in ShopItems:
     let
       spec = item.itemSpec
-      card = layout.cards[item.ord - 1]
+      card = layout.cards[index]
       reason = world.purchaseReason(hero.id, item.ord.int32)
       enabled = reason.len == 0 and waitingItem == NoItem
       hovered = sk.hovered(card)
@@ -122,9 +137,8 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
       item = hero.inventory[slot]
     sk.drawWellImage(well,
       if item == NoItem: "" else: itemIconKey(item), iconSize = 64)
-    if hero.itemCounts[slot] > 1:
-      sk.drawLabel($hero.itemCounts[slot], well.origin + vec2(42, 44),
-        vec2(24), Gold, "Bold", CenterAlign)
+    if item != NoItem and item.itemSpec.kind == Consumable:
+      sk.drawItemCount(well, hero.itemCounts[slot])
   let status = footer.takeRest()
   sk.drawLabel(
     if waitingItem != NoItem and not playing:

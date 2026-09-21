@@ -7,13 +7,15 @@ type
     ActionInventoryFull, ActionEmptySlot, ActionNotConsumable,
     ActionFullHealth, ActionFullMana, ActionTargetUnavailable,
     ActionOutOfRange, ActionNoRoute, ActionInvalidPoint, ActionCooldown,
-    ActionNoCharges, ActionInsufficientMana, ActionSpellLimit
+    ActionNoCharges, ActionInsufficientMana, ActionSpellLimit,
+    ActionChanneling, ActionStunned, ActionRooted, ActionOutsideKeep
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
     Assist, XpGained, GoldGained, GoldSpent, LevelChanged, HealthAdjusted,
     ManaChanged, SpellReleased, ItemPurchased, ItemConsumed, ActionRejected,
-    MatchEnded
+    MatchEnded, PortalStarted, PortalCompleted, PortalInterrupted,
+    Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted
 
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
@@ -59,7 +61,11 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionOutOfRange: "Out of range"
   of ActionNoRoute: "No route"
   of ActionInvalidPoint: "Invalid map point"
-  of ActionCooldown: "Ability on cooldown"
+  of ActionCooldown: "On cooldown"
   of ActionNoCharges: "No charges"
   of ActionInsufficientMana: "Not enough mana"
   of ActionSpellLimit: "Too many active spells"
+  of ActionChanneling: "Teleport channel in progress"
+  of ActionStunned: "Stunned"
+  of ActionRooted: "Rooted"
+  of ActionOutsideKeep: "Return to your keep"

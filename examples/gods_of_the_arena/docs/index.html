@@ -1750,40 +1750,50 @@
       <p class="kicker">THE SHOP</p>
       <h2>Items, costs, and bonuses</h2>
       <p>
-        Six inventory slots. Consumables stack to 8. Heroes start with 150 gold.
+        Six inventory slots. Consumables stack to 8 and show their count on the icon. Heroes start with 150 gold. Purchases require being inside your own keep, including its spawn room.
         Footmen drop 15, towers 75, heroes 100.
       </p>
       <h3 style="margin: 8px 0 12px; color: var(--gold);">Consumables</h3>
       <div class="shop">
         <article class="item-card">
           <div class="item-top">
-            <img class="icon" src="../../../../polyworld_data/items/ironroot_ration.png" alt="Ironroot Ration">
+            <img class="icon" src="../../../../polyworld_data/items/health_leaf.png" alt="Health Potion">
             <div>
-              <h3>Ironroot Ration</h3>
+              <h3>Health Potion</h3>
               <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">30</div>
             </div>
           </div>
-          <p class="bonus">Use: restore 40 health.</p>
+          <p class="bonus">Use: restore 120 health over 10 seconds. Damage interrupts regeneration.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/items/vitality_elixir.png" alt="Vitality Elixir">
             <div>
               <h3>Vitality Elixir</h3>
-              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">50</div>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">75</div>
             </div>
           </div>
-          <p class="bonus">Use: restore 90 health.</p>
+          <p class="bonus">Use: restore 90 health instantly.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
-            <img class="icon" src="../../../../polyworld_data/items/mana_potion.png" alt="Mana Potion">
+            <img class="icon" src="../../../../polyworld_data/items/mana_flower.png" alt="Mana Potion">
             <div>
               <h3>Mana Potion</h3>
               <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">45</div>
             </div>
           </div>
-          <p class="bonus">Use: restore 60 mana.</p>
+          <p class="bonus">Use: restore 90 mana over 10 seconds. Damage interrupts regeneration.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/mana_potion.png" alt="Mana Elixir">
+            <div>
+              <h3>Mana Elixir</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">90</div>
+            </div>
+          </div>
+          <p class="bonus">Use: restore 60 mana instantly.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
@@ -1796,6 +1806,15 @@
           <p class="bonus">Use: deal 35 strike damage to a living, visible enemy within your hero's attack range. Tower order and god protection still apply.</p>
         </article>
       </div>
+
+      <p>Health potions and elixirs share a 10-second cooldown. Mana potions and elixirs share a separate 10-second cooldown. Cooldowns begin on use and survive damage and death. Both slow regeneration effects stop on any positive incoming damage; moving and attacking do not interrupt them. Rejected uses consume nothing.</p>
+      <p>BASIC: item IDs are 1 Health Potion, 2 Vitality Elixir, 22 Mana Potion, and 3 Mana Elixir. <code>itemCooldown(slot)</code> reports live remaining ticks (24 per second), or zero for an empty/invalid slot. <code>canShop()</code> reports whether purchases are allowed. Buying elsewhere returns <code>ActionOutsideKeep</code>.</p>
+      <p>Inside your own spawn room, health and mana each recover at 20% of maximum per second. This is separate from potions and continues under attack. It does not apply elsewhere in the keep or in the enemy spawn, and cannot revive a dead hero. <code>inOwnSpawn()</code> reports whether your living hero is in this recovery area.</p>
+
+      <h3>Portal Scroll</h3>
+      <p><img class="icon" src="../../../../polyworld_data/items/waystone_scroll.png" alt="Portal Scroll"> Item 21 costs 100 gold and stacks to eight. Click the scroll, then right-click the map or minimap. It consumes one scroll and channels for 3 seconds, teleporting to visible, walkable ground within a living allied tower's sight (7 tiles for outer/inner towers, 8 for gate/guard towers). Distant destinations are clamped into tower range. Barracks cannot anchor a teleport.</p>
+      <p>You cannot move, attack, or cast during the channel, but can still take damage and die. Stun, root, death, or destruction of the selected tower cancels it. Damage alone does not cancel it. Completion or interruption starts a shared 60-second cooldown, preserved through death. Existing spells do not currently stun or root; those simulation effects interrupt teleport when applied.</p>
+      <p>BASIC: <code>useItemAt(slot, x, y)</code> accepts fractional coordinates and returns 1 on success, 0 on rejection. <code>selfPortalCooldown</code>, <code>selfChannelTicks</code>, <code>selfStunTicks</code>, and <code>selfRootTicks</code> report remaining ticks. <code>useItem(slot)</code> rejects scrolls because they require a destination.</p>
 
       <h3 style="margin: 22px 0 12px; color: var(--gold);">Equipment</h3>
       <div class="shop">
@@ -1987,7 +2006,7 @@
         <button id="charge-wait" type="button">Advance 10 seconds</button>
         <button id="charge-reset" type="button">Reset</button>
       </div>
-      <p><strong>Refill resources:</strong> Ironroot Ration costs 30 gold and heals 40 HP; Vitality Elixir costs 50 gold and heals 90 HP; Mana Potion costs 45 gold and restores 60 mana. Buy them in the <a href="#shop">shop</a>. Healing cannot revive a hero at zero HP.</p>
+      <p><strong>Refill resources:</strong> Return to your own spawn room for fast health and mana recovery. Buy slow potions or instant elixirs in your own <a href="#shop">keep shop</a>. Damage interrupts slow potion regeneration. Healing cannot revive a hero at zero HP.</p>
     </section>
     <section id="controls" class="panel">
       <p class="kicker">PLAYER CONTROLS</p>
@@ -2051,7 +2070,7 @@
       <p><code>players/rusher.bas</code> pushes all five heroes down mid together. When any pair of living allies is more than 10 tiles apart, the team regroups toward its center until the gap is at most 8 tiles. Otherwise it attacks visible, vulnerable enemies within 20 tiles or attack-moves through the middle toward the enemy god. Dead allies are ignored until they respawn. Automatic abilities stay enabled.</p>
       <h3>Action feedback</h3>
       <p><code>lastActionError()</code> reports your hero's latest submitted command error. Success clears it to <code>NoActionError</code> (0). Rejection preserves the command's 0 return value and records the first failed check. Read-only queries and automatic casts do not overwrite it. Read the error immediately after the command; unlike sampled self data, it updates during a decision.</p>
-      <p>Read-only constants (values 0 through 19): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
+      <p>Read-only constants (values 0 through 22): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>, <code>ActionChanneling</code>, <code>ActionStunned</code>, <code>ActionRooted</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
       <p>The <a href="../../../docs/stats.md#gota-replay-events">replay extractor</a> provides typed post-match events for both teams. Detailed capture is compiled in with <code>-d:replayEvents</code> and is unavailable to live BASIC policies.</p>
       <h3 id="terrain-api">Terrain API</h3>
       <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>

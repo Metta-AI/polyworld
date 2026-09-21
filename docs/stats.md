@@ -121,6 +121,9 @@ replay payloads and state hashes, and never accumulates a match history.
 | `ActionRejected` | Explicit command, original numeric arguments, and typed rejection reason. Internal auto-cast candidate failures are omitted. |
 | `EntitySpawned`, `EntityRespawned`, `EntityRemoved` | Entity lifecycle; corpse expiration is distinct from death. |
 | `MatchEnded` | God destruction or configured time limit. `amount` is winning team (0 red, 1 blue), or -1 for timeout. A partial recording does not imply a match ended. |
+| `PortalStarted`, `PortalCompleted`, `PortalInterrupted` | Scroll channel lifecycle. Start/interruption reference the selected tower; completion references the hero at arrival. |
+| `Stunned`, `Rooted` | A control effect was applied to the target hero. These interrupt an active teleport. |
+| `RecoveryStarted`, `RecoveryCompleted`, `RecoveryInterrupted` | Potion regeneration lifecycle. `detail` is the item ID; interruption identifies the damaging actor and affected hero. |
 
 `related` is a zero-based index within the same tick, or -1 when absent.
 It is not a persistent event ID. `detail` is an ability or item enum ID
@@ -168,10 +171,15 @@ Named read-only BASIC constants match `ActionError` in `events.nim`:
 | 17 | `ActionNoCharges` |
 | 18 | `ActionInsufficientMana` |
 | 19 | `ActionSpellLimit` |
+| 20 | `ActionChanneling` |
+| 21 | `ActionStunned` |
+| 22 | `ActionRooted` |
+| 23 | `ActionOutsideKeep` |
 
-Gameplay version 42 records the signed cast slot separately from action
-kind, including invalid slots. Playback regenerates the same failures and
-diagnostic state. This client accepts only version 42; older recordings
+Gameplay version 45 includes keep-only shopping, potion recovery and cooldowns,
+and fast spawn recovery. Potion effects, channels, shared cooldowns, and control
+effects are hashed. Playback regenerates the same events and diagnostic state.
+This client accepts only version 45; older recordings
 require their archived client.
 
 Rejected movement and ground casts include `offsetX` and `offsetY`, signed Q16.16 offsets from the named tile center. Multiply by 1/65536 to read the fractional tile component.

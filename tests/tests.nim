@@ -32,6 +32,8 @@ import
   test_gota_lighting,
   test_gota_mapgen,
   test_gota_observations,
+  test_gota_portals,
+  test_gota_potions,
   test_gota_presets,
   test_gota_replays,
   test_gota_rusher,

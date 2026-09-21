@@ -149,6 +149,19 @@ block:
   separatePair(stackedA, stackedB, openGround)
   doAssert stackedA.pos == stackedB.pos
 
+echo "Testing fixed bodies resist collision separation"
+block:
+  var
+    a = Body(pos: FixedVec2Zero, radius: 0.5'fx)
+    b = Body(pos: fixedVec2(0.25'fx, 0'fx), radius: 0.5'fx)
+  separatePair(a, b, openGround, aFixed = true)
+  doAssert a.pos == FixedVec2Zero
+  doAssert abs(b.pos.x - 1'fx) <= Fixed(8)
+  a.pos.x = 0.5'fx
+  let oldA = a.pos
+  separatePair(a, b, openGround, aFixed = true, bFixed = true)
+  doAssert a.pos == oldA
+
 echo "Testing steer turns before walking backward"
 block:
   var body = Body(

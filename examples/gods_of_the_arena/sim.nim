@@ -147,6 +147,12 @@ type
     recharges*: array[HeroAbilitySlot, int32]
     spellsReady*: bool
     manualSpells*: bool
+    potionCooldownEnds*: array[RecoveryKind, int32]
+    recoveryItems*: array[RecoveryKind, Item]
+    recoveryStarted*, recoveryApplied*: array[RecoveryKind, int32]
+    portalEnds*, portalCooldownEnds*, portalTowerId*: int32
+    portalDestination*: WorldPoint
+    stunnedUntil*, rootedUntil*: int32
     lastActionError*: ActionError
 
   Fort* = object
@@ -274,6 +280,10 @@ const
   ]
   TowerAttackTicks* = TickRate
   TowerSiegeRange* = 105_000'i32
+
+proc towerSightTiles*(tier: TowerTier): int32 =
+  ## Shares a tower's reveal radius with portal destinations.
+  TowerAttackRanges[tier] div WorldScale + 2
 
 proc config*(game: Game): GotaConfig =
   ## Reads the match configuration owned by the live or loaded replay.
@@ -591,7 +601,7 @@ proc rebuildVision*(world: World) {.measure.} =
         visionSources.add VisionSource(
           x: tile.x,
           z: tile.z,
-          radius: TowerAttackRanges[tower.tier] div WorldScale + 2,
+          radius: tower.tier.towerSightTiles,
           eyeHeight: 24
         )
     for fort in world.forts:
@@ -779,6 +789,8 @@ when defined(replayEvents):
       target: world.eventEntity(target), cause: cause, related: -1
     )
 
+proc interruptPortal(world: World, hero: Hero)
+
 proc applyDamage[T: Hero | Footman](
     world: World,
     target: var T,
@@ -790,6 +802,22 @@ proc applyDamage[T: Hero | Footman](
   when defined(replayEvents):
     let before = target.hp
   target.hp -= amount
+  when T is Hero:
+    if amount > 0:
+      for kind in RecoveryKind:
+        let item = target.recoveryItems[kind]
+        if item != NoItem:
+          target.recoveryItems[kind] = NoItem
+          target.recoveryStarted[kind] = 0
+          target.recoveryApplied[kind] = 0
+          when defined(replayEvents):
+            world.emit GameEvent(
+              kind: RecoveryInterrupted, actor: world.eventEntity(source),
+              target: world.eventEntity(target.id), cause: ItemEffect,
+              detail: item.ord.int32, related: -1
+            )
+    if target.hp <= 0:
+      world.interruptPortal(target)
   when defined(replayEvents):
     world.damageEvent(source, target.id, amount, before, target.hp, cause, detail)
 
@@ -1652,6 +1680,54 @@ proc mapCoordinate*(value: int32): int32 =
     mapTiles() - 1
   ))
 
+proc heroBaseArea(hero: Hero): BaseArea =
+  ## Reads the room beneath a hero without extending it beyond the map.
+  if hero.navLayer != GroundLayer:
+    return OutsideBase
+  baseArea(
+    floorWorldTile(hero.position.x) + mapTiles() div 2,
+    floorWorldTile(hero.position.z) + mapTiles() div 2
+  )
+
+proc inOwnSpawn*(hero: Hero): bool =
+  ## Checks whether a living hero is inside its team's spawn room.
+  hero.hp > 0 and hero.state != Dying and hero.heroBaseArea ==
+    (if hero.team == RedTeam: RedSpawn else: BlueSpawn)
+
+proc canShop*(hero: Hero): bool =
+  ## Allows purchases only on the living hero's own keep or spawn floor.
+  if hero.hp <= 0 or hero.state == Dying:
+    return false
+  let area = hero.heroBaseArea
+  if hero.team == RedTeam:
+    area in {RedKeep, RedSpawn}
+  else:
+    area in {BlueKeep, BlueSpawn}
+
+proc consumableCooldown(hero: Hero, item: Item, tick: int32): int32 =
+  ## Reads the resource-family cooldown shared by all stacks of a potion.
+  let spec = item.itemSpec
+  if item == PortalScroll:
+    max(0'i32, hero.portalCooldownEnds - tick)
+  elif spec.heal > 0:
+    max(0'i32, hero.potionCooldownEnds[HealthRecovery] - tick)
+  elif spec.restore > 0:
+    max(0'i32, hero.potionCooldownEnds[ManaRecovery] - tick)
+  else:
+    0
+
+proc itemCooldown*(hero: Hero, slot: int, tick: int32): int32 =
+  ## Reads the remaining cooldown for an inventory slot, or zero if invalid.
+  if slot >= 0 and slot < InventorySlots:
+    hero.consumableCooldown(hero.inventory[slot], tick)
+  else:
+    0
+
+proc itemCooldowns*(hero: Hero, tick: int32): array[InventorySlots, int32] =
+  ## Captures all inventory cooldowns for the HUD.
+  for slot in 0 ..< InventorySlots:
+    result[slot] = hero.itemCooldown(slot, tick)
+
 proc rawWorldObjectCount(world: World): int =
   ## Returns the total number of stable script-addressable objects.
   world.forts.len + world.buildings.len + world.heroes.len + world.footmen.len
@@ -2031,6 +2107,8 @@ proc stopHeroPath(hero: Hero) =
 
 proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
+  if hero.rootedUntil > navigationWorld.tick:
+    return false
   if hero.hasMoveTarget and hero.moveRevision != navigationWorld.navigationRevision:
     if not hero.setHeroDestination(
         hero.moveTileX, hero.moveTileY, hero.position.y, hero.moveOffset):
@@ -2077,6 +2155,93 @@ proc followHeroPath(hero: Hero): bool =
   hero.hasMoveTarget = false
   false
 
+proc interruptPortal(world: World, hero: Hero) =
+  ## Ends a spent scroll's channel and starts its shared cooldown.
+  if hero.portalEnds == 0:
+    return
+  hero.portalEnds = 0
+  hero.portalCooldownEnds = world.tick + PortalCooldownTicks
+  when defined(replayEvents):
+    world.lifecycleEvent(PortalInterrupted, hero.id, hero.portalTowerId,
+      ItemEffect)
+  hero.portalTowerId = 0
+
+proc applyStun*(world: World, heroId, duration: int32) =
+  ## Stops actions and interrupts a portal when a stun is applied.
+  let hero = world.heroById(heroId)
+  if hero.id == 0 or hero.hp <= 0 or duration <= 0:
+    return
+  hero.stunnedUntil = max(hero.stunnedUntil, world.tick + duration)
+  hero.swingTicks = -1
+  world.interruptPortal(hero)
+  when defined(replayEvents):
+    world.lifecycleEvent(Stunned, 0, hero.id, AbilityEffect)
+
+proc applyRoot*(world: World, heroId, duration: int32) =
+  ## Stops movement and interrupts a portal when a root is applied.
+  let hero = world.heroById(heroId)
+  if hero.id == 0 or hero.hp <= 0 or duration <= 0:
+    return
+  hero.rootedUntil = max(hero.rootedUntil, world.tick + duration)
+  world.interruptPortal(hero)
+  when defined(replayEvents):
+    world.lifecycleEvent(Rooted, 0, hero.id, AbilityEffect)
+
+proc heroActionError(world: World, hero: Hero, movement = false): ActionError =
+  ## Rejects commands that a channel or active control effect prevents.
+  if hero.hp <= 0 or hero.state == Dying:
+    return ActionNotAlive
+  if hero.portalEnds > 0:
+    return ActionChanneling
+  if hero.stunnedUntil > world.tick:
+    return ActionStunned
+  if movement and hero.rootedUntil > world.tick:
+    return ActionRooted
+
+proc portalLanding*(
+  world: World,
+  team: Team,
+  aim: WorldPoint,
+  destination: var WorldPoint,
+  towerId: var int32,
+  anchorId = 0'i32
+): bool =
+  ## Finds the closest visible, open landing within a living allied tower's sight.
+  navigationWorld = world
+  var best = int64.high
+  for tower in world.buildings:
+    if tower.kind != TowerBuilding or tower.team != team or tower.hp <= 0 or
+      (anchorId != 0 and tower.id != anchorId):
+        continue
+    let
+      radius = tower.tier.towerSightTiles.int
+      centerX = floorWorldTile(tower.position.x) + GridTiles div 2
+      centerZ = floorWorldTile(tower.position.z) + GridTiles div 2
+    for layerIndex, layer in layers:
+      if layer.water:
+        continue
+      for z in max(0, centerZ - layer.originZ - radius) ..
+        min(layer.depth - 1, centerZ - layer.originZ + radius):
+          for x in max(0, centerX - layer.originX - radius) ..
+            min(layer.width - 1, centerX - layer.originX + radius):
+              if not navigationOpen(layerIndex, x, z):
+                continue
+              var point = worldPoint(pathPoint(layerIndex, x, z))
+              if floorWorldTile(point.x) == floorWorldTile(aim.x) and
+                floorWorldTile(point.z) == floorWorldTile(aim.z):
+                  point.x = aim.x
+                  point.z = aim.z
+                  discard layerFixedHeight(layerIndex, point, point.y)
+              if not within(point, tower.position, radius.int32 * WorldScale) or
+                not world.visible(team, point) or not inWalkMargin(toPlanar(point)):
+                  continue
+              let distance = distanceSquared(point, aim)
+              if distance < best:
+                destination = point
+                towerId = tower.id
+                best = distance
+                result = true
+
 proc applyWalkTo*(world: World, heroId, mapX, mapY: int32,
     offset = FixedVec2Zero
 ): bool =
@@ -2095,6 +2260,9 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32,
       ActionNotAlive,
       offset
     )
+  let error = world.heroActionError(world.heroes[index], movement = true)
+  if error != NoActionError:
+    return world.finishAction(heroId, ActionWalkTo, 0, mapX, mapY, error, offset)
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = false
   world.heroes[index].targetFootmanId = 0
@@ -2135,6 +2303,11 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
       mapY,
       ActionNotAlive,
       offset
+    )
+  let error = world.heroActionError(world.heroes[index], movement = true)
+  if error != NoActionError:
+    return world.finishAction(
+      heroId, ActionAttackMove, 0, mapX, mapY, error, offset
     )
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = true
@@ -2197,6 +2370,9 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
       0,
       ActionNotAlive
     )
+  let error = world.heroActionError(world.heroes[index])
+  if error != NoActionError:
+    return world.finishAction(heroId, ActionAttackTarget, 0, targetId, 0, error)
   if targetId == 0:
     world.heroes[index].attackObjectId = 0
     world.heroes[index].attackMoving = false
@@ -2233,6 +2409,8 @@ proc purchaseError(world: World, heroId, itemId: int32): ActionError =
   let item = itemFromId(itemId)
   if item == NoItem:
     return ActionUnknownItem
+  if not world.heroes[index].canShop:
+    return ActionOutsideKeep
   let spec = item.itemSpec
   if world.heroes[index].gold < spec.cost:
     return ActionInsufficientGold
@@ -2596,6 +2774,13 @@ proc respawn(world: World, hero: Hero) =
   hero.animTicks = 0
   hero.deathTicks = 0
   hero.surfaceHint = hero.spawnPosition.y
+  hero.portalEnds = 0
+  hero.portalTowerId = 0
+  hero.stunnedUntil = 0
+  hero.rootedUntil = 0
+  hero.recoveryItems = default(typeof(hero.recoveryItems))
+  hero.recoveryStarted = default(typeof(hero.recoveryStarted))
+  hero.recoveryApplied = default(typeof(hero.recoveryApplied))
   hero.navLayer = bindNavLayer(hero.spawnPosition)
   for slot in HeroAbilitySlot:
     hero.cooldowns[slot] = 0
@@ -2633,6 +2818,50 @@ proc regenHeroMana(world: World, hero: Hero, tick: int32) =
   ## Restores a small amount of mana on a stable cadence.
   if tick mod 6 == 0 and hero.mana < hero.maxMana:
     world.restoreMana(hero, 1, hero.id, Regeneration, 0)
+
+proc recoverPotion(world: World, hero: Hero, kind: RecoveryKind) =
+  ## Applies each earned point once, including when replacing an expiring dose.
+  let item = hero.recoveryItems[kind]
+  if item == NoItem:
+    return
+  let
+    spec = item.itemSpec
+    elapsed = clamp(world.tick - hero.recoveryStarted[kind],
+      0'i32, spec.recoveryTicks)
+    total = if kind == HealthRecovery: spec.heal else: spec.restore
+    earned = total * elapsed div spec.recoveryTicks
+    amount = earned - hero.recoveryApplied[kind]
+  hero.recoveryApplied[kind] = earned
+  if amount > 0:
+    if kind == HealthRecovery:
+      world.healHero(hero, amount, hero.id, ItemEffect, item.ord.int32)
+    else:
+      world.restoreMana(hero, amount, hero.id, ItemEffect, item.ord.int32)
+  if elapsed == spec.recoveryTicks:
+    hero.recoveryItems[kind] = NoItem
+    hero.recoveryStarted[kind] = 0
+    hero.recoveryApplied[kind] = 0
+    when defined(replayEvents):
+      world.emit GameEvent(
+        kind: RecoveryCompleted, actor: world.eventEntity(hero.id),
+        target: world.eventEntity(hero.id), cause: ItemEffect,
+        detail: item.ord.int32, related: -1
+      )
+
+proc recoverHero(world: World, hero: Hero) =
+  ## Applies potion regeneration and fast recovery on the own spawn floor.
+  for kind in RecoveryKind:
+    world.recoverPotion(hero, kind)
+  if hero.inOwnSpawn:
+    const Duration = SpawnRecoverySeconds * TickRate
+    let
+      phase = world.tick mod Duration
+      health = hero.maxHp * (phase + 1) div Duration -
+        hero.maxHp * phase div Duration
+      mana = hero.maxMana * (phase + 1) div Duration -
+        hero.maxMana * phase div Duration
+    world.healHero(hero, health, hero.id, Regeneration, 0)
+    world.restoreMana(hero, mana, hero.id, Regeneration, 0)
 
 proc applyHeroHit(
     world: World,
@@ -2740,14 +2969,15 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       0,
       ActionNotAlive
     )
-  if world.heroes[index].hp <= 0:
+  let error = world.heroActionError(world.heroes[index])
+  if error != NoActionError:
     return world.finishAction(
       heroId,
       ActionUseItem,
       slotId,
       slotId,
       0,
-      ActionNotAlive
+      error
     )
   if slot < 0 or slot >= InventorySlots:
     return world.finishAction(
@@ -2769,6 +2999,10 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionEmptySlot
     )
   let spec = item.itemSpec
+  if item == PortalScroll:
+    return world.finishAction(
+      heroId, ActionUseItem, slotId, slotId, 0, ActionInvalidPoint
+    )
   if spec.kind != Consumable:
     return world.finishAction(
       heroId,
@@ -2777,6 +3011,11 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       slotId,
       0,
       ActionNotConsumable
+    )
+  let hero = world.heroes[index]
+  if hero.consumableCooldown(item, world.tick) > 0:
+    return world.finishAction(
+      heroId, ActionUseItem, slotId, slotId, 0, ActionCooldown
     )
   if spec.heal > 0:
     if world.heroes[index].hp >= world.heroes[index].maxHp:
@@ -2788,8 +3027,8 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
         0,
         ActionFullHealth
       )
-    world.healHero(world.heroes[index], spec.heal, heroId,
-      ItemEffect, item.ord.int32)
+    if spec.recoveryTicks == 0:
+      world.healHero(hero, spec.heal, heroId, ItemEffect, item.ord.int32)
   elif spec.restore > 0:
     if world.heroes[index].mana >= world.heroes[index].maxMana:
       return world.finishAction(
@@ -2800,8 +3039,8 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
         0,
         ActionFullMana
       )
-    world.restoreMana(world.heroes[index], spec.restore, heroId,
-      ItemEffect, item.ord.int32)
+    if spec.recoveryTicks == 0:
+      world.restoreMana(hero, spec.restore, heroId, ItemEffect, item.ord.int32)
   elif spec.strike > 0:
     let targetId = world.heroes[index].attackObjectId
     if targetId == 0:
@@ -2869,8 +3108,81 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       0,
       ActionNotConsumable
     )
-  world.consumeItem(world.heroes[index], slot)
+  if spec.heal > 0 or spec.restore > 0:
+    let kind = if spec.heal > 0: HealthRecovery else: ManaRecovery
+    world.recoverPotion(hero, kind)
+    hero.potionCooldownEnds[kind] = world.tick + spec.cooldownTicks
+    if spec.recoveryTicks > 0:
+      hero.recoveryItems[kind] = item
+      hero.recoveryStarted[kind] = world.tick
+      hero.recoveryApplied[kind] = 0
+      when defined(replayEvents):
+        world.emit GameEvent(
+          kind: RecoveryStarted, actor: world.eventEntity(heroId),
+          target: world.eventEntity(heroId), cause: ItemEffect,
+          detail: item.ord.int32, related: -1
+        )
+  world.consumeItem(hero, slot)
   world.finishAction(heroId, ActionUseItem, slotId, slotId, 0, NoActionError)
+
+proc applyUseItemAt*(
+    world: World,
+    heroId, slotId, mapX, mapY: int32,
+    offset = FixedVec2Zero
+): bool =
+  ## Spends a scroll and channels toward an open allied tower landing.
+  let hero = world.heroById(heroId)
+  var error = world.heroActionError(hero, movement = true)
+  if hero.id == 0:
+    error = ActionNotAlive
+  if error == NoActionError:
+    if slotId < 0 or slotId >= InventorySlots:
+      error = ActionInvalidSlot
+    elif hero.inventory[slotId] == NoItem:
+      error = ActionEmptySlot
+    elif hero.inventory[slotId] != PortalScroll:
+      error = ActionNotConsumable
+    elif hero.portalCooldownEnds > world.tick:
+      error = ActionCooldown
+    elif mapX < 0 or mapX >= mapTiles() or mapY < 0 or
+      mapY >= mapTiles() or not offset.validTileOffset:
+        error = ActionInvalidPoint
+  var
+    destination: WorldPoint
+    towerId: int32
+  if error == NoActionError:
+    let aim = WorldPoint(
+      x: (mapX - mapTiles().int32 div 2) * WorldScale + WorldScale div 2 +
+        tilesToWorld(offset.x, WorldScale),
+      z: (mapY - mapTiles().int32 div 2) * WorldScale + WorldScale div 2 +
+        tilesToWorld(offset.y, WorldScale)
+    )
+    if not world.portalLanding(hero.team, aim, destination, towerId):
+      error = ActionTargetUnavailable
+  if error != NoActionError:
+    return world.finishAction(
+      heroId, ActionUseItemAt, slotId, mapX, mapY, error, offset
+    )
+  world.consumeItem(hero, slotId.int)
+  hero.stopHeroPath()
+  hero.attackObjectId = 0
+  hero.attackMoving = false
+  hero.targetFootmanId = 0
+  hero.targetHeroId = 0
+  hero.targetBuildingId = 0
+  hero.attackingFort = false
+  hero.swingTicks = -1
+  hero.state = Marching
+  hero.animClip = heroIdleClip
+  hero.animTicks = 0
+  hero.portalEnds = world.tick + PortalChannelTicks
+  hero.portalDestination = destination
+  hero.portalTowerId = towerId
+  when defined(replayEvents):
+    world.lifecycleEvent(PortalStarted, hero.id, towerId, ItemEffect)
+  world.finishAction(
+    heroId, ActionUseItemAt, slotId, mapX, mapY, NoActionError, offset
+  )
 
 proc spellTarget*(world: World, id: int32, value: var WorldObject): bool =
   ## Resolves an existing object without depending on the script query cache.
@@ -3077,8 +3389,9 @@ proc castAbility(
     aim: WorldPoint
 ): ActionError =
   ## Releases an object or ground spell after atomically checking its costs.
-  if hero.hp <= 0 or hero.state == Dying:
-    return ActionNotAlive
+  let error = world.heroActionError(hero)
+  if error != NoActionError:
+    return error
   if world.casts.len >= 512:
     return ActionSpellLimit
   if not hero.spellsReady:
@@ -3268,6 +3581,9 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     applyBuyItem(world, action.heroId, action.first)
   of ActionUseItem:
     applyUseItem(world, action.heroId, action.first)
+  of ActionUseItemAt:
+    applyUseItemAt(world, action.heroId, action.slot,
+      action.first, action.second, action.offset)
   of ActionCastTarget:
     applyCastTarget(world, action.heroId,
       action.slot, action.first)
@@ -3437,6 +3753,7 @@ proc updateHero(world: World, hero: Hero) =
     return
 
   if hero.hp <= 0:
+    world.interruptPortal(hero)
     hero.state = Dying
     hero.deathTicks = 0
     hero.targetFootmanId = 0
@@ -3446,6 +3763,34 @@ proc updateHero(world: World, hero: Hero) =
     hero.attackObjectId = 0
     hero.attackMoving = false
     hero.hasMoveTarget = false
+    return
+
+  world.recoverHero(hero)
+  if hero.portalEnds > 0:
+    hero.animClip = heroIdleClip
+    inc hero.animTicks
+    world.regenHeroMana(hero, world.tick)
+    if hero.stunnedUntil > world.tick or hero.rootedUntil > world.tick:
+      world.interruptPortal(hero)
+    elif world.tick >= hero.portalEnds:
+      var
+        destination: WorldPoint
+        towerId: int32
+      if world.portalLanding(hero.team, hero.portalDestination,
+          destination, towerId, hero.portalTowerId):
+        hero.place(destination)
+        hero.portalEnds = 0
+        hero.portalCooldownEnds = world.tick + PortalCooldownTicks
+        hero.portalTowerId = 0
+        when defined(replayEvents):
+          world.lifecycleEvent(PortalCompleted, hero.id, hero.id, ItemEffect)
+      else:
+        world.interruptPortal(hero)
+    return
+  if hero.stunnedUntil > world.tick:
+    hero.animClip = heroIdleClip
+    inc hero.animTicks
+    world.regenHeroMana(hero, world.tick)
     return
 
   let start = hero.position
@@ -3636,7 +3981,10 @@ proc updateHero(world: World, hero: Hero) =
   hero.animClip = if moving: heroRunClip else: heroIdleClip
   inc hero.animTicks
 
-proc separateBodies(first, second: var Body, layer: int32) =
+proc separateBodies(
+    first, second: var Body, layer: int32,
+    firstFixed = false, secondFixed = false
+) =
   ## Pushes two living units apart while keeping both on this layer.
   if not needsSeparation(first, second):
     return
@@ -3645,7 +3993,12 @@ proc separateBodies(first, second: var Body, layer: int32) =
   gotaWalkOrigin = first.pos
   if not tilesWalkable(second.pos):
     return
-  separatePair(first, second, tilesWalkable)
+  separatePair(first, second, tilesWalkable, firstFixed, secondFixed)
+
+proc immobile(world: World, hero: Hero): bool =
+  ## Keeps channeling or controlled heroes in place during separation.
+  hero.portalEnds > 0 or hero.stunnedUntil > world.tick or
+    hero.rootedUntil > world.tick
 
 proc addHashy(hash: var uint32, value: WorldPoint) =
   ## Mixes one authoritative integer world position.
@@ -3756,6 +4109,17 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.spellsReady)
     hash.addHashy(hero.manualSpells)
     hash.addHashy(hero.lastActionError.ord)
+    for kind in RecoveryKind:
+      hash.addHashy(hero.potionCooldownEnds[kind])
+      hash.addHashy(hero.recoveryItems[kind].ord)
+      hash.addHashy(hero.recoveryStarted[kind])
+      hash.addHashy(hero.recoveryApplied[kind])
+    hash.addHashy(hero.portalEnds)
+    hash.addHashy(hero.portalCooldownEnds)
+    hash.addHashy(hero.portalTowerId)
+    hash.addHashy(hero.portalDestination)
+    hash.addHashy(hero.stunnedUntil)
+    hash.addHashy(hero.rootedUntil)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
@@ -3907,7 +4271,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
         separateBodies(
           world.heroes[i].body,
           world.heroes[j].body,
-          world.heroes[i].navLayer
+          world.heroes[i].navLayer,
+          world.immobile(world.heroes[i]),
+          world.immobile(world.heroes[j])
         )
       for j in 0 ..< world.footmen.len:
         if world.footmen[j].state == Dying:
@@ -3917,7 +4283,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
         separateBodies(
           world.heroes[i].body,
           world.footmen[j].body,
-          world.heroes[i].navLayer
+          world.heroes[i].navLayer,
+          world.immobile(world.heroes[i])
         )
 
   profileBlock "applyBody":
