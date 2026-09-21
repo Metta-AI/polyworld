@@ -136,6 +136,7 @@ proc run() =
     randomTitle = ""
     hasGnomes = false
     hasGota = false
+    hasGods = false
     hasGnomeParts = false
     speed = 1.0'f
     fade = 0.20'f
@@ -154,6 +155,8 @@ proc run() =
       hasGnomes = true
     if preset.group == "Gota":
       hasGota = true
+    if preset.group == "Gota Gods":
+      hasGods = true
   for category in manifest.categories:
     for item in category.items:
       if item.alignment == GnomeOnly:
@@ -244,6 +247,9 @@ proc run() =
       pupil = manifest.pupilColors.colorIndex(preset.pupilColor)
       pupilTint = manifest.pupilColors[pupil].rgb
     playClip(preset.pose, fade)
+    if preset.group == "Gota Gods":
+      distance = 7.5
+      target = vec3(0.4, 1.85, 0)
 
   proc frameLineup() =
     ## Frames the selected lineup with room for the controls panel.
@@ -257,6 +263,9 @@ proc run() =
       distance = 7.5
       target = vec3(1.6, 1.7, 0)
       lineup.poseCreeps()
+    of "Gota Gods":
+      distance = 10.5
+      target = vec3(1.8, 1.9, 0)
     else:
       distance = 14.5
       target = vec3(2.5, 5.94, 0)
@@ -420,6 +429,8 @@ proc run() =
     setLineup(true, "Gota")
   if getEnv("CREEP_REVIEW", "0") == "1":
     setLineup(true, "Creeps")
+  if getEnv("GODS_LINEUP", "0") == "1":
+    setLineup(true, "Gota Gods")
 
   proc mouseOverUi(): bool =
     ## Prevents camera gestures from starting over either controls panel.
@@ -588,6 +599,8 @@ proc run() =
       reference.loadPreset(index)
       playClip(reference.manifest.presets[index].pose, fade)
     else:
+      if showLineup:
+        setLineup(false)
       loadPreset(index)
 
   proc clothControls(category: string) =
@@ -658,11 +671,15 @@ proc run() =
             button "Gnome presets":
               presetGroup =
                 if presetGroup == "Gnomes": "" else: "Gnomes"
+        if hasGods:
+          button "God presets":
+            presetGroup =
+              if presetGroup == "Gota Gods": "" else: "Gota Gods"
         if presetGroup.len > 0:
           for i, preset in manifest.presets:
             if preset.group == presetGroup:
               button preset.name:
-                loadPreset(i)
+                selectedPreset(i)
                 presetGroup = ""
         group "aligned random":
           box RowWidth, 34
@@ -844,6 +861,12 @@ proc run() =
           setLineup(enabled, "Gota")
         button "Creep sword pose":
           setLineup(true, "Creeps")
+      if hasGods:
+        var enabled = showLineup and lineupGroup == "Gota Gods"
+        let previous = enabled
+        checkBox("Gota gods", enabled)
+        if enabled != previous:
+          setLineup(enabled, "Gota Gods")
       if showLineup:
         text lineupGroup & " character lineup"
         if lineupGroup == "Creeps":
