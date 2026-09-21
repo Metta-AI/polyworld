@@ -21,17 +21,89 @@
 '
 ' Inventory:
 '   itemId(slot), itemCount(slot), buyItem(itemId), useItem(slot)
-' Item ids: 1 ration, 2 elixir, 3 mana potion, 4 poison,
+'   Portal Scroll: item 21, 100 gold; useItemAt(slot, x, y).
+'   selfPortalCooldown, selfChannelTicks: remaining ticks (24/second).
+' Item ids: 1 health potion, 2 vitality elixir, 3 mana elixir, 4 poison,
+'   22 mana potion. Potions share a 10-second cooldown per resource.
+'   itemCooldown(slot), canShop(), inOwnSpawn() report live state.
 '   5 helmet, 6 buckler, 7 gauntlets, 8 boots, 9 amulet, 10 ring,
 '   11 dagger, 12 wand, 13 sword, 14 bow, 15 pauldrons, 16 armor,
 '   17 staff, 18 axe, 19 crossbow, 20 spellbook
 '
-' Object kinds are 1 = god, 2 = hero, 3 = footman, and 4 = tower.
+' Object kinds are 1 = god, 2 = hero, 3 = footman, 4 = tower, and 5 = barracks.
 ' Towers become attackable outer first, then inner, then gate.
 ' Clearing a lane exposes the two god guards. Both must fall to hurt the god.
 ' Hero classes are stable integer values from 0 to 9. Non-heroes use -1.
 ' Actions return 1 when accepted and 0 when rejected:
 '   walkTo(x, y), attackTarget(objectId), buyItem(itemId), useItem(slot)
+
+
+' Draft roles: 0 frontline, 1 carry, 2 mage, 3 support, 4 fighter.
+' Prefer roles missing from our team, then our faction's familiar heroes.
+sub chooseHero()
+  if draftTurnId <> selfId then
+    exit sub
+  end if
+  bestClass = -1
+  bestScore = -2147483647
+  candidate = 0
+  while candidate < 10
+    if heroAvailable(candidate) then
+      role = heroRole(candidate)
+      score = 100
+      player = 0
+      while player < draftPlayerCount()
+        if draftPlayerTeam(player) = selfTeam then
+          picked = draftedClass(draftPlayerId(player))
+          if picked >= 0 then
+            if heroRole(picked) = role then
+              score = score - 100
+            end if
+          end if
+        end if
+        player = player + 1
+      wend
+      if candidate \ 5 = selfTeam then
+        score = score + 1
+      end if
+      if score > bestScore then
+        bestScore = score
+        bestClass = candidate
+      end if
+    end if
+    candidate = candidate + 1
+  wend
+  if bestClass >= 0 then
+    draftHero(bestClass)
+  end if
+end sub
+
+if drafting then
+  chooseHero()
+  end
+end if
+
+' Buy back as soon as affordable, then wait for fresh observations.
+if selfHp <= 0 then
+  price = buybackPrice()
+  if price > 0 and selfGold >= price then
+    buyback()
+  end if
+  end
+end if
+
+' Spend points explicitly, prioritizing the ultimate and primary spell.
+for upgrade = 1 to 4
+  if canLevelAbility(3) then
+    levelAbility(3)
+  elseif canLevelAbility(1) then
+    levelAbility(1)
+  elseif canLevelAbility(2) then
+    levelAbility(2)
+  elseif canLevelAbility(0) then
+    levelAbility(0)
+  end if
+next upgrade
 
 decisions = decisions + 1
 bestId = 0
@@ -73,22 +145,22 @@ while slot < 6
   if id = 2 then
     hasHeal = 1
   end if
-  if id = 3 then
+  if id = 3 or id = 22 then
     hasMana = 1
   end if
   if id = 4 then
     hasPoison = 1
   end if
-  if id > 4 then
+  if id >= 5 and id <= 20 then
     hasGear = 1
   end if
   if id = 1 or id = 2 then
-    if selfHp * 5 < selfMaxHp * 3 then
+    if selfHp * 5 < selfMaxHp * 3 and itemCooldown(slot) = 0 then
       useItem(slot)
     end if
   end if
-  if id = 3 then
-    if selfMana * 5 < selfMaxMana * 2 then
+  if id = 3 or id = 22 then
+    if selfMana * 5 < selfMaxMana * 2 and itemCooldown(slot) = 0 then
       useItem(slot)
     end if
   end if
@@ -100,102 +172,105 @@ while slot < 6
   slot = slot + 1
 wend
 
-if selfHp * 2 < selfMaxHp then
-  if hasHeal = 0 then
-    if selfGold >= 50 then
-      buyItem(2)
-    end if
-    if selfGold >= 30 then
-      buyItem(1)
+if canShop() then
+  if selfHp * 2 < selfMaxHp then
+    if hasHeal = 0 then
+      if selfGold >= 75 then
+        buyItem(2)
+      end if
+      if selfGold >= 30 then
+        buyItem(1)
+      end if
     end if
   end if
-end if
 
-if selfMaxMana > 0 then
-  if selfMana * 2 < selfMaxMana then
-    if hasMana = 0 then
-      if selfGold >= 45 then
-        buyItem(3)
+  if selfMaxMana > 0 then
+    if selfMana * 2 < selfMaxMana then
+      if hasMana = 0 then
+        if selfGold >= 45 then
+          buyItem(22)
+        end if
       end if
     end if
   end if
-end if
 
-if bestId <> 0 then
-  if hasPoison = 0 then
-    if selfGold >= 40 then
-      buyItem(4)
+  if bestId <> 0 then
+    if hasPoison = 0 then
+      if selfGold >= 40 then
+        buyItem(4)
+      end if
     end if
   end if
-end if
 
-if emptySlot <> 0 then
-  melee = 0
-  ranged = 0
-  magic = 0
-  if selfClass = 0 or selfClass = 4 or selfClass = 5 or selfClass = 9 then
-    melee = 1
-  end if
-  if selfClass = 1 or selfClass = 6 then
-    ranged = 1
-  end if
-  if selfClass = 2 or selfClass = 3 or selfClass = 7 or selfClass = 8 then
-    magic = 1
-  end if
-  if melee = 1 then
-    if hasGear = 0 then
-      if selfGold >= 70 then
-        buyItem(7)
+  if emptySlot <> 0 then
+    melee = 0
+    ranged = 0
+    magic = 0
+    if selfClass = 0 or selfClass = 4 or selfClass = 5 or selfClass = 9 then
+      melee = 1
+    end if
+    if selfClass = 1 or selfClass = 6 then
+      ranged = 1
+    end if
+    if selfClass = 2 or selfClass = 3 or selfClass = 7 or selfClass = 8 then
+      magic = 1
+    end if
+    if melee = 1 then
+      if hasGear = 0 then
+        if selfGold >= 70 then
+          buyItem(7)
+        end if
+      end if
+      if selfGold >= 80 then
+        buyItem(5)
+      end if
+      if selfGold >= 110 then
+        buyItem(11)
+      end if
+      if selfGold >= 150 then
+        buyItem(13)
+      end if
+      if selfGold >= 180 then
+        buyItem(18)
       end if
     end if
-    if selfGold >= 80 then
-      buyItem(5)
-    end if
-    if selfGold >= 110 then
-      buyItem(11)
-    end if
-    if selfGold >= 150 then
-      buyItem(13)
-    end if
-    if selfGold >= 180 then
-      buyItem(18)
-    end if
-  end if
-  if ranged = 1 then
-    if hasGear = 0 then
-      if selfGold >= 100 then
-        buyItem(8)
+    if ranged = 1 then
+      if hasGear = 0 then
+        if selfGold >= 100 then
+          buyItem(8)
+        end if
+      end if
+      if selfGold >= 150 then
+        buyItem(14)
+      end if
+      if selfGold >= 180 then
+        buyItem(19)
       end if
     end if
-    if selfGold >= 150 then
-      buyItem(14)
-    end if
-    if selfGold >= 180 then
-      buyItem(19)
-    end if
-  end if
-  if magic = 1 then
-    if hasGear = 0 then
-      if selfGold >= 140 then
-        buyItem(12)
+    if magic = 1 then
+      if hasGear = 0 then
+        if selfGold >= 140 then
+          buyItem(12)
+        end if
       end if
+      if selfGold >= 120 then
+        buyItem(10)
+      end if
+      if selfGold >= 170 then
+        buyItem(17)
+      end if
+      if selfGold >= 190 then
+        buyItem(20)
+      end if
+    end if
+    if selfGold >= 90 then
+      buyItem(6)
     end if
     if selfGold >= 120 then
-      buyItem(10)
-    end if
-    if selfGold >= 170 then
-      buyItem(17)
-    end if
-    if selfGold >= 190 then
-      buyItem(20)
+      buyItem(9)
     end if
   end if
-  if selfGold >= 90 then
-    buyItem(6)
-  end if
-  if selfGold >= 120 then
-    buyItem(9)
-  end if
+
 end if
 
 if bestId = 0 then
