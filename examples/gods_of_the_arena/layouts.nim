@@ -13,6 +13,7 @@ const
   PanelMinimap* = vec2(256, 256)
   PanelDetails* = vec2(859, 242)
   PanelInventory* = vec2(252, 243)
+  PanelDraft = vec2(1048, 632)
   HeroCardSize = vec2(100, 126)
   HeroGap = 4.0'f
   HeroTeamWidth = HeroCardSize.x * 5 + HeroGap * 4
@@ -37,6 +38,49 @@ type
     panel*, heading*, catalog*, footer*: GameUiPanel
     cards*: array[Item.high.ord, GameUiPanel]
     compact*: bool
+
+  DraftPanels* = object
+    panel*, title*, status*, footer*, selection*, role*, confirm*: GameUiPanel
+    deadline*: GameUiPanel
+    heroes*: array[10, GameUiPanel]
+
+proc draftScale*(size: Vec2): float32 =
+  ## Enlarges the picker by half while fitting above the replay controls.
+  min(
+    1.5'f,
+    min((size.x - 48) / PanelDraft.x, (size.y - 48) / PanelDraft.y)
+  )
+
+proc draftPanels*(size: Vec2): DraftPanels =
+  ## Centers a compact five-column hero grid beneath the current picker.
+  const
+    Gap = 12.0'f
+    CardHeight = 224.0'f
+    HeaderHeight = 96.0'f
+    FooterHeight = 76.0'f
+  let
+    width = min(PanelDraft.x, size.x - 48)
+    cardWidth = floor((width - Gap * 4) / 5)
+    gridWidth = cardWidth * 5 + Gap * 4
+    gridHeight = CardHeight * 2 + Gap
+  result.panel.size = vec2(
+    gridWidth, HeaderHeight + gridHeight + FooterHeight
+  )
+  result.panel.origin = floor((size - result.panel.size) / 2)
+  var rows = result.panel.stack(TopToBottom)
+  result.title = rows.takeRow(44, 4)
+  result.status = rows.takeRow(28, 4)
+  result.deadline = rows.takeRow(8, 8)
+  result.deadline.origin.x += floor((result.deadline.size.x - 320) / 2)
+  result.deadline.size.x = 320
+  let grid = rows.takeRow(gridHeight, 20)
+  grid.stackGrid(vec2(cardWidth, CardHeight), 5, vec2(Gap), result.heroes)
+  result.footer = rows.takeRest()
+  var footer = result.footer.stack(RightToLeft)
+  result.confirm = footer.takeColumn(240, 24)
+  var selected = footer.takeRest().stack(TopToBottom)
+  result.selection = selected.takeRow(30, 2)
+  result.role = selected.takeRest()
 
 proc scorePanel*(layout: GameUiLayout): GameUiPanel =
   ## Moves the score below the hero roster when they cannot fit side by side.

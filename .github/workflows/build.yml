@@ -27,6 +27,7 @@ jobs:
       - run: nim r -d:replayEvents tests/test_gota_portals.nim
       - run: nim r -d:replayEvents tests/test_gota_potions.nim
       - run: nim r -d:replayEvents tests/test_gota_progression.nim
+      - run: nim r -d:replayEvents tests/test_gota_drafts.nim
       - name: Check replay extractor
         shell: bash
         run: nim r examples/gods_of_the_arena/tools/replay_extractor.nim > /dev/null

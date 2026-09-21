@@ -8,7 +8,14 @@ proc portalGame(team = RedTeam, size = 116): Game =
   ## Creates a quiet match with one living hero and allied tower anchors.
   var preset = defaultConfig()
   preset.mapSize = size
-  result = newGame(generateMap(54, preset), 100_000, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54, preset),
+    100_000,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
@@ -194,7 +201,14 @@ block:
   let
     directory = createTempDir("gota-portal-", "")
     path = directory / "portal.bas"
-    game = newGame(generateMap(54), 100_000, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      100_000,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
   defer:
     removeDir(directory)
   writeFile(path, """

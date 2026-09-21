@@ -9,6 +9,7 @@ import
 
 type
   PlayerCommandKind = enum
+    CommandDraft
     CommandWalk
     CommandAttack
     CommandAttackMove
@@ -38,6 +39,12 @@ var
   armedAbility* = -1'i32
   armedItem* = -1'i32
   shopOpen* = false
+
+proc queueDraft*(heroId, classId: int32) =
+  ## Queues a hero choice for validation on the next draft decision.
+  pending.add PlayerCommand(
+    kind: CommandDraft, heroId: heroId, first: classId
+  )
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
   ## Queues one walk command for the human hero.
@@ -172,6 +179,11 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     return
   let tick = uint32(game.world.tick)
   case command.kind
+  of CommandDraft:
+    game.recorder.record ReplayAction(
+      tick: tick, heroId: command.heroId, kind: ActionDraft,
+      first: command.first
+    )
   of CommandWalk:
     game.recorder.recordWalkTo(
       tick, command.heroId, command.first, command.second
@@ -204,6 +216,8 @@ proc recordCommand(game: Game, command: PlayerCommand) =
 proc applyCommand(game: Game, command: PlayerCommand): bool =
   ## Applies one queued command through the bot validators.
   case command.kind
+  of CommandDraft:
+    game.world.applyDraft(command.heroId, command.first)
   of CommandWalk:
     applyWalkTo(
       game.world, command.heroId, command.first, command.second

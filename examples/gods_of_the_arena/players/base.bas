@@ -38,6 +38,51 @@
 '   walkTo(x, y), attackTarget(objectId), buyItem(itemId), useItem(slot)
 
 
+' Draft roles: 0 frontline, 1 carry, 2 mage, 3 support, 4 fighter.
+' Prefer roles missing from our team, then our faction's familiar heroes.
+sub chooseHero()
+  if draftTurnId <> selfId then
+    exit sub
+  end if
+  bestClass = -1
+  bestScore = -2147483647
+  candidate = 0
+  while candidate < 10
+    if heroAvailable(candidate) then
+      role = heroRole(candidate)
+      score = 100
+      player = 0
+      while player < draftPlayerCount()
+        if draftPlayerTeam(player) = selfTeam then
+          picked = draftedClass(draftPlayerId(player))
+          if picked >= 0 then
+            if heroRole(picked) = role then
+              score = score - 100
+            end if
+          end if
+        end if
+        player = player + 1
+      wend
+      if candidate \ 5 = selfTeam then
+        score = score + 1
+      end if
+      if score > bestScore then
+        bestScore = score
+        bestClass = candidate
+      end if
+    end if
+    candidate = candidate + 1
+  wend
+  if bestClass >= 0 then
+    draftHero(bestClass)
+  end if
+end sub
+
+if drafting then
+  chooseHero()
+  end
+end if
+
 ' Buy back as soon as affordable, then wait for fresh observations.
 if selfHp <= 0 then
   price = buybackPrice()

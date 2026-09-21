@@ -10,6 +10,8 @@ const
   CreepsPerBarracks* = 3
   TickRate* = SharedTickRate
     ## Simulation ticks per second.
+  DraftPickTicks* = 10 * TickRate
+    ## Each human or bot gets ten simulation seconds to choose a hero.
 
 type
   HeroClass* = enum
@@ -27,6 +29,8 @@ type
     MeleeAttack,
     RangedAttack,
     MagicAttack
+  HeroRole* = enum
+    Frontline, Carry, Mage, Support, Fighter
   HeroAbilitySlot* = enum
     PassiveAbility,
     PrimaryAbility,
@@ -675,6 +679,15 @@ proc heroClassForTeam*(team, slot: int): HeroClass =
 proc heroSpec*(class: HeroClass): HeroSpec =
   ## Returns the immutable integer tuning for one hero class.
   HeroSpecs[class]
+
+proc heroRole*(class: HeroClass): HeroRole {.raises: [].} =
+  ## Groups heroes into the five complementary draft roles.
+  case class
+  of VanguardKnight, DeathKnight: Frontline
+  of Ranger, Crossbowman: Carry
+  of Arcanist, Lich: Mage
+  of DruidWarden, Warlock: Support
+  of DemonHunter, Berserker: Fighter
 
 proc abilitySpec*(ability: Ability): AbilitySpec =
   ## Returns casting, charge, effect and shape tuning for one ability.

@@ -88,7 +88,14 @@ block:
   let
     path = getTempDir() / ("gota-hero-stats-" & $getCurrentProcessId() &
       ".replay")
-    game = newGame(generateMap(2026), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(2026),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     metadata = %*{"id": "test", "coworld_version": "fixture",
       "completed_at": "2026-09-14T00:00:00Z",
       "participants": [], "participant_scores": []}

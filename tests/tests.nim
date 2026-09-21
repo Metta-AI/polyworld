@@ -25,6 +25,7 @@ import
   test_gota_cameras,
   test_gota_characters,
   test_gota_content,
+  test_gota_drafts,
   test_gota_faces,
   test_gota_gods,
   test_gota_host,

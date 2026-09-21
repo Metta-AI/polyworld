@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 48'u16
+  ReplayGameVersion* = 50'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -27,6 +27,7 @@ const
   ActionUseItemAt* = 15'u8
   ActionLevelAbility* = 16'u8
   ActionBuyback* = 17'u8
+  ActionDraft* = 18'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -47,7 +48,9 @@ type
     gridTiles*: uint16
     spawnIntervalTicks*: uint32
     maximumTicks*: uint32
+      ## Battle ticks only; drafting has a separate per-player deadline.
     heroes*: seq[ReplayHero]
+    drafting*: bool
 
   ReplayAction* = object
     tick*: uint32
@@ -108,7 +111,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionCastPoint and
       action.kind != ActionManualSpells and
       action.kind != ActionLevelAbility and
-      action.kind != ActionBuyback:
+      action.kind != ActionBuyback and
+      action.kind != ActionDraft:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
 
@@ -224,9 +228,20 @@ proc recordBuyback*(
     kind: ActionBuyback
   )
 
+proc maximumReplayTicks(setup: Setup): uint64 =
+  ## Bounds the tape by battle time plus every possible pick deadline.
+  result = setup.maximumTicks.uint64
+  if setup.drafting:
+    result += setup.heroes.len.uint64 * DraftPickTicks.uint64
+
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.
-  recordHash(recorder, hash, MaxReplayHashes)
+  if recorder == nil:
+    return
+  let maximum = recorder.data.header.setup.maximumReplayTicks()
+  if maximum > MaxReplayHashes.uint64:
+    fail("replay setup duration exceeds the hash limit")
+  recorder.data.hashes.appendHash(hash, maximum.uint32, MaxReplayHashes)
 
 proc recordUseItemAt*(
     recorder: ReplayRecorder,
@@ -257,7 +272,9 @@ proc validate*(data: ReplayData) =
     ReplayFormatVersion,
     ReplayGameVersion
   )
-  let setup = data.header.setup
+  let
+    setup = data.header.setup
+    totalTicks = setup.maximumReplayTicks()
   if setup.tickRate != uint16(TickRate):
     fail("replay setup has an unsupported tick rate")
   if setup.gridTiles.int != data.config.mapPreset.mapSize:
@@ -268,15 +285,17 @@ proc validate*(data: ReplayData) =
     fail("replay setup has an invalid duration")
   if setup.spawnIntervalTicks > uint32(int32.high):
     fail("replay setup spawn interval is too large")
-  if setup.maximumTicks > uint32(MaxReplayHashes):
+  if totalTicks > uint64(MaxReplayHashes):
     fail("replay setup duration exceeds the hash limit")
   if setup.heroes.len == 0 or setup.heroes.len > MaxReplayHeroes:
     fail("replay setup has an invalid hero count")
+  if setup.drafting and setup.heroes.len > HeroClassCount:
+    fail("replay draft has more players than available heroes")
   if data.actions.len > MaxReplayActions:
     fail("replay action limit exceeded")
   if data.hashes.len > MaxReplayHashes:
     fail("replay hash limit exceeded")
-  if data.hashes.len > int(setup.maximumTicks):
+  if data.hashes.len.uint64 > totalTicks:
     fail("replay hashes exceed the configured duration")
   for i, hero in setup.heroes:
     if hero.team > 1 or hero.lane > 2 or
@@ -291,7 +310,7 @@ proc validate*(data: ReplayData) =
       fail("replay action exceeds the recorded duration")
     if i > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
-    if setup.maximumTicks > 0 and action.tick > setup.maximumTicks:
+    if action.tick.uint64 > totalTicks:
       fail("replay action exceeds the configured duration")
     if not action.offset.validTileOffset:
       fail("replay point offset is outside its tile")
@@ -305,7 +324,8 @@ proc validate*(data: ReplayData) =
         action.kind != ActionCastPoint and
         action.kind != ActionManualSpells and
         action.kind != ActionLevelAbility and
-        action.kind != ActionBuyback:
+        action.kind != ActionBuyback and
+        action.kind != ActionDraft:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:

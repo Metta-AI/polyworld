@@ -40,7 +40,9 @@ type
     DataSelfStunTicks,
     DataSelfRootTicks,
     DataSelfDeaths,
-    DataSelfRespawnTicks
+    DataSelfRespawnTicks,
+    DataDrafting,
+    DataDraftTurnId
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY
@@ -76,7 +78,9 @@ const
     "selfStunTicks",
     "selfRootTicks",
     "selfDeaths",
-    "selfRespawnTicks"
+    "selfRespawnTicks",
+    "drafting",
+    "draftTurnId"
   ]
 
 var
@@ -97,8 +101,8 @@ proc heroVmLimits(): Limits =
   result.maxArrays = 32
   result.maxArrayElements = 4096
   result.maxGlobals = 256
-  result.maxHostData = 96
-  result.maxHostFunctions = 96
+  result.maxHostData = 128
+  result.maxHostFunctions = 128
   result.maxRoutines = 64
   result.maxParameters = 16
   result.maxRegisters = 256
@@ -220,7 +224,9 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityLevel: rank
     of AbilityMaximum: slot.abilityMaxLevel
     of AbilityRequirement: slot.abilityRequiredLevel(rank + 1)
-    of AbilityCanLevel: int32(hero.abilityLevelError(slot) == NoActionError)
+    of AbilityCanLevel:
+      int32(activeGame.world.phase != Drafting and
+        hero.abilityLevelError(slot) == NoActionError)
     of AbilityDamage: spec.damage
     of AbilityHeal: spec.heal
     of AbilityRestore: spec.restore
@@ -231,6 +237,8 @@ proc initHeroHost(heroId: int32): Host =
   result = initHost()
   for error in ActionError:
     discard result.addData($error, error.ord.int32)
+  for class in HeroClass:
+    discard result.addData($class, class.ord.int32)
   for name in HeroDataNames:
     discard result.addData(name)
   discard result.addData("mapWidth", mapTiles().int32)
@@ -247,6 +255,60 @@ proc initHeroHost(heroId: int32): Host =
     ("WaterLayer", WaterLayer)
   ]:
     discard result.addData(name, layer.int32)
+
+  let draftHeroProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Records and validates the active player's hero choice.
+    try:
+      activeGame.recorder.record ReplayAction(
+        tick: uint32(activeGame.world.tick), heroId: heroId,
+        kind: ActionDraft, first: arguments[0]
+      )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyDraft(heroId, arguments[0])
+    if accepted:
+      activeGame.metrics.command(
+        activeGame.world.heroIndex(heroId), activeGame.world.tick
+      )
+    int32(accepted)
+  let draftedClassProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads any player's public selection, including the opposing team.
+    activeGame.world.draftedClass(arguments[0])
+  let heroAvailableProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reports whether a valid class remains in the shared draft pool.
+    int32(activeGame.world.heroAvailable(arguments[0]))
+  let heroRoleProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads the class role, or minus one for an invalid class.
+    if arguments[0] < 0 or arguments[0] > HeroClass.high.ord:
+      return -1
+    HeroClass(arguments[0]).heroRole.ord.int32
+  let draftPlayerCountProc: HostProc = proc(
+      arguments: openArray[int32]
+  ): int32 =
+    ## Counts the public player roster in spawn order.
+    activeGame.world.heroes.len.int32
+  let draftPlayerIdProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reads a player ID by spawn index, or zero outside the roster.
+    let index = arguments[0]
+    if index < 0 or index >= activeGame.world.heroes.len:
+      return 0
+    activeGame.world.heroes[index].id
+  let draftPlayerTeamProc: HostProc = proc(
+      arguments: openArray[int32]
+  ): int32 =
+    ## Reads a player's team by spawn index, or minus one when invalid.
+    let index = arguments[0]
+    if index < 0 or index >= activeGame.world.heroes.len:
+      return -1
+    activeGame.world.heroes[index].team.ord.int32
+  discard result.addFunction("draftHero", 1, draftHeroProc, 20)
+  discard result.addFunction("draftedClass", 1, draftedClassProc, 16)
+  discard result.addFunction("heroAvailable", 1, heroAvailableProc, 16)
+  discard result.addFunction("heroRole", 1, heroRoleProc, 4)
+  discard result.addFunction("draftPlayerCount", 0, draftPlayerCountProc, 4)
+  discard result.addFunction("draftPlayerId", 1, draftPlayerIdProc, 4)
+  discard result.addFunction("draftPlayerTeam", 1, draftPlayerTeamProc, 4)
 
   let objectCountProc: HostProc = proc(
       arguments: openArray[int32]
@@ -419,7 +481,8 @@ proc initHeroHost(heroId: int32): Host =
     hero.itemCooldown(int(arguments[0]), activeGame.world.tick)
   let canShopProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reports whether the hero may purchase items here.
-    int32(activeGame.world.heroById(heroId).canShop)
+    int32(activeGame.world.phase != Drafting and
+      activeGame.world.heroById(heroId).canShop)
   let inOwnSpawnProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reports whether the hero is receiving spawn-room recovery.
     int32(activeGame.world.heroById(heroId).inOwnSpawn)
@@ -734,7 +797,15 @@ proc runHeroScript(game: Game, index: int) =
     discard game.world.worldObjectCount(hero.id)
     vm.runtime.setData(heroDataIds[DataSelfId], hero.id)
     vm.runtime.setData(heroDataIds[DataSelfTeam], int32(hero.team.ord))
-    vm.runtime.setData(heroDataIds[DataSelfClass], int32(hero.class.ord))
+    vm.runtime.setData(
+      heroDataIds[DataSelfClass], game.world.draftedClass(hero.id)
+    )
+    vm.runtime.setData(
+      heroDataIds[DataDrafting], int32(game.world.phase == Drafting)
+    )
+    vm.runtime.setData(
+      heroDataIds[DataDraftTurnId], game.world.draftHeroId()
+    )
     vm.runtime.setData(
       heroDataIds[DataSelfX],
       mapCoordinate(hero.position.x)
@@ -793,6 +864,9 @@ proc runHeroScript(game: Game, index: int) =
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every VM in seeded cyclic order and advances the first slot.
   activeGame = game
+  if game.world.phase == Drafting:
+    runHeroScript(game, game.world.heroIndex(game.world.draftHeroId()))
+    return
   for offset in 0 ..< game.world.heroes.len:
     let index = (game.world.heroTurnStart + offset) mod game.world.heroes.len
     runHeroScript(game, index)

@@ -13,7 +13,14 @@ proc offset(point: WorldPoint, tiles: int32): WorldPoint =
 
 proc policyGame(team: Team): Game =
   ## Runs one rusher while keeping every other hero under test control.
-  result = newGame(generateMap(54), 100_000, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54),
+    100_000,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.loadBots([BotGroup(path: Policy, count: 10)])
   result.recorder = initReplayRecorder(result.currentSetup(1000))
   for i, hero in result.world.heroes:

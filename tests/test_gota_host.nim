@@ -114,7 +114,14 @@ proc checkHostObservations() =
   let
     directory = createTempDir("gota-host-", "")
     path = directory / "observations.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     world = game.world
     hero = world.heroes[0]
     ally = world.heroes[1]
@@ -337,7 +344,14 @@ proc checkActionSnapshots() =
   let
     directory = createTempDir("gota-host-snapshot-", "")
     path = directory / "snapshot.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)
@@ -393,7 +407,14 @@ block:
   let
     directory = createTempDir("gota-decimals-", "")
     path = directory / "fractions.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)
@@ -447,7 +468,14 @@ block:
   let
     directory = createTempDir("gota-points-", "")
     path = directory / "points.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
   defer:
     removeDir(directory)
   writeFile(path, """
@@ -499,7 +527,14 @@ block:
   let
     directory = createTempDir("gota-aim-", "")
     path = directory / "aim.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)

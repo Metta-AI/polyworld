@@ -87,6 +87,10 @@ const
     HeroPortraitRoot & "berserker.profile.png"
   ]
 
+proc draftedPortraitKey*(class: HeroClass): string {.raises: [].} =
+  ## Names the desaturated portrait used for unavailable draft choices.
+  HeroPortraitKeys[class] & ".drafted"
+
 proc heroAnimationNames*(class: HeroClass): array[5, string] =
   ## Maps deterministic animation slots to each class's weapon style.
   result[0] = "Jog_Fwd_Loop"

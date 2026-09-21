@@ -9,7 +9,14 @@ const BasePolicy = currentSourcePath().parentDir.parentDir /
 
 proc buybackGame(): Game =
   ## Creates a quiet arena for exact death and buyback timing checks.
-  result = newGame(generateMap(54), 240, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54),
+    240,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:

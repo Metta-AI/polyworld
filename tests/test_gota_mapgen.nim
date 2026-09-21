@@ -129,7 +129,7 @@ for site in map.layout.barracks:
 echo "Game terrain matches every editor tile and movement edge."
 
 echo "Checking generated towers, hero spawns, and paired barracks in play."
-let game = newGame(map, 100_000, 10, false, ReplayData())
+let game = newGame(map, 100_000, 10, false, ReplayData(), drafting = false)
 game.world.heroTurnTicks = 100_000
 doAssert game.world.buildings.len == 34
 for tower in game.world.buildings:
@@ -190,7 +190,7 @@ for edge in [editorTiles.CliffEdge, editorTiles.RampEdge]:
           sourceX = x
           sourceZ = z
   doAssert sourceX >= 0, "No walkable tiles found on either side of the edge."
-  let trial = newGame(map, 100_000, 10, false, ReplayData())
+  let trial = newGame(map, 100_000, 10, false, ReplayData(), drafting = false)
   trial.world.heroes.setLen(1)
   for building in trial.world.buildings.mitems:
     building.hp = 0
