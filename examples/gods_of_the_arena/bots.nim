@@ -34,7 +34,11 @@ type
     DataSelfAttackDamage,
     DataSelfTarget,
     DataSelfAttackCooldown,
-    DataSelfAttacksLanded
+    DataSelfAttacksLanded,
+    DataSelfPortalCooldown,
+    DataSelfChannelTicks,
+    DataSelfStunTicks,
+    DataSelfRootTicks
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY
@@ -61,7 +65,11 @@ const
     "selfAttackDamage",
     "selfTarget",
     "selfAttackCooldown",
-    "selfAttacksLanded"
+    "selfAttacksLanded",
+    "selfPortalCooldown",
+    "selfChannelTicks",
+    "selfStunTicks",
+    "selfRootTicks"
   ]
 
 var
@@ -374,6 +382,18 @@ proc initHeroHost(heroId: int32): Host =
     if index < 0 or slot < 0 or slot >= InventorySlots:
       return 0
     activeGame.world.heroes[index].itemCounts[slot]
+  let itemCooldownProc: HostProc = proc(
+      arguments: openArray[int32]
+  ): int32 =
+    ## Returns live remaining ticks for this inventory slot.
+    let hero = activeGame.world.heroById(heroId)
+    hero.itemCooldown(int(arguments[0]), activeGame.world.tick)
+  let canShopProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reports whether the hero may purchase items here.
+    int32(activeGame.world.heroById(heroId).canShop)
+  let inOwnSpawnProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Reports whether the hero is receiving spawn-room recovery.
+    int32(activeGame.world.heroById(heroId).inOwnSpawn)
   let buyItemProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -417,6 +437,26 @@ proc initHeroHost(heroId: int32): Host =
     let accepted = applyUseItem(
       activeGame.world, heroId, arguments[0]
     )
+    if accepted:
+      activeGame.metrics.command(
+        heroIndex(activeGame.world, heroId), activeGame.world.tick
+      )
+    int32(accepted)
+
+  let useItemAtProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
+    ## Records and attempts a scroll channel at fractional map coordinates.
+    let
+      (x, y, offset) = splitTilePoint(fixedVec2(
+        arguments[1].asFixed, arguments[2].asFixed))
+      slot = arguments[0].asInt
+    try:
+      activeGame.recorder.recordUseItemAt(
+        uint32(activeGame.world.tick), heroId, slot, x, y, offset
+      )
+    except ReplayError as error:
+      activeGame.recordingError = error.msg
+      raise newException(BasicError, "replay recording failed: " & error.msg)
+    let accepted = activeGame.world.applyUseItemAt(heroId, slot, x, y, offset)
     if accepted:
       activeGame.metrics.command(
         heroIndex(activeGame.world, heroId), activeGame.world.tick
@@ -538,8 +578,12 @@ proc initHeroHost(heroId: int32): Host =
   discard result.addFunction("attackTarget", 1, attackTargetProc, 20)
   discard result.addFunction("itemId", 1, itemIdProc, 4)
   discard result.addFunction("itemCount", 1, itemCountProc, 4)
+  discard result.addFunction("itemCooldown", 1, itemCooldownProc, 4)
+  discard result.addFunction("canShop", 0, canShopProc, 4)
+  discard result.addFunction("inOwnSpawn", 0, inOwnSpawnProc, 4)
   discard result.addFunction("buyItem", 1, buyItemProc, 20)
   discard result.addFunction("useItem", 1, useItemProc, 20)
+  discard result.addFunction("useItemAt", 3, useItemAtProc, 800)
   for (field, name) in [
     (TerrainKindField, "terrainKind"),
     (TerrainWalkableField, "terrainWalkable"),
@@ -636,6 +680,14 @@ proc runHeroScript(game: Game, index: int) =
       game.world.heroAttackCooldown(hero)
     )
     vm.runtime.setData(heroDataIds[DataSelfAttacksLanded], hero.attacksLanded)
+    vm.runtime.setData(heroDataIds[DataSelfPortalCooldown],
+      max(0'i32, hero.portalCooldownEnds - game.world.tick))
+    vm.runtime.setData(heroDataIds[DataSelfChannelTicks],
+      max(0'i32, hero.portalEnds - game.world.tick))
+    vm.runtime.setData(heroDataIds[DataSelfStunTicks],
+      max(0'i32, hero.stunnedUntil - game.world.tick))
+    vm.runtime.setData(heroDataIds[DataSelfRootTicks],
+      max(0'i32, hero.rootedUntil - game.world.tick))
     discard vm.runtime.run(vm.output)
     inc vm.decisions
   except BasicError as error:

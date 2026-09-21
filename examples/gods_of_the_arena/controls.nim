@@ -14,6 +14,7 @@ type
     CommandAttackMove
     CommandBuy
     CommandUse
+    CommandUseAt
     CommandCastTarget
     CommandCastPoint
 
@@ -33,6 +34,7 @@ var
   pending: seq[PlayerCommand]
   purchaseReceipt*: PurchaseReceipt
   armedAbility* = -1'i32
+  armedItem* = -1'i32
   shopOpen* = false
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
@@ -83,6 +85,25 @@ proc queueCastTarget*(heroId, slot, targetId: int32) =
     kind: CommandCastTarget, heroId: heroId, slot: slot, first: targetId
   )
 
+proc queueUseItemAt*(heroId, slot, mapX, mapY: int32) =
+  ## Queues a scroll channel toward the clicked map position.
+  pending.add PlayerCommand(
+    kind: CommandUseAt, heroId: heroId, slot: slot,
+    first: mapX, second: mapY
+  )
+
+proc activatePlayerItem*(world: World, heroId, slot: int32) =
+  ## Arms portal aiming or immediately uses an ordinary consumable.
+  let hero = world.heroById(heroId)
+  if hero.id == 0 or slot < 0 or slot >= InventorySlots:
+    return
+  armedAbility = -1
+  armedItem = -1
+  if hero.inventory[slot] == PortalScroll:
+    armedItem = slot
+  else:
+    queueUseItem(heroId, slot)
+
 proc queueCastPoint*(heroId, slot, mapX, mapY: int32) =
   ## Queues an ability toward the ground even when no object is selected.
   pending.add PlayerCommand(
@@ -101,6 +122,7 @@ proc activatePlayerAbility*(
       return false
   let spec = heroAbility(hero.class, HeroAbilitySlot(slotId)).abilitySpec
   armedAbility = -1
+  armedItem = -1
   if spec.casting == SelfCast:
     queueCastTarget(heroId, slotId, heroId)
     return true
@@ -149,6 +171,10 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     game.recorder.recordBuyItem(tick, command.heroId, command.first)
   of CommandUse:
     game.recorder.recordUseItem(tick, command.heroId, command.first)
+  of CommandUseAt:
+    game.recorder.recordUseItemAt(
+      tick, command.heroId, command.slot, command.first, command.second
+    )
 
   of CommandCastTarget, CommandCastPoint:
     game.recorder.recordCast(
@@ -173,6 +199,10 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
     applyBuyItem(game.world, command.heroId, command.first)
   of CommandUse:
     applyUseItem(game.world, command.heroId, command.first)
+  of CommandUseAt:
+    applyUseItemAt(
+      game.world, command.heroId, command.slot, command.first, command.second
+    )
 
   of CommandCastTarget:
     applyCastTarget(game.world, command.heroId, command.slot, command.first)

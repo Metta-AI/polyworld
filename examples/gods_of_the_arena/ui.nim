@@ -5,7 +5,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
-  content, sim, game, controls, layouts, shops, maps
+  content, sim, game, controls, layouts, shops, maps, events
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -72,6 +72,8 @@ type
     attackRange: float32
     inventory: array[InventorySlots, Item]
     itemCounts: array[InventorySlots, int32]
+    portalCooldown, channelTicks: int32
+    itemCooldowns: array[InventorySlots, int32]
     abilities: array[HeroAbilitySlot, Ability]
     cooldowns: array[HeroAbilitySlot, int32]
     charges: array[HeroAbilitySlot, int32]
@@ -271,7 +273,15 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         portraitKey: HeroPortraitKeys[hero.class],
         callsign: callsign(spec.name),
         classLabel: classLabel(spec.attackStyle),
-        status: if hero.state == Dying: "Respawning" else: "Ready",
+        status:
+          if hero.state == Dying: "Respawning"
+          elif hero.portalEnds > run.world.tick: "Teleporting"
+          elif hero.stunnedUntil > run.world.tick: "Stunned"
+          elif hero.rootedUntil > run.world.tick: "Rooted"
+          elif hero.inOwnSpawn: "Spawn recovery"
+          elif hero.recoveryItems != default(typeof(hero.recoveryItems)):
+            "Regenerating"
+          else: "Ready",
         hp: max(hero.hp, 0'i32).float32,
         maxHp: hero.maxHp.float32,
         mana: hero.mana.float32,
@@ -291,6 +301,9 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         attackRange: attackRange,
         inventory: hero.inventory,
         itemCounts: hero.itemCounts,
+        itemCooldowns: hero.itemCooldowns(run.world.tick),
+        portalCooldown: max(0'i32, hero.portalCooldownEnds - run.world.tick),
+        channelTicks: max(0'i32, hero.portalEnds - run.world.tick),
         abilities: spec.abilities,
         charges: hero.charges,
         recharges: hero.recharges,
@@ -410,6 +423,14 @@ proc selectHeroCard(
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
   ## Returns the map rectangle inside the minimap plate's frame.
   panel.inset(8)
+
+proc minimapAim*(window: Window, mouse: Vec2, point: var Vec2): bool =
+  ## Resolves a map destination when the pointer is inside the minimap.
+  let area = currentChrome(window).minimap.minimapMap()
+  if window.statsContains(mouse) or not area.contains(mouse):
+    return false
+  point = minimapWorldPoint(mouse, area.origin, area.size, mapHalfSize())
+  true
 
 proc updateMinimapCamera*(
     window: Window,
@@ -969,6 +990,7 @@ proc drawUi*(
           selection.id == run.world.heroes[options.playerSlot - 1].id:
             if window.hudClicked(sk, well):
               armedAbility = slot.ord.int32
+              armedItem = -1
             if armedAbility == slot.ord.int32:
               let color = rgbx(255, 223, 133, 255)
               sk.drawRect(well.origin, vec2(well.size.x, 3), color)
@@ -983,6 +1005,8 @@ proc drawUi*(
           item = selection.inventory[i]
         if item != NoItem:
           sk.drawAbilityIcon(well, itemIconKey(item))
+          sk.drawCooldownSweep(well, selection.itemCooldowns[i],
+            item.itemSpec.cooldownTicks)
         else:
           sk.drawWellImage(well, "")
   let playerHero =
@@ -1000,6 +1024,7 @@ proc drawUi*(
     if window.hudClicked(sk, inventory.shop):
       shopOpen = true
       armedAbility = -1
+      armedItem = -1
   let inventoryHero =
     if playerHero: selectedUnit(playerHeroId, viewMode)
     else: selection
@@ -1010,10 +1035,12 @@ proc drawUi*(
         if inventoryHero == nil: NoItem else: inventoryHero.inventory[slot]
     if item != NoItem:
       sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
+      sk.drawCooldownSweep(slotPanel, inventoryHero.itemCooldowns[slot],
+        item.itemSpec.cooldownTicks)
     else:
       sk.drawSlot(slotPanel)
     if playerHero and window.hudClicked(sk, slotPanel):
-      queueUseItem(playerHeroId, int32(slot))
+      activatePlayerItem(run.world, playerHeroId, int32(slot))
 
   if selection != nil:
     let
@@ -1134,32 +1161,38 @@ proc drawUi*(
             rgbx(110, 190, 245, 255)
           )
       if i >= 4 and selection.kind == SelectedHero:
-        let count = selection.itemCounts[i - 4]
-        if count > 1:
-          sk.drawLabel(
-            $count,
-            well.origin,
-            well.size,
-            rgbx(247, 221, 143, 255),
-            "Hud",
-            CenterAlign
-          )
+        let slot = i - 4
+        if selection.itemCooldowns[slot] > 0:
+          sk.drawLabel($cooldownSeconds(selection.itemCooldowns[slot]) & "s",
+            well.origin, well.size, rgbx(255, 255, 255, 255),
+            "Small", CenterAlign)
+        if selection.inventory[slot] != NoItem and
+          selection.inventory[slot].itemSpec.kind == Consumable:
+            sk.drawItemCount(well, selection.itemCounts[slot])
       sk.drawAbilityKey(well, AbilityKeys[i])
 
   if inventoryHero != nil:
     for slot in 0 ..< InventorySlots:
-      if inventoryHero.itemCounts[slot] > 1:
-        let slotPanel = inventory.slots[slot]
-        sk.drawLabel(
-          $inventoryHero.itemCounts[slot],
-          slotPanel.origin,
-          slotPanel.size,
-          rgbx(247, 221, 143, 255),
-          "Hud",
-          CenterAlign
-        )
+      let
+        item = inventoryHero.inventory[slot]
+        well = inventory.slots[slot]
+        cooldown = inventoryHero.itemCooldowns[slot]
+      if cooldown > 0:
+        sk.drawLabel($cooldownSeconds(cooldown) & "s",
+          well.origin, well.size, rgbx(255, 255, 255, 255),
+          "Small", CenterAlign)
+      if item != NoItem and item.itemSpec.kind == Consumable:
+        sk.drawItemCount(well, inventoryHero.itemCounts[slot])
   sk.drawLabel(
-    "INVENTORY",
+    if playerHero and armedItem >= 0: "RIGHT-CLICK MAP"
+    elif inventoryHero != nil and inventoryHero.channelTicks > 0:
+      "TELEPORTING " & $cooldownSeconds(inventoryHero.channelTicks) & "s"
+    elif inventoryHero != nil and inventoryHero.portalCooldown > 0:
+      "PORTAL " & $cooldownSeconds(inventoryHero.portalCooldown) & "s"
+    elif playerHero and
+      run.world.heroById(playerHeroId).lastActionError != NoActionError:
+        run.world.heroById(playerHeroId).lastActionError.actionErrorMessage
+    else: "INVENTORY",
     inventory.title.origin,
     inventory.title.size,
     rgbx(200, 205, 216, 255),

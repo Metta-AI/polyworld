@@ -67,6 +67,13 @@ var
   savedPreset: MapConfig
   arenaReady: bool
 
+proc baseArea*(x, z: int): BaseArea {.raises: [].} =
+  ## Reads the generated keep or spawn room at an unclamped map coordinate.
+  if not arenaReady or x < 0 or z < 0 or
+    x >= mapTiles() or z >= mapTiles():
+      return OutsideBase
+  savedArena.baseAreas[z * mapTiles() + x]
+
 proc generateMap*(
     seed: int32, preset = defaultConfig()
 ): MapData {.measure.} =
@@ -78,6 +85,8 @@ proc generateMap*(
   installImmutableLayers(savedArena.layers)
   activeMapResolution = savedArena.layers[0].width
   var hash = uint32(mapFingerprint())
+  for area in savedArena.baseAreas:
+    hash.addHashy(area.ord)
   for points in [savedArena.layout.forts, savedArena.layout.spawns]:
     for point in points:
       hash.addHashy(point.x)

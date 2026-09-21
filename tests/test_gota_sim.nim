@@ -298,13 +298,11 @@ block:
 echo "Testing shop purchases reach inventory and the state hash"
 block:
   let
+    savedWorld = run.world.clone()
     heroId = run.world.heroes[0].id
     base = hashNow()
-    savedGold = run.world.heroes[0].gold
-    savedHp = run.world.heroes[0].hp
-    savedInv = run.world.heroes[0].inventory
-    savedCounts = run.world.heroes[0].itemCounts
     savedMaxHp = run.world.heroes[0].maxHp
+  run.world.heroes[0].place(run.world.heroes[0].spawnPosition)
   run.world.heroes[0].gold = 500
   doAssert applyBuyItem(run.world, heroId, int32(KnightArmor.ord)),
     "a funded hero should buy knight armor"
@@ -317,20 +315,16 @@ block:
     "armor should raise maximum health"
   doAssert hashNow() != base, "inventory is missing from stateHash"
   run.world.heroes[0].hp = run.world.heroes[0].maxHp div 2
-  doAssert applyBuyItem(run.world, heroId, int32(IronrootRation.ord))
-  var rationSlot = -1
+  doAssert applyBuyItem(run.world, heroId, int32(VitalityElixir.ord))
+  var elixirSlot = -1
   for slot in 0 ..< InventorySlots:
-    if run.world.heroes[0].inventory[slot] == IronrootRation:
-      rationSlot = slot
-  doAssert rationSlot >= 0
+    if run.world.heroes[0].inventory[slot] == VitalityElixir:
+      elixirSlot = slot
+  doAssert elixirSlot >= 0
   let hpBefore = run.world.heroes[0].hp
-  doAssert applyUseItem(run.world, heroId, int32(rationSlot))
-  doAssert run.world.heroes[0].hp > hpBefore, "a ration should heal"
-  run.world.heroes[0].gold = savedGold
-  run.world.heroes[0].inventory = savedInv
-  run.world.heroes[0].itemCounts = savedCounts
-  run.world.heroes[0].refreshHeroStats()
-  run.world.heroes[0].hp = savedHp
+  doAssert applyUseItem(run.world, heroId, int32(elixirSlot))
+  doAssert run.world.heroes[0].hp > hpBefore, "an elixir should heal"
+  run.world.restore(savedWorld)
 
 echo "Testing the base bot spends starting gold on an item"
 block:
@@ -468,22 +462,24 @@ block:
   doAssert run.metrics.read(0, run.world.tick).commands == 0
   run.world.heroes[0].gold = 10000
   run.world.heroes[0].inventory = default(typeof(run.world.heroes[0].inventory))
-  queueBuyItem(heroId, int32(ManaPotion.ord))
+  run.world.heroes[0].place(run.world.heroes[0].spawnPosition)
+  queueBuyItem(heroId, int32(ManaElixir.ord))
   let serial = purchaseReceipt.serial
   flushPlayerCommands(run)
   doAssert run.metrics.read(0, run.world.tick).commands == 1
   doAssert purchaseReceipt.serial == serial + 1
   doAssert purchaseReceipt.accepted
-  doAssert purchaseReceipt.itemId == int32(ManaPotion.ord)
-  doAssert run.world.purchaseReason(heroId, int32(ManaPotion.ord)) == ""
+  doAssert purchaseReceipt.itemId == int32(ManaElixir.ord)
+  doAssert run.world.purchaseReason(heroId, int32(ManaElixir.ord)) == ""
   run.world.heroes[0].itemCounts[0] = MaxItemStack
-  doAssert run.world.purchaseReason(heroId, int32(ManaPotion.ord)) == "Stack full"
-  queueBuyItem(heroId, int32(ManaPotion.ord))
+  doAssert run.world.purchaseReason(heroId, int32(ManaElixir.ord)) == "Stack full"
+  run.world.heroes[0].place(run.world.heroes[0].spawnPosition)
+  queueBuyItem(heroId, int32(ManaElixir.ord))
   flushPlayerCommands(run)
   doAssert not purchaseReceipt.accepted
   doAssert run.metrics.read(0, run.world.tick).commands == 1
   run.world.heroes[0].inventory = [
-    ManaPotion, SteelHelmet, SteelBuckler, LeatherGauntlets,
+    ManaElixir, SteelHelmet, SteelBuckler, LeatherGauntlets,
     RangerBoots, RubyAmulet
   ]
   doAssert run.world.purchaseReason(heroId, int32(SteelHelmet.ord)) ==
@@ -491,7 +487,7 @@ block:
   doAssert run.world.purchaseReason(heroId, int32(KnightArmor.ord)) ==
     "Inventory full"
   run.world.heroes[0].gold = 0
-  doAssert run.world.purchaseReason(heroId, int32(ManaPotion.ord)) ==
+  doAssert run.world.purchaseReason(heroId, int32(ManaElixir.ord)) ==
     "Not enough gold"
   run.world.restore(savedWorld)
   run.metrics = savedMetrics

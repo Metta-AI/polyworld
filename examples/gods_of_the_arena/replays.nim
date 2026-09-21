@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 43'u16
+  ReplayGameVersion* = 45'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -24,6 +24,7 @@ const
   ActionCastTarget* = 6'u8
   ActionCastPoint* = 10'u8
   ActionManualSpells* = 14'u8
+  ActionUseItemAt* = 15'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -99,6 +100,7 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionAttackTarget and
       action.kind != ActionBuyItem and
       action.kind != ActionUseItem and
+      action.kind != ActionUseItemAt and
       action.kind != ActionAttackMove and
       action.kind != ActionCastTarget and
       action.kind != ActionCastPoint and
@@ -202,6 +204,18 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.
   recordHash(recorder, hash, MaxReplayHashes)
 
+proc recordUseItemAt*(
+    recorder: ReplayRecorder,
+    tick: uint32,
+    heroId, slot, mapX, mapY: int32,
+    offset = FixedVec2Zero
+) =
+  ## Records one targeted inventory use including fractional coordinates.
+  recorder.record ReplayAction(
+    tick: tick, heroId: heroId, kind: ActionUseItemAt,
+    slot: slot, first: mapX, second: mapY, offset: offset
+  )
+
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, actor IDs, and action ordering.
   data.config.validateConfig(HeroClassCount)
@@ -261,6 +275,7 @@ proc validate*(data: ReplayData) =
         action.kind != ActionAttackTarget and
         action.kind != ActionBuyItem and
         action.kind != ActionUseItem and
+        action.kind != ActionUseItemAt and
         action.kind != ActionAttackMove and
         action.kind != ActionCastTarget and
         action.kind != ActionCastPoint and

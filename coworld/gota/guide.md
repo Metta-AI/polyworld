@@ -32,6 +32,59 @@ The existing `selfId`, `selfTeam`, `selfClass`, `selfX`, `selfY`, `selfHp`, `sel
 | `selfTarget` | Current ordered or automatically acquired attack target's stable object ID, or zero for none. |
 | `selfAttackCooldown` | Ticks until the next basic hit could land if the target stays in range. Includes remaining recovery and the next windup, or the remainder of a current windup. An idle hero reports a full windup. Excludes chasing and is separate from ability cooldowns. Movement can cancel a swing. |
 | `selfAttacksLanded` | Lifetime count of successful basic hits, preserved across respawns. Spells do not increment it. |
+| `selfPortalCooldown` | Ticks before another Portal Scroll can be used, shared across all inventory stacks and preserved through death. |
+| `selfChannelTicks` | Ticks remaining in the current teleport channel, or zero. |
+| `selfStunTicks`, `selfRootTicks` | Ticks remaining in these control effects, or zero. |
+
+### Shop, potions, and spawn recovery
+
+Purchases only work inside your own keep, including its spawn room. Elsewhere,
+`buyItem(id)` returns 0 with `ActionOutsideKeep`. `canShop()` returns 1 when
+purchases are allowed, and `inOwnSpawn()` returns 1 inside your living hero's
+own spawn room. These queries read live state.
+
+Inside that spawn room, health and mana each recover at **20% of maximum per
+second**, capped at maximum. The larger keep and the enemy spawn give no such
+recovery. Normal passive mana regeneration still applies. Damage does not
+turn off spawn recovery, and dead heroes cannot recover until they respawn.
+
+| ID | Item | Gold | Effect |
+| --- | --- | --- | --- |
+| 1 | Health Potion | 30 | 120 health over 10 seconds. |
+| 2 | Vitality Elixir | 75 | 90 health immediately. |
+| 22 | Mana Potion | 45 | 90 mana over 10 seconds. |
+| 3 | Mana Elixir | 90 | 60 mana immediately. |
+
+Each stacks to **8** per slot. `useItem(slot)` spends one dose. Any positive
+incoming damage interrupts both active potion regeneration effects; movement
+and attacks do not. Health items share a **10-second** cooldown, and mana items
+share a separate **10-second** cooldown. Cooldowns begin on use and survive
+interruption and death. Full health/mana or a cooldown rejects use without
+spending a dose. `itemCooldown(slot)` returns live remaining ticks (24 per
+second), or 0 for empty/invalid slots. Inventory icons show stack counts and
+remaining cooldowns.
+
+### Portal Scrolls
+
+Buy item **21** for **100 gold**. Scrolls stack to eight per slot. Call
+`useItemAt(slot, x, y)` with whole or fractional map coordinates to consume
+one scroll and begin a **3-second** channel. The destination is the nearest
+visible, walkable point inside a living allied tower's sight radius:
+7 tiles for outer/inner towers, 8 for gate/guard towers. Barracks are not
+anchors. A distant requested point is clamped into this area; there is no
+travel-distance limit. The selected tower must survive until arrival.
+
+The hero cannot move, attack, or cast while channeling, and still takes
+damage. Stuns, roots, death, or loss of the anchor interrupt the channel.
+The scroll is spent when the channel begins. Completion or interruption
+starts a **60-second** cooldown shared by every scroll the hero holds.
+Damage alone does not interrupt it. Current spells have no stun/root
+effects; the simulation's stun/root APIs support interruption when applied.
+`useItem(slot)` rejects scrolls because they require a destination.
+
+For human play, click the inventory scroll (or press F/G for the first two
+slots), then right-click the map or minimap. Purple circles show tower range, and a
+channel bar shows the time remaining. Esc cancels destination selection.
 
 ### Visible objects
 
@@ -83,7 +136,8 @@ Read-only reason constants are `NoActionError`, `ActionNotAlive`,
 `ActionEmptySlot`, `ActionNotConsumable`, `ActionFullHealth`, `ActionFullMana`,
 `ActionTargetUnavailable`, `ActionOutOfRange`, `ActionNoRoute`,
 `ActionInvalidPoint`, `ActionCooldown`, `ActionNoCharges`,
-`ActionInsufficientMana`, and `ActionSpellLimit` (values 0 through 19).
+`ActionInsufficientMana`, `ActionSpellLimit`, `ActionChanneling`,
+`ActionStunned`, and `ActionRooted` (values 0 through 22).
 Unavailable targets share a generic error without exposing hidden state.
 This feedback is recorded deterministically through submitted replay actions.
 

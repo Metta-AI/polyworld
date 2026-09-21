@@ -22,6 +22,7 @@ proc spellGame(class: HeroClass): Game =
   hero.hp = hero.maxHp
   hero.mana = 10_000
   hero.maxMana = 10_000
+  hero.place(result.world.forts[0].center)
 
 proc step(game: Game, ticks = 1) =
   ## Advances real ticks while suppressing unrelated idle basic attacks.
