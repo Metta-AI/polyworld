@@ -269,6 +269,37 @@ proc applyPreset*(
   for part in preset.parts:
     manifest.selectPart(selection, part.category, part.item)
 
+proc presetManifest*(manifest: Manifest, preset: Preset): Manifest =
+  ## Keeps only the parts needed by one preset and omits animation copies.
+  var selection: seq[int]
+  manifest.applyPreset(selection, preset)
+  result = manifest
+  result.categories = @[]
+  result.clips = @[]
+  result.skinNodes = @[]
+  result.hairShades = @[]
+  result.hatShades = @[]
+  var kept = manifest.base.toHashSet()
+  for i, category in manifest.categories:
+    if selection[i] < 0:
+      continue
+    let item = category.items[selection[i]]
+    result.categories.add Category(
+      key: category.key, selected: 0, items: @[item]
+    )
+    for name in item.nodes:
+      kept.incl name
+  for name in manifest.skinNodes:
+    if name in kept:
+      result.skinNodes.add name
+  for shade in manifest.hairShades:
+    if shade.node in kept:
+      result.hairShades.add shade
+
+  for shade in manifest.hatShades:
+    if shade.node in kept:
+      result.hatShades.add shade
+
 proc cycleColor*(category: Category, selected: var int) =
   ## Keeps the part style while stepping to another available color.
   if selected < 0:

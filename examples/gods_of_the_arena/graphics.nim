@@ -7,7 +7,7 @@ import
   controls, spelleffects,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
-  polyworld/common, polyworld/pathing,
+  polyworld/chargen, polyworld/common, polyworld/pathing,
   polyworld/tapes, polyworld/toon,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
   polyworld/profiles,
@@ -206,16 +206,27 @@ proc runGraphics*() =
     heroModels: array[HeroClass, CharacterModel]
     heroRenderClips: array[5, int]
   profileBlock "models":
+    let creepLibrary = readManifest(ChargenLibrary)
     for team in Team:
-      let model = loadCharacterModel(FootmanModels[ord(team)], 1.15)
+      let
+        preset = creepLibrary.namedPreset(CreepPresets[ord(team)])
+        inventory = creepLibrary.presetManifest(preset)
+        model = loadCharacterModel(
+          readPresetCharacter(ChargenLibrary, creepLibrary, preset, CreepClips),
+          CreepTargetHeight
+        )
+      for category in inventory.categories:
+        if category.key in ["Eyes", "Mouth", "Brow"]:
+          for item in category.items:
+            model.unlitParts.add item.nodes
       footmanModels[team] = model
       footmanRenderClips[team] = [
-        model.clipIndex("Run"),
-        model.clipIndex("Idle"),
-        model.clipIndex("Death"),
-        model.clipIndex("Victory"),
-        model.clipIndex("Attack01"),
-        model.clipIndex("Attack02")
+        model.clipIndex("Jog_Fwd_Loop"),
+        model.clipIndex("Sword_Idle"),
+        model.clipIndex("Death01"),
+        model.clipIndex("Dance_Loop"),
+        model.clipIndex("Sword_Attack"),
+        model.clipIndex("Sword_Attack")
       ]
       let god = loadCharacterModel(GodModels[ord(team)], GodTargetHeight)
       godModels[team] = god
@@ -262,18 +273,6 @@ proc runGraphics*() =
     TallTowerScale = 4.5'f
     GateTowerScale = 6.0'f
     BarracksScale = 1.65'f
-
-  const
-    # Preserve the undead footprint adjustment and enlarge Radiant humans 21%.
-    FootmanSizeIncrease = 1.1'f32
-    FootmanSizeFactors: array[Team, float32] = [
-      RedTeam: 1.15'f32 * FootmanSizeIncrease,
-      BlueTeam: 1.21'f32 * FootmanSizeIncrease
-    ]
-
-  proc footmanSizeFactor(team: Team): float32 =
-    ## Matches the apparent body size of both lane-creep models.
-    FootmanSizeFactors[team]
 
   proc towerPropName(tier: TowerTier): string =
     ## Returns the matching fort model for one tower tier.
@@ -507,6 +506,27 @@ proc runGraphics*() =
     else:
       unitRenderTime(ticks)
 
+  proc creepRenderTime(footman: Footman): float32 =
+    ## Fits authored sword impacts and death poses to simulation timing.
+    let
+      model = footmanModels[footman.team]
+      clip = footmanRenderClips[footman.team][footman.animClip]
+      duration = model.clipDuration(clip)
+    if footman.state == Dying:
+      return min(footman.deathTicks.float32 / FootmanDeathTicks.float32, 1) *
+        duration
+    if footman.animClip in attackClips:
+      const StrikeTime = 19'f / 30
+      let
+        tick = footman.animTicks.float32 + animationAlpha
+        hit = footmanHitTicks(footman.animClip).float32
+        finish = footmanAttackTicks(footman.animClip).float32
+      if tick <= hit:
+        return tick / hit * StrikeTime
+      return StrikeTime + min((tick - hit) / (finish - hit), 1) *
+        (duration - StrikeTime)
+    unitRenderTime(footman.animTicks)
+
   proc visibleInView(team: Team, position: WorldPoint): bool =
     ## Applies the current omniscient or team visibility spectator mode.
     if viewMode == 0:
@@ -737,10 +757,7 @@ proc runGraphics*() =
           unitRenderPoint(footman.id, footman.position),
           unitRenderFacing(footman.id, footman.facing),
           clip,
-          holdClipTime(
-            model, clip, footman.animTicks, footman.state == Dying
-          ),
-          footmanSizeFactor(footman.team)
+          creepRenderTime(footman)
         )
       )
     for tower in run.world.buildings:
@@ -1118,13 +1135,7 @@ proc runGraphics*() =
         unitRenderPoint(footman.id, footman.position),
         unitRenderFacing(footman.id, footman.facing),
         footmanRenderClips[footman.team][footman.animClip],
-        holdClipTime(
-          footmanModels[footman.team],
-          footmanRenderClips[footman.team][footman.animClip],
-          footman.animTicks,
-          footman.state == Dying
-        ),
-        sizeFactor = footmanSizeFactor(footman.team)
+        creepRenderTime(footman)
       )
       finishCharacters(scene)
       return
@@ -1935,9 +1946,7 @@ proc runGraphics*() =
               scene, model, unitRenderPoint(footman.id, footman.position),
               unitRenderFacing(footman.id, footman.facing),
               clip,
-              holdClipTime(
-                model, clip, footman.animTicks, footman.state == Dying),
-              sizeFactor = footmanSizeFactor(footman.team)
+              creepRenderTime(footman)
             )
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):

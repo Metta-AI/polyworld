@@ -47,15 +47,20 @@ proc baseTransformFor(bounds: AABounds, targetHeight: float32): Mat4 =
   scale(vec3(factor, factor, factor)) * translate(vec3(0, -bounds.min.y, 0))
 
 proc loadCharacterModel*(
-    path: string, targetHeight: float32
+    file: GltfFile, targetHeight: float32
 ): CharacterModel =
-  ## Requires a current GL context (the PBR renderer uploads textures on
-  ## first draw, but bounds and clips are plain CPU data).
-  result = CharacterModel(file: readGltfFile(path))
+  ## Wraps an assembled character and sizes it with its feet at ground level.
+  result = CharacterModel(file: file)
   for i, clip in result.file.root.animations:
     result.clips[clip.name] = i
   result.baseTransform =
     baseTransformFor(result.file.root.getAABounds(), targetHeight)
+
+proc loadCharacterModel*(
+    path: string, targetHeight: float32
+): CharacterModel =
+  ## Loads one character file; textures upload on its first rendered frame.
+  loadCharacterModel(readGltfFile(path), targetHeight)
 
 proc loadModularFile(path: string): CharacterModel =
   ## Returns a model wrapping the shared glb for this path.

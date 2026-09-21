@@ -412,7 +412,7 @@ const
   FirstFootmanId = 1000'i32
   UnitCap = 120 * CreepsPerBarracks
   CorpseLingerTicks = 60'i32
-  FootmanDeathTicks = 24'i32
+  FootmanDeathTicks* = 24'i32
   HeroDeathTicks = 24'i32
   FortHp* = 400'i32
 
@@ -2296,10 +2296,14 @@ proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
   hero.refreshHeroStats(world, EquipmentChange, itemId)
   world.finishAction(heroId, ActionBuyItem, 0, itemId, 0, NoActionError)
 
-proc footmanAttackTicks(clip: int): int32 =
+proc footmanAttackTicks*(clip: int): int32 =
   ## Returns the deterministic footman attack duration in ticks.
   discard clip
   32
+
+proc footmanHitTicks*(clip: int): int32 =
+  ## Returns the impact tick shared by creep combat and its visual swing.
+  footmanAttackTicks(clip) * 45 div 100
 
 proc startSwing(world: World, footman: var Footman) =
   ## Begins a randomly selected melee animation and damage cycle.
@@ -2525,7 +2529,7 @@ proc updateFootman(world: World, footman: var Footman) =
       let duration = footmanAttackTicks(footman.swingClip)
       inc footman.swingTicks
       if not footman.damageLanded and
-          footman.swingTicks >= duration * 45 div 100:
+          footman.swingTicks >= footmanHitTicks(footman.swingClip):
         footman.damageLanded = true
         if targetFootman >= 0:
           world.applyDamage(world.footmen[targetFootman],
