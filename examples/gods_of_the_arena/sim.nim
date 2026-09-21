@@ -68,6 +68,7 @@ type
 
   Footman* = object
     id*: int32
+    kind*: CreepKind
     team*: Team
     lane*: int
     position*: WorldPoint
@@ -115,6 +116,8 @@ type
     level*: int
     xp*: int
     totalXp*: int
+    creepXpRemainder*: int
+      ## Carries fractional shared creep XP between deaths.
     gold*: int
     deaths*: int32
     state*: FootmanState
@@ -283,8 +286,9 @@ const
   PathPointRadius = WorldScale div 3
   ChasePathTicks = 6'i32
   FailedPathTicks = TickRate
-  TowerHitPoints*: array[TowerTier, int32] = [950'i32, 1_300, 1_950]
-  TowerDamages*: array[TowerTier, int32] = [18'i32, 24, 30]
+  TowerHitPoints*: array[TowerTier, int32] = [1_900'i32, 2_600, 3_900]
+  TowerDamages*: array[TowerTier, int32] = [36'i32, 48, 60]
+  BarracksHitPoints* = 950'i32
   TowerAttackRanges*: array[TowerTier, int32] = [
     300_000'i32,
     330_000,
@@ -406,6 +410,12 @@ const
   FootmanSightRadius* = 5 * WorldScale
   FootmanTowerSightRadius = 7 * WorldScale
   FootmanMeleeRange* = 54_000'i32
+  FootmanRangedRange* = 4 * WorldScale
+  CreepXpRange* = 6 * WorldScale
+  CreepNearbyXp* = 15
+  CreepLastHitPercent = 15
+  CreepXpScale = 6000
+    ## Keeps percentage splits exact for teams of up to five heroes.
   FortRange = 255_000'i32
   FortSightRadius = 14'i32
   HeroMeleeIdleRange* = 150_000'i32
@@ -418,7 +428,6 @@ const
   HeroMaxRespawnTicks = 60 * TickRate
   HeroBuybackGold = 100'i32
   HeroMaxLevel* = 20
-  FootmanXpReward = 25
   FootmanGoldReward = 15
   HeroXpReward = 150
   HeroGoldReward = 100
@@ -700,6 +709,7 @@ when defined(replayEvents):
       if creep >= 0:
         let value = world.footmen[creep]
         result.kind = FootmanObjectKind
+        result.class = value.kind.ord.int32
         result.team = value.team.ord.int32
         position = value.position
       elif building >= 0:
@@ -806,6 +816,9 @@ when defined(replayEvents):
 
 proc interruptPortal(world: World, hero: Hero)
 
+proc gainCreepRewards(world: World, creep: Footman, source: int32)
+  ## Awards nearby XP and the killing hero's bonus once per creep death.
+
 proc applyDamage[T: Hero | Footman](
     world: World,
     target: var T,
@@ -814,7 +827,7 @@ proc applyDamage[T: Hero | Footman](
     detail = 0'i32
 ) =
   ## Applies a unit hit and records its actual health change.
-  when defined(replayEvents):
+  when T is Footman or defined(replayEvents):
     let before = target.hp
   target.hp -= amount
   when T is Hero:
@@ -835,6 +848,9 @@ proc applyDamage[T: Hero | Footman](
       world.interruptPortal(target)
   when defined(replayEvents):
     world.damageEvent(source, target.id, amount, before, target.hp, cause, detail)
+  when T is Footman:
+    if before > 0 and target.hp <= 0:
+      world.gainCreepRewards(target, source)
 
 proc healHero(
     world: World,
@@ -1102,13 +1118,16 @@ proc heroMoveSpeed*(hero: Hero): int32 =
   heroMovePerTick(hero.class, hero.level) +
     hero.heroItemBonus().movePerTick
 
-proc gainRewards(world: World, hero: Hero, xp, gold: int, victim: int32) =
-  ## Grants the existing kill rewards and links them to their lethal event.
+proc gainRewards(
+    world: World, hero: Hero, xp, gold: int, victim: int32,
+    cause = KillReward
+) =
+  ## Grants rewards and links them to their lethal event.
   when defined(replayEvents):
     let related = world.deathEvent(victim)
-    world.valueEvent(XpGained, victim, hero.id, KillReward, 0,
+    world.valueEvent(XpGained, victim, hero.id, cause, 0,
       hero.totalXp, hero.totalXp + xp, xp, related)
-    world.valueEvent(GoldGained, victim, hero.id, KillReward, 0,
+    world.valueEvent(GoldGained, victim, hero.id, cause, 0,
       hero.gold, hero.gold + gold, gold, related)
   hero.xp += xp
   hero.totalXp += xp
@@ -1123,6 +1142,44 @@ proc gainRewards(world: World, hero: Hero, xp, gold: int, victim: int32) =
       world.valueEvent(LevelChanged, hero.id, hero.id, LevelUp, 0,
         beforeLevel, hero.level, 1)
     hero.refreshHeroStats(world, LevelUp)
+
+proc gainCreepRewards(world: World, creep: Footman, source: int32) =
+  ## Shares one XP pool, reserving 15 percent for an eligible last hitter.
+  var
+    nearby: seq[int]
+    lastHit = false
+  for i, hero in world.heroes:
+    if hero.team != creep.team and hero.hp > 0 and hero.state != Dying and
+      hero.navLayer == creep.navLayer and
+      within(hero.position, creep.position, CreepXpRange):
+        nearby.add(i)
+        if hero.id == source:
+          lastHit = true
+  if nearby.len > 0:
+    let
+      pool = CreepNearbyXp * CreepXpScale
+      bonus =
+        if lastHit:
+          pool * CreepLastHitPercent div 100
+        else:
+          0
+      share = (pool - bonus) div nearby.len
+    for i in nearby:
+      let hero = world.heroes[i]
+      hero.creepXpRemainder += share
+      var cause = NearbyKill
+      if hero.id == source:
+        hero.creepXpRemainder += bonus
+        cause = KillReward
+      let xp = hero.creepXpRemainder div CreepXpScale
+      hero.creepXpRemainder = hero.creepXpRemainder mod CreepXpScale
+      world.gainRewards(hero, xp, 0, creep.id, cause)
+  let killer = world.heroIndex(source)
+  if killer >= 0 and world.heroes[killer].team != creep.team:
+    world.gainRewards(
+      world.heroes[killer], 0, FootmanGoldReward, creep.id
+    )
+    world.stats.add(killer, GoldMetric, FootmanGoldReward)
 
 proc layerFixedHeight(
     layerIndex: int,
@@ -1696,7 +1753,7 @@ proc nearestNavTile(
 ): bool
 
 proc spawnWave(world: World) {.measure.} =
-  ## Spawns three aligned creeps per surviving barracks on separate open tiles.
+  ## Spawns three melee creeps and one caster per surviving barracks.
   var count = 0
   for building in world.buildings:
     if building.kind == BarracksBuilding and building.hp > 0:
@@ -1730,6 +1787,7 @@ proc spawnWave(world: World) {.measure.} =
       let placed = worldPoint(pathPoint(tile.layer, tile.x, tile.z))
       var footman = Footman(
         id: world.nextFootmanId,
+        kind: (if unit < MeleeCreepsPerBarracks: MeleeCreep else: RangedCreep),
         team: building.team, lane: building.lane,
         position: placed,
         body: bindBody(placed, Heading(), FootmanBodyRadius),
@@ -1865,7 +1923,7 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
     value = WorldObject(
       id: footman.id,
       kind: FootmanObjectKind,
-      class: -1,
+      class: footman.kind.ord.int32,
       team: footman.team,
       position: footman.position,
       hp: footman.hp,
@@ -2608,12 +2666,20 @@ proc footmanAttackTicks*(clip: int): int32 =
   discard clip
   32
 
+proc footmanAttackRange*(kind: CreepKind): int32 =
+  ## Returns the reach of a creep's sword or staff attack.
+  case kind
+  of MeleeCreep:
+    FootmanMeleeRange
+  of RangedCreep:
+    FootmanRangedRange
+
 proc footmanHitTicks*(clip: int): int32 =
   ## Returns the impact tick shared by creep combat and its visual swing.
   footmanAttackTicks(clip) * 45 div 100
 
 proc startSwing(world: World, footman: var Footman) =
-  ## Begins a randomly selected melee animation and damage cycle.
+  ## Begins a randomly selected attack animation and damage cycle.
   footman.swingClip = attackClips[world.rng.below(2)]
   footman.swingTicks = 0
   footman.damageLanded = false
@@ -2820,9 +2886,17 @@ proc updateFootman(world: World, footman: var Footman) =
       # as being at arm's length of the enemy god's walls.
       inRange =
         if targetFootman >= 0 or targetHero >= 0:
-          within(footman.position, targetPosition, FootmanMeleeRange)
+          within(
+            footman.position,
+            targetPosition,
+            footman.kind.footmanAttackRange
+          )
         elif targetBuilding >= 0:
-          within(footman.position, targetPosition, TowerSiegeRange)
+          within(
+            footman.position,
+            targetPosition,
+            max(TowerSiegeRange, footman.kind.footmanAttackRange)
+          )
         else: true
     if not inRange:
       footman.swingTicks = -1
@@ -3128,13 +3202,8 @@ proc applyHeroHit(
   if damage <= 0:
     return
   if targetFootman >= 0:
-    let wasAlive = world.footmen[targetFootman].hp > 0
     world.applyDamage(world.footmen[targetFootman],
       damage, hero.id, cause, detail)
-    if wasAlive and world.footmen[targetFootman].hp <= 0:
-      world.gainRewards(hero, FootmanXpReward, FootmanGoldReward,
-        world.footmen[targetFootman].id)
-      world.stats.add(heroIndex(world, hero.id), GoldMetric, FootmanGoldReward)
   elif targetHero >= 0:
     let wasAlive = world.heroes[targetHero].hp > 0
     world.applyDamage(world.heroes[targetHero],
@@ -4361,6 +4430,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.level)
     hash.addHashy(hero.xp)
     hash.addHashy(hero.totalXp)
+    hash.addHashy(hero.creepXpRemainder)
     hash.addHashy(hero.gold)
     hash.addHashy(hero.deaths)
     hash.addHashy(hero.state.ord)
@@ -4417,6 +4487,7 @@ proc stateHash*(game: Game): uint64 =
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
+    hash.addHashy(footman.kind.ord)
     hash.addHashy(footman.team.ord)
     hash.addHashy(footman.lane)
     hash.addHashy(footman.position)
@@ -4813,7 +4884,7 @@ proc newGame*(
       position: position, spawn: spawn,
       facing: heading(site.facing.x - site.position.x,
         site.facing.z - site.position.z),
-      hp: TowerHitPoints[OuterTower], maxHp: TowerHitPoints[OuterTower]
+      hp: BarracksHitPoints, maxHp: BarracksHitPoints
     )
   for team in Team:
     for i, site in map.layout.guards[team.ord]:

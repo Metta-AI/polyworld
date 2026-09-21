@@ -449,20 +449,22 @@
         <div>
           <p>
             Gods of the Arena is a 5v5 lane battler. Red brings
-            the living roster. Blue brings the undead warband. Each side
+            one drafted roster and Blue another. Each side
             starts with five heroes, six barracks, nine lane towers,
             two god guards, and a god to defend.
           </p>
           <p>
-            The 128 by 128 arena uses the map editor's saved seed 54 preset.
+            The 116 by 116 arena uses the map editor's saved seed 54 preset.
             Blue starts in the southwest and Red in the northeast. Roads
             carve the forest and cross cliffs at short ramps. Each fort has
             three exits, two barracks per exit, and a separate walled spawn.
             Match seeds control gameplay randomness without changing this layout.
           </p>
           <p>
-            Footmen spawn two per lane every ten seconds and march until they
-            meet the enemy. Heroes start at level 1 with 150 gold and their
+            Each barracks spawns three melee creeps and one ranged caster
+            every twenty seconds: six melee and two ranged creeps per lane
+            for each team. They march until they meet the enemy.
+            Heroes start at level 1 with 150 gold and their
             four abilities locked and one point to spend. Kills grant gold and XP.
             Each hero level grants another ability point, up to level 20.
             Gold buys items for a six-slot inventory.
@@ -471,17 +473,17 @@
             Outer towers fall first, then inner, then the gate. Clearing a
             lane exposes the two level-3 towers guarding that team's god.
             Both guards must fall before the god can take any damage.
-            Red defends a warlock and Blue defends a druid. The first god
+            Red defends Hades and Blue defends Zeus. The first god
             to reach zero health loses.
           </p>
         </div>
         <div class="lanes">
-          <div class="chip"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>Footmen</b><div class="muted">60 HP, 12 damage, 15 gold</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">HP: outer 950, inner 1300, gate 1950. Damage: 18, 24, 30.</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>Creeps</b><div class="muted">60 HP, 12 damage, 15 last-hit gold. Casters attack from four tiles.</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">HP: outer 1900, inner 2600, gate 3900. Damage: 36, 48, 60.</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/fort.png" alt=""><div><b>Gods</b><div class="muted">400 HP, exposed after both god guards fall</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/kills.png" alt=""><div><b>Hero bounty</b><div class="muted">150 XP and 100 gold</div></div></div>
           <div class="chip"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>Level curve</b><div class="muted">100 XP, then +75 each level</div></div></div>
-          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">20 minute match</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">20 minute battle, plus drafting</div></div></div>
         </div>
       </div>
     </section>
@@ -2501,7 +2503,7 @@
   end if
 end if</code></pre>
       <h3>Visible objects</h3>
-      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
+      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged caster per wave, giving six melee and two ranged creeps per lane for each team. Destroying a barracks stops its four creeps from spawning. For creeps, <code>objectClass(i)</code> is 0 for melee and 1 for ranged. Casters attack from up to four tiles away. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
       <table class="spell-table api-table">
         <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -2515,6 +2517,7 @@ end if</code></pre>
         </tbody>
       </table>
       <p>These new object queries return zero for invalid indices or fields that do not apply to that object. Invalid inventory slots also return zero. Hero level, mana, and inventory queries return zero for non-heroes. An object's ID is not a valid substitute for its list index.</p>
+      <p>Each enemy creep death provides a shared pool of 15 XP to living heroes within six tiles on the same navigation floor, regardless of starting lane. A nearby hero who lands the last hit receives 15% of that pool first; the remaining 85% is split equally among all nearby heroes, including the last hitter. With three heroes, the last hitter earns 6.5 XP and each teammate earns 4.25 XP. Fractional XP carries forward between kills. Without an eligible hero last hitter, the full pool is shared equally. Hero last hits also award 15 gold; tower and creep last hits grant no gold to heroes.</p>
       <h3>Pending spells and warnings</h3>
       <p>Loop over <code>0</code> through <code>spellCount() - 1</code>. This list contains unresolved casts from their start through impact, including projectiles and area warnings. Allied casts are observable; enemy casts require their aim position to be visible, matching the viewer's warning visibility. Completed effects are omitted.</p>
       <table class="spell-table api-table">

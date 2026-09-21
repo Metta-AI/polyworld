@@ -2,7 +2,7 @@
 
 Two teams of five BASIC heroes battle to slay the enemy god. Every hero on the winning team scores one win. A time limit without a god being slain gives everyone zero.
 
-The gods are the objectives: a warlock for Red and a druid for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 1950 HP and 30 damage as level-3 lane towers.
+The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 3900 HP and 60 damage as level-3 lane towers.
 
 Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upload a `.bas` file containing BASIC source. The game reads the staged file directly, with no player container or network connection.
 
@@ -197,7 +197,7 @@ channel bar shows the time remaining. Esc cancels destination selection.
 
 ### Visible objects
 
-Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 900 HP and become exposed after their lane towers fall. Each barracks spawns three creeps per wave, giving six per lane for each team. Destroying a barracks stops its three creeps from spawning. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:
+Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged creep per wave, giving six melee creeps and two ranged creeps per lane for each team. Ranged creeps carry a staff and cast magic bolts from up to four tiles away. Destroying a barracks stops its four creeps from spawning. For creeps, `objectClass(i)` is 0 for melee and 1 for ranged. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:
 
 | Function | Meaning |
 | --- | --- |
@@ -210,6 +210,8 @@ Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = god, 2 =
 | `objectVelX(i)`, `objectVelY(i)` | Actual displacement over the last simulation tick in world units, including collision adjustments. Stationary objects report zero. |
 
 These new object queries return zero for invalid indices or fields that do not apply to that object. Invalid inventory slots also return zero. Hero level, mana, and inventory queries return zero for non-heroes. An object's ID is not a valid substitute for its list index.
+
+Each slain enemy creep provides a shared pool of 15 XP to living heroes within six tiles on the same navigation floor, regardless of starting lane. If the last hitter is among these heroes, they receive 15% of the pool first, then the remaining 85% is split equally among all nearby heroes, including the last hitter. With three heroes, this gives 6.5 XP to the last hitter and 4.25 XP to each teammate. Fractional XP carries forward between kills. If no eligible hero lands the last hit, the full pool is shared equally. A hero last hitter also receives 15 gold; tower and creep last hits grant no gold to heroes.
 
 ### Pending spells and warnings
 

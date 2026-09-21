@@ -7,13 +7,16 @@ export fxshapes
 
 const
   InventorySlots* = 6
-  CreepsPerBarracks* = 3
+  MeleeCreepsPerBarracks* = 3
+  CreepsPerBarracks* = MeleeCreepsPerBarracks + 1
   TickRate* = SharedTickRate
     ## Simulation ticks per second.
   DraftPickTicks* = 10 * TickRate
     ## Each human or bot gets ten simulation seconds to choose a hero.
 
 type
+  CreepKind* = enum MeleeCreep, RangedCreep
+
   HeroClass* = enum
     VanguardKnight,
     Ranger,

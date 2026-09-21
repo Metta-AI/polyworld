@@ -27,7 +27,7 @@ type
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
     EquipmentChange, LevelUp, Regeneration, Respawn, Command, GodDestroyed,
-    TimeLimit, CorpseExpired, Buyback
+    TimeLimit, CorpseExpired, Buyback, NearbyKill
 
   EventEntity* = object
     id*, kind*, team*, class*, player*: int32
