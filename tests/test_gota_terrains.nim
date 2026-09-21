@@ -2,7 +2,8 @@
 
 import
   std/[os, strformat, tempfiles],
-  polyworld/[basic, cli, pathing],
+  bassy,
+  polyworld/[cli, pathing],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim, terrains]
 
 proc terrain(field: TerrainField, x, y: int, layer = GroundLayer): int32 =
@@ -81,7 +82,14 @@ proc checkBasicTerrain() =
   let
     directory = createTempDir("gota-terrain-", "")
     path = directory / "terrain.bas"
-    game = newGame(generateMap(1988), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(1988),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
   defer:
     removeDir(directory)
   var

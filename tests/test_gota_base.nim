@@ -1,0 +1,234 @@
+import
+  std/[os, sets, strutils],
+  bassy,
+  polyworld/[cli, pathing, tapes],
+  ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
+
+const
+  Root = currentSourcePath().parentDir.parentDir
+  Policy = Root / "examples/gods_of_the_arena/players/base.bas"
+
+proc policyGame(team = RedTeam, size = 116): Game =
+  ## Creates one real policy VM with controllable opponents and allied towers.
+  var preset = defaultConfig()
+  preset.mapSize = size
+  result = newGame(
+    generateMap(54, preset), 100_000, 10, false, ReplayData(), drafting = false
+  )
+  result.loadBots([BotGroup(path: Policy, count: 10)])
+  result.recorder = initReplayRecorder(result.currentSetup(1000), preset)
+  for i, hero in result.world.heroes:
+    hero.manualSpells = true
+    hero.abilityLevels[PassiveAbility] = 1
+    hero.spellsReady = true
+    hero.gold = 0
+    if i != team.ord * 5:
+      result.heroVms[i] = nil
+      hero.hp = 0
+      hero.state = Dying
+  for building in result.world.buildings.mitems:
+    if building.team != team:
+      building.hp = 0
+  result.world.syncBuildings()
+  for cells in result.world.teamVisible.mitems:
+    for cell in cells.mitems:
+      cell = 255
+
+proc decide(game: Game): seq[ReplayAction] =
+  ## Runs a bounded policy decision and returns only its submitted commands.
+  game.world.tick += 6
+  let before = game.recorder.data.actions.len
+  game.runBotDecisions()
+  for vm in game.heroVms:
+    if vm != nil:
+      doAssert not vm.failed, vm.lastError
+      doAssert vm.lastInstructions <= vm.limits.maxInstructions
+      doAssert vm.lastWork <= vm.limits.maxWorkUnits
+  game.recorder.data.actions[before ..< game.recorder.data.actions.len]
+
+proc hasAction(actions: seq[ReplayAction], kind: uint8): bool =
+  ## Checks for an actual host submission from the reference policy.
+  for action in actions:
+    if action.kind == kind:
+      return true
+
+proc middle(game: Game): WorldPoint =
+  ## Selects the generated middle lane instead of assuming map coordinates.
+  let point = lanePathPoints[1][lanePathPoints[1].len div 2]
+  const Unit = WorldScale div PathUnitsPerTile
+  WorldPoint(x: point.x * Unit, y: point.y * Unit, z: point.z * Unit)
+
+echo "Testing base policy calls cover the current GotA host API"
+block:
+  let host = readFile(Root / "examples/gods_of_the_arena/bots.nim")
+  var
+    names: HashSet[string]
+    source: string
+  for line in readFile(Policy).splitLines():
+    if not line.strip().startsWith("'"):
+      source.add line & "\n"
+  for line in host.splitLines():
+    let
+      text = line.strip()
+      field = text.startsWith("(Object") or text.startsWith("(Spell") or
+        text.startsWith("(Ability") or text.startsWith("(Terrain")
+    if "addFunction(\"" in line or (field and ", \"" in line):
+        let name = line.split('"')[1]
+        names.incl(name)
+        if name.startsWith("terrain"):
+          names.incl(name & "At")
+  doAssert names.len >= 68
+  for name in names:
+    doAssert name & "(" in source, "Base policy omits host call " & name
+
+echo "Testing base shopping, safe portals, channels, and shared cooldowns"
+for team in Team:
+  let
+    game = policyGame(team)
+    hero = game.world.heroes[team.ord * 5]
+  hero.gold = 2000
+  hero.hp = hero.maxHp div 2
+  doAssert hero.inOwnSpawn()
+  doAssert game.decide().hasAction(ActionBuyItem)
+  discard game.decide()
+  var scrollSlot = -1
+  for i, item in hero.inventory:
+    if item == HealthPotion:
+      doAssert hero.itemCounts[i] == 2
+    if item == PortalScroll:
+      scrollSlot = i
+      doAssert hero.itemCounts[i] == 2
+  doAssert scrollSlot >= 0
+  hero.hp = hero.maxHp
+  doAssert game.decide().hasAction(ActionUseItemAt)
+  doAssert hero.portalEnds > game.world.tick
+  let count = hero.itemCounts[scrollSlot]
+  doAssert game.decide().len == 0
+  doAssert hero.itemCounts[scrollSlot] == count
+  hero.portalEnds = 0
+  hero.portalCooldownEnds = game.world.tick + PortalCooldownTicks
+  doAssert not game.decide().hasAction(ActionUseItemAt)
+
+echo "Testing base prioritizes last hits and ignores hidden enemies"
+block:
+  let
+    game = policyGame()
+    hero = game.world.heroes[0]
+    point = game.middle()
+  hero.place(point)
+  game.world.footmen = @[
+    Footman(id: 1000, team: BlueTeam, hp: 1, position: point,
+      state: Marching),
+    Footman(id: 1001, team: BlueTeam, hp: FootmanHp, position: point,
+      state: Marching)
+  ]
+  let actions = game.decide()
+  doAssert actions.hasAction(ActionAttackTarget)
+  doAssert hero.attackObjectId == 1000
+  for cell in game.world.teamVisible[RedTeam.ord].mitems:
+    cell = 0
+  hero.attackObjectId = 0
+  doAssert not game.decide().hasAction(ActionAttackTarget)
+
+echo "Testing explicit allied healing and led area casts"
+block:
+  let
+    game = policyGame()
+    hero = game.world.heroes[0]
+    ally = game.world.heroes[1]
+    point = game.middle()
+  hero.class = DruidWarden
+  hero.refreshHeroStats()
+  hero.hp = hero.maxHp
+  hero.mana = hero.maxMana
+  hero.place(point)
+  ally.place(point)
+  ally.hp = ally.maxHp
+  ally.state = Marching
+  discard game.decide()
+  ally.hp -= 80
+  hero.abilityLevels[PrimaryAbility] = 1
+  hero.charges[PrimaryAbility] = 1
+  hero.spellsReady = true
+  let actions = game.decide()
+  doAssert actions.hasAction(ActionCastTarget)
+  doAssert game.world.casts[^1].ability == HealingBloom
+  doAssert game.world.casts[^1].position == ally.position
+
+block:
+  let
+    game = policyGame()
+    hero = game.world.heroes[0]
+    enemy = game.world.heroes[5]
+    point = game.middle()
+  hero.class = Arcanist
+  hero.refreshHeroStats()
+  hero.hp = hero.maxHp
+  hero.mana = hero.maxMana
+  hero.place(point)
+  hero.abilityLevels[SecondaryAbility] = 1
+  hero.charges[SecondaryAbility] = 1
+  hero.spellsReady = true
+  enemy.place(point)
+  enemy.hp = enemy.maxHp
+  enemy.state = Marching
+  enemy.velocity = heading(WorldScale div 32, 0)
+  let actions = game.decide()
+  doAssert actions.hasAction(ActionCastPoint)
+  doAssert game.world.casts[^1].ability == MeteorStrike
+  doAssert game.world.casts[^1].position.x > enemy.position.x
+  for action in actions:
+    if action.kind == ActionCastPoint:
+      doAssert action.offset != FixedVec2Zero
+
+echo "Testing safe gradual recovery and emergency burst consumables"
+for item in [HealthPotion, ManaPotion, VitalityElixir, ManaElixir]:
+  let
+    game = policyGame()
+    hero = game.world.heroes[0]
+  hero.place(game.middle())
+  hero.inventory[0] = item
+  hero.itemCounts[0] = 2
+  hero.hp = hero.maxHp div 3
+  hero.mana = 0
+  game.world.tick = 100
+  if item == ManaElixir:
+    game.world.footmen = @[
+      Footman(id: 1000, team: BlueTeam, hp: FootmanHp,
+        position: hero.position, state: Marching)
+    ]
+  doAssert game.decide().hasAction(ActionUseItem)
+  doAssert hero.itemCounts[0] == 1
+  doAssert not game.decide().hasAction(ActionUseItem)
+
+echo "Testing hostile warnings and maximum-size crowded maps stay bounded"
+for size in [64, 116, 256]:
+  let
+    game = policyGame(size = size)
+    world = game.world
+    hero = world.heroes[0]
+    enemy = world.heroes[5]
+    point = game.middle()
+  hero.place(point)
+  enemy.place(point)
+  enemy.hp = enemy.maxHp
+  enemy.state = Marching
+  for i in 0 ..< 480:
+    world.footmen.add Footman(
+      id: 1000 + i.int32, team: Team(i mod 2), hp: FootmanHp,
+      position: point, state: Marching
+    )
+  for i in 0 ..< 512:
+    world.casts.add SpellCast(
+      heroId: enemy.id, ability: MeteorStrike, level: 1,
+      origin: point, position: point, impact: 72, ends: 84
+    )
+  let actions = game.decide()
+  doAssert game.heroVms[0].runtime.getGlobal("dodge") != 0
+  doAssert actions.hasAction(ActionWalkTo)
+  for i in 0 ..< 8:
+    discard game.decide()
+  echo "  ", size, " tiles: ", game.heroVms[0].lastInstructions,
+    " instructions, ", game.heroVms[0].lastWork, " work units"
+
+echo "GotA base policy checks passed"

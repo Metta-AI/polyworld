@@ -57,6 +57,15 @@ individual transparent cutouts. Eyes and mouths remain unlit. Iris masks tint
 only the iris, preserving the white and dark details. White eyebrows follow the
 hair color unless the viewer's white eyebrow option is selected.
 
+`Eyes: Dead X` is a shared cartoon death expression. Select it after any
+character preset, including heroes, enemies, and gnomes. Default eyes and
+outfit presets remain unchanged. Its charcoal X marks
+stay unlit and are not affected by skin, hair, or pupil colors. The separate
+`eyes/dead_x.json`, `.glb`, and `.png` files can be included in game packs.
+Launch a preview with `EYES="Dead X" nim r experiments/chargen/chargen.nim`.
+The generated source and prompt live in `source/eyes/dead_x_v1`. To rebuild
+only this expression, run Blender with `source/scripts/build_expressions.py`.
+
 ## Shared gnome features
 
 Select `Gnome 01` through `Gnome 09` in the preset picker, or enable
@@ -512,6 +521,22 @@ The ivory and gold edging follows the full cloth hem.
 front, side, and back captures. The head review renderer supports
 `REVIEW_HEAD=1`, `REVIEW_ANGLE`, and `REVIEW_PBR=1`. Regenerate the final
 comparison with `review_gota_hoods.py --stage after --render`.
+
+## Gota gods
+
+The Character panel's God presets button offers Zeus and Hades. The
+Animations panel's Gota gods option displays both together. Start directly
+in that lineup with `GODS_LINEUP=1`.
+
+Each preset reuses the shared body, rig, and eyes, with ten separate outfit
+and equipment slots. Their repeatable builders are `gota_zeus.py` and
+`gota_hades.py`. Build through `gota_common.py -- zeus` or `-- hades`, then
+run `register_gota.py`. The registration preserves other preset groups.
+
+`render_gota.nim` accepts `REVIEW_ALL_PARTS=1` to capture every clothing,
+hair, beard, cape, and equipment slot as well as complete animated outfits.
+Source concepts, prompts, models, and reviews live in `source/gota/zeus`
+and `source/gota/hades`. The independent review is in `source/gota/gods`.
 
 ## Creep sword grips
 

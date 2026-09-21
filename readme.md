@@ -39,12 +39,9 @@ git clone git@github.com:Metta-AI/polyworld-data.git ../polyworld_data
 From the repository root, launch a game with its bundled baseline agents:
 
 ```sh
-nim r examples/gods_of_the_arena/gota.nim \
-  --bot examples/gods_of_the_arena/players/base.bas:10
-nim r examples/light_vs_dark/lvd.nim \
-  --bot examples/light_vs_dark/players/base.bas:2
-nim r examples/call_to_adventure/cta.nim \
-  --bot examples/call_to_adventure/players/base.bas:4
+nim r examples/gods_of_the_arena/gota.nim --bot examples/gods_of_the_arena/players/base.bas:10
+nim r examples/light_vs_dark/lvd.nim --bot examples/light_vs_dark/players/base.bas:2
+nim r examples/call_to_adventure/cta.nim --bot examples/call_to_adventure/players/base.bas:4
 ```
 
 Use `-d:headless` to run without a window, `--record PATH` to save a match,

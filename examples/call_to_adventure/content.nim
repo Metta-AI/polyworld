@@ -8,6 +8,7 @@
 ## Actors refer to each other by `int32` id, never by pointer.
 
 import
+  fixxy,
   polyworld/[bodies, cli, common, metrics, pathing, rngs]
 
 ## Shape of the world
@@ -62,6 +63,7 @@ type
   PathStep* = object
     tile*: TileRef
     direction*: Facing
+    offset*: FixedVec2
 
 ## Actors
 

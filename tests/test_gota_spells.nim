@@ -4,7 +4,14 @@ import
 
 proc spellGame(class: HeroClass): Game =
   ## Creates a quiet arena where only explicit test casts can deal damage.
-  result = newGame(generateMap(2026), 240, 10, false, ReplayData())
+  result = newGame(
+    generateMap(2026),
+    240,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
@@ -16,12 +23,14 @@ proc spellGame(class: HeroClass): Game =
     tower.hp = 0
   let hero = result.world.heroes[0]
   hero.class = class
+  hero.abilityLevels = [1'i32, 1, 1, 1]
   hero.spellsReady = false
   hero.refreshHeroStats()
   hero.state = Marching
   hero.hp = hero.maxHp
   hero.mana = 10_000
   hero.maxMana = 10_000
+  hero.place(result.world.forts[0].center)
 
 proc step(game: Game, ticks = 1) =
   ## Advances real ticks while suppressing unrelated idle basic attacks.

@@ -1,6 +1,8 @@
 import
-  polyworld/[bodies, fixed, pathing],
-  ../examples/call_to_adventure/[content, sim]
+  std/[os, tempfiles],
+  bassy,
+  polyworld/[bodies, cli, pathing],
+  ../examples/call_to_adventure/[bots, content, replays, sim]
 
 proc flatFloor(width, depth: int): QuadLayer =
   ## Builds connected tiles for an isolated navigation scenario.
@@ -177,3 +179,49 @@ block:
   world.finishPath(slot, goal, 150)
 
 echo "CTA navigation tests passed"
+
+echo "Testing CTA fractional destinations in the same cell and across routes"
+block:
+  layers = @[flatFloor(16, 16)]
+  computeWalkable()
+  let
+    world = newWorld(Setup(seed: 1988))
+    slot = world.walker(TileRef(level: 0, x: 5, z: 5), ClassSpeeds[RogueClass])
+    offset = fixedVec2(0.25'fx, -0.25'fx)
+  for goal in [TileRef(level: 0, x: 5, z: 5), TileRef(level: 0, x: 10, z: 10)]:
+    doAssert world.stepToward(slot, goal, offset)
+    let snapshot = world.clone()
+    for pass in 0 .. 1:
+      if pass == 1:
+        world.restore(snapshot)
+      for tick in 0 ..< 400:
+        discard world.advancePath(slot)
+      let expected = fixedVec2(fixed(goal.x.int32) + 0.75'fx,
+        fixed(goal.z.int32) + 0.25'fx)
+      doAssert world.actors[slot].path.len == 0
+      doAssert length(world.actors[slot].body.pos - expected) <= fixed(1, 1000)
+
+
+echo "Testing CTA numeric host arguments and replay coordinates"
+block:
+  let
+    directory = createTempDir("cta-points-", "")
+    path = directory / "points.bas"
+    game = newGame(2026, 100)
+  defer:
+    removeDir(directory)
+  writeFile(path,
+    "accepted = walkTo(currentLevel, x + 0.25, y - 0.25)\n")
+  game.loadBots([BotGroup(path: path, count: PartySize)])
+  game.world.tick = 1
+  game.recorder = initReplayRecorder(game.world.setup)
+  game.runBotDecisions(0)
+  let vm = game.heroVms[0]
+  doAssert not vm.failed, vm.lastError
+  doAssert vm.runtime.getGlobal("accepted") == 1
+  doAssert game.world.actors[0].path[^1].offset ==
+    fixedVec2(0.25'fx, -0.25'fx)
+  game.recorder.recordHash(game.stateHash())
+  let replay = decodeReplay(game.recorder.data.encodeReplay())
+  doAssert replay.actions.len == 1
+  doAssert replay.actions[0].offset == fixedVec2(0.25'fx, -0.25'fx)

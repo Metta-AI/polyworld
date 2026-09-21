@@ -2,7 +2,7 @@
 ## Bots are .bas scripts compiled once and executed each decision point.
 ## Each invocation plays at most one card; the game loop calls repeatedly
 ## until the bot ends its turn.
-import polyworld/basic
+import bassy
 import awmsim
 
 type

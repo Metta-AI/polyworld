@@ -7,18 +7,27 @@ type
     ActionInventoryFull, ActionEmptySlot, ActionNotConsumable,
     ActionFullHealth, ActionFullMana, ActionTargetUnavailable,
     ActionOutOfRange, ActionNoRoute, ActionInvalidPoint, ActionCooldown,
-    ActionNoCharges, ActionInsufficientMana, ActionSpellLimit
+    ActionNoCharges, ActionInsufficientMana, ActionSpellLimit,
+    ActionChanneling, ActionStunned, ActionRooted, ActionOutsideKeep,
+    ActionAbilityLocked, ActionNoAbilityPoints, ActionAbilityMaxLevel,
+    ActionHeroLevelRequired,
+    ActionNotDead, ActionMatchEnded,
+    ActionDrafting, ActionNotDrafting, ActionNotDraftTurn,
+    ActionUnknownHero, ActionHeroTaken
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
     Assist, XpGained, GoldGained, GoldSpent, LevelChanged, HealthAdjusted,
     ManaChanged, SpellReleased, ItemPurchased, ItemConsumed, ActionRejected,
-    MatchEnded
+    MatchEnded, PortalStarted, PortalCompleted, PortalInterrupted,
+    Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted,
+    AbilityLeveled,
+    HeroDrafted
 
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
     EquipmentChange, LevelUp, Regeneration, Respawn, Command, GodDestroyed,
-    TimeLimit, CorpseExpired
+    TimeLimit, CorpseExpired, Buyback, NearbyKill
 
   EventEntity* = object
     id*, kind*, team*, class*, player*: int32
@@ -36,6 +45,7 @@ type
       ## Index of the causal event in this tick, or -1 when absent.
     action*: uint8
     slot*, first*, second*: int32
+    offsetX*, offsetY*: int32
       ## Original command arguments, including invalid signed slots.
     error*: ActionError
 
@@ -58,7 +68,22 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionOutOfRange: "Out of range"
   of ActionNoRoute: "No route"
   of ActionInvalidPoint: "Invalid map point"
-  of ActionCooldown: "Ability on cooldown"
+  of ActionCooldown: "On cooldown"
   of ActionNoCharges: "No charges"
   of ActionInsufficientMana: "Not enough mana"
   of ActionSpellLimit: "Too many active spells"
+  of ActionChanneling: "Teleport channel in progress"
+  of ActionStunned: "Stunned"
+  of ActionRooted: "Rooted"
+  of ActionOutsideKeep: "Return to your keep"
+  of ActionAbilityLocked: "Ability is locked"
+  of ActionNoAbilityPoints: "No ability points"
+  of ActionAbilityMaxLevel: "Ability is at maximum level"
+  of ActionHeroLevelRequired: "Higher hero level required"
+  of ActionNotDead: "Available when dead"
+  of ActionMatchEnded: "Match has ended"
+  of ActionDrafting: "Waiting for all players to draft"
+  of ActionNotDrafting: "Draft is complete"
+  of ActionNotDraftTurn: "Wait for your draft turn"
+  of ActionUnknownHero: "Unknown hero"
+  of ActionHeroTaken: "Hero already drafted"

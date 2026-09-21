@@ -9,14 +9,11 @@
 
 import
   std/[math, os, strformat, strutils, tables, times, unicode],
-  chroma, opengl, pixie, vmath, windy, silky,
-  polyworld/[
-    actioncam, assets, characters, chrome, clickmarks, common, fixed, inputs,
-    particles, particleshaders,
-    pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
-    shapes,
-    shadows, tapes, toon, viewers, visions, worldbars, worldtexts
-  ],
+  chroma, fixxy, opengl, pixie, vmath, windy, silky,
+  polyworld/[actioncam, assets, characters, chrome, clickmarks, common,
+    inputs, particles, particleshaders, pathing, player, profiles,
+    quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
+    viewers, visions, worldbars, worldtexts],
   assets, content,
   sim,
   game,

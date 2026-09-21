@@ -9,13 +9,17 @@ import
 
 type
   PlayerCommandKind = enum
+    CommandDraft
     CommandWalk
     CommandAttack
     CommandAttackMove
     CommandBuy
     CommandUse
+    CommandUseAt
     CommandCastTarget
     CommandCastPoint
+    CommandLevelAbility
+    CommandBuyback
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -33,7 +37,14 @@ var
   pending: seq[PlayerCommand]
   purchaseReceipt*: PurchaseReceipt
   armedAbility* = -1'i32
+  armedItem* = -1'i32
   shopOpen* = false
+
+proc queueDraft*(heroId, classId: int32) =
+  ## Queues a hero choice for validation on the next draft decision.
+  pending.add PlayerCommand(
+    kind: CommandDraft, heroId: heroId, first: classId
+  )
 
 proc queueWalkTo*(heroId, mapX, mapY: int32) =
   ## Queues one walk command for the human hero.
@@ -77,17 +88,46 @@ proc queueUseItem*(heroId, slot: int32) =
     first: slot
   )
 
+proc queueBuyback*(heroId: int32) =
+  ## Queues one buyback through the shared simulation validator.
+  pending.add PlayerCommand(kind: CommandBuyback, heroId: heroId)
+
 proc queueCastTarget*(heroId, slot, targetId: int32) =
   ## Queues one ability on the object under the player's pointer.
   pending.add PlayerCommand(
     kind: CommandCastTarget, heroId: heroId, slot: slot, first: targetId
   )
 
+proc queueUseItemAt*(heroId, slot, mapX, mapY: int32) =
+  ## Queues a scroll channel toward the clicked map position.
+  pending.add PlayerCommand(
+    kind: CommandUseAt, heroId: heroId, slot: slot,
+    first: mapX, second: mapY
+  )
+
+proc activatePlayerItem*(world: World, heroId, slot: int32) =
+  ## Arms portal aiming or immediately uses an ordinary consumable.
+  let hero = world.heroById(heroId)
+  if hero.id == 0 or slot < 0 or slot >= InventorySlots:
+    return
+  armedAbility = -1
+  armedItem = -1
+  if hero.inventory[slot] == PortalScroll:
+    armedItem = slot
+  else:
+    queueUseItem(heroId, slot)
+
 proc queueCastPoint*(heroId, slot, mapX, mapY: int32) =
   ## Queues an ability toward the ground even when no object is selected.
   pending.add PlayerCommand(
     kind: CommandCastPoint, heroId: heroId, slot: slot,
     first: mapX, second: mapY
+  )
+
+proc queueLevelAbility*(heroId, slot: int32) =
+  ## Queues a player-selected unlock or upgrade for the next decision tick.
+  pending.add PlayerCommand(
+    kind: CommandLevelAbility, heroId: heroId, slot: slot
   )
 
 proc activatePlayerAbility*(
@@ -101,6 +141,10 @@ proc activatePlayerAbility*(
       return false
   let spec = heroAbility(hero.class, HeroAbilitySlot(slotId)).abilitySpec
   armedAbility = -1
+  armedItem = -1
+  if hero.abilityLevels[HeroAbilitySlot(slotId)] == 0:
+    queueCastTarget(heroId, slotId, heroId)
+    return true
   if spec.casting == SelfCast:
     queueCastTarget(heroId, slotId, heroId)
     return true
@@ -135,6 +179,11 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     return
   let tick = uint32(game.world.tick)
   case command.kind
+  of CommandDraft:
+    game.recorder.record ReplayAction(
+      tick: tick, heroId: command.heroId, kind: ActionDraft,
+      first: command.first
+    )
   of CommandWalk:
     game.recorder.recordWalkTo(
       tick, command.heroId, command.first, command.second
@@ -149,6 +198,14 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     game.recorder.recordBuyItem(tick, command.heroId, command.first)
   of CommandUse:
     game.recorder.recordUseItem(tick, command.heroId, command.first)
+  of CommandUseAt:
+    game.recorder.recordUseItemAt(
+      tick, command.heroId, command.slot, command.first, command.second
+    )
+  of CommandLevelAbility:
+    game.recorder.recordLevelAbility(tick, command.heroId, command.slot)
+  of CommandBuyback:
+    game.recorder.recordBuyback(tick, command.heroId)
 
   of CommandCastTarget, CommandCastPoint:
     game.recorder.recordCast(
@@ -159,6 +216,8 @@ proc recordCommand(game: Game, command: PlayerCommand) =
 proc applyCommand(game: Game, command: PlayerCommand): bool =
   ## Applies one queued command through the bot validators.
   case command.kind
+  of CommandDraft:
+    game.world.applyDraft(command.heroId, command.first)
   of CommandWalk:
     applyWalkTo(
       game.world, command.heroId, command.first, command.second
@@ -173,6 +232,14 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
     applyBuyItem(game.world, command.heroId, command.first)
   of CommandUse:
     applyUseItem(game.world, command.heroId, command.first)
+  of CommandUseAt:
+    applyUseItemAt(
+      game.world, command.heroId, command.slot, command.first, command.second
+    )
+  of CommandLevelAbility:
+    applyLevelAbility(game.world, command.heroId, command.slot)
+  of CommandBuyback:
+    applyBuyback(game.world, command.heroId)
 
   of CommandCastTarget:
     applyCastTarget(game.world, command.heroId, command.slot, command.first)

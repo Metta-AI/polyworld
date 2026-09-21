@@ -855,6 +855,11 @@ proc canopy(geometry: var TreeGeometry, settings: TreeSettings,
     crownSize: float32
   let
     clearance = min(settings.stemClearance, settings.height * 0.6'f)
+    cardDensity =
+      if settings.kind == Evergreen:
+        settings.density * 1.5'f
+      else:
+        settings.density
     trimWidth =
       if settings.kind == Evergreen:
         0.45'f
@@ -926,7 +931,7 @@ proc canopy(geometry: var TreeGeometry, settings: TreeSettings,
         packedCards = ceil(Tau * packingRadius / coveredWidth *
           settings.packing).int
         count = clamp(round(max(settings.cardsPerRing, packedCards).float32 *
-          settings.density).int, 1, 128)
+          cardDensity).int, 1, 128)
       for i in 0 ..< count:
         let
           angleJitter =

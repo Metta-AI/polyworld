@@ -190,7 +190,7 @@ proc episode(
     doAssert private.len <= LogLimit
     let marker = "PRIVATE-" & $slot
     if scripts[slot].contains(marker):
-      doAssert private.contains(marker)
+      doAssert private.contains(marker & " 1.50000")
       for otherSlot, other in logs:
         if otherSlot != slot:
           doAssert not other.contains(marker)
@@ -240,7 +240,7 @@ proc episode(
 for (game, count) in Games:
   var scripts: seq[string]
   for slot in 0 ..< count:
-    scripts.add "PRINT \"PRIVATE-" & $slot & "\"\nEND\n"
+    scripts.add "PRINT \"PRIVATE-" & $slot & "\", 1.5\nEND\n"
   episode(game, count, scripts)
   episode(game, count, newSeq[string](count))
   for slot in 0 ..< scripts.len:

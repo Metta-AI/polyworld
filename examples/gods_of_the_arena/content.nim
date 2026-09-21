@@ -7,11 +7,16 @@ export fxshapes
 
 const
   InventorySlots* = 6
-  CreepsPerBarracks* = 3
+  MeleeCreepsPerBarracks* = 3
+  CreepsPerBarracks* = MeleeCreepsPerBarracks + 1
   TickRate* = SharedTickRate
     ## Simulation ticks per second.
+  DraftPickTicks* = 10 * TickRate
+    ## Each human or bot gets ten simulation seconds to choose a hero.
 
 type
+  CreepKind* = enum MeleeCreep, RangedCreep
+
   HeroClass* = enum
     VanguardKnight,
     Ranger,
@@ -27,6 +32,8 @@ type
     MeleeAttack,
     RangedAttack,
     MagicAttack
+  HeroRole* = enum
+    Frontline, Carry, Mage, Support, Fighter
   HeroAbilitySlot* = enum
     PassiveAbility,
     PrimaryAbility,
@@ -63,6 +70,7 @@ type
     attackTicks*: int32
     abilities*: array[HeroAbilitySlot, Ability]
   AbilitySpec* = object
+    slot*: HeroAbilitySlot
     name*: string
     icon*: string
     kind*: AbilityKind
@@ -82,9 +90,9 @@ type
     restore*: int32
   Item* = enum
     NoItem,
-    IronrootRation,
+    HealthPotion,
     VitalityElixir,
-    ManaPotion,
+    ManaElixir,
     PoisonPotion,
     SteelHelmet,
     SteelBuckler,
@@ -101,9 +109,13 @@ type
     ThornwoodStaff,
     BattleAxe,
     RuneCrossbow,
-    ArcaneSpellbook
+    ArcaneSpellbook,
+    PortalScroll,
+    ManaPotion
   ItemKind* = enum
     Consumable, Equipment
+  RecoveryKind* = enum
+    HealthRecovery, ManaRecovery
   ItemSpec* = object
     name*: string
     icon*: string
@@ -116,9 +128,15 @@ type
     heal*: int32
     restore*: int32
     strike*: int32
+    channelTicks*, cooldownTicks*, recoveryTicks*: int32
 
 const
   MaxItemStack* = 8
+  PotionCooldownTicks* = 10 * TickRate
+  PotionRecoveryTicks* = 10 * TickRate
+  SpawnRecoverySeconds* = 5
+  PortalChannelTicks* = 3 * TickRate
+  PortalCooldownTicks* = 60 * TickRate
   HeroClassCount* = HeroClass.high.ord + 1
   HeroClassesPerTeam* = 5
   RedHeroClasses*: array[HeroClassesPerTeam, HeroClass] = [
@@ -318,192 +336,232 @@ const
     )
   ]
   BaseAbilitySpecs*: array[Ability, AbilitySpec] = [
-    AbilitySpec(
+    LionGuard: AbilitySpec(
+      slot: PassiveAbility,
       name: "Lion Guard", icon: "lion_guard",
       kind: Heal, cooldownTicks: 192, heal: 28
     ),
-    AbilitySpec(
+    FirebrandSword: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Firebrand Sword", icon: "firebrand_sword",
       kind: Strike, cooldownTicks: 96, manaCost: 20,
       range: 90_000, damage: 40
     ),
-    AbilitySpec(
+    InfernoAegis: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Inferno Aegis", icon: "inferno_aegis",
       kind: Heal, cooldownTicks: 240, manaCost: 35, heal: 50
     ),
-    AbilitySpec(
+    BlazingBlade: AbilitySpec(
+      slot: UltimateAbility,
       name: "Blazing Blade", icon: "blazing_blade",
       kind: Strike, cooldownTicks: 480, manaCost: 70,
       range: 110_000, damage: 90
     ),
-    AbilitySpec(
+    DragonSight: AbilitySpec(
+      slot: PassiveAbility,
       name: "Dragon Sight", icon: "dragon_sight",
       kind: Strike, cooldownTicks: 216,
       range: 420_000, damage: 16
     ),
-    AbilitySpec(
+    VerdantArrow: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Verdant Arrow", icon: "verdant_arrow",
       kind: Strike, cooldownTicks: 72, manaCost: 18,
       range: 360_000, damage: 32
     ),
-    AbilitySpec(
+    RicochetDisc: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Ricochet Disc", icon: "ricochet_disc",
       kind: Strike, cooldownTicks: 192, manaCost: 32,
       range: 390_000, damage: 48
     ),
-    AbilitySpec(
+    StormEagle: AbilitySpec(
+      slot: UltimateAbility,
       name: "Storm Eagle", icon: "storm_eagle",
       kind: Strike, cooldownTicks: 576, manaCost: 80,
       range: 480_000, damage: 95
     ),
-    AbilitySpec(
+    ManaCrystal: AbilitySpec(
+      slot: PassiveAbility,
       name: "Mana Crystal", icon: "mana_crystal",
       kind: Restore, cooldownTicks: 144, restore: 28
     ),
-    AbilitySpec(
+    FrostLance: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Frost Lance", icon: "frost_lance",
       kind: Strike, cooldownTicks: 96, manaCost: 28,
       range: 330_000, damage: 42
     ),
-    AbilitySpec(
+    MeteorStrike: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Meteor Strike", icon: "meteor_strike",
       kind: Strike, cooldownTicks: 216, manaCost: 53,
       range: 360_000, damage: 70
     ),
-    AbilitySpec(
+    ArcaneMeteor: AbilitySpec(
+      slot: UltimateAbility,
       name: "Arcane Meteor", icon: "arcane_meteor",
       kind: Strike, cooldownTicks: 600, manaCost: 100,
       range: 420_000, damage: 120
     ),
-    AbilitySpec(
+    NatureTalisman: AbilitySpec(
+      slot: PassiveAbility,
       name: "Nature Talisman", icon: "nature_talisman",
       kind: Heal, cooldownTicks: 192, heal: 22
     ),
-    AbilitySpec(
+    HealingBloom: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Healing Bloom", icon: "healing_bloom",
       kind: Heal, cooldownTicks: 168, manaCost: 30, heal: 55
     ),
-    AbilitySpec(
+    KindredWisps: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Kindred Wisps", icon: "kindred_wisps",
       kind: Heal, cooldownTicks: 288, manaCost: 45, heal: 80
     ),
-    AbilitySpec(
+    GolemSeed: AbilitySpec(
+      slot: UltimateAbility,
       name: "Golem Seed", icon: "golem_seed",
       kind: Strike, cooldownTicks: 528, manaCost: 75,
       range: 200_000, damage: 85
     ),
-    AbilitySpec(
+    ShadowCloak: AbilitySpec(
+      slot: PassiveAbility,
       name: "Shadow Cloak", icon: "shadow_cloak",
       kind: Heal, cooldownTicks: 240, heal: 18
     ),
-    AbilitySpec(
+    VoidBlade: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Void Blade", icon: "void_blade",
       kind: Strike, cooldownTicks: 80, manaCost: 16,
       range: 90_000, damage: 38
     ),
-    AbilitySpec(
+    GaleSlash: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Gale Slash", icon: "gale_slash",
       kind: Strike, cooldownTicks: 168, manaCost: 28,
       range: 120_000, damage: 52
     ),
-    AbilitySpec(
+    ShadowComet: AbilitySpec(
+      slot: UltimateAbility,
       name: "Shadow Comet", icon: "shadow_comet",
       kind: Strike, cooldownTicks: 504, manaCost: 65,
       range: 300_000, damage: 100
     ),
-    AbilitySpec(
+    SanguineChalice: AbilitySpec(
+      slot: PassiveAbility,
       name: "Sanguine Chalice", icon: "sanguine_chalice",
       kind: Heal, cooldownTicks: 192, heal: 36
     ),
-    AbilitySpec(
+    AfterlightSickle: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Afterlight Sickle", icon: "afterlight_sickle",
       kind: Strike, cooldownTicks: 108, manaCost: 18,
       range: 90_000, damage: 42
     ),
-    AbilitySpec(
+    WitheringIdol: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Withering Idol", icon: "withering_idol",
       kind: Strike, cooldownTicks: 216, manaCost: 36,
       range: 160_000, damage: 60
     ),
-    AbilitySpec(
+    DarkEclipse: AbilitySpec(
+      slot: UltimateAbility,
       name: "Dark Eclipse", icon: "dark_eclipse",
       kind: Strike, cooldownTicks: 624, manaCost: 80,
       range: 140_000, damage: 110
     ),
-    AbilitySpec(
+    FinalMeasure: AbilitySpec(
+      slot: PassiveAbility,
       name: "Final Measure", icon: "final_measure",
       kind: Strike, cooldownTicks: 216,
       range: 420_000, damage: 20
     ),
-    AbilitySpec(
+    SiegeScarab: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Siege Scarab", icon: "siege_scarab",
       kind: Strike, cooldownTicks: 120, manaCost: 22,
       range: 400_000, damage: 50
     ),
-    AbilitySpec(
+    LodestoneSurge: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Lodestone Surge", icon: "lodestone_surge",
       kind: Strike, cooldownTicks: 240, manaCost: 40,
       range: 360_000, damage: 68
     ),
-    AbilitySpec(
+    ClockworkCharge: AbilitySpec(
+      slot: UltimateAbility,
       name: "Clockwork Charge", icon: "clockwork_charge",
       kind: Strike, cooldownTicks: 552, manaCost: 70,
       range: 450_000, damage: 115
     ),
-    AbilitySpec(
+    FrostSigil: AbilitySpec(
+      slot: PassiveAbility,
       name: "Frost Sigil", icon: "frost_sigil",
       kind: Strike, cooldownTicks: 192,
       range: 360_000, damage: 14
     ),
-    AbilitySpec(
+    IceSpear: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Ice Spear", icon: "ice_spear",
       kind: Strike, cooldownTicks: 96, manaCost: 30,
       range: 400_000, damage: 48
     ),
-    AbilitySpec(
+    BoneMarionette: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Bone Marionette", icon: "bone_marionette",
       kind: Strike, cooldownTicks: 216, manaCost: 48,
       range: 300_000, damage: 66
     ),
-    AbilitySpec(
+    BoundVoid: AbilitySpec(
+      slot: UltimateAbility,
       name: "Bound Void", icon: "bound_void",
       kind: Strike, cooldownTicks: 648, manaCost: 110,
       range: 390_000, damage: 125
     ),
-    AbilitySpec(
+    AetherSiphon: AbilitySpec(
+      slot: PassiveAbility,
       name: "Aether Siphon", icon: "aether_siphon",
       kind: Restore, cooldownTicks: 168, restore: 30
     ),
-    AbilitySpec(
+    MothHex: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Moth Hex", icon: "moth_hex",
       kind: Strike, cooldownTicks: 96, manaCost: 24,
       range: 280_000, damage: 36
     ),
-    AbilitySpec(
+    DreadTotem: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Dread Totem", icon: "dread_totem",
       kind: Strike, cooldownTicks: 216, manaCost: 42,
       range: 240_000, damage: 58
     ),
-    AbilitySpec(
+    VoidPortal: AbilitySpec(
+      slot: UltimateAbility,
       name: "Void Portal", icon: "void_portal",
       kind: Strike, cooldownTicks: 576, manaCost: 90,
       range: 300_000, damage: 105
     ),
-    AbilitySpec(
+    RageCrucible: AbilitySpec(
+      slot: PassiveAbility,
       name: "Rage Crucible", icon: "rage_crucible",
       kind: Heal, cooldownTicks: 192, heal: 20
     ),
-    AbilitySpec(
+    MoltenFist: AbilitySpec(
+      slot: PrimaryAbility,
       name: "Molten Fist", icon: "molten_fist",
       kind: Strike, cooldownTicks: 84, manaCost: 8,
       range: 90_000, damage: 45
     ),
-    AbilitySpec(
+    WingedBoot: AbilitySpec(
+      slot: SecondaryAbility,
       name: "Winged Boot", icon: "winged_boot",
       kind: Strike, cooldownTicks: 192, manaCost: 12,
       range: 150_000, damage: 40
     ),
-    AbilitySpec(
+    VolcanicEruption: AbilitySpec(
+      slot: UltimateAbility,
       name: "Volcanic Eruption", icon: "volcanic_eruption",
       kind: Strike, cooldownTicks: 480, manaCost: 24,
       range: 130_000, damage: 100
@@ -512,16 +570,19 @@ const
   ItemSpecs*: array[Item, ItemSpec] = [
     ItemSpec(),
     ItemSpec(
-      name: "Ironroot Ration", icon: "ironroot_ration",
-      kind: Consumable, cost: 30, heal: 40
+      name: "Health Potion", icon: "health_leaf",
+      kind: Consumable, cost: 30, heal: 120,
+      recoveryTicks: PotionRecoveryTicks, cooldownTicks: PotionCooldownTicks
     ),
     ItemSpec(
       name: "Vitality Elixir", icon: "vitality_elixir",
-      kind: Consumable, cost: 50, heal: 90
+      kind: Consumable, cost: 75, heal: 90,
+      cooldownTicks: PotionCooldownTicks
     ),
     ItemSpec(
-      name: "Mana Potion", icon: "mana_potion",
-      kind: Consumable, cost: 45, restore: 60
+      name: "Mana Elixir", icon: "mana_potion",
+      kind: Consumable, cost: 90, restore: 60,
+      cooldownTicks: PotionCooldownTicks
     ),
     ItemSpec(
       name: "Poison Potion", icon: "poison_potion",
@@ -590,8 +651,26 @@ const
     ItemSpec(
       name: "Arcane Spellbook", icon: "arcane_spellbook",
       kind: Equipment, cost: 190, maxMana: 30, damage: 12
+    ),
+    ItemSpec(
+      name: "Portal Scroll", icon: "waystone_scroll",
+      kind: Consumable, cost: 100,
+      channelTicks: PortalChannelTicks, cooldownTicks: PortalCooldownTicks
+    ),
+    ItemSpec(
+      name: "Mana Potion", icon: "mana_flower",
+      kind: Consumable, cost: 45, restore: 90,
+      recoveryTicks: PotionRecoveryTicks, cooldownTicks: PotionCooldownTicks
     )
   ]
+
+const ShopItems* = [
+  HealthPotion, VitalityElixir, ManaPotion, ManaElixir, PoisonPotion,
+  PortalScroll, SteelHelmet, SteelBuckler, LeatherGauntlets, RangerBoots,
+  RubyAmulet, SapphireRing, CrimsonDagger, AmethystWand, SunsteelLongsword,
+  RangerBow, IronbarkPauldrons, KnightArmor, ThornwoodStaff, BattleAxe,
+  RuneCrossbow, ArcaneSpellbook
+]
 
 proc heroClassForTeam*(team, slot: int): HeroClass =
   ## Assigns one of five stable class identities to a team's local slot.
@@ -603,6 +682,15 @@ proc heroClassForTeam*(team, slot: int): HeroClass =
 proc heroSpec*(class: HeroClass): HeroSpec =
   ## Returns the immutable integer tuning for one hero class.
   HeroSpecs[class]
+
+proc heroRole*(class: HeroClass): HeroRole {.raises: [].} =
+  ## Groups heroes into the five complementary draft roles.
+  case class
+  of VanguardKnight, DeathKnight: Frontline
+  of Ranger, Crossbowman: Carry
+  of Arcanist, Lich: Mage
+  of DruidWarden, Warlock: Support
+  of DemonHunter, Berserker: Fighter
 
 proc abilitySpec*(ability: Ability): AbilitySpec =
   ## Returns casting, charge, effect and shape tuning for one ability.
@@ -720,6 +808,28 @@ proc heroAbility*(class: HeroClass, slot: HeroAbilitySlot): Ability =
   ## Returns the ability bound to one class slot.
   class.heroSpec.abilities[slot]
 
+proc abilityMaxLevel*(slot: HeroAbilitySlot): int32 =
+  ## Returns the number of learnable ranks for an ability slot.
+  if slot == UltimateAbility: 3 else: 4
+
+proc abilityRequiredLevel*(slot: HeroAbilitySlot, rank: int32): int32 =
+  ## Returns the hero level needed to learn a rank, or zero for invalid ranks.
+  if rank < 1 or rank > slot.abilityMaxLevel:
+    return 0
+  if slot == UltimateAbility: rank * 6 else: rank * 2 - 1
+
+proc abilitySpec*(ability: Ability, rank: int32): AbilitySpec =
+  ## Scales effects by rank while retaining the ability's timing and geometry.
+  result = ability.abilitySpec
+  let
+    level = clamp(rank, 0'i32, result.slot.abilityMaxLevel)
+    scale = if level == 0: 0'i32 else: level + 1
+  result.damage = result.damage * scale div 2
+  result.heal = result.heal * scale div 2
+  result.restore = result.restore * scale div 2
+  if level == 0:
+    result.charges = 0
+
 proc abilityIconKey*(ability: Ability): string =
   ## Returns the atlas name packed from one ability art file.
   "ability_" & ability.abilitySpec.icon
@@ -739,7 +849,7 @@ proc itemIconKey*(item: Item): string =
   ## Returns the atlas name packed from one item art file.
   if item == NoItem:
     return ""
-  "item_" & item.itemSpec.icon
+  "item_" & $item
 
 proc heroMaxHp*(class: HeroClass, level: int): int32 =
   ## Returns class hit points at one level.

@@ -17,6 +17,8 @@ const
   ArenaWaterDepth* = 3'i16
 
 type
+  BaseArea* = enum
+    OutsideBase, RedKeep, BlueKeep, RedSpawn, BlueSpawn
   ArenaStop* = tuple[layer, x, z: int]
   ArenaSite* = object
     position*, facing*, spawn*: PathPoint
@@ -37,6 +39,7 @@ type
     layers*: seq[QuadLayer]
     layout*: ArenaLayout
     minimap*: seq[uint32]
+    baseAreas*: seq[BaseArea]
     mainRoads*: seq[bool]
       ## Visual lane classification, including their ramp segments.
 
@@ -308,7 +311,18 @@ proc buildArena*(config: MapConfig): ArenaData =
     for i in 0 ..< heights.len:
       heights[i] += cmp(changes[i], 0'i32).int16
       changes[i] = 0
+  result.baseAreas.setLen(count)
   for index, tile in grid.cells:
+    if tile.passable:
+      case tile.terrain
+      of grids.KeepGround:
+        result.baseAreas[index] =
+          if tile.side == layouts.Northeast: RedKeep else: BlueKeep
+      of grids.SpawnGround:
+        result.baseAreas[index] =
+          if tile.side == layouts.Northeast: RedSpawn else: BlueSpawn
+      else:
+        discard
     var packed = pathing.Tile(flags: TileExists, kind: material(tile))
     if tile.surface == grids.TreeSurface and
       tile.side == layouts.Northeast:

@@ -1,6 +1,7 @@
 import
   std/[os, tempfiles],
-  polyworld/[basic, cli],
+  bassy,
+  polyworld/[cli, tapes],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
 const ObservationProgram = """
@@ -113,7 +114,14 @@ proc checkHostObservations() =
   let
     directory = createTempDir("gota-host-", "")
     path = directory / "observations.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     world = game.world
     hero = world.heroes[0]
     ally = world.heroes[1]
@@ -136,7 +144,7 @@ proc checkHostObservations() =
   hero.itemCounts[0] = 1
   hero.inventory[1] = CrimsonDagger
   hero.itemCounts[1] = 1
-  hero.inventory[2] = ManaPotion
+  hero.inventory[2] = ManaElixir
   hero.itemCounts[2] = 3
   hero.refreshHeroStats()
   hero.mana = 47
@@ -227,7 +235,7 @@ proc checkHostObservations() =
   doAssert vm.runtime.getArray("mana", enemyIndex) == 11
   doAssert vm.runtime.getArray("items", ownIndex * 6) == RangerBoots.ord
   doAssert vm.runtime.getArray("counts", ownIndex * 6) == 1
-  doAssert vm.runtime.getArray("items", ownIndex * 6 + 2) == ManaPotion.ord
+  doAssert vm.runtime.getArray("items", ownIndex * 6 + 2) == ManaElixir.ord
   doAssert vm.runtime.getArray("counts", ownIndex * 6 + 2) == 3
   doAssert vm.runtime.getArray("items", enemyIndex * 6 + 5) ==
     VitalityElixir.ord
@@ -291,7 +299,7 @@ proc checkHostObservations() =
   enemy.level = 8
   enemy.refreshHeroStats()
   enemy.mana = 0
-  enemy.inventory[5] = ManaPotion
+  enemy.inventory[5] = ManaElixir
   world.reveal(hidden.position)
   game.observe(vm)
   doAssert vm.runtime.getGlobal("speed") == heroMovePerTick(VanguardKnight, 4)
@@ -309,7 +317,7 @@ proc checkHostObservations() =
   doAssert vm.runtime.getArray("levels", vm.objectIndex(enemy.id)) == 8
   doAssert vm.runtime.getArray("mana", vm.objectIndex(enemy.id)) == 0
   doAssert vm.runtime.getArray("items", vm.objectIndex(enemy.id) * 6 + 5) ==
-    ManaPotion.ord
+    ManaElixir.ord
   doAssert vm.objectIndex(hidden.id) >= 0
   doAssert vm.runtime.getArray("targets", vm.objectIndex(ally.id)) == hidden.id
   doAssert vm.runtime.getGlobal("warnings") == 4
@@ -336,7 +344,14 @@ proc checkActionSnapshots() =
   let
     directory = createTempDir("gota-host-snapshot-", "")
     path = directory / "snapshot.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)
@@ -362,27 +377,184 @@ wend
   game.world.tick = 100
   hero.mana = 1
   hero.maxMana = 200
-  hero.inventory[0] = ManaPotion
+  hero.inventory[0] = ManaElixir
   hero.itemCounts[0] = 2
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
   doAssert vm.runtime.getGlobal("consumed") == 1
-  doAssert hero.mana == 1 + ManaPotion.itemSpec.restore
+  doAssert hero.mana == 1 + ManaElixir.itemSpec.restore
   doAssert hero.itemCounts[0] == 1
   doAssert vm.runtime.getGlobal("observedSelfMana") == 1
   doAssert vm.runtime.getGlobal("observedMana") == 1,
     "An action before the first object query must not change its snapshot."
-  doAssert vm.runtime.getGlobal("observedItem") == ManaPotion.ord
+  doAssert vm.runtime.getGlobal("observedItem") == ManaElixir.ord
   doAssert vm.runtime.getGlobal("observedCount") == 2
   inc game.world.tick
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
   doAssert vm.runtime.getGlobal("observedSelfMana") == hero.mana
   doAssert vm.runtime.getGlobal("observedMana") == hero.mana
-  doAssert vm.runtime.getGlobal("observedItem") == ManaPotion.ord
+  doAssert vm.runtime.getGlobal("observedItem") == ManaElixir.ord
   doAssert vm.runtime.getGlobal("observedCount") == 1,
     "The next decision must observe the previous action's inventory change."
 
 checkHostObservations()
 echo "Testing actions preserve the current decision's observation snapshot"
 checkActionSnapshots()
+
+echo "Testing Bassy decimals persist across GotA decisions and reach actions"
+block:
+  let
+    directory = createTempDir("gota-decimals-", "")
+    path = directory / "fractions.bas"
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
+    hero = game.world.heroes[0]
+  defer:
+    removeDir(directory)
+  writeFile(path, """
+dim ratios(1)
+ratios(0) = selfMana / selfMaxMana
+ratios(1) = ratios(1) + 0.25
+accepted = 0
+if ratios(0) < 0.5 and ratios(1) >= 0.5 then
+  accepted = useItem(0.0)
+end if
+print ratios(0)
+print ratios(1)
+""")
+  game.loadBots([BotGroup(path: path, count: 10)])
+  for i in 1 ..< game.heroVms.len:
+    game.heroVms[i] = nil
+  let vm = game.heroVms[0]
+  var printed: seq[Fixed]
+  vm.output = proc(event: PrintEvent) =
+    ## Captures decimal output through the game's real print callback.
+    if event.kind == FixedPrint:
+      printed.add event.fixedValue
+  hero.maxMana = 200
+  hero.mana = 50
+  hero.inventory[0] = ManaElixir
+  hero.itemCounts[0] = 2
+  game.runBotDecisions()
+  doAssert not vm.failed, vm.lastError
+  doAssert hero.itemCounts[0] == 2
+  doAssert vm.runtime.getGlobal("accepted") == 0
+  game.runBotDecisions()
+  doAssert not vm.failed, vm.lastError
+  doAssert hero.itemCounts[0] == 1
+  doAssert hero.mana > 50
+  doAssert vm.runtime.getGlobal("accepted") == 1
+  doAssert printed == @[0.25'fx, 0.25'fx, 0.25'fx, 0.5'fx]
+
+  writeFile(path, "ignored = useItem(0.25)\n")
+  game.loadBots([BotGroup(path: path, count: 10)])
+  for i in 1 ..< game.heroVms.len:
+    game.heroVms[i] = nil
+  let mana = hero.mana
+  game.runBotDecisions()
+  doAssert game.heroVms[0].failed
+  doAssert hero.itemCounts[0] == 1 and hero.mana == mana,
+    "fractional slots must not be truncated"
+
+echo "Testing fractional GotA movement survives recording and seeking"
+block:
+  let
+    directory = createTempDir("gota-points-", "")
+    path = directory / "points.bas"
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
+  defer:
+    removeDir(directory)
+  writeFile(path, """
+if worldTick = 1 then
+  accepted = walkTo(selfX + 0.25, selfY - 0.25)
+end if
+if worldTick = 12 then
+  accepted = attackMove(selfX - 0.25, selfY + 0.25)
+end if
+""")
+  game.loadBots([BotGroup(path: path, count: 10)])
+  for i in 1 ..< game.heroVms.len:
+    game.heroVms[i] = nil
+  game.recorder = initReplayRecorder(game.currentSetup(60), game.map.preset)
+  let initial = game.world.clone()
+  for tick in 1 .. 60:
+    game.tickWorld(proc() = game.runBotDecisions())
+  doAssert not game.heroVms[0].failed, game.heroVms[0].lastError
+  doAssert game.heroVms[0].runtime.getGlobal("accepted") == 1
+  let replay = decodeReplay(encodeReplay(game.recorder.data))
+  doAssert replay.actions.len == 2
+  doAssert replay.actions[0].offset == fixedVec2(0.25'fx, -0.25'fx)
+  doAssert replay.actions[1].offset == fixedVec2(-0.25'fx, 0.25'fx)
+  let
+    last = replay.actions[1]
+    expectedX = (last.first - mapTiles().int32 div 2) * WorldScale +
+      WorldScale div 4
+    expectedZ = (last.second - mapTiles().int32 div 2) * WorldScale +
+      WorldScale * 3 div 4
+  doAssert abs(game.world.heroes[0].position.x - expectedX) <= 100
+  doAssert abs(game.world.heroes[0].position.z - expectedZ) <= 100
+  let playback = newGame(
+    generateMap(replay.config.seed, replay.config.mapPreset),
+    replay.config.spawnIntervalTicks, 0, true, replay
+  )
+  playback.historyPlayback = true
+  playback.replayPlayer = initReplayPlayer(replay)
+  for pass in 0 .. 1:
+    if pass == 1:
+      playback.world.restore(initial)
+      playback.replayPlayer.syncCursor(0)
+    for tick in 1 .. 60:
+      playback.tickWorld(nil)
+    doAssert playback.hashCheck.mismatches == 0
+    doAssert playback.stateHash() == game.stateHash()
+
+echo "Testing fractional GotA ground aim and rejected cast payloads"
+block:
+  let
+    directory = createTempDir("gota-aim-", "")
+    path = directory / "aim.bas"
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
+    hero = game.world.heroes[0]
+  defer:
+    removeDir(directory)
+  hero.class = Arcanist
+  hero.spellsReady = false
+  doAssert game.world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
+  hero.refreshHeroStats()
+  hero.manualSpells = true
+  writeFile(path, "accepted = castPoint(2.0, selfX + 0.25, selfY - 0.25)\n")
+  game.loadBots([BotGroup(path: path, count: 10)])
+  for i in 1 ..< game.heroVms.len:
+    game.heroVms[i] = nil
+  game.runBotDecisions()
+  doAssert not game.heroVms[0].failed, game.heroVms[0].lastError
+  doAssert game.heroVms[0].runtime.getGlobal("accepted") == 1
+  doAssert game.world.casts.len == 1
+  let spell = game.world.casts[0]
+  doAssert spell.position.x ==
+    (mapCoordinate(hero.position.x) - mapTiles().int32 div 2) * WorldScale +
+    WorldScale * 3 div 4
+  doAssert spell.position.z ==
+    (mapCoordinate(hero.position.z) - mapTiles().int32 div 2) * WorldScale +
+    WorldScale div 4

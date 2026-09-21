@@ -50,7 +50,7 @@ let
   defaultMap = generateMap(saved.seed, saved.mapPreset)
   customMap = generateMap(custom.seed, custom.mapPreset)
 doAssert customMap.hash != defaultMap.hash
-let game = newGame(customMap, 240, 10, false, ReplayData())
+let game = newGame(customMap, 240, 10, false, ReplayData(), drafting = false)
 game.world.heroTurnTicks = 100_000
 game.recorder = initReplayRecorder(game.currentSetup(100), customMap.preset)
 for tick in 0 ..< 100:

@@ -2,7 +2,8 @@
 
 import
   std/[os, tempfiles],
-  polyworld/[basic, cli, metrics, pathing, tapes],
+  bassy,
+  polyworld/[cli, metrics, pathing, tapes],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
 proc arena(): World =
@@ -25,13 +26,14 @@ proc arena(): World =
   )
   for i, hero in result.heroes:
     hero.refreshHeroStats()
+    hero.abilityLevels = [1'i32, 1, 1, 1]
     result.stats.teams[i] = hero.team.ord
     hero.inventory[0] = PoisonPotion
     hero.itemCounts[0] = 3
-    hero.inventory[1] = IronrootRation
+    hero.inventory[1] = VitalityElixir
     hero.itemCounts[1] = 3
   for team in Team:
-    result.teamVisible[team.ord] = newSeq[uint8](GridTiles * GridTiles)
+    result.teamVisible[team.ord] = newSeq[uint8](mapTiles() * mapTiles())
     for cell in result.teamVisible[team.ord].mitems:
       cell = 255
 
@@ -114,7 +116,11 @@ block:
   doAssert world.last(Death).actor.id == 20
   doAssert world.last(Death).actor.kind == 4
   doAssert world.last(Death).target.kind == 3
-  doAssert world.count(XpGained) == 1
+  doAssert world.count(XpGained) == 3
+  doAssert world.last(XpGained).cause == NearbyKill
+  doAssert world.last(XpGained).amount == CreepNearbyXp div 2
+  doAssert world.events[world.last(XpGained).related].kind == Death
+  doAssert world.count(GoldGained) == 1
 
 echo "Testing command validation order, raw arguments and hidden target privacy"
 block:
@@ -127,8 +133,21 @@ block:
   world.error(ActionInvalidPoint)
   doAssert not world.applyBuyItem(hero.id, -1)
   world.error(ActionUnknownItem)
+  let
+    shopGame = newGame(
+      generateMap(54),
+      100_000,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
+    originalPosition = hero.position
+  for team in Team:
+    world.teamVisible[team.ord].setLen(mapTiles() * mapTiles())
+  hero.place(shopGame.world.heroes[0].spawnPosition)
   hero.gold = 0
-  doAssert not world.applyBuyItem(hero.id, IronrootRation.ord.int32)
+  doAssert not world.applyBuyItem(hero.id, VitalityElixir.ord.int32)
   world.error(ActionInsufficientGold)
   hero.gold = 1000
   doAssert world.applyBuyItem(hero.id, RangerBoots.ord.int32)
@@ -144,18 +163,19 @@ block:
   world.error(ActionEmptySlot)
   doAssert not world.applyUseItem(hero.id, 1)
   world.error(ActionFullHealth)
-  hero.inventory[3] = ManaPotion
+  hero.inventory[3] = ManaElixir
   hero.itemCounts[3] = 1
   doAssert not world.applyUseItem(hero.id, 3)
   world.error(ActionFullMana)
   hero.itemCounts[1] = MaxItemStack
-  doAssert not world.applyBuyItem(hero.id, IronrootRation.ord.int32)
+  doAssert not world.applyBuyItem(hero.id, VitalityElixir.ord.int32)
   world.error(ActionStackFull)
   for slot in 0 ..< InventorySlots:
-    hero.inventory[slot] = IronrootRation
+    hero.inventory[slot] = HealthPotion
     hero.itemCounts[slot] = 1
-  doAssert not world.applyBuyItem(hero.id, ManaPotion.ord.int32)
+  doAssert not world.applyBuyItem(hero.id, ManaElixir.ord.int32)
   world.error(ActionInventoryFull)
+  hero.place(originalPosition)
   hero.spellsReady = true
   hero.cooldowns[PrimaryAbility] = 1
   hero.charges[PrimaryAbility] = 0
@@ -194,7 +214,14 @@ block:
 
 proc quietGame(class: HeroClass): Game =
   ## Keeps only explicit test combat active on a real generated map.
-  result = newGame(generateMap(54), 240, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54),
+    240,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
@@ -210,8 +237,10 @@ proc quietGame(class: HeroClass): Game =
   hero.hp = hero.maxHp
   hero.mana = 10_000
   hero.maxMana = 10_000
+  hero.place(result.world.forts[0].center)
   hero.state = Marching
   hero.spellsReady = false
+  hero.abilityLevels = [1'i32, 1, 1, 1]
 
 proc quietStep(game: Game) =
   ## Suppresses unrelated idle attacks while allowing spell impacts and regen.
@@ -304,22 +333,55 @@ block:
     game.quietStep()
     doAssert world.count(EntityRespawned) == 0
 
+echo "Testing buyback spending, respawn, and duplicate rejection events"
+block:
+  let
+    game = quietGame(Ranger)
+    world = game.world
+    hero = world.heroes[0]
+  hero.hp = 0
+  game.tickWorld(nil)
+  doAssert hero.deaths == 1
+  hero.gold = 100
+  doAssert world.applyBuyback(hero.id)
+  doAssert world.count(GoldSpent) == 1
+  doAssert world.last(GoldSpent).cause == Buyback
+  doAssert world.last(GoldSpent).amount == -100
+  doAssert world.last(GoldSpent).before == 100
+  doAssert world.last(GoldSpent).after == 0
+  doAssert world.count(EntityRespawned) == 1
+  doAssert world.last(EntityRespawned).target.id == hero.id
+  doAssert not world.applyBuyback(hero.id)
+  world.error(ActionNotDead)
+  doAssert world.last(ActionRejected).action == ActionBuyback
+  doAssert world.count(GoldSpent) == 1
+
 echo "Testing initialization, tick boundaries, host queries and replay events"
 block:
   let
     directory = createTempDir("gota-events-", "")
     path = directory / "diagnostics.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     world = game.world
   defer:
     removeDir(directory)
   const Policy = """
-rejected = castTarget(-7, selfId)
+rejected = castPoint(-7, selfX + 0.25, selfY - 0.25)
 reason = lastActionError()
 query = objectCount()
 unchanged = lastActionError() = reason and reason = ActionInvalidSlot
 accepted = attackMove(mapWidth / 2, mapHeight / 2)
 cleared = lastActionError() = NoActionError
+if selfHp = 0 then
+  cleared = lastActionError() = ActionNotAlive
+end if
 """
   writeFile(path, Policy)
   game.loadBots([BotGroup(path: path, count: 10)])
@@ -337,7 +399,13 @@ cleared = lastActionError() = NoActionError
     for event in world.events:
       doAssert event.tick == tick
       if event.kind == ActionRejected:
-        doAssert event.slot == -7 and event.error == ActionInvalidSlot
+        if event.action == ActionCastPoint:
+          doAssert event.slot == -7 and event.error == ActionInvalidSlot
+          doAssert event.offsetX == 16384 and event.offsetY == -16384
+        else:
+          doAssert event.action == ActionAttackMove
+          doAssert event.error == ActionNotAlive
+          doAssert world.heroById(event.actor.id).hp <= 0
     peak = max(peak, world.events.len)
     expected.add world.events
   doAssert peak < 1000
@@ -345,8 +413,8 @@ cleared = lastActionError() = NoActionError
   doAssert game.recorder.data.actions[0].slot == -7
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError
-    doAssert vm.runtime.getGlobal("unchanged") == 1
-    doAssert vm.runtime.getGlobal("cleared") == 1
+    doAssert vm.runtime.getGlobal("unchanged") != 0
+    doAssert vm.runtime.getGlobal("cleared") != 0
   let replay = decodeReplay(encodeReplay(game.recorder.data))
   let playback = newGame(
     generateMap(replay.config.seed, replay.config.mapPreset),

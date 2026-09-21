@@ -7,7 +7,6 @@ import
   test_actioncam,
   test_animblend_controls,
   test_directors,
-  test_basic,
   test_bodies,
   test_body_layers,
   test_chrome,
@@ -18,20 +17,28 @@ import
   test_cta_maps,
   test_cta_nav,
   test_cta_sim,
-  test_fixed,
   test_fxmeshes,
   test_gameuis,
   test_gota_abilities,
   test_gota_attacks,
+  test_gota_base,
   test_gota_brushes,
+  test_gota_buybacks,
+  test_gota_cameras,
   test_gota_content,
+  test_gota_creeps,
+  test_gota_drafts,
   test_gota_gods,
   test_gota_host,
   test_gota_landscapes,
   test_gota_lanes,
+  test_gota_lighting,
   test_gota_mapgen,
   test_gota_observations,
+  test_gota_portals,
+  test_gota_potions,
   test_gota_presets,
+  test_gota_progression,
   test_gota_replays,
   test_gota_rusher,
   test_gota_sizes,
@@ -70,5 +77,10 @@ import
   test_viewers,
   test_visions,
   test_worldtexts
+
+when defined(gotaAssets):
+  import test_gota_characters, test_gota_faces
+else:
+  echo "Skipping private character asset checks; run with -d:gotaAssets."
 
 echo "All tests passed"
