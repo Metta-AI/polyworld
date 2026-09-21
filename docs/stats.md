@@ -90,33 +90,16 @@ resimulates every tick and verifies every recorded hash, so compact output
 does not mean sampled validation. It fails on incompatible, divergent, or
 incomplete replays.
 
-Use this order for agent investigations:
+To inspect a particular tick range, add `--events`:
 
-1. Run the extractor once and preserve its small stdout as the factual handoff.
-   A coordinator or smaller analysis agent should reason from that handoff,
-   not ingest the replay, full state dumps, or an entire game log.
-2. Compare hero decisions, rejected-action reasons, progression checkpoints,
-   deaths, structure losses, and the final result. State one concrete question
-   before requesting more evidence.
-3. If the summary identifies a suspicious tick, request only that event window:
+```sh
+nim r examples/gods_of_the_arena/tools/replay_extractor.nim \
+  --events 810:850 path/to/match.replay
+```
 
-   ```sh
-   nim r examples/gods_of_the_arena/tools/replay_extractor.nim \
-     --events 810:850 path/to/match.replay
-   ```
-
-   Raw windows are capped at 480 ticks and 200 records. Narrow the window if
-   records were omitted. `--checkpoint-seconds 0` suppresses progression, and
-   `--evidence N` changes the bounded first/last evidence count.
-4. Open the visual replay or inspect focused source only after the compact
-   evidence cannot answer the stated question. Do not paste repeated full-match
-   dumps into a long-lived coordinator conversation.
-
-For policy comparisons, summarize each replay separately and give the main
-agent only the summaries plus the policy diff. Use the same seeds and roster,
-and require more than one replay before treating a tactical outcome as a
-general improvement. Keep runtime recordings and generated summaries out of
-the repository.
+Raw windows are capped at 480 ticks and 200 records. Narrow the window if
+records were omitted. `--checkpoint-seconds 0` suppresses progression, and
+`--evidence N` sets how many first and last notable events to retain.
 
 Records are flat value structs from
 `examples/gods_of_the_arena/events.nim`, with enums and fixed-width numbers.
