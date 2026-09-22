@@ -47,15 +47,20 @@ proc baseTransformFor(bounds: AABounds, targetHeight: float32): Mat4 =
   scale(vec3(factor, factor, factor)) * translate(vec3(0, -bounds.min.y, 0))
 
 proc loadCharacterModel*(
-    path: string, targetHeight: float32
+    file: GltfFile, targetHeight: float32
 ): CharacterModel =
-  ## Requires a current GL context (the PBR renderer uploads textures on
-  ## first draw, but bounds and clips are plain CPU data).
-  result = CharacterModel(file: readGltfFile(path))
+  ## Wraps an assembled character and sizes it with its feet at ground level.
+  result = CharacterModel(file: file)
   for i, clip in result.file.root.animations:
     result.clips[clip.name] = i
   result.baseTransform =
     baseTransformFor(result.file.root.getAABounds(), targetHeight)
+
+proc loadCharacterModel*(
+    path: string, targetHeight: float32
+): CharacterModel =
+  ## Loads one character file; textures upload on its first rendered frame.
+  loadCharacterModel(readGltfFile(path), targetHeight)
 
 proc loadModularFile(path: string): CharacterModel =
   ## Returns a model wrapping the shared glb for this path.
@@ -243,6 +248,35 @@ proc setCharacterPose(model: CharacterModel, player: ClipPlayer) =
   # Shared character models retain the last instance's node values. Reapply
   # this player's owned pose immediately before every transform query or draw.
   player.pose()
+
+proc fitCharacterHeight*(
+  model: CharacterModel, targetHeight: float32, clip: int
+) =
+  ## Sizes visible skinned geometry in a reference pose, with feet grounded.
+  model.setCharacterPose(clip, 0)
+  let root = model.file.root
+  root.updateTransforms()
+  var bounds = AABounds(
+    min: vec3(float32.high), max: vec3(float32.low)
+  )
+  for node in root.walkNodes:
+    if node.mesh == nil or not node.visible:
+      continue
+    let joints = root.skinMatrices(node)
+    for primitive in node.mesh.primitives:
+      for i, point in primitive.points:
+        var posed = point
+        if joints.len > 0:
+          posed = vec3(0)
+          for j in 0 ..< 4:
+            let weight = primitive.jointWeights[i][j]
+            if weight != 0:
+              posed += joints[primitive.jointIds[i][j].int] * point * weight
+        let position = node.mat * posed
+        bounds.min = min(bounds.min, position)
+        bounds.max = max(bounds.max, position)
+  doAssert bounds.max.y > bounds.min.y, "Character has no visible height."
+  model.baseTransform = baseTransformFor(bounds, targetHeight)
 
 proc characterTransform(
     model: CharacterModel,

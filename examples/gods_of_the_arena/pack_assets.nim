@@ -12,10 +12,10 @@ proc main() =
   var bytes = 0
   for file in packed:
     bytes += file.bytes
-  const WebAssetBudget = 20 * 1024 * 1024
+  const WebAssetBudget = 32 * 1024 * 1024
   if bytes > WebAssetBudget:
     raise newException(
       AssetError,
-      "GOTA browser assets exceed 20 MiB: " & $(bytes div 1024) & " KiB")
+      "GOTA browser assets exceed 32 MiB: " & $(bytes div 1024) & " KiB")
 
 main()

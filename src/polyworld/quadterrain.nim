@@ -126,6 +126,7 @@ proc envShadeTwoSided(albedo, normal: Vec3, sunFactor: float32): Vec3 =
 
 var
   mvp: Uniform[Mat4]
+  propModel: Uniform[Mat4]
   borderWidthUniform: Uniform[float32]
   heightScale: Uniform[float32]
   edgesEnabled: Uniform[float32]
@@ -561,16 +562,17 @@ proc propVert(
     fragmentPosition: var Vec3,
     shadowPos: var Vec3
 ) =
-  ## Emits baked prop vertex outputs for the generated OpenGL shader.
+  ## Emits world-space lighting inputs for baked and standalone props.
+  let
+    worldPosition: Vec3 =
+      (propModel * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)).xyz
+    worldNormal: Vec3 = normalize(
+      (propModel * vec4(normal.x, normal.y, normal.z, 0.0)).xyz)
   gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
-  shadowPos = vec3(
-    vertPos.x + normal.x * 0.08,
-    vertPos.y + normal.y * 0.08,
-    vertPos.z + normal.z * 0.08
-  )
+  shadowPos = worldPosition + worldNormal * 0.08
   fragmentColor = vertColor
-  fragmentNormal = normal
-  fragmentPosition = vertPos
+  fragmentNormal = worldNormal
+  fragmentPosition = worldPosition
 
 proc propFrag(
     fragColor: var Vec4,
@@ -677,16 +679,17 @@ proc texturedPropVert(
     shadowPos: var Vec3,
     fragTint: var Vec3
 ) =
-  ## Tree vertex outputs plus a per-instance tint for textured props.
+  ## Emits world-space lighting inputs and a tint for textured props.
+  let
+    worldPosition: Vec3 =
+      (propModel * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)).xyz
+    worldNormal: Vec3 = normalize(
+      (propModel * vec4(normal.x, normal.y, normal.z, 0.0)).xyz)
   gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
-  shadowPos = vec3(
-    vertPos.x + normal.x * 0.08,
-    vertPos.y + normal.y * 0.08,
-    vertPos.z + normal.z * 0.08
-  )
+  shadowPos = worldPosition + worldNormal * 0.08
   fragUv = vertUv
-  fragmentNormal = normal
-  fragmentPosition = vertPos
+  fragmentNormal = worldNormal
+  fragmentPosition = worldPosition
   fragTint = vertTint
 
 proc texturedPropFrag(
@@ -913,11 +916,12 @@ var
   waterVisibilityOffsetLocation, waterVisibilityScaleLocation: GLint
   waterNormalTextureArray: GLuint
   propProgram: GLuint
-  propMvpLocation, propVisibilityTexLocation: GLint
+  propMvpLocation, propModelLocation, propVisibilityTexLocation: GLint
   propVisibilityOffsetLocation, propVisibilityScaleLocation: GLint
   propTintLocation: GLint
   treeProgram, texturedPropProgram, texturedInstantProgram: GLuint
   texturedInstantMvpLocation, texturedInstantVisibilityTexLocation: GLint
+  texturedInstantModelLocation: GLint
   texturedInstantVisibilityOffsetLocation: GLint
   texturedInstantVisibilityScaleLocation: GLint
   texturedInstantTexturesLocation, texturedInstantAlphaCutoffLocation: GLint
@@ -925,6 +929,7 @@ var
   texturedInstantEnv: EnvLocations
   texturedInstantShadow: ShadowLocations
   texturedPropMvpLocation, texturedPropVisibilityTexLocation: GLint
+  texturedPropModelLocation: GLint
   texturedPropVisibilityOffsetLocation: GLint
   texturedPropVisibilityScaleLocation: GLint
   texturedPropTexturesLocation, texturedPropAlphaCutoffLocation: GLint
@@ -1722,13 +1727,10 @@ proc drawTexturedProp(
 ) =
   ## Draws one textured prop immediately with the cutout texture program.
   model.uploadTexturedPropModel()
-  let model3d =
-    translate(position) * rotateY(rotation) *
-    scale(vec3(propScale, propScale, propScale))
   var
+    model3d = translate(position) * rotateY(rotation) *
+      scale(vec3(propScale, propScale, propScale))
     transform = viewProjection * model3d
-    shadowTransform0 = sunLightMvp0 * model3d
-    shadowTransform1 = sunLightMvp1 * model3d
   glDisable(GL_BLEND)
   glDepthMask(GL_TRUE)
   glDisable(GL_CULL_FACE)
@@ -1737,11 +1739,8 @@ proc drawTexturedProp(
   setEnvUniforms(texturedInstantEnv)
   setShadowUniforms(texturedInstantShadow)
   glUniformMatrix4fv(
-    texturedInstantShadow.mvp0, 1, GL_FALSE,
-    cast[ptr float32](shadowTransform0.addr))
-  glUniformMatrix4fv(
-    texturedInstantShadow.mvp1, 1, GL_FALSE,
-    cast[ptr float32](shadowTransform1.addr))
+    texturedInstantModelLocation, 1, GL_FALSE,
+    cast[ptr float32](model3d.addr))
   glUniformMatrix4fv(
     texturedInstantMvpLocation, 1, GL_FALSE,
     cast[ptr float32](transform.addr))
@@ -1787,10 +1786,10 @@ proc drawProp*(
       model, position, rotation, propScale, viewProjection, tint)
     return
   model.uploadPropModel()
-  let model3d =
-    translate(position) * rotateY(rotation) *
-    scale(vec3(propScale, propScale, propScale))
-  var transform = viewProjection * model3d
+  var
+    model3d = translate(position) * rotateY(rotation) *
+      scale(vec3(propScale, propScale, propScale))
+    transform = viewProjection * model3d
   if tint.w < 1.0'f32:
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -1803,15 +1802,8 @@ proc drawProp*(
   glUseProgram(propProgram)
   setEnvUniforms(propEnv)
   setShadowUniforms(propShadow)
-  # Standalone props keep model-space vertices, so the shadow lookups need
-  # the model transform folded into both step matrices.
-  var
-    shadowTransform0 = sunLightMvp0 * model3d
-    shadowTransform1 = sunLightMvp1 * model3d
   glUniformMatrix4fv(
-    propShadow.mvp0, 1, GL_FALSE, cast[ptr float32](shadowTransform0.addr))
-  glUniformMatrix4fv(
-    propShadow.mvp1, 1, GL_FALSE, cast[ptr float32](shadowTransform1.addr))
+    propModelLocation, 1, GL_FALSE, cast[ptr float32](model3d.addr))
   glUniformMatrix4fv(
     propMvpLocation,
     1,
@@ -1819,6 +1811,12 @@ proc drawProp*(
     cast[ptr float32](transform.addr)
   )
   setPropTint(tint)
+  glUniform1f(propVisibilityOffsetLocation, visibilitySize.float32 / 2)
+  glUniform1f(propVisibilityScaleLocation, 1.0'f / visibilitySize.float32)
+  glActiveTexture(GL_TEXTURE1)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glUniform1i(propVisibilityTexLocation, 1)
+  glActiveTexture(GL_TEXTURE0)
   glBindVertexArray(model.vertexArray)
   glDrawArrays(GL_TRIANGLES, 0, model.vertexCount)
   glBindVertexArray(0)
@@ -3577,6 +3575,7 @@ proc initTerrain*(
     toShader(propFrag, OpenGlShaderTarget, shaderFragment)
   )
   propMvpLocation = glGetUniformLocation(propProgram, "mvp")
+  propModelLocation = glGetUniformLocation(propProgram, "propModel")
   propTintLocation = glGetUniformLocation(propProgram, "propTint")
   propEnv = envLocations(propProgram)
   propShadow = shadowLocations(propProgram)
@@ -3617,6 +3616,8 @@ proc initTerrain*(
     toShader(texturedPropFrag, OpenGlShaderTarget, shaderFragment)
   )
   texturedPropMvpLocation = glGetUniformLocation(texturedPropProgram, "mvp")
+  texturedPropModelLocation = glGetUniformLocation(
+    texturedPropProgram, "propModel")
   texturedPropEnv = envLocations(texturedPropProgram)
   texturedPropShadow = shadowLocations(texturedPropProgram)
   texturedPropVisibilityTexLocation = glGetUniformLocation(
@@ -3635,6 +3636,8 @@ proc initTerrain*(
   )
   texturedInstantMvpLocation = glGetUniformLocation(
     texturedInstantProgram, "mvp")
+  texturedInstantModelLocation = glGetUniformLocation(
+    texturedInstantProgram, "propModel")
   texturedInstantEnv = envLocations(texturedInstantProgram)
   texturedInstantShadow = shadowLocations(texturedInstantProgram)
   texturedInstantVisibilityTexLocation = glGetUniformLocation(
@@ -4050,10 +4053,15 @@ proc drawTexturedMesh(
 
 proc drawTexturedBatch(batch: TexturedBatch, mvp: Mat4) =
   ## Draws one textured prop batch with its per-instance tints.
-  var matrix = mvp
+  var
+    matrix = mvp
+    model3d = mat4()
   glUseProgram(texturedPropProgram)
   setEnvUniforms(texturedPropEnv)
   setShadowUniforms(texturedPropShadow)
+  glUniformMatrix4fv(
+    texturedPropModelLocation, 1, GL_FALSE,
+    cast[ptr float32](model3d.addr))
   glUniformMatrix4fv(
     texturedPropMvpLocation,
     1,
@@ -4108,10 +4116,13 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   glBindVertexArray(0)
 
   if propMesh.len > 0:
+    var model3d = mat4()
     glUseProgram(propProgram)
     setEnvUniforms(propEnv)
     setShadowUniforms(propShadow)
     setPropTint(vec4(1, 1, 1, 1))
+    glUniformMatrix4fv(
+      propModelLocation, 1, GL_FALSE, cast[ptr float32](model3d.addr))
     glUniformMatrix4fv(
       propMvpLocation,
       1,

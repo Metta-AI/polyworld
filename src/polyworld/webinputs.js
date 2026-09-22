@@ -62,10 +62,16 @@
     "spawn-interval",
     "view",
     "ticks",
-    "speed"
+    "speed",
+    "player",
+    "play"
   ].forEach(function addValueParameter(name) {
     parameters.getAll(name).forEach(function addValue(value) {
-      commandArguments.push("--" + name, value);
+      if (name === "player") {
+        commandArguments.push("--player=" + value);
+      } else {
+        commandArguments.push("--" + name, value);
+      }
     });
   });
 

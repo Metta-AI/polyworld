@@ -23,6 +23,9 @@ assert.deepEqual(configure("?bot=my%2520bot.BAS"), [
 assert.deepEqual(configure("?replay=query.replay"), [
   "--replay", "/web/replay.replay"
 ]);
+assert.deepEqual(configure("?bot=base.bas:9&player=6&play=false"), [
+  "--bot", "/web/bot0/base.bas:9", "--player=6", "--play", "false"
+]);
 assert.deepEqual(configure("?bot=https://example.com/%252Fescape.bas"), [
   "--bot", "/web/bot0/_escape.bas"
 ]);

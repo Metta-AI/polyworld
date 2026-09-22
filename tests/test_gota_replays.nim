@@ -72,6 +72,8 @@ block:
   for slot in 0'i32 .. 3'i32:
     spells.recordCast(2, 100, slot, 105, 0, false)
     spells.recordCast(2, 100, slot, 64, 42, true)
+  for slot in [-7'i32, 0, 1, 2, 3, int32.high]:
+    spells.recordLevelAbility(2, 100, slot)
   spells.recordCast(2, 100, -7, 105, 0, false)
   spells.recordCast(2, 100, int32.high, -20, 42, true)
   spells.recordHash(123)
@@ -92,6 +94,32 @@ doAssert moved[0].kind == ActionAttackMove
 doAssert player.actionsAt(18).len == 0
 doAssert player.actionsAt(19).len == 1
 doAssert player.finished
+
+echo "Testing draft ticks have their own bounded replay allowance"
+block:
+  var draftSetup = setup
+  draftSetup.drafting = true
+  let
+    draft = initReplayRecorder(draftSetup)
+    maximum = setup.maximumTicks.int + setup.heroes.len * DraftPickTicks
+  draft.recordWalkTo(maximum.uint32, 100, 64, 42)
+  for tick in 1 .. maximum:
+    draft.recordHash(tick.uint64)
+  let restored = decodeReplay(draft.data.encodeReplay())
+  doAssert restored.config.maxTicks == setup.maximumTicks.int32
+  doAssert restored.hashes.len == maximum
+  doAssert restored.actions[^1].tick == maximum.uint32
+  try:
+    draft.recordHash(0)
+    doAssert false, "hashes beyond the draft and battle budgets must fail"
+  except ReplayError:
+    discard
+  draft.data.hashes.add(0)
+  try:
+    discard draft.data.encodeReplay()
+    doAssert false, "encoded tapes must respect both duration budgets"
+  except ReplayError:
+    discard
 
 echo "Testing allocation-free action playback"
 let directPlayer = initReplayPlayer(decoded)

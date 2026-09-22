@@ -3,7 +3,8 @@
 import
   std/math,
   vmath,
-  polyworld/[gameuis, stackpanels]
+  polyworld/[gameuis, stackpanels],
+  content
 
 const
   PanelScore* = vec2(298, 104)
@@ -12,6 +13,7 @@ const
   PanelMinimap* = vec2(256, 256)
   PanelDetails* = vec2(859, 242)
   PanelInventory* = vec2(252, 243)
+  PanelDraft = vec2(1048, 632)
   HeroCardSize = vec2(100, 126)
   HeroGap = 4.0'f
   HeroTeamWidth = HeroCardSize.x * 5 + HeroGap * 4
@@ -34,8 +36,51 @@ type
 
   ShopPanels* = object
     panel*, heading*, catalog*, footer*: GameUiPanel
-    cards*: array[20, GameUiPanel]
+    cards*: array[Item.high.ord, GameUiPanel]
     compact*: bool
+
+  DraftPanels* = object
+    panel*, title*, status*, footer*, selection*, role*, confirm*: GameUiPanel
+    deadline*: GameUiPanel
+    heroes*: array[10, GameUiPanel]
+
+proc draftScale*(size: Vec2): float32 =
+  ## Enlarges the picker by half while fitting above the replay controls.
+  min(
+    1.5'f,
+    min((size.x - 48) / PanelDraft.x, (size.y - 48) / PanelDraft.y)
+  )
+
+proc draftPanels*(size: Vec2): DraftPanels =
+  ## Centers a compact five-column hero grid beneath the current picker.
+  const
+    Gap = 12.0'f
+    CardHeight = 224.0'f
+    HeaderHeight = 96.0'f
+    FooterHeight = 76.0'f
+  let
+    width = min(PanelDraft.x, size.x - 48)
+    cardWidth = floor((width - Gap * 4) / 5)
+    gridWidth = cardWidth * 5 + Gap * 4
+    gridHeight = CardHeight * 2 + Gap
+  result.panel.size = vec2(
+    gridWidth, HeaderHeight + gridHeight + FooterHeight
+  )
+  result.panel.origin = floor((size - result.panel.size) / 2)
+  var rows = result.panel.stack(TopToBottom)
+  result.title = rows.takeRow(44, 4)
+  result.status = rows.takeRow(28, 4)
+  result.deadline = rows.takeRow(8, 8)
+  result.deadline.origin.x += floor((result.deadline.size.x - 320) / 2)
+  result.deadline.size.x = 320
+  let grid = rows.takeRow(gridHeight, 20)
+  grid.stackGrid(vec2(cardWidth, CardHeight), 5, vec2(Gap), result.heroes)
+  result.footer = rows.takeRest()
+  var footer = result.footer.stack(RightToLeft)
+  result.confirm = footer.takeColumn(240, 24)
+  var selected = footer.takeRest().stack(TopToBottom)
+  result.selection = selected.takeRow(30, 2)
+  result.role = selected.takeRest()
 
 proc scorePanel*(layout: GameUiLayout): GameUiPanel =
   ## Moves the score below the hero roster when they cannot fit side by side.
@@ -103,7 +148,7 @@ proc inventoryPanels*(panel: GameUiPanel): InventoryPanels =
   stackGrid(result.contents, vec2(72), 3, vec2(4, 5), result.slots)
 
 proc shopPanels*(size: Vec2): ShopPanels =
-  ## Fits all twenty items and the inventory into the full-screen shop.
+  ## Fits the complete item catalog and inventory into the full-screen shop.
   result.compact = size.x < 1920 or size.y < 1080
   let
     margin = if result.compact: 16.0'f else: 24.0'f
@@ -118,8 +163,13 @@ proc shopPanels*(size: Vec2): ShopPanels =
   result.heading = rows.takeRow(72, gap)
   result.catalog = rows.takeRow(rows.remainingSpace.y - footerHeight, gap)
   result.footer = rows.takeRest()
-  let cell = vec2(
-    floor((result.catalog.size.x - gridGap * 4) / 5),
-    floor((result.catalog.size.y - gridGap * 3) / 4)
-  )
-  stackGrid(result.catalog, cell, 5, vec2(gridGap), result.cards)
+  let
+    columns = 6
+    rowCount = (result.cards.len + columns - 1) div columns
+    cell = vec2(
+      floor((result.catalog.size.x - gridGap * (columns - 1).float32) /
+        columns.float32),
+      floor((result.catalog.size.y - gridGap * (rowCount - 1).float32) /
+        rowCount.float32)
+    )
+  stackGrid(result.catalog, cell, columns, vec2(gridGap), result.cards)

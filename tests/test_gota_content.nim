@@ -41,7 +41,19 @@ block:
     for slot in HeroAbilitySlot:
       let ability = spec.abilities[slot]
       doAssert ability notin used, "ability is assigned twice"
+      doAssert ability.abilitySpec.slot == slot,
+        $ability & " metadata disagrees with its hero kit slot"
       used.incl ability
+  doAssert used == {Ability.low .. Ability.high}
+
+echo "Testing spell ranks clamp to the declared slot limit"
+block:
+  doAssert FirebrandSword.abilitySpec(4).damage == 100
+  doAssert FirebrandSword.abilitySpec(int32.high) ==
+    FirebrandSword.abilitySpec(4)
+  doAssert BlazingBlade.abilitySpec(3).damage == 180
+  doAssert BlazingBlade.abilitySpec(4) == BlazingBlade.abilitySpec(3)
+  doAssert BlazingBlade.abilitySpec(int32.high) == BlazingBlade.abilitySpec(3)
 
 echo "Testing every kit ability has a distinct usable spec"
 block:
@@ -94,17 +106,22 @@ block:
     doAssert spec.icon.len > 0
     doAssert spec.cost > 0
     doAssert spec.name notin names, "item name is assigned twice"
-    doAssert spec.icon notin icons, "item icon is assigned twice"
+    doAssert item.itemIconKey notin icons, "item key is assigned twice"
     names.add spec.name
-    icons.add spec.icon
+    icons.add item.itemIconKey
     case spec.kind
     of Consumable:
-      doAssert spec.heal > 0 or spec.restore > 0 or spec.strike > 0
+      doAssert spec.heal > 0 or spec.restore > 0 or spec.strike > 0 or
+        spec.channelTicks > 0
     of Equipment:
       doAssert spec.maxHp > 0 or spec.maxMana > 0 or
         spec.damage > 0 or spec.movePerTick > 0
     doAssert itemIconKey(item).len > 5
-  doAssert names.len == 20
+  doAssert names.len == 22
+  doAssert ShopItems.len == Item.high.ord
+  for item in Item:
+    if item != NoItem:
+      doAssert item in ShopItems
   doAssert itemFromId(0) == NoItem
   doAssert itemFromId(int32(LeatherGauntlets.ord)) == LeatherGauntlets
 

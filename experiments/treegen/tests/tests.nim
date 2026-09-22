@@ -121,7 +121,7 @@ proc testControls() =
   settings.shells = 3
   settings.density = 2
   let maximum = generateGeometry(settings)
-  doAssert maximum.cards + maximum.omittedCards == 23 * 64 * 3
+  doAssert maximum.cards + maximum.omittedCards == 23 * 96 * 3
   maximum.foliage.checkMesh(atlas = true)
   settings.height = NaN.float32
   var rejected = false

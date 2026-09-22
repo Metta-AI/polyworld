@@ -29,9 +29,10 @@ proc usage() =
   echo "  --player:N              Control hero N (1-10); supply 9 bots."
   echo "  --replay PATH           Play an action replay instead of bots."
   echo "  --record PATH           Record bot actions to a replay."
-  echo "  --seconds NUMBER        Duration in seconds (default 1200)."
-  echo "  --minutes NUMBER        Duration in minutes (default 20)."
-  echo "  --ticks NUMBER          Duration in ticks (default 28800)."
+  echo "  --seconds NUMBER        Battle seconds (default 1200)."
+  echo "  --minutes NUMBER        Battle minutes (default 20)."
+  echo "  --ticks NUMBER          Battle ticks (default 28800)."
+  echo "Drafting allows 10 seconds per pick, separate from battle time."
   echo "  --seed NUMBER           Match seed, independent of mapPreset.seed."
   echo "  --config PATH           JSON match settings, including mapPreset."
   echo "  --spawn-interval NUMBER Seconds between waves."
@@ -166,13 +167,14 @@ proc advanceGame*() =
             tick: 1, heroId: hero.id, kind: ActionManualSpells, first: 1
           )
   tickWorld(run, proc() =
+    let draftTurn = run.world.draftHeroId()
     flushPlayerCommands(run)
-    runBotDecisions(run)
+    if draftTurn == 0 or draftTurn == run.world.draftHeroId():
+      runBotDecisions(run)
   )
 
-  run.sampleMetrics(
-    run.world.gameOver or run.world.tick >= options.maximumTicks
-  )
+  run.sampleMetrics(run.finished() or
+    (run.replayMode and run.world.tick == run.replayData.hashes.len))
   run.metrics.finishTick(run.world.tick)
 
 ## Headless reporting and replay recording.
@@ -245,6 +247,8 @@ when defined(headless):
     let
       elapsed = max(epochTime() - started, 0.000001)
       simulated = steps.float64 / HeadlessTickRate.float64
+      draftSeconds = run.world.draftTicks.float64 / HeadlessTickRate.float64
+      battleSeconds = run.world.battleTick().float64 / HeadlessTickRate.float64
       speedup = simulated / elapsed
       vmStatus = heroVmStatus()
       redFortHp = max(run.world.forts[0].hp, 0'i32)
@@ -252,11 +256,14 @@ when defined(headless):
       outcome =
         if run.world.gameOver:
           if run.world.winner == RedTeam: "red won" else: "blue won"
+        elif run.world.phase == Drafting:
+          "draft incomplete"
         else:
           "time limit"
     echo &"result: {outcome}"
     echo &"simulated: {simulated:.2f} s in {elapsed:.4f} s " &
       &"({speedup:.1f}x real time)"
+    echo &"draft: {draftSeconds:.2f} s, battle: {battleSeconds:.2f} s"
     echo &"gods: red {redFortHp} hp, blue {blueFortHp} hp"
     echo &"towers: red {teamTowerCount(RedTeam)}, " &
       &"blue {teamTowerCount(BlueTeam)}"
@@ -278,21 +285,15 @@ when defined(headless):
 
   proc runHeadless*() =
     ## Runs a live game or replay immediately with fixed simulation ticks.
-    let
-      stepLimit =
-        if run.replayMode:
-          run.replayData.hashes.len
-        else:
-          int(options.maximumTicks)
-      started = epochTime()
+    let started = epochTime()
     if not run.replayMode:
-      startReplayRecording(uint32(stepLimit))
+      startReplayRecording(uint32(options.maximumTicks))
     startGameProfile()
     defer:
       finishGameProfile()
     var steps = 0
-    while steps < stepLimit and
-        (run.replayMode or not run.world.gameOver) and
+    while (if run.replayMode: steps < run.replayData.hashes.len
+        else: not run.finished()) and
         run.recordingError.len == 0:
       advanceGame()
       inc steps

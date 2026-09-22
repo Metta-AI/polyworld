@@ -138,9 +138,11 @@ proc needsSeparation*(a, b: Body): bool {.inline.} =
     squared = lengthSquared(b.pos - a.pos)
   need > 0 and squared > 0 and squared < need * need
 
-proc separatePair*(a, b: var Body, walkable: Walkable) =
+proc separatePair*(
+    a, b: var Body, walkable: Walkable, aFixed = false, bFixed = false
+) =
   ## Pushes two overlapping circles apart and clamps both to walkable ground.
-  if not needsSeparation(a, b):
+  if (aFixed and bFixed) or not needsSeparation(a, b):
     return
   let
     offset = b.pos - a.pos
@@ -149,8 +151,11 @@ proc separatePair*(a, b: var Body, walkable: Walkable) =
   let
     oldA = a.pos
     oldB = b.pos
-    push = normalize(offset) * ((need - dist) / 2)
-  a.pos -= push
-  b.pos += push
+    push = normalize(offset) *
+      (if aFixed or bFixed: need - dist else: (need - dist) / 2)
+  if not aFixed:
+    a.pos -= push
+  if not bFixed:
+    b.pos += push
   clampWalkable(a.pos, oldA, walkable)
   clampWalkable(b.pos, oldB, walkable)

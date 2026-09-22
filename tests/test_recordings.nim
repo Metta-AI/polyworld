@@ -185,7 +185,7 @@ proc testRecording() =
     let continuedPlayback = playFile(path)
     doAssert continuedPlayback.exitCode == 0, continuedPlayback.output
     doAssert continuedPlayback.output.contains(apmSummary()),
-      continuedPlayback.output
+      "Expected " & apmSummary() & "\n" & continuedPlayback.output
 
   echo "Testing divergent replays exit with failure"
   var corrupt = partial

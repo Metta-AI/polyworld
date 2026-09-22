@@ -3,6 +3,65 @@
 ' Attack visible, vulnerable enemies within 20 tiles; otherwise attack-move.
 ' Use this policy for all five heroes on a team. Automatic spells stay enabled.
 
+
+' Draft roles: 0 frontline, 1 carry, 2 mage, 3 support, 4 fighter.
+' Prefer roles missing from our team, then our faction's familiar heroes.
+sub chooseHero()
+  if draftTurnId <> selfId then
+    exit sub
+  end if
+  bestClass = -1
+  bestScore = -2147483647
+  candidate = 0
+  while candidate < 10
+    if heroAvailable(candidate) then
+      role = heroRole(candidate)
+      score = 100
+      player = 0
+      while player < draftPlayerCount()
+        if draftPlayerTeam(player) = selfTeam then
+          picked = draftedClass(draftPlayerId(player))
+          if picked >= 0 then
+            if heroRole(picked) = role then
+              score = score - 100
+            end if
+          end if
+        end if
+        player = player + 1
+      wend
+      if candidate \ 5 = selfTeam then
+        score = score + 1
+      end if
+      if score > bestScore then
+        bestScore = score
+        bestClass = candidate
+      end if
+    end if
+    candidate = candidate + 1
+  wend
+  if bestClass >= 0 then
+    draftHero(bestClass)
+  end if
+end sub
+
+if drafting then
+  chooseHero()
+  end
+end if
+
+' Spend points explicitly, prioritizing the ultimate and primary spell.
+for upgrade = 1 to 4
+  if canLevelAbility(3) then
+    levelAbility(3)
+  elseif canLevelAbility(1) then
+    levelAbility(1)
+  elseif canLevelAbility(2) then
+    levelAbility(2)
+  elseif canLevelAbility(0) then
+    levelAbility(0)
+  end if
+next upgrade
+
 dim allyX(9)
 dim allyY(9)
 

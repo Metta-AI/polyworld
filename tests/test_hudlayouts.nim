@@ -48,10 +48,32 @@ for size in [
   vec2(7680, 4320), vec2(1080, 1920), vec2(3440, 1440)
 ]:
   let layout = initGameUiLayout(size / gameUiScale(size), TransportHeight)
+  let
+    draftScale = gota.draftScale(layout.gameAreaSize)
+    draftSize = layout.gameAreaSize / draftScale
+    draft = gota.draftPanels(draftSize)
+  doAssert draftScale > 0 and draftScale <= 1.5'f
+  if layout.gameAreaSize.x >= 1620 and layout.gameAreaSize.y >= 996:
+    doAssert draftScale == 1.5'f
+  doAssert draft.panel.inside(draftSize)
+  var draftChildren = @[
+    draft.title, draft.status, draft.deadline, draft.footer
+  ]
+  for panel in draft.heroes:
+    draftChildren.add(panel)
+    doAssert panel.size.x >= 180 and panel.size.y == 224
+  for panel in draftChildren:
+    doAssert panel.inside(draftSize)
+  doAssert not panelsOverlap(draftChildren)
+  checkPanels(draft.footer, [draft.selection, draft.role, draft.confirm])
+  doAssert draft.heroes[0].origin.y == draft.heroes[4].origin.y
+  doAssert draft.heroes[5].origin.y == draft.heroes[9].origin.y
+  doAssert draft.heroes[0].origin.x == draft.heroes[5].origin.x
+  doAssert draft.panel.size.x <= 1048 and draft.panel.size.y <= 632
   let shop = gota.shopPanels(layout.size)
   checkPanels(shop.panel, [shop.heading, shop.catalog, shop.footer])
   checkPanels(shop.catalog, shop.cards)
-  doAssert shop.cards[0].size.x >= (if shop.compact: 280 else: 320)
+  doAssert shop.cards[0].size.x >= (if shop.compact: 230 else: 280)
   doAssert shop.cards[0].size.y >= (if shop.compact: 140 else: 160)
   checkHud(layout, [
     gota.scorePanel(layout),

@@ -13,7 +13,14 @@ proc offset(point: WorldPoint, tiles: int32): WorldPoint =
 
 proc policyGame(team: Team): Game =
   ## Runs one rusher while keeping every other hero under test control.
-  result = newGame(generateMap(54), 100_000, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54),
+    100_000,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.loadBots([BotGroup(path: Policy, count: 10)])
   result.recorder = initReplayRecorder(result.currentSetup(1000))
   for i, hero in result.world.heroes:
@@ -40,7 +47,11 @@ proc decide(game: Game): ReplayAction =
   for vm in game.heroVms:
     if vm != nil:
       doAssert not vm.failed, vm.lastError
-  doAssert game.recorder.data.actions.len == before + 1
+  var orders = 0
+  for i in before ..< game.recorder.data.actions.len:
+    if game.recorder.data.actions[i].kind != ActionLevelAbility:
+      inc orders
+  doAssert orders == 1
   game.recorder.data.actions[^1]
 
 echo "Testing rusher cohesion, radius boundaries, vision, and middle routing"

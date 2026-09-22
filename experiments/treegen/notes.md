@@ -13,7 +13,8 @@ then tune the Trunk, Branches, Canopy, Leaves, and Colors tabs.
 Drag the parameter tracks.
 The parameter area scrolls independently. The current seed is displayed
 above Randomize Seed. RGB controls use values from 0 to 1.
-The six leafy presets average about 100 leaf cards, using one foliage shell.
+The leafy presets use one foliage shell. Evergreens generate 50% more cards
+for a fuller canopy.
 Increase Density, Leaf overlap, or Inner shells for fuller canopies.
 
 Drag in the preview to orbit. Middle drag pans and the wheel zooms.
@@ -75,6 +76,8 @@ near the tip to fit the small ring instead of sticking out as flat wings.
 Wider lower rings add more cards instead of enlarging them. Counts use
 the strip midpoint radius, and angular jitter stays within each card slot
 to avoid large gaps between neighboring sprays.
+Evergreens apply a 1.5 multiplier to card density in the shared generator,
+including custom game settings. Card sizes and the cone profile stay the same.
 Leaf randomness adds seeded size variation independent of ring height.
 Broadleaf radii follow a rounded envelope. Sphere coverage defaults to 0.75,
 omitting rings in the lowest quarter of the full sphere's height. This removes
@@ -108,7 +111,7 @@ and stem clearance. The crown cap stays fixed. Its exclusion area follows
 the visible cap texture, allowing surrounding leaves into its transparent
 border while keeping them beneath its opaque area.
 This also applies to exported trees and does not run physics each frame.
-The default presets retain about 100 cards on average with separation enabled.
+Leaf separation remains enabled for the denser evergreen canopies.
 Very crowded settings can omit more cards rather than reintroduce crossings.
 
 The outlines in `src/polyworld/treegen/trims.nim` come from atlas alpha at 0.45.

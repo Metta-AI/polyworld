@@ -1,5 +1,5 @@
 import
-  std/[sets, tables],
+  std/tables,
   gltf, vmath,
   polyworld/chargen
 
@@ -25,37 +25,6 @@ proc poseCreeps*(actors: var seq[LineupActor], view = FrontView) =
   for i, actor in actors.mpairs:
     actor.transform = translate(vec3((i.float32 - 0.5) * 3.8, 1.7, 0)) *
       rotation * translate(vec3(0, -1.7, 0))
-
-proc presetManifest*(manifest: Manifest, preset: Preset): Manifest =
-  ## Keeps only the parts needed by one preset and omits animation copies.
-  var selection: seq[int]
-  manifest.applyPreset(selection, preset)
-  result = manifest
-  result.categories = @[]
-  result.clips = @[]
-  result.skinNodes = @[]
-  result.hairShades = @[]
-  result.hatShades = @[]
-  var kept = manifest.base.toHashSet()
-  for i, category in manifest.categories:
-    if selection[i] < 0:
-      continue
-    let item = category.items[selection[i]]
-    result.categories.add Category(
-      key: category.key, selected: 0, items: @[item]
-    )
-    for name in item.nodes:
-      kept.incl name
-  for name in manifest.skinNodes:
-    if name in kept:
-      result.skinNodes.add name
-  for shade in manifest.hairShades:
-    if shade.node in kept:
-      result.hairShades.add shade
-
-  for shade in manifest.hatShades:
-    if shade.node in kept:
-      result.hatShades.add shade
 
 proc readLineup*(
   directory: string,

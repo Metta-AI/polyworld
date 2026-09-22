@@ -114,7 +114,14 @@ proc checkHostObservations() =
   let
     directory = createTempDir("gota-host-", "")
     path = directory / "observations.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     world = game.world
     hero = world.heroes[0]
     ally = world.heroes[1]
@@ -137,7 +144,7 @@ proc checkHostObservations() =
   hero.itemCounts[0] = 1
   hero.inventory[1] = CrimsonDagger
   hero.itemCounts[1] = 1
-  hero.inventory[2] = ManaPotion
+  hero.inventory[2] = ManaElixir
   hero.itemCounts[2] = 3
   hero.refreshHeroStats()
   hero.mana = 47
@@ -228,7 +235,7 @@ proc checkHostObservations() =
   doAssert vm.runtime.getArray("mana", enemyIndex) == 11
   doAssert vm.runtime.getArray("items", ownIndex * 6) == RangerBoots.ord
   doAssert vm.runtime.getArray("counts", ownIndex * 6) == 1
-  doAssert vm.runtime.getArray("items", ownIndex * 6 + 2) == ManaPotion.ord
+  doAssert vm.runtime.getArray("items", ownIndex * 6 + 2) == ManaElixir.ord
   doAssert vm.runtime.getArray("counts", ownIndex * 6 + 2) == 3
   doAssert vm.runtime.getArray("items", enemyIndex * 6 + 5) ==
     VitalityElixir.ord
@@ -292,7 +299,7 @@ proc checkHostObservations() =
   enemy.level = 8
   enemy.refreshHeroStats()
   enemy.mana = 0
-  enemy.inventory[5] = ManaPotion
+  enemy.inventory[5] = ManaElixir
   world.reveal(hidden.position)
   game.observe(vm)
   doAssert vm.runtime.getGlobal("speed") == heroMovePerTick(VanguardKnight, 4)
@@ -310,7 +317,7 @@ proc checkHostObservations() =
   doAssert vm.runtime.getArray("levels", vm.objectIndex(enemy.id)) == 8
   doAssert vm.runtime.getArray("mana", vm.objectIndex(enemy.id)) == 0
   doAssert vm.runtime.getArray("items", vm.objectIndex(enemy.id) * 6 + 5) ==
-    ManaPotion.ord
+    ManaElixir.ord
   doAssert vm.objectIndex(hidden.id) >= 0
   doAssert vm.runtime.getArray("targets", vm.objectIndex(ally.id)) == hidden.id
   doAssert vm.runtime.getGlobal("warnings") == 4
@@ -337,7 +344,14 @@ proc checkActionSnapshots() =
   let
     directory = createTempDir("gota-host-snapshot-", "")
     path = directory / "snapshot.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)
@@ -363,24 +377,24 @@ wend
   game.world.tick = 100
   hero.mana = 1
   hero.maxMana = 200
-  hero.inventory[0] = ManaPotion
+  hero.inventory[0] = ManaElixir
   hero.itemCounts[0] = 2
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
   doAssert vm.runtime.getGlobal("consumed") == 1
-  doAssert hero.mana == 1 + ManaPotion.itemSpec.restore
+  doAssert hero.mana == 1 + ManaElixir.itemSpec.restore
   doAssert hero.itemCounts[0] == 1
   doAssert vm.runtime.getGlobal("observedSelfMana") == 1
   doAssert vm.runtime.getGlobal("observedMana") == 1,
     "An action before the first object query must not change its snapshot."
-  doAssert vm.runtime.getGlobal("observedItem") == ManaPotion.ord
+  doAssert vm.runtime.getGlobal("observedItem") == ManaElixir.ord
   doAssert vm.runtime.getGlobal("observedCount") == 2
   inc game.world.tick
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
   doAssert vm.runtime.getGlobal("observedSelfMana") == hero.mana
   doAssert vm.runtime.getGlobal("observedMana") == hero.mana
-  doAssert vm.runtime.getGlobal("observedItem") == ManaPotion.ord
+  doAssert vm.runtime.getGlobal("observedItem") == ManaElixir.ord
   doAssert vm.runtime.getGlobal("observedCount") == 1,
     "The next decision must observe the previous action's inventory change."
 
@@ -393,7 +407,14 @@ block:
   let
     directory = createTempDir("gota-decimals-", "")
     path = directory / "fractions.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)
@@ -419,7 +440,7 @@ print ratios(1)
       printed.add event.fixedValue
   hero.maxMana = 200
   hero.mana = 50
-  hero.inventory[0] = ManaPotion
+  hero.inventory[0] = ManaElixir
   hero.itemCounts[0] = 2
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
@@ -447,7 +468,14 @@ block:
   let
     directory = createTempDir("gota-points-", "")
     path = directory / "points.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
   defer:
     removeDir(directory)
   writeFile(path, """
@@ -499,12 +527,20 @@ block:
   let
     directory = createTempDir("gota-aim-", "")
     path = directory / "aim.bas"
-    game = newGame(generateMap(54), 240, 10, false, ReplayData())
+    game = newGame(
+      generateMap(54),
+      240,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
     hero = game.world.heroes[0]
   defer:
     removeDir(directory)
   hero.class = Arcanist
   hero.spellsReady = false
+  doAssert game.world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
   hero.refreshHeroStats()
   hero.manualSpells = true
   writeFile(path, "accepted = castPoint(2.0, selfX + 0.25, selfY - 0.25)\n")

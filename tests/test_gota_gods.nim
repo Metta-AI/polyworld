@@ -6,7 +6,14 @@ proc quietGame(size = 116): Game =
   ## Creates a match without automatic heroes or recurring creep waves.
   var preset = defaultConfig()
   preset.mapSize = size
-  result = newGame(generateMap(54, preset), 100_000, 10, false, ReplayData())
+  result = newGame(
+    generateMap(54, preset),
+    100_000,
+    10,
+    false,
+    ReplayData(),
+    drafting = false
+  )
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
@@ -64,6 +71,9 @@ for defender in Team:
     hero.state = Marching
     hero.maxHp = 100_000
     hero.hp = hero.maxHp
+    hero.level = 2
+    doAssert world.applyLevelAbility(hero.id, PrimaryAbility.ord.int32)
+    doAssert world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
     hero.mana = 10_000
     hero.maxMana = 10_000
     hero.place(fort.center)
