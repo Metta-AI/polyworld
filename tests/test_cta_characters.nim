@@ -78,6 +78,9 @@ for clip in manifest.clips:
 
 for asset in browserAssets():
   doAssert "modular_chars" notin asset.source
+  doAssert "cartoon_textures" notin asset.source
+  doAssert "handpainted_trees" notin asset.source
+  doAssert "toon_enchanted_meadow" notin asset.source
   for name in ["orc", "footman", "lich", "rock_golem"]:
     doAssert asset.source != "characters/" & name & ".glb"
   if asset.kind in {FileAsset, ModelAsset, ImageAsset}:

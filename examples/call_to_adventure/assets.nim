@@ -1,7 +1,7 @@
 import
   std/os,
   jsony,
-  polyworld/[assets, chargen, common],
+  polyworld/[assets, chargen, common, terrainsurfaces],
   content
 
 const
@@ -13,14 +13,18 @@ const
     "Pistol_Idle_Loop", "Pistol_Shoot",
     "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot"
   ]
-  CtaWebTerrainAssets* = TerrainAssets(
-    size: 256,
-    materials: @["grass", "sand", "cliff", "marsh", "stone", "dirt", "volcanic"],
-    compressed: not defined(webPng)
-  )
-  CtaTerrainAssets* =
-    when defined(emscripten): CtaWebTerrainAssets
-    else: TerrainAssets(size: 1024, materials: CtaWebTerrainAssets.materials)
+  CtaTerrainTiles* = [
+    "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-flagstone-1",
+    "crypt-lava-1", "crypt-lava-2", "cobble-tan-1"
+  ]
+  CryptRockSurface* = SurfaceNames.len.float32
+  CryptRubbleSurface* = CryptRockSurface + 1
+  CryptStoneSurface* = CryptRockSurface + 2
+  CryptFloorSurface* = CryptRockSurface + 3
+  CryptLavaSurface* = CryptRockSurface + 4
+  CryptCrustSurface* = CryptRockSurface + 5
+  VaultSurface* = CryptRockSurface + 6
+  CtaTerrainAssets* = TerrainAssets(size: 256)
   HeroPortraitRoot = DataRoot & "/characters/chargen/portraits/"
   HeroPortraitPaths*: array[HeroClass, string] = [
     HeroPortraitRoot & "vanguard_knight.profile.png",
@@ -118,7 +122,7 @@ proc browserAssets*(): seq[Asset] =
       "animations/quaternius/universal_standard/README.txt"]:
     result.add fileAsset(path)
   result.add terrainAssets(
-    NoTrees, CartoonTerrain, NoRocks, CtaWebTerrainAssets
+    NoTrees, GeneratedTerrain, NoRocks, CtaTerrainAssets, CtaTerrainTiles
   )
   result.add generatedCharacterAssets()
   for path in HeroPortraitPaths:

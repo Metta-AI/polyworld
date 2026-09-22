@@ -3,9 +3,11 @@
 CtA character replacement completed after this inventory on 2026-09-22:
 the four heroes, their portraits, all monster models and the footman loot
 placeholder have been replaced. Native CtA no longer loads unused trees,
-rocks, grass or water assets. The seven CartoonTerrain ground materials
-remain the next CtA replacement. The table below records the original audit;
-see [the integration record](cta-chargen.md) for the current character setup.
+rocks, grass or water assets. The terrain pass also replaces the seven
+CartoonTerrain ground materials with existing generated textures. No known
+restricted art from this audit remains selected by CtA. The table below
+records the original audit; see the [character integration](cta-chargen.md)
+and [terrain mapping](cta-terrain.md) for the current setup.
 
 Audit date: 2026-09-22. Scope: the current `examples/light_vs_dark` and
 `examples/call_to_adventure` games, their native renderers, browser asset

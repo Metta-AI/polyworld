@@ -26,7 +26,9 @@ All characters use existing equipped chargen parts and Quaternius Universal
 Standard animations. Hero portraits match the imported GotA presets. Floor
 loot uses the existing gold, treasure and ability icons. Both native and
 browser declarations omit the old character packs and unused terrain props.
-The seven CartoonTerrain ground materials still need a separate replacement.
+The terrain pass also replaces all CartoonTerrain textures with existing
+generated grass, marsh, crypt rock, stone, flagstone, lava and tan cobbles.
+See [the terrain mapping](cta-terrain.md).
 
 Replay game version is now 23 because monster IDs, spawning and tuning
 changed. Older replays cannot reproduce this simulation and are rejected.

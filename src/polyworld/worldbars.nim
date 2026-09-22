@@ -4,7 +4,7 @@ import
   chroma, opengl, shady, vmath
 
 const
-  VertexFloats = 11
+  VertexFloats = 12
   DefaultGap* = 0.045'f32
   DefaultBorder* = 0.035'f32
   DefaultDamageHoldSeconds* = 1.25'f32
@@ -17,6 +17,9 @@ const
 
 type
   WorldBarError* = object of CatchableError
+
+  BillboardTexture* = enum
+    MaskTexture, ColorTexture
 
   WorldBarRenderer* = object
     program: GLuint
@@ -54,10 +57,12 @@ proc barVertex(
     gl_Position: var Vec4,
     fragmentColor: var Vec4,
     fragmentUv: var Vec2,
+    fragmentTextureMode: var float32,
     worldCenter: Vec3,
     billboardOffset: Vec2,
     vertexColor: Vec4,
-    vertexUv: Vec2
+    vertexUv: Vec2,
+    vertexTextureMode: float32
 ) =
   ## Transforms one bar vertex into a camera-facing world-space plane.
   let position = worldCenter +
@@ -66,16 +71,22 @@ proc barVertex(
   gl_Position = barViewProjection * vec4(position, 1)
   fragmentColor = vertexColor
   fragmentUv = vertexUv
+  fragmentTextureMode = vertexTextureMode
 
 proc barFragment(
     fragColor: var Vec4,
     fragmentColor: Vec4,
-    fragmentUv: Vec2
+    fragmentUv: Vec2,
+    fragmentTextureMode: float32
 ) =
-  ## Emits an unlit bar or applies the shared font atlas's alpha coverage.
+  ## Draws solid bars, tinted font masks, or colored atlas images.
   fragColor = fragmentColor
   if fragmentUv.x >= 0:
-    fragColor.w *= texture(barTexture, fragmentUv).w
+    let texel = texture(barTexture, fragmentUv)
+    if fragmentTextureMode > 0.5'f:
+      # The atlas is premultiplied, while these bars use straight alpha.
+      fragColor.xyz = fragColor.xyz * texel.xyz / max(texel.w, 0.00001'f)
+    fragColor.w *= texel.w
 
 proc compileShaderStage(
     kind: GLenum,
@@ -153,7 +164,8 @@ proc initWorldBarRenderer*(): WorldBarRenderer =
     (name: "worldCenter", count: 3, offset: 0),
     (name: "billboardOffset", count: 2, offset: 3 * sizeof(float32)),
     (name: "vertexColor", count: 4, offset: 5 * sizeof(float32)),
-    (name: "vertexUv", count: 2, offset: 9 * sizeof(float32))
+    (name: "vertexUv", count: 2, offset: 9 * sizeof(float32)),
+    (name: "vertexTextureMode", count: 1, offset: 11 * sizeof(float32))
   ]:
     let location = glGetAttribLocation(
       result.program,
@@ -180,7 +192,8 @@ proc addVertex(
     center: Vec3,
     offset: Vec2,
     color: ColorRGBX,
-    uv: Vec2
+    uv: Vec2,
+    textureMode: BillboardTexture
 ) =
   ## Adds one interleaved billboard vertex to the dynamic mesh.
   const ByteScale = 1.0'f32 / 255.0'f32
@@ -195,6 +208,7 @@ proc addVertex(
   renderer.vertices.add color.a.float32 * ByteScale
   renderer.vertices.add uv.x
   renderer.vertices.add uv.y
+  renderer.vertices.add textureMode.ord.float32
 
 proc addBillboardQuad*(
     renderer: var WorldBarRenderer,
@@ -203,7 +217,8 @@ proc addBillboardQuad*(
     size: Vec2,
     color: ColorRGBX,
     uv = vec2(-1),
-    uvSize = vec2(0)
+    uvSize = vec2(0),
+    textureMode = MaskTexture
 ) =
   ## Adds one camera-facing colored rectangle as two mesh triangles.
   let
@@ -211,12 +226,15 @@ proc addBillboardQuad*(
     bottomRight = offset + vec2(size.x, 0)
     topLeft = offset + vec2(0, size.y)
     topRight = offset + size
-  renderer.addVertex(center, bottomLeft, color, uv + vec2(0, uvSize.y))
-  renderer.addVertex(center, bottomRight, color, uv + uvSize)
-  renderer.addVertex(center, topRight, color, uv + vec2(uvSize.x, 0))
-  renderer.addVertex(center, bottomLeft, color, uv + vec2(0, uvSize.y))
-  renderer.addVertex(center, topRight, color, uv + vec2(uvSize.x, 0))
-  renderer.addVertex(center, topLeft, color, uv)
+  for (position, texcoord) in [
+    (bottomLeft, uv + vec2(0, uvSize.y)),
+    (bottomRight, uv + uvSize),
+    (topRight, uv + vec2(uvSize.x, 0)),
+    (bottomLeft, uv + vec2(0, uvSize.y)),
+    (topRight, uv + vec2(uvSize.x, 0)),
+    (topLeft, uv)
+  ]:
+    renderer.addVertex(center, position, color, texcoord, textureMode)
 
 proc addResourceBars*(
     renderer: var WorldBarRenderer,

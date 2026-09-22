@@ -13,7 +13,7 @@ import
   polyworld/[actioncam, assets, characters, chargen, clickmarks, common, inputs,
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
-    viewers, visions, worldbars, worldtexts],
+    terrainsurfaces, viewers, visions, worldbars, worldtexts],
   assets, content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
@@ -49,34 +49,58 @@ type
 var sk: Silky
 
 proc registerTileColors() =
-  ## Gives every dungeon kind a texture, tint, and blend priority.
+  ## Maps every dungeon kind to the generated texture array after loading.
   setTileMaterial(
-    int(FloorTile), StoneMaterial, DirtMaterial,
-    vec3(0.72, 0.70, 0.66), vec3(0.48, 0.46, 0.43), 10
+    int(GrassTile), GrassSurface.float32, DirtSurface.float32,
+    vec3(1), vec3(0.85'f), 1
   )
   setTileMaterial(
-    int(RubbleTile), CliffMaterial, DirtMaterial,
-    vec3(0.58, 0.52, 0.46), vec3(0.42, 0.38, 0.34), 11
+    int(RoadTile), DirtSurface.float32, DirtSurface.float32,
+    vec3(1), vec3(0.85'f), 5
   )
   setTileMaterial(
-    int(LavaTile), VolcanicMaterial, VolcanicMaterial,
-    vec3(1.0, 0.48, 0.20), vec3(0.68, 0.20, 0.08), 16
+    int(RockTile), CryptRockSurface, CryptRockSurface,
+    vec3(1), vec3(0.8'f), 4
   )
   setTileMaterial(
-    int(ObsidianTile), VolcanicMaterial, CliffMaterial,
-    vec3(0.28, 0.24, 0.32), vec3(0.18, 0.16, 0.22), 15
+    int(MarshTile), MarshSurface.float32, DirtSurface.float32,
+    vec3(1), vec3(0.8'f), 2
   )
   setTileMaterial(
-    int(GoldTile), SandMaterial, StoneMaterial,
-    vec3(1.0, 0.86, 0.40), vec3(0.72, 0.58, 0.24), 17
+    int(StoneTile), CryptStoneSurface, CryptStoneSurface,
+    vec3(1), vec3(0.85'f), 6
   )
   setTileMaterial(
-    int(MossTile), MarshMaterial, DirtMaterial,
-    vec3(0.54, 0.72, 0.48), vec3(0.36, 0.48, 0.32), 12
+    int(TreeTile), ForestSurface.float32, DirtSurface.float32,
+    vec3(1), vec3(0.85'f), 0
   )
   setTileMaterial(
-    int(RampTile), StoneMaterial, CliffMaterial,
-    vec3(0.82, 0.76, 0.62), vec3(0.56, 0.50, 0.40), 13
+    int(FloorTile), CryptFloorSurface, CryptStoneSurface,
+    vec3(1), vec3(0.8'f), 10
+  )
+  setTileMaterial(
+    int(RubbleTile), CryptRubbleSurface, CryptRockSurface,
+    vec3(1), vec3(0.8'f), 11
+  )
+  setTileMaterial(
+    int(LavaTile), CryptLavaSurface, CryptLavaSurface,
+    vec3(1), vec3(0.85'f), 16
+  )
+  setTileMaterial(
+    int(ObsidianTile), CryptCrustSurface, CryptRockSurface,
+    vec3(0.72'f), vec3(0.65'f), 15
+  )
+  setTileMaterial(
+    int(GoldTile), VaultSurface, CryptStoneSurface,
+    vec3(1, 0.9'f, 0.65'f), vec3(0.8'f), 17
+  )
+  setTileMaterial(
+    int(MossTile), MarshSurface.float32, CryptRockSurface,
+    vec3(1), vec3(0.8'f), 12
+  )
+  setTileMaterial(
+    int(RampTile), CryptFloorSurface, CryptRockSurface,
+    vec3(1.1'f), vec3(0.8'f), 13
   )
 
 proc renderPosition(actor: Actor): Vec3 =
@@ -212,7 +236,6 @@ proc addAbilityIcons(builder: AtlasBuilder) =
 proc runGraphics*() =
   ## Runs the native or Emscripten graphical expedition viewer.
   startGameProfile()
-  registerTileColors()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     for class in HeroClass:
@@ -242,7 +265,12 @@ proc runGraphics*() =
   # readable instead of clipping the deep ones to black.
   profileBlock "terrain":
     amplitude = 48.0
-    initTerrain(NoTrees, rockStyle = NoRocks, settings = CtaTerrainAssets)
+    seed = run.world.setup.seed.int
+    initTerrain(
+      NoTrees, GeneratedTerrain, NoRocks, CtaTerrainTiles,
+      settings = CtaTerrainAssets
+    )
+    registerTileColors()
     bakeTerrain(rebuildWalkability = false)
 
   let scene = newCharacterScene(window)
@@ -981,6 +1009,12 @@ proc runGraphics*() =
             of Idol: "idol"
             of Crown: "crown"
             else: "bounty"
+        tint =
+          case item.kind
+          of Chalice: rgbx(217, 209, 140, 255)
+          of Idol: rgbx(158, 122, 82, 255)
+          of Crown: rgbx(255, 199, 71, 255)
+          else: rgbx(255, 255, 255, 255)
         entry = sk.atlas.entries[key]
         anchor = tileCenter(
           int(item.tile.level), int(item.tile.x), int(item.tile.z)
@@ -989,10 +1023,11 @@ proc runGraphics*() =
         anchor,
         vec2(-0.36'f),
         vec2(0.72'f),
-        rgbx(255, 255, 255, 255),
+        tint,
         vec2(entry.x.float32, entry.y.float32) / sk.atlas.size.float32,
         vec2(entry.width.float32, entry.height.float32) /
-          sk.atlas.size.float32
+          sk.atlas.size.float32,
+        textureMode = ColorTexture
       )
 
   proc drawWorldBars(
