@@ -75,6 +75,11 @@ type
     EdgeNeighbors ## Four edge-linked neighbours, including ramps.
     EightNeighbors ## Eight same-layer offsets, clockwise from north.
 
+  PathTieOrder* = enum
+    IndexedTies ## Orders equal-cost nodes by their storage index.
+    ForwardTies ## Orders equal-cost nodes by cardinal discovery order.
+    ReverseTies ## Rotates cardinal discovery order by 180 degrees.
+
   PathWalkable* = proc (layer, x, z: int): bool {.nimcall.}
     ## Returns whether a tile may be entered. Games pass trees and
     ## structures here; the search never reads occupancy itself.
@@ -89,6 +94,7 @@ type
     startLayer*, startX*, startZ*: int
     finishLayer*, finishX*, finishZ*: int
     neighbors*: PathNeighbors
+    tieOrder*: PathTieOrder
     walkable*: PathWalkable
     enterCost*: PathEnterCost
     maxExpansions*: int
@@ -172,8 +178,8 @@ var
   pathSeen: seq[uint32]
   pathGeneration = 0'u32
   pathResultKeys: seq[int]
-  pathFrontierEdges: HeapQueue[(int64, int64, int)]
-  pathFrontierEight: HeapQueue[(int32, int32)]
+  pathFrontierEdges: HeapQueue[(int64, int64, int, int)]
+  pathFrontierEight: HeapQueue[(int32, int, int)]
   dormantPathingContext: PathingContext
 
 ## Walkability
@@ -733,17 +739,18 @@ proc searchEdges(query: PathQuery): PathKeys =
   clearFrontier(pathFrontierEdges)
   var
     expansions = 0
+    discovery = 0
     found = false
     bestKey = startKey
     bestHeuristic = distanceToGoal(startKey)
-  pathFrontierEdges.push((0'i64, 0'i64, startKey))
+  pathFrontierEdges.push((0'i64, 0'i64, 0, startKey))
   pathSeen[startKey] = generation
   pathCosts[startKey] = 0
   pathCameFrom[startKey] = -1
   while pathFrontierEdges.len > 0:
     if query.maxExpansions > 0 and expansions >= query.maxExpansions:
       break
-    let (_, poppedCost, key) = pathFrontierEdges.pop()
+    let (_, poppedCost, _, key) = pathFrontierEdges.pop()
     if pathSeen[key] != generation or poppedCost != pathCosts[key]:
       continue
     inc expansions
@@ -756,7 +763,10 @@ proc searchEdges(query: PathQuery): PathKeys =
       z = nodeZs[key]
       currentCost = pathCosts[key]
       currentPathY = int64(nodePathYs[key])
-    for direction in 0 .. 3:
+    for offset in 0 .. 3:
+      let direction =
+        if query.tieOrder == ReverseTies: (offset + 2) mod 4
+        else: offset
       let link = edgeLink(li, x, z, direction)
       if not link.open:
         continue
@@ -785,10 +795,13 @@ proc searchEdges(query: PathQuery): PathKeys =
       let guess = distanceToGoal(nextKey)
       if query.partial and (
           guess < bestHeuristic or
-          (guess == bestHeuristic and nextKey < bestKey)):
+          (guess == bestHeuristic and query.tieOrder == IndexedTies and
+            nextKey < bestKey)):
         bestHeuristic = guess
         bestKey = nextKey
-      pathFrontierEdges.push((newCost + guess, newCost, nextKey))
+      inc discovery
+      let order = if query.tieOrder == IndexedTies: nextKey else: discovery
+      pathFrontierEdges.push((newCost + guess, newCost, order, nextKey))
   result.expansions = expansions
   result.complete = found
   if not found and not query.partial:
@@ -834,17 +847,17 @@ proc searchEight(query: PathQuery): PathKeys =
   clearFrontier(pathFrontierEight)
   var
     expansions = 0
+    discovery = 0
     found = false
     bestKey = startKey
     bestHeuristic = octile(startKey)
-  pathFrontierEight.push((bestHeuristic, int32(startKey)))
+  pathFrontierEight.push((bestHeuristic, 0, startKey))
   pathSeen[startKey] = generation
   pathCosts[startKey] = 0
   pathCameFrom[startKey] = -1
   while pathFrontierEight.len > 0 and
       (query.maxExpansions == 0 or expansions < query.maxExpansions):
-    let (_, index32) = pathFrontierEight.pop()
-    let index = int(index32)
+    let (_, _, index) = pathFrontierEight.pop()
     if pathSeen[index] != generation:
       continue
     inc expansions
@@ -854,8 +867,12 @@ proc searchEight(query: PathQuery): PathKeys =
     let
       x = nodeXs[index]
       z = nodeZs[index]
-    for (dx, dz) in EightOffsets:
+    for offset in 0 ..< EightOffsets.len:
       let
+        direction =
+          if query.tieOrder == ReverseTies: (offset + 4) mod 8
+          else: offset
+        (dx, dz) = EightOffsets[direction]
         nextX = x + dx
         nextZ = z + dz
       if not inLayer(li, nextX, nextZ) or not allowed(nextX, nextZ):
@@ -881,10 +898,13 @@ proc searchEight(query: PathQuery): PathKeys =
       let guess = octile(nextKey)
       if query.partial and (
           guess < bestHeuristic or
-          (guess == bestHeuristic and nextKey < bestKey)):
+          (guess == bestHeuristic and query.tieOrder == IndexedTies and
+            nextKey < bestKey)):
         bestHeuristic = guess
         bestKey = nextKey
-      pathFrontierEight.push((nextCost + guess, int32(nextKey)))
+      inc discovery
+      let order = if query.tieOrder == IndexedTies: nextKey else: discovery
+      pathFrontierEight.push((nextCost + guess, order, nextKey))
   result.expansions = expansions
   result.complete = found
   if not found and not query.partial:

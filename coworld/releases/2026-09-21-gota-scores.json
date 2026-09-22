@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-21",
+  "version": "2026.9.21.4",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_b20c4309-a04c-4c02-89ba-a6fd1609eec2",
+  "canonical": true,
+  "source_commit": "f776d5e55d439706a8d49878d17d7ba1f6a1f7ce",
+  "uncommitted_source": true,
+  "source_diff_sha256": "04fb4d85e2f9bfe5ee7bd3c7cad440ab9ec347d5f87b0b6284d00bb200a142f4",
+  "scores_source_sha256": "a4a26c328c536016560656ccde66f95d571e63050c26b32d70e46519946570c4",
+  "replay_version": 51,
+  "scoring": {
+    "formula": "lifetime_xp - 200 * ticks / 1440",
+    "round": "mean",
+    "standing": "previous + 0.15 * (round_mean - previous)",
+    "first_round": "round_mean",
+    "matchmaking": "random"
+  },
+  "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "migration": {
+    "source_round": 612,
+    "completed_games": 21,
+    "failed_requests_excluded": 3,
+    "players_seeded": 19,
+    "historical_rounds_preserved": true,
+    "scheduling_resumed": true
+  },
+  "checks": [
+    "Nim checks for GotA, Light vs Dark, and Call to Adventure Coworld entrypoints",
+    "Full headless suite",
+    "Tournament score and report regressions",
+    "Hero statistics and intentional replay-corruption rejection",
+    "Native runtime contracts for all three games",
+    "Local certification: 10 checks passed",
+    "Hosted certification and all five smoke episodes passed",
+    "Hosted scores match XP and elapsed ticks",
+    "Live settings, standings, and guide verified"
+  ],
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:b9e150d1687ae53d0318e02cd564fa339aec4108027f39e9fa321a2e7a3d5698",
+  "known_platform_limitation": "Superseded by the zero-floor update: flooring valid game scores at zero prevents a failed bot from outranking a negative score.",
+  "superseded_by": "2026.9.21.5",
+  "verification_round": {
+    "id": "round_146a7b52-9397-4fdc-ab4c-26910f1d4f5e",
+    "number": 613,
+    "status": "completed",
+    "players_verified": 20
+  }
+}

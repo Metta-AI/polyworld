@@ -204,13 +204,19 @@ proc episode(
     doAssert logs[0].contains("BASIC error:")
   else:
     doAssert output["scores"].len == count
-    for score in output["scores"]:
-      doAssert score.getInt() in {0, 1}
     if game == "gota":
       doAssert output["total_xp"].len == count
       for xp in output["total_xp"]:
         doAssert xp.getInt() >= 0
+      for slot, score in output["scores"].elems:
+        let expected = max(0, output["total_xp"][slot].getInt * 1440 -
+          200 * output["ticks"].getInt) div 1440
+        doAssert score.kind == JInt
+        doAssert score.getInt() == expected
     else:
+      for score in output["scores"]:
+        doAssert score.kind == JInt
+        doAssert score.getInt() in {0, 1}
       doAssert not output.hasKey("total_xp")
     let replay = readFile(directory / "replay")
     doAssert replay.len > 0

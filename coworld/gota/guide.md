@@ -2,7 +2,11 @@
 
 **New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.
 
-Two teams of five BASIC heroes battle to slay the enemy god. Every hero on the winning team scores one win. A time limit without a god being slain gives everyone zero.
+Two teams of five BASIC heroes battle to slay the enemy god. Each hero's ladder
+score is lifetime XP minus 200 per simulated minute. Fractional minutes count,
+including drafting time. Losses and timeouts retain their time-adjusted XP,
+with each hero's score rounded down to whole points and clamped to zero before
+averaging. Victory is recorded separately in the outcome.
 
 The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 3900 HP and 60 damage as level-3 lane towers.
 
@@ -139,9 +143,33 @@ and available points.
 
 ## BASIC observations
 
-Self data and visible objects are sampled for each decision and remain consistent during it, including after an action call. Spell queries read the pending casts, so a successful cast can append a spell during that decision. Object and spell indices are zero-based and may change next decision. Keep `objectId(i)` when tracking an object across decisions or calling `attackTarget`, rather than keeping its list index.
+All bots in one decision phase observe the same starting objects and spell
+warnings. Earlier bots' actions do not change later bots' observations in
+that phase. New casts appear in the next observation frame. Own inventory,
+ability costs, and command results still update immediately when a command
+is accepted. Object and spell indices are zero-based and may change next
+decision. Keep `objectId(i)` when tracking an object across decisions or
+calling `attackTarget`, rather than keeping its list index.
 
 Observations are integers. `worldScale = 60000` is the number of world units per tile, and `tickRate = 24` is the number of simulation ticks per second. `selfX`, `selfY`, `objectX(i)`, `objectY(i)`, `spellX(i)`, and `spellY(i)` use whole global tiles. Facing, speed, range, and velocity retain sub-tile precision in world units. The Y component of these APIs is the second horizontal map axis, not height.
+
+At an exact tile boundary, Red observers select the higher cell and Blue
+observers select the lower cell. This makes observed cells rotate exactly
+when the arena and teams are swapped. The bundled policies convert global
+coordinates into their own team's frame before rounding spatial decisions.
+
+Objects appear in groups: gods, buildings, heroes, then creeps. Within each
+group, allies precede enemies, followed by position in the observer's team
+frame and stable ID. This order does not depend on simulation storage order.
+Spell warnings are ordered by impact tick, hostile before allied casts,
+then team-relative position, ability, and stable caster/target identities.
+
+Units plan movement and attacks from the same starting actor state. Movement
+is published together, then spell impacts and collected damage resolve before
+deaths and rewards. Opponents can kill each other in the same tick. Collision
+corrections are also accumulated before moving any participant. Simultaneous
+last-hit credit uses the match seed, tick, and team-relative actor geometry
+and role, so corresponding fights do not depend on faction-specific IDs.
 
 ### Your hero
 
@@ -316,7 +344,23 @@ BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle mes
 
 Battles run up to 28,800 deterministic ticks (20 simulated minutes), plus drafting time, without real-time pacing. Replays run entirely in the browser with playback, seeking, speed, and loop controls. The server exposes `/healthz`; legacy clients are static stubs.
 
-The Competition league runs every 30 minutes with at least two episodes per entrant. Separate baseline filler policies complete short rosters. Fillers are not ranked entrants. Standings use binary win scores and platform Elo.
+The Competition league schedules 24 games per round with random matchups,
+on a 32-minute interval. Each match uses ten distinct policies when at least
+ten are eligible: five different policies on Red and five on Blue, with
+one hero per policy. The scheduler uses `team_n`, `team_count: 2`,
+`team_layout: "blocks"`, `matchmaking: "random"`, and
+`distinct_teammates: true`. Preserve these settings when updating the league.
+Separate baseline filler policies complete short rosters and are not ranked
+entrants. A policy controlling multiple heroes in a short-roster game receives
+their average score, so extra seats do not multiply it.
+
+Each player's round score is the arithmetic average of their game scores.
+Standings use an exponential moving average: 15% of the new round score plus
+85% of the previous standing. The first scored round sets the initial standing.
+Higher standings rank first. Opponent ratings and win/loss Elo do not affect
+either standings or matchmaking. For example, 3,000 lifetime XP after 10.5
+simulated minutes gives a score of 900. A previous standing of 800 followed
+by a round average of 1,000 becomes 830.
 
 ## BASIC numbers and coordinates
 

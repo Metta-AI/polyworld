@@ -45,7 +45,7 @@ proc standings(panel, rows: JsonNode): string =
     let
       value = if panel["ladder"].getStr == "wins" and
         row["value"].kind != JNull: number(row["value"].getFloat * 100) & "%"
-        else: number(row["value"])
+        else: number(row["value"], 0)
       movement = row["movement"]
       change = movement.getInt
       color = if change > 0: "up" elif change < 0: "down" else: "muted"
@@ -159,7 +159,8 @@ proc playersHtml(rows: JsonNode): string =
         elif rate.getFloat >= 50: "stat-win" else: "stat-loss"
       wins = number(rate, 1) & (if rate.kind == JNull: "" else: "%")
       outcomes = number(row["wins"]) & "W / " &
-        number(row["losses"]) & "L / " & number(row["timeouts"]) & "T"
+        number(row["losses"]) & "L / " & number(row{"draws"}) &
+        "D / " & number(row["timeouts"]) & "T"
       bar = "<span class=win-track aria-hidden=true><i style=\"width:" &
         number(rate.getFloat, 2) & "%\"></i></span>"
     result.add "<tr data-policy=\"" & escape(row["id"].getStr) &
@@ -191,7 +192,7 @@ proc playersHtml(rows: JsonNode): string =
     result.add "</tr>"
   result.add "</tbody></table><div class=players-notes>" &
     "<p class=note>Games: mixed / mono. Level: average / max. " &
-    "LH: last hits. W / L / T: wins / losses / timeouts.</p>" &
+    "LH: last hits. W / L / D / T: wins / losses / draws / timeouts.</p>" &
     "<details><summary>Stat definitions</summary><p class=note>" &
     "Mono games average five heroes. Max level is the highest hero level " &
     "reached. Last hits are footman kills. Gold and XP are lifetime " &

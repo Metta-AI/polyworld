@@ -29,8 +29,10 @@ proc standingTile(creep: Footman): PathTile =
   ## Resolves a creep's current cell on its own navigation layer.
   let floor = layers[creep.navLayer]
   PathTile(layer: creep.navLayer,
-    x: mapCoordinate(creep.position.x) + int32(mapOrigin() - floor.originX),
-    z: mapCoordinate(creep.position.z) + int32(mapOrigin() - floor.originZ))
+    x: mapCoordinate(creep.position.x, creep.team) +
+      int32(mapOrigin() - floor.originX),
+    z: mapCoordinate(creep.position.z, creep.team) +
+      int32(mapOrigin() - floor.originZ))
 
 echo "Testing living tower and barracks footprints across supported map sizes"
 for size in [64, 116, 256]:

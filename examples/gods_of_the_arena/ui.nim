@@ -111,7 +111,8 @@ proc currentStats(): StatsTable =
   run.sampleMetrics()
   result = StatsTable(kind: GotaStats, tick: run.world.tick,
     complete: run.finished(),
-    winner: if run.world.gameOver: run.world.winner.ord else: -1,
+    winner: (if run.world.gameOver and not run.world.draw:
+      run.world.winner.ord else: -1),
     kills: run.world.teamHeroKills)
   for team in [BlueTeam, RedTeam]:
     for slot, hero in run.world.heroes:

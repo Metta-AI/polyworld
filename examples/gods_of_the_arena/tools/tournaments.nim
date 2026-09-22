@@ -1,7 +1,8 @@
 import
-  std/[algorithm, json, os, posix, random, sequtils,
+  std/[algorithm, json, math, os, posix, random, sequtils,
     sets, strutils, tables, times, uri],
-  jsony
+  jsony,
+  ../scores
 
 const
   Root* = currentSourcePath().parentDir.parentDir.parentDir.parentDir
@@ -92,7 +93,7 @@ proc defaults*(): JsonNode =
   ## Returns the frozen settings used when creating a new tournament.
   %*{"games": 0, "top": 10, "format": "both", "seed": 2026,
     "check_every": 10, "league": DefaultLeague, "division": nil,
-    "xp_per_minute": 200}
+    "xp_per_minute": ScoreXpPerMinute}
 
 proc scheduleGames*(count, rosterSize: int, mode: string, seed: int): JsonNode =
   ## Samples balanced appearances, opponents, sides, and hero slots.
@@ -177,26 +178,33 @@ proc scheduleGames*(count, rosterSize: int, mode: string, seed: int): JsonNode =
         "format": Formats[kind], "seed": rng.rand(2147483647), "seats": seats}
       dec budgets[kind]
 
+proc seatWin*(raw: JsonNode, slot: int): int =
+  ## Reads team victory independently of the numerical ladder score.
+  let outcome = raw["outcome"].getStr
+  ord((outcome == "RedTeam" and slot < 5) or
+    (outcome == "BlueTeam" and slot >= 5))
+
 proc validateResult*(raw, game, run: JsonNode) =
-  ## Requires original, ten-seat XP and binary team outcomes.
+  ## Requires original ten-seat scores, XP, and a known team outcome.
   require(raw.kind == JObject, "Episode result must be an object")
   for field in ["scores", "total_xp"]:
     require(raw{field} != nil and raw[field].kind == JArray and
       raw[field].len == 10, "Results require ten " & field & " values")
     for value in raw[field]:
-      require(value.kind == JInt and value.getInt >= 0,
-        "Invalid " & field & " values")
+      if field == "total_xp":
+        require(value.kind == JInt and value.getInt >= 0,
+          "Invalid XP values")
+      else:
+        require(value.kind in {JInt, JFloat} and
+          value.getFloat.classify notin {fcNan, fcInf, fcNegInf},
+          "Invalid score values")
   require(raw{"ticks"} != nil and raw["ticks"].kind == JInt and
     raw["ticks"].getInt in 0 .. run["game_config"]["max_ticks"].getInt,
     "Invalid result ticks")
   require(raw{"seed"} == game["seed"], "Result seed differs from schedule")
   let outcome = raw{"outcome"}.getStr
-  require(outcome in ["RedTeam", "BlueTeam", "time_limit"],
+  require(outcome in ["RedTeam", "BlueTeam", "time_limit", "draw"],
     "Unknown game outcome")
-  for slot, value in raw["scores"].elems:
-    let won = (outcome == "RedTeam" and slot < 5) or
-      (outcome == "BlueTeam" and slot >= 5)
-    require(value.getInt == ord(won), "Scores disagree with outcome")
 
 proc gameValues*(game, raw, run: JsonNode): Table[int, Values] =
   ## Averages hero results using the run's frozen time penalty.
@@ -207,18 +215,17 @@ proc gameValues*(game, raw, run: JsonNode): Table[int, Values] =
     "Invalid saved xp_per_minute: expected a nonnegative integer"
   )
   # Runs created before the rate was saved used 100 XP per minute.
-  let
-    xpPerMinute = if rate == nil: 100.0 else: rate.getInt.float64
-    penalty = xpPerMinute * raw["ticks"].getInt.float64 / 1440.0
+  let xpPerMinute = if rate == nil: 100 else: rate.getInt
   for slot, entry in game["seats"].elems:
     let
       policy = entry.getInt
-      xp = raw["total_xp"][slot].getInt.float64
-      won = raw["scores"][slot].getInt.float64
+      value = score(raw["total_xp"][slot].getInt,
+        raw["ticks"].getInt, xpPerMinute).float64
+      won = raw.seatWin(slot).float64
     var values = result.getOrDefault(policy)
     values[0] += won
-    values[1] += xp - penalty
-    values[2] += (xp - penalty) * won
+    values[1] += value
+    values[2] += value * won
     result[policy] = values
     counts[policy] = counts.getOrDefault(policy) + 1
   for policy, values in result.mpairs:
@@ -300,7 +307,7 @@ proc validatePlayerStats*(stats, raw, game, run: JsonNode) =
       hero{"policy_version_id"} == run["roster"][game["seats"][slot].getInt]["id"],
       "Replay policy seats differ from the frozen schedule")
     require(hero{"xp"} == raw["total_xp"][slot] and
-      hero{"win"}.getInt(-1) == raw["scores"][slot].getInt,
+      hero{"win"}.getInt(-1) == raw.seatWin(slot),
       "Replay hero result differs from saved game")
     for field in PlayerMetrics:
       require(hero{field} != nil and hero[field].kind == JInt and
@@ -311,8 +318,8 @@ proc playerRows*(run: JsonNode, records: seq[JsonNode]): JsonNode =
   result = newJArray()
   for policy in run["roster"]:
     let row = policy.copy()
-    for field in ["games", "wins", "losses", "timeouts", "mixed", "mono",
-        "stats_games"]:
+    for field in ["games", "wins", "losses", "timeouts", "draws",
+        "mixed", "mono", "stats_games"]:
       row[field] = %0
     for field in ["xp", "minutes", "stats_minutes"]:
       row[field] = %0.0
@@ -337,7 +344,8 @@ proc playerRows*(run: JsonNode, records: seq[JsonNode]): JsonNode =
       let
         row = result[policy]
         outcome = if raw["outcome"].getStr == "time_limit": "timeouts"
-          elif raw["scores"][slots[0]].getInt == 1: "wins" else: "losses"
+          elif raw["outcome"].getStr == "draw": "draws"
+          elif raw.seatWin(slots[0]) == 1: "wins" else: "losses"
       for field in ["games", game["format"].getStr, outcome]:
         row[field] = %(row[field].getInt + 1)
       row["minutes"] = %(row["minutes"].getFloat +

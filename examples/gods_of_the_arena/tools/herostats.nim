@@ -2,7 +2,7 @@ import
   std/[algorithm, json, math, os, sequtils, sets, strutils, times, uri],
   curly, jsony, zippy,
   polyworld/[metrics, tapes],
-  ../[content, maps, replays, sim],
+  ../[content, maps, replays, scores, sim],
   heropages
 
 const
@@ -180,27 +180,27 @@ proc inspectReplay*(path: string, metadata: JsonNode): JsonNode =
     requireStats(game.hashCheck.mismatches == 0, game.hashCheck.error)
   requireStats(game.replayPlayer.finished, "Unconsumed replay actions")
   let
-    scores = game.world.scores()
+    victories = game.world.scores()
+    seatScores = scores(game.world.totalXp(), int(game.world.tick))
     observed = metadata{"participant_scores"}
     players = metadata{"participants"}
-  requireStats(observed != nil and observed.len == scores.len,
+  requireStats(observed != nil and observed.len == seatScores.len,
     "Missing authoritative seat scores")
   var positions: HashSet[int]
   for score in observed:
     let slot = score{"position"}.getInt(-1)
-    requireStats(slot in 0 ..< scores.len and slot notin positions,
+    requireStats(slot in 0 ..< seatScores.len and slot notin positions,
       "Invalid or duplicate score position")
     positions.incl(slot)
-    requireStats(score["score"].getFloat == float64(scores[slot]),
-      "Replay outcome differs from the league seat scores")
+    requireStats(abs(score["score"].getFloat - seatScores[slot]) < 1e-9,
+      "Replay XP and duration differ from the league seat scores")
   result = %*{"schema": StatsSchema, "id": metadata["id"],
     "verified": true, "ticks": game.world.tick, "hash_mismatches": 0,
     "replay_version": data.header.gameVersion,
     "game_version": metadata{"coworld_version"}.getStr,
     "completed_at": metadata["completed_at"],
     "minutes": float64(game.world.tick) / float64(TickRate) / 60,
-    "outcome": (if game.world.gameOver: $game.world.winner
-      else: "time_limit"), "heroes": []}
+    "outcome": game.world.outcome(), "heroes": []}
   for slot, hero in game.world.heroes:
     var participant: JsonNode
     for player in players:
@@ -210,8 +210,8 @@ proc inspectReplay*(path: string, metadata: JsonNode): JsonNode =
     requireStats(participant != nil, "Missing participant for replay seat")
     let values = game.world.stats.values[slot]
     result["heroes"].add %*{"slot": slot, "hero": hero.class.heroSpec.name,
-      "class": hero.class.ord, "team": $hero.team, "win": scores[slot],
-      "draw": not game.world.gameOver, "level": hero.level,
+      "class": hero.class.ord, "team": $hero.team, "win": victories[slot],
+      "draw": not game.world.gameOver or game.world.draw, "level": hero.level,
       "xp": hero.totalXp, "xp_progress": hero.xp,
       "gold": values[GoldMetric], "banked_gold": hero.gold,
       "kills": values[KillsMetric], "deaths": values[LossesMetric],
@@ -404,7 +404,7 @@ proc publishStats*(directory: string, manifest: JsonNode): JsonNode =
     let team = if side == 0: "RedTeam" else: "BlueTeam"
     for record in records:
       wins += int(record["outcome"].getStr == team)
-      draws += int(record["outcome"].getStr == "time_limit")
+      draws += int(record["outcome"].getStr in ["time_limit", "draw"])
     result["teams"].add %*{"team": team, "games": records.len,
       "wins": wins, "draws": draws, "heroes": toSeq(sides[side]),
       "distinct_lineups": lineups[side].len,

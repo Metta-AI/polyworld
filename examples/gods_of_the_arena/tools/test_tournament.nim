@@ -1,6 +1,7 @@
 import
   std/[json, os, osproc, posix, sequtils, sets, strutils, tables],
-  tournaments, reports, runners, softmax, sites, collections
+  tournaments, reports, runners, softmax, sites, collections,
+  ../scores
 
 const
   DataRoot = Root.parentDir / "polyworld_data"
@@ -23,13 +24,12 @@ proc fixture(count = 41, mode = "both", interval = 10): JsonNode =
       "version": "fixture:v" & $(policy + 1)}
 
 proc resultFor(game: JsonNode, outcome = "RedTeam", ticks = 720): JsonNode =
-  ## Produces seat-attributed XP and explicit binary team outcomes.
+  ## Produces seat-attributed tournament scores and explicit team outcomes.
   result = %*{"scores": [], "outcome": outcome, "ticks": ticks,
     "seed": game["seed"], "total_xp": []}
   for slot, policy in game["seats"].elems:
     result["total_xp"].add %((policy.getInt + 1) * 100 + slot)
-    result["scores"].add %ord((outcome == "RedTeam" and slot < 5) or
-      (outcome == "BlueTeam" and slot >= 5))
+    result["scores"].add %score(result["total_xp"][slot].getInt, ticks)
 
 proc completed(run: JsonNode): seq[JsonNode] =
   ## Creates one completed authoritative record per fixture game.
@@ -44,7 +44,7 @@ proc statsFor(run, game, raw: JsonNode): JsonNode =
   for slot, policy in game["seats"].elems:
     result["heroes"].add %*{"slot": slot,
       "policy_version_id": run["roster"][policy.getInt]["id"],
-      "xp": raw["total_xp"][slot], "win": raw["scores"][slot],
+      "xp": raw["total_xp"][slot], "win": raw.seatWin(slot),
       "gold": slot * 50 + 100, "banked_gold": slot * 5,
       "level": slot + 1, "kills": slot + 1, "deaths": slot,
       "assists": 10, "tower_kills": 1, "last_hits": slot * 2}
@@ -172,7 +172,7 @@ for (count, size, mode) in [(0, 10, "both"), (10, 9, "mixed"), (5, 1, "mono")]:
     rejected = true
   doAssert rejected
 
-echo "Checking XP, timeouts, fractional penalties and mono averages"
+echo "Checking whole-point scores, timeouts, and mono averages"
 for mode in ["mixed", "mono"]:
   let run = fixture(1, mode)
   let game = run["schedule"][0]
@@ -181,34 +181,49 @@ for mode in ["mixed", "mono"]:
     validateResult(raw, game, run)
     let values = gameValues(game, raw, run)
     for policy, value in values:
-      var xp, wins, count: float64
+      var adjusted, wins, count, published: float64
       for slot, participant in game["seats"].elems:
         if participant.getInt == policy:
-          xp += raw["total_xp"][slot].getInt.float64
-          wins += raw["scores"][slot].getInt.float64
+          adjusted += max(0, raw["total_xp"][slot].getInt - 101).float64
+          wins += raw.seatWin(slot).float64
+          doAssert raw["scores"][slot].kind == JInt
+          published += raw["scores"][slot].getFloat
           count += 1
       doAssert abs(value[0] - wins / count) < 1e-9
-      doAssert abs(value[1] - (xp / count - 200 * 721 / 1440)) < 1e-9
-      let glory = if wins > 0: xp / count - 200 * 721 / 1440 else: 0.0
+      doAssert abs(value[1] - adjusted / count) < 1e-9
+      doAssert abs(value[1] - published / count) < 1e-9
+      let glory = if wins > 0: adjusted / count else: 0.0
       doAssert abs(value[2] - glory) < 1e-9
   let raw = resultFor(game, "time_limit", 28800)
   for slot in 0 ..< 10:
     raw["total_xp"].elems[slot] = %0
   for policy, values in gameValues(game, raw, run):
-    doAssert values == [0.0, -4000.0, 0.0]
+    doAssert values == [0.0, 0.0, 0.0]
   let victory = resultFor(game, "RedTeam", 28800)
   for slot in 0 ..< 10:
     victory["total_xp"].elems[slot] = %0
   for policy, values in gameValues(game, victory, run):
-    doAssert values[1] == -4000.0
-    doAssert values[2] == (if values[0] == 1: -4000.0 else: 0.0)
-  raw["scores"].elems[0] = %1
+    doAssert values[1] == 0.0
+    doAssert values[2] == 0.0
+  raw["scores"].elems[0] = %"invalid score"
   var rejected = false
   try:
     validateResult(raw, game, run)
   except TournamentError:
     rejected = true
   doAssert rejected
+
+echo "Checking the zero floor precedes hero and game averages"
+block:
+  let
+    run = fixture(1, "mono")
+    game = run["schedule"][0]
+    raw = resultFor(game, "RedTeam", 1440)
+  for slot in 0 ..< 10:
+    raw["total_xp"].elems[slot] = %(if slot mod 5 == 0: 0 else: 1000)
+  for policy, values in gameValues(game, raw, run):
+    doAssert values[1] == 640.0
+    doAssert values[2] == 640.0 * values[0]
 
 echo "Checking frozen penalties and legacy run compatibility"
 for rate in [0, 100, 200]:
@@ -488,6 +503,12 @@ block:
   doAssert rows[1]["losses"].getInt == 1
   doAssert rows[2]["kda"].getFloat == 6.5
   doAssert playerRows(sample, records) == rows
+  records[2]["result"] = resultFor(sample["schedule"][2], "draw")
+  let drawn = playerRows(sample, records)
+  doAssert drawn[0]["draws"].getInt == 1
+  doAssert drawn[0]["timeouts"].getInt == 0
+  doAssert drawn[0]["wins"] == rows[0]["wins"]
+  doAssert drawn[0]["losses"] == rows[0]["losses"]
   records[0].delete("player_stats")
   let partial = playerRows(sample, records)
   doAssert partial[2]["avg_gold"].kind == JNull

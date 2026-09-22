@@ -31,10 +31,6 @@ sub chooseHero()
           end if
         end if
       next player
-      ' Blue is team 1; the light classes occupy the first five IDs.
-      if candidate \ 5 = 1 - selfTeam then
-        score = score + 1
-      end if
       if score > bestScore then
         bestScore = score
         bestClass = candidate
@@ -92,10 +88,10 @@ sub readObject(index)
   if hp <= 0 then
     exit sub
   end if
-  x = objectX(index)
-  y = objectY(index)
-  dx = x - selfX
-  dy = y - selfY
+  x = originX + side * objectX(index)
+  y = originY + side * objectY(index)
+  dx = x - myX
+  dy = y - myY
   distance = dx * dx + dy * dy
   if team = selfTeam then
     if kind = 1 then
@@ -236,11 +232,11 @@ sub observe()
   end if
   targetIndex = bestIndex
   ' Divide large integer world units before mixing them with Q16.16 values.
-  velocityX = (objectVelX(bestIndex) \ 100) / (worldScale \ 100)
-  velocityY = (objectVelY(bestIndex) \ 100) / (worldScale \ 100)
-  facingX = (objectFacingX(bestIndex) \ 100) / (worldScale \ 100)
-  facingY = (objectFacingY(bestIndex) \ 100) / (worldScale \ 100)
-  aimedAtUs = facingX * (selfX - bestX) + facingY * (selfY - bestY)
+  velocityX = (side * objectVelX(bestIndex) \ 100) / (worldScale \ 100)
+  velocityY = (side * objectVelY(bestIndex) \ 100) / (worldScale \ 100)
+  facingX = (side * objectFacingX(bestIndex) \ 100) / (worldScale \ 100)
+  facingY = (side * objectFacingY(bestIndex) \ 100) / (worldScale \ 100)
+  aimedAtUs = facingX * (myX - bestX) + facingY * (myY - bestY)
   if bestKind = 2 then
     ' Visible equipment and potion stacks help judge a close duel.
     for inspectSlot = 0 to 5
@@ -367,20 +363,20 @@ sub dodgeWarnings()
         hostile = 0
       end if
       impact = spellImpactTick(warning) - worldTick
-      warningX = spellX(warning)
-      warningY = spellY(warning)
-      dx = selfX - warningX
-      dy = selfY - warningY
+      warningX = originX + side * spellX(warning)
+      warningY = originY + side * spellY(warning)
+      dx = myX - warningX
+      dy = myY - warningY
       if hostile and impact > 0 and impact <= tickRate * 3 then
         if dx * dx + dy * dy <= 9 then
           dodge = 1
-          dodgeX = selfX + 3
-          dodgeY = selfY + 3
+          dodgeX = myX + 3
+          dodgeY = myY + 3
           if dx < 0 then
-            dodgeX = selfX - 3
+            dodgeX = myX - 3
           end if
           if dy < 0 then
-            dodgeY = selfY - 3
+            dodgeY = myY - 3
           end if
         end if
       end if
@@ -410,19 +406,25 @@ sub moveTo(goalX, goalY, marching)
     for offsetX = -1 to 1
       tileX = goalX + offsetX
       tileY = goalY + offsetY
+      worldTileX = originX + side * tileX
+      worldTileY = originY + side * tileY
       if tileX >= 0 and tileX < mapWidth then
         if tileY >= 0 and tileY < mapHeight then
-          open = terrainWalkable(tileX, tileY)
-          ground = terrainKind(tileX, tileY)
-          height = terrainHeight(tileX, tileY)
-          depth = terrainWaterDepth(tileX, tileY)
+          open = terrainWalkable(worldTileX, worldTileY)
+          ground = terrainKind(worldTileX, worldTileY)
+          height = terrainHeight(worldTileX, worldTileY)
+          depth = terrainWaterDepth(worldTileX, worldTileY)
           if open = 0 then
             for layer = 0 to mapLayers - 1
-              if terrainWalkableAt(tileX, tileY, layer) then
+              worldLayer = layer
+              if layer = RedFortLayer or layer = BlueFortLayer then
+                worldLayer = layer + selfTeam * (RedFortLayer + BlueFortLayer - 2 * layer)
+              end if
+              if terrainWalkableAt(worldTileX, worldTileY, worldLayer) then
                 open = 1
-                ground = terrainKindAt(tileX, tileY, layer)
-                height = terrainHeightAt(tileX, tileY, layer)
-                depth = terrainWaterDepthAt(tileX, tileY, layer)
+                ground = terrainKindAt(worldTileX, worldTileY, worldLayer)
+                height = terrainHeightAt(worldTileX, worldTileY, worldLayer)
+                depth = terrainWaterDepthAt(worldTileX, worldTileY, worldLayer)
                 exit for
               end if
             next layer
@@ -452,9 +454,9 @@ sub moveTo(goalX, goalY, marching)
     exit sub
   end if
   if marching then
-    accepted = attackMove(routeX, routeY)
+    accepted = attackMove(originX + side * routeX, originY + side * routeY)
   else
-    accepted = walkTo(routeX, routeY)
+    accepted = walkTo(originX + side * routeX, originY + side * routeY)
   end if
   actionError = lastActionError()
   orderTick = worldTick
@@ -518,7 +520,7 @@ sub spells()
             aimY = bestY + leadY
             if aimX >= 0 and aimX < mapWidth - 1 then
               if aimY >= 0 and aimY < mapHeight - 1 then
-                accepted = castPoint(spellSlot, aimX, aimY)
+                accepted = castPoint(spellSlot, originX + side * aimX, originY + side * aimY)
                 actionError = lastActionError()
                 if accepted then
                   exit sub
@@ -559,6 +561,13 @@ end if
 if worldTick < nextThink then
   end
 end if
+' Use the same team-relative coordinates for every spatial decision.
+side = 1 - selfTeam * 2
+originX = selfTeam * (mapWidth - 1)
+originY = selfTeam * (mapHeight - 1)
+myX = originX + side * selfX
+myY = originY + side * selfY
+
 nextThink = worldTick + 6
 role = heroRole(selfClass)
 attackRange = (selfAttackRange \ 100) / (worldScale \ 100)
@@ -566,16 +575,16 @@ speed = (selfMoveSpeed \ 100) / (worldScale \ 100)
 
 if initialized = 0 then
   initialized = 1
-  spawnX = selfX
-  spawnY = selfY
-  homeX = selfX
-  homeY = selfY
-  enemyX = mapWidth - 1 - selfX
-  enemyY = mapHeight - 1 - selfY
+  spawnX = myX
+  spawnY = myY
+  homeX = myX
+  homeY = myY
+  enemyX = mapWidth - 1 - myX
+  enemyY = mapHeight - 1 - myY
   previousHp = selfHp
   progressTick = worldTick
-  previousX = selfX
-  previousY = selfY
+  previousX = myX
+  previousY = myY
   crossedMiddle = 0
   retreating = 0
   ' The host exposes effects and costs, but not spell range or cast shape.
@@ -637,12 +646,12 @@ if selfHp < previousHp then
   hurtTick = worldTick
 end if
 previousHp = selfHp
-if selfAttacksLanded <> previousHits or selfX <> previousX or selfY <> previousY then
+if selfAttacksLanded <> previousHits or myX <> previousX or myY <> previousY then
   progressTick = worldTick
 end if
 previousHits = selfAttacksLanded
-previousX = selfX
-previousY = selfY
+previousX = myX
+previousY = myY
 if worldTick - progressTick > tickRate * 6 and selfTarget <> 0 then
   blockedId = selfTarget
   blockedUntil = worldTick + tickRate * 3
@@ -676,10 +685,10 @@ end if
 if retreating then
   ' A safe scroll saves the long return trip; damage and control can punish it.
   if owned(21) > 0 and selfPortalCooldown = 0 and selfRootTicks = 0 then
-    dx = selfX - homeX
-    dy = selfY - homeY
+    dx = myX - homeX
+    dy = myY - homeY
     if dx * dx + dy * dy > 400 and threatDistance > 144 then
-      accepted = useItemAt(inventorySlot(21), spawnX, spawnY)
+      accepted = useItemAt(inventorySlot(21), originX + side * spawnX, originY + side * spawnY)
       actionError = lastActionError()
       if accepted then
         end
@@ -712,13 +721,13 @@ if bestId <> 0 then
         elseif kiteStep > 4 then
           kiteStep = 4
         end if
-        kiteX = selfX + kiteStep
-        kiteY = selfY + kiteStep
-        if bestX >= selfX then
-          kiteX = selfX - kiteStep
+        kiteX = myX + kiteStep
+        kiteY = myY + kiteStep
+        if bestX >= myX then
+          kiteX = myX - kiteStep
         end if
-        if bestY >= selfY then
-          kiteY = selfY - kiteStep
+        if bestY >= myY then
+          kiteY = myY - kiteStep
         end if
         moveTo(kiteX, kiteY, 0)
         end
@@ -750,8 +759,8 @@ if selfLevel < 6 then
     middleY = mapHeight * 9 \ 10
   end if
 end if
-dx = selfX - middleX
-dy = selfY - middleY
+dx = myX - middleX
+dy = myY - middleY
 if dx * dx + dy * dy <= 36 then
   crossedMiddle = 1
 end if
@@ -762,11 +771,11 @@ if crossedMiddle then
   goalY = enemyY
 end if
 if canShop() and owned(21) > 0 and selfPortalCooldown = 0 then
-  dx = selfX - forwardX
-  dy = selfY - forwardY
+  dx = myX - forwardX
+  dy = myY - forwardY
   if forwardDistance < 1000000 and dx * dx + dy * dy > 400 then
     if threatDistance > 144 then
-      accepted = useItemAt(inventorySlot(21), forwardX, forwardY)
+      accepted = useItemAt(inventorySlot(21), originX + side * forwardX, originY + side * forwardY)
       actionError = lastActionError()
       if accepted then
         end

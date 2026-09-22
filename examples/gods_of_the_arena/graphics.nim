@@ -448,7 +448,7 @@ proc runGraphics*() =
     ## Selects the god animation for the current game state.
     if not run.world.gameOver:
       GodIdle
-    elif god.team == run.world.winner:
+    elif not run.world.draw and god.team == run.world.winner:
       GodVictory
     else:
       GodDeath
@@ -853,8 +853,9 @@ proc runGraphics*() =
         model = godModels[god.team]
         clip = godRenderClips[god.team][god.godClip]
       var animTime = god.animTime
-      if run.world.gameOver and god.team != run.world.winner:
-        animTime = min(animTime, clipDuration(model, clip))
+      if run.world.gameOver and
+        (run.world.draw or god.team != run.world.winner):
+          animTime = min(animTime, clipDuration(model, clip))
       consider(
         run.world.forts[i].id,
         pickCharacter(
@@ -2004,12 +2005,13 @@ proc runGraphics*() =
         clickMarks.advanceClickMarks(dt)
         for god in gods.mitems:
           god.animTime += dt
-          if run.world.gameOver and god.team != run.world.winner:
-            god.animTime = min(
-              god.animTime,
-              clipDuration(
-                godModels[god.team], godRenderClips[god.team][GodDeath])
-            )
+          if run.world.gameOver and
+            (run.world.draw or god.team != run.world.winner):
+              god.animTime = min(
+                god.animTime,
+                clipDuration(
+                  godModels[god.team], godRenderClips[god.team][GodDeath])
+              )
 
       feedGotaActions()
       actionCam.direct(
@@ -2086,8 +2088,9 @@ proc runGraphics*() =
               clip = godRenderClips[god.team][god.godClip]
             godEyes[god.team].setDead(run.world.forts[god.team.ord].hp <= 0)
             var animTime = god.animTime
-            if run.world.gameOver and god.team != run.world.winner:
-              animTime = min(animTime, clipDuration(model, clip))
+            if run.world.gameOver and
+              (run.world.draw or god.team != run.world.winner):
+                animTime = min(animTime, clipDuration(model, clip))
             drawCharacter(
               scene, model, god.position, god.facing,
               clip, animTime)

@@ -151,3 +151,41 @@ block:
           )
           doAssert kernel == liveVisible(wideTerrain, wideBlockers, dx, dz, eyeHeight),
             "kernel ray " & $dx & "," & $dz & " diverged"
+
+echo "Testing half-turn symmetry of kernel and long-range vision"
+block:
+  const
+    Columns = 41
+    Rows = 37
+  var
+    terrain = newSeq[int16](Columns * Rows)
+    blockers = newSeq[int16](Columns * Rows)
+    oppositeTerrain = newSeq[int16](Columns * Rows)
+    oppositeBlockers = newSeq[int16](Columns * Rows)
+    rays = 0
+  for i in 0 ..< terrain.len:
+    terrain[i] = int16((i * 17 + i div Columns) mod 31 - 15)
+    blockers[i] = if i mod 13 == 0: 24 else: 0
+    oppositeTerrain[terrain.high - i] = terrain[i]
+    oppositeBlockers[terrain.high - i] = blockers[i]
+  for sourceZ in countup(0, Rows - 1, 7):
+    for sourceX in countup(0, Columns - 1, 7):
+      for targetZ in 0 ..< Rows:
+        for targetX in 0 ..< Columns:
+          for eyeHeight in [3'i16, 14'i16, 28'i16]:
+            let
+              first = lineVisible(
+                Columns, Rows, terrain, blockers,
+                sourceX.int32, sourceZ.int32,
+                targetX.int32, targetZ.int32, 50, eyeHeight
+              )
+              second = lineVisible(
+                Columns, Rows, oppositeTerrain, oppositeBlockers,
+                (Columns - 1 - sourceX).int32,
+                (Rows - 1 - sourceZ).int32,
+                (Columns - 1 - targetX).int32,
+                (Rows - 1 - targetZ).int32, 50, eyeHeight
+              )
+            doAssert first == second
+            inc rays
+  echo "Mirrored visibility rays checked: ", rays
