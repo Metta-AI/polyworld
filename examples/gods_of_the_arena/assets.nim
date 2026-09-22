@@ -6,8 +6,8 @@ import
 const
   LogoPath* = DataRoot & "/themes/gota/gota_logo.png"
   LicensePaths* = [
-    "licenses/gota.md", "licenses/CC0-1.0.txt", "licenses/generated.md",
-    "licenses/ai-ui.md", "fonts/OFL-Rubik.txt", "fonts/OFL-OverpassMono.txt",
+    "LICENSE", "licenses/gota.md",
+    "fonts/OFL-Rubik.txt", "fonts/OFL-OverpassMono.txt",
     "terrain/water_normals/license.md",
     "animations/quaternius/universal_standard/README.txt"
   ]

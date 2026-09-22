@@ -12,11 +12,13 @@ keeps its existing packaging path.
 GotA no longer loads or packages the Toon Enchanted Meadow camp crate, barrel,
 or unused decorations. Its selected artwork uses the project-generated CC0
 assets, Quaternius CC0 animations, CC BY grass, OFL fonts, and MIT water maps.
-The bundle includes eight license and attribution files, starting with
-`polyworld_data/licenses/gota.md`. Hero documentation and exported statistics
+The bundle includes six license and attribution files, including the root
+`polyworld_data/LICENSE` and `polyworld_data/licenses/gota.md`.
+Hero documentation and exported statistics
 use generated portraits; exported statistics also include Rubik's OFL notice.
 
-The 2026-09-22 local build contained 850 files totaling 30,771,349 bytes.
+Before consolidating the CC0 notices into the root license, the 2026-09-22
+local build contained 850 files totaling 30,771,349 bytes.
 Every packaged byte matched the staging files. The audit found no remaining
 Unity, Blizzard, or noncommercial artwork in this GotA bundle. This finding
 does not cover the other games or the entire data repository, which still
