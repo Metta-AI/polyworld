@@ -482,6 +482,7 @@ const
   HeroGoldReward = 100
   TowerXpReward = 100
   TowerGoldReward = 75
+  GodXpReward* = 500
   DecisionTicks = 1'i32
     ## Ticks between hero VM decisions. One decision per simulation tick.
   FortObjectKind = 1'i32
@@ -5154,6 +5155,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           idleClip
       footman.animTicks = 0
     for hero in world.heroes:
+      let enemyGod = world.forts[1 - hero.team.ord]
+      if enemyGod.hp <= 0:
+        world.gainRewards(hero, GodXpReward, 0, enemyGod.id, GodDestroyed)
       if hero.state == Dying:
         continue
       hero.animClip =

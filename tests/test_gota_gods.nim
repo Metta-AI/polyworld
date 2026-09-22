@@ -1,6 +1,6 @@
 import
   polyworld/pathing,
-  ../examples/gods_of_the_arena/[content, maps, replays, sim]
+  ../examples/gods_of_the_arena/[content, maps, replays, scores, sim]
 
 proc quietGame(size = 116): Game =
   ## Creates a match without automatic heroes or recurring creep waves.
@@ -135,4 +135,94 @@ for size in [64, 116, 256]:
       game.tickWorld(nil)
     doAssert world.forts[defender.ord].hp < FortHp
 
-echo "God guards passed"
+echo "Testing god kills reward every teammate once, including dead heroes"
+for attacker in Team:
+  for creepLastHit in [false, true]:
+    let
+      game = quietGame()
+      world = game.world
+      defender = Team(1 - attacker.ord)
+      fort = world.forts[defender.ord]
+      killer = world.heroes[attacker.ord * 5]
+      distant = world.heroes[attacker.ord * 5 + 1]
+      capped = world.heroes[attacker.ord * 5 + 2]
+    for building in world.buildings.mitems:
+      building.hp = 0
+    world.syncBuildings()
+    world.tick = 5 * 60 * TickRate - 1
+    world.forts[defender.ord].hp = 1
+    for hero in world.heroes:
+      hero.totalXp = 2000
+    capped.level = HeroMaxLevel
+    distant.state = Marching
+    distant.hp = distant.maxHp
+    if creepLastHit:
+      var creep = Footman(
+        id: 50_000, team: attacker, lane: 1, hp: FootmanHp,
+        state: Fighting, swingClip: attackClips[0],
+        swingTicks: footmanHitTicks(attackClips[0]) - 1,
+        targetId: fort.id, attackingFort: true
+      )
+      creep.place(fort.center)
+      creep.waypointIndex = creep.creepWaypoints().len
+      world.footmen.add creep
+    else:
+      killer.state = Fighting
+      killer.hp = killer.maxHp
+      killer.place(fort.center)
+      killer.attackObjectId = fort.id
+      killer.swingClip = heroAttackClips[0]
+      killer.swingTicks = world.heroHitTicks(killer) - 1
+    let before = world.clone()
+    game.tickWorld(nil)
+    doAssert world.gameOver and not world.draw
+    doAssert world.winner == attacker
+    doAssert world.forts[defender.ord].hp == 0
+    let finalScores = scores(world.totalXp(), world.tick.int)
+    for i, hero in world.heroes:
+      let reward = if hero.team == attacker: 500 else: 0
+      doAssert hero.totalXp == 2000 + reward
+      doAssert finalScores[i] == 1000 + reward
+      doAssert hero.gold == before.heroes[i].gold
+      if before.heroes[i].state == Dying:
+        doAssert hero.state == Dying and hero.hp == 0
+    doAssert capped.level == HeroMaxLevel and capped.xp == 500
+    when defined(replayEvents):
+      var rewards = 0
+      for event in world.events:
+        if event.kind == XpGained:
+          inc rewards
+          doAssert event.cause == GodDestroyed
+          doAssert event.actor.id == fort.id
+          doAssert event.target.team == attacker.ord
+          doAssert event.amount == 500
+          doAssert event.before == 2000 and event.after == 2500
+          doAssert event.related >= 0
+          doAssert world.events[event.related].kind == Death
+          doAssert world.events[event.related].target.id == fort.id
+      doAssert rewards == 5
+      doAssert world.events[^1].kind == MatchEnded
+    let finalHash = game.stateHash()
+    game.tickWorld(nil)
+    doAssert game.stateHash() == finalHash
+    world.restore(before)
+    game.tickWorld(nil)
+    doAssert game.stateHash() == finalHash
+
+echo "Testing timeouts grant no god XP and simultaneous god deaths pay both teams"
+for draw in [false, true]:
+  let
+    game = quietGame()
+    world = game.world
+  if draw:
+    for fort in world.forts.mitems:
+      fort.hp = 0
+  else:
+    world.tick = game.config.maxTicks - 1
+  game.tickWorld(nil)
+  doAssert game.finished()
+  doAssert world.draw == draw
+  for hero in world.heroes:
+    doAssert hero.totalXp == (if draw: 500 else: 0)
+
+echo "God guards and rewards passed"
