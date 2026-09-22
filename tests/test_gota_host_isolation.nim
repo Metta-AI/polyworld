@@ -19,6 +19,10 @@ let secondHost = initHeroHost(second, second.world.heroes[0].id)
 var secondRuntime = initRuntime(program, secondHost, heroVmLimits())
 first.world.heroes[0].charges[HeroAbilitySlot(0)] = 1
 second.world.heroes[0].charges[HeroAbilitySlot(0)] = 3
+first.world.phase = Playing
+second.world.phase = Playing
+first.world.tick = 1
+second.world.tick = 1
 
 let untouchedSecond = second.stateHash()
 discard firstRuntime.run()
