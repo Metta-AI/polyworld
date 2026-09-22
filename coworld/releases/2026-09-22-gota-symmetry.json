@@ -1,0 +1,45 @@
+{
+  "date": "2026-09-22",
+  "version": "2026.9.22.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_1d5d124e-f7cb-4a38-a1d5-d71d070c2856",
+  "canonical": true,
+  "source_commit": "02897e8201b9761be577587019c479973d9f08a6",
+  "demo_commit": "89ceec1e891f1ccff222144d2b8c165baf31cdc8",
+  "replay_version": 56,
+  "changes": [
+    "Simultaneous movement and combat phases with mutual kills and draws.",
+    "Mirrored geometry, navigation, observations, policy coordinates, and last-hit priorities.",
+    "Seeded match behavior and a separate map seed.",
+    "Integer scores: max(0, lifetime_xp * 1440 - 200 * ticks) div 1440."
+  ],
+  "checks": [
+    "Full Nim suite and tournament score regressions passed.",
+    "Native runtime contracts passed for GOTA, Light vs Dark, and Call to Adventure.",
+    "Ten local certification checks and ten hosted certification checks passed.",
+    "All five hosted smoke episodes completed and emitted verified integer scores.",
+    "Local browser playback passed; served JS, WASM, and data hashes match built files.",
+    "Local Linux certification replay and hosted round replay reproduced natively.",
+    "Version-56 demo passed replay extractor verification."
+  ],
+  "league_settings_preserved": true,
+  "verification_round": {
+    "round_id": "round_915f9338-e537-4667-8f39-d1b37af41542",
+    "round_number": 644,
+    "status": "completed",
+    "games": 24,
+    "coworld_id": "cow_1d5d124e-f7cb-4a38-a1d5-d71d070c2856",
+    "version": "2026.9.22.1",
+    "integer_scores_verified": 240,
+    "outcomes": {
+      "RedTeam": 11,
+      "BlueTeam": 12,
+      "time_limit": 1
+    },
+    "replay_version": 56,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=1d6c7d63-d9be-48a7-ace9-64b9cf5d9bdd",
+    "verified_at": "2026-09-22T15:23:52.865466+00:00"
+  },
+  "manifest_hash": "sha256:487e93610d7a3bad7c532ec52f01cdb1c2f9d8bb76c8fab637c208830b9967e2",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:938646633238cbb4dbb183fa048fa31d07b3fae8695ed6565fadb4cc3a57091c"
+}

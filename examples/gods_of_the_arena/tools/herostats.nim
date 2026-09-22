@@ -192,7 +192,7 @@ proc inspectReplay*(path: string, metadata: JsonNode): JsonNode =
     requireStats(slot in 0 ..< seatScores.len and slot notin positions,
       "Invalid or duplicate score position")
     positions.incl(slot)
-    requireStats(abs(score["score"].getFloat - seatScores[slot]) < 1e-9,
+    requireStats(score["score"].getFloat == seatScores[slot].float64,
       "Replay XP and duration differ from the league seat scores")
   result = %*{"schema": StatsSchema, "id": metadata["id"],
     "verified": true, "ticks": game.world.tick, "hash_mismatches": 0,
