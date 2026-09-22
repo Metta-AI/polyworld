@@ -31,11 +31,63 @@ proc run() =
   let
     window = newWindow(
       "Gota clothing review", ivec2(1600, 1100),
-      vsync = false, msaa = msaa4x
+      vsync = false, msaa = msaa4x, visible = false
     )
   createDir(output)
   makeContextCurrent(window)
   loadExtensions()
+  # Hidden macOS windows need an offscreen framebuffer for screenshots.
+  var
+    framebuffers: array[2, GLuint]
+    buffers: array[3, GLuint]
+  glGenFramebuffers(2, framebuffers[0].addr)
+  glGenRenderbuffers(3, buffers[0].addr)
+  defer:
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+    glDeleteFramebuffers(2, framebuffers[0].addr)
+    glDeleteRenderbuffers(3, buffers[0].addr)
+    window.close()
+  for i in 0 ..< 2:
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffers[i])
+    glBindRenderbuffer(GL_RENDERBUFFER, buffers[i])
+    if i == 0:
+      glRenderbufferStorageMultisample(
+        GL_RENDERBUFFER,
+        4,
+        GL_RGBA8,
+        window.size.x,
+        window.size.y
+      )
+    else:
+      glRenderbufferStorage(
+        GL_RENDERBUFFER,
+        GL_RGBA8,
+        window.size.x,
+        window.size.y
+      )
+    glFramebufferRenderbuffer(
+      GL_FRAMEBUFFER,
+      GL_COLOR_ATTACHMENT0,
+      GL_RENDERBUFFER,
+      buffers[i]
+    )
+    if i == 0:
+      glBindRenderbuffer(GL_RENDERBUFFER, buffers[2])
+      glRenderbufferStorageMultisample(
+        GL_RENDERBUFFER,
+        4,
+        GL_DEPTH_COMPONENT24,
+        window.size.x,
+        window.size.y
+      )
+      glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER,
+        GL_DEPTH_ATTACHMENT,
+        GL_RENDERBUFFER,
+        buffers[2]
+      )
+    if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+      raise newException(ChargenError, "Cannot create review framebuffer.")
   let
     renderer = newRenderer(window)
     toon = newToonContext()
@@ -152,6 +204,7 @@ proc run() =
     toon.proj = ortho(
       -halfWidth, halfWidth, -halfHeight, halfHeight, 0.02'f, 100'f
     )
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffers[0])
     renderer.beginFrame(window, window.size)
     renderer.clearScreen(color(0.72, 0.71, 0.69, 1))
     glEnable(GL_MULTISAMPLE)
@@ -170,7 +223,23 @@ proc run() =
       else:
         toon.draw(model.root)
     renderer.endFrame()
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffers[0])
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffers[1])
+    glBlitFramebuffer(
+      0,
+      0,
+      window.size.x,
+      window.size.y,
+      0,
+      0,
+      window.size.x,
+      window.size.y,
+      GL_COLOR_BUFFER_BIT,
+      GL_NEAREST.GLenum
+    )
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffers[1])
     let shot = newImage(window.size.x, window.size.y)
+    glReadBuffer(GL_COLOR_ATTACHMENT0)
     glReadPixels(
       0, 0, window.size.x, window.size.y,
       GL_RGBA, GL_UNSIGNED_BYTE, shot.data[0].addr
@@ -182,11 +251,10 @@ proc run() =
       elif frame == 2: "crouch"
       else: categories[slot].replace(' ', '_')
     shot.writeFile(output / (name & ".png"))
-    window.swapBuffers()
     inc frame
-    if frame == 3 + categories.len:
-      quit(0)
-  while not window.closeRequested:
+  while not window.closeRequested and frame < 3 + categories.len:
     pollEvents()
+  renderer.release(model.root)
+  renderer.shutdown()
 
 run()
