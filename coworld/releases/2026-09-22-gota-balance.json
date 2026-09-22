@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-22",
+  "version": "2026.9.22.2",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_2dd9158a-e22e-4000-9b2b-b060fffa7a9a",
+  "canonical": true,
+  "source_commit": "ffcedcd866c4d31924361ed4baff2b7a6d3aba67",
+  "replay_version": 57,
+  "changes": [
+    "Ranger HP per level: 38 to 19 (-50%).",
+    "Crossbowman base attack damage: 46 to 69 (+50%).",
+    "Warlock Dread Totem base damage: 58 to 87 (+50%).",
+    "Hero report includes 95% confidence margins for mean level, XP and gold."
+  ],
+  "checks": [
+    "Nim check, full Nim suite and recording regression tests passed.",
+    "New 20-minute demo reproduced with all 8661 recorded actions consumed.",
+    "Ten local certification checks and ten hosted certification checks passed.",
+    "All five hosted smoke episodes completed with verified integer scores.",
+    "Built browser bundle played replay 57 and rendered without browser errors.",
+    "Served JS, WASM and data hashes match the built files.",
+    "Local Linux certification replay and hosted league replay reproduced natively.",
+    "GitHub Pages deployment verified against the published guide and report."
+  ],
+  "league_settings_preserved": true,
+  "verification_round": {
+    "round_id": "round_5a90c404-803b-4c8b-b10f-42162263a9ff",
+    "round_number": 645,
+    "status": "completed",
+    "games": 24,
+    "coworld_id": "cow_2dd9158a-e22e-4000-9b2b-b060fffa7a9a",
+    "version": "2026.9.22.2",
+    "integer_scores_verified": 240,
+    "outcomes": {
+      "BlueTeam": 14,
+      "RedTeam": 9,
+      "time_limit": 1
+    },
+    "replay_version": 57,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=fd372104-b9dd-440c-868f-ef1d62c84f00",
+    "verified_at": "2026-09-22T15:50:26.915515+00:00"
+  },
+  "polyworld_buff": {
+    "commit": "8f46bb18cb90b70dcebeb2733bfefed9651eaaf0",
+    "url": "https://metta-ai.github.io/polyworld-buff/GOTA/heros/",
+    "report_games": 672,
+    "report_rounds": [
+      617,
+      644
+    ],
+    "deployed": true
+  },
+  "manifest_hash": "sha256:e4770a30bb142d4d9e6c6b213bccf47bb7d7d11055a0750cc75cebf6c3152d51",
+  "viewer_sha256": {
+    "wasm": "adbe8cc3edf645a355e6ba4227881f44637481f30198d2417d641dcebf53ec79",
+    "data": "4b5fb6a6f8c0a8181a99cab24bfaa523aa344b552f717e88b61fa11b35a1c559",
+    "js": "8a1da8121c8d1cac8e1703a957b39245de5abafc19b82c4bb42cf0addf384047"
+  }
+}
