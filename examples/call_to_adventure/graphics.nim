@@ -10,7 +10,7 @@
 import
   std/[math, tables, times],
   chroma, fixxy, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, clickmarks, common, inputs,
+  polyworld/[actioncam, assets, characters, chargen, clickmarks, common, inputs,
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
     viewers, visions, worldbars, worldtexts],
@@ -242,10 +242,7 @@ proc runGraphics*() =
   # readable instead of clipping the deep ones to black.
   profileBlock "terrain":
     amplitude = 48.0
-    when defined(emscripten):
-      initTerrain(NoTrees, rockStyle = NoRocks, settings = CtaWebTerrainAssets)
-    else:
-      initTerrain()
+    initTerrain(NoTrees, rockStyle = NoRocks, settings = CtaTerrainAssets)
     bakeTerrain(rebuildWalkability = false)
 
   let scene = newCharacterScene(window)
@@ -265,21 +262,49 @@ proc runGraphics*() =
   var heroModels: array[HeroClass, CharacterModel]
   var monsterModels: array[Species, CharacterModel]
   profileBlock "models":
+    let
+      library = readManifest(ChargenLibrary)
+      roster = readCharacterRoster()
+
+    proc loadPresetModel(preset: Preset, height: float32): CharacterModel =
+      ## Assembles existing equipment and preserves the authored face colors.
+      result = loadCharacterModel(
+        readPresetCharacter(ChargenLibrary, library, preset, CharacterClips),
+        height
+      )
+      result.fitCharacterHeight(height, result.clipIndex("Idle_Loop"))
+      for category in library.presetManifest(preset).categories:
+        if category.key in ["Eyes", "Mouth", "Brow"]:
+          for item in category.items:
+            result.unlitParts.add item.nodes
+
     for class in HeroClass:
-      heroModels[class] = loadModularCharacterModel(
-        HeroModelPath, HeroManifestPath, ClassPresets[class], 1.7)
+      heroModels[class] = loadPresetModel(
+        library.namedPreset(HeroPresets[class]), HeroTargetHeight
+      )
     for species in Species:
-      monsterModels[species] = loadCharacterModel(SpeciesModels[species], 1.6)
+      let
+        entry = roster.mobs[species.ord]
+        model = loadPresetModel(
+          entry.preset, HeroTargetHeight * RankScales[species.monsterRank]
+        )
+        rgb = entry.skinRgb
+      partNodes(model.file.root).applySkin(
+        library.presetManifest(entry.preset), color(rgb[0], rgb[1], rgb[2], 1)
+      )
+      monsterModels[species] = model
   drawSplash(sk, window, splash.name)
 
   var
     heroIdle, heroRun, heroAttack: array[HeroClass, int]
     monsterIdle, monsterRun, monsterAttack: array[Species, int]
   for class in HeroClass:
-    let model = heroModels[class]
-    heroIdle[class] = model.clipIndex(HeroClips[0])
-    heroRun[class] = model.clipIndex(HeroClips[1])
-    heroAttack[class] = model.clipIndex(HeroClips[2])
+    let
+      model = heroModels[class]
+      clips = class.heroClips()
+    heroIdle[class] = model.clipIndex(clips[0])
+    heroRun[class] = model.clipIndex(clips[1])
+    heroAttack[class] = model.clipIndex(clips[2])
   for species in Species:
     let
       model = monsterModels[species]
@@ -382,7 +407,7 @@ proc runGraphics*() =
       0.5'f32
     )
     if state.kind == MonsterActor:
-      if Species(state.class) == LichSpecies:
+      if Species(state.class).monsterRank == CasterRank:
         particles.emitParticleProjectile(
           MagicBolt,
           MagicBurst,
@@ -937,6 +962,39 @@ proc runGraphics*() =
       cameraDistance
     )
 
+  proc addLootIcons(visibleFrom: int) =
+    ## Draws existing loot icons in place of the former footman placeholder.
+    for item in run.world.items:
+      if item.carrier != 0 or int(item.tile.level) < visibleFrom or
+        not selectedVisible(item.tile):
+          continue
+      let
+        ability = LootAbilities[item.kind]
+        key =
+          if ability != NoAbility:
+            "ability_" & AbilityIconFiles[ability]
+          else:
+            case item.kind
+            of GoldPile: "gold"
+            of Gemstone: "crystal"
+            of Chalice: "chalice"
+            of Idol: "idol"
+            of Crown: "crown"
+            else: "bounty"
+        entry = sk.atlas.entries[key]
+        anchor = tileCenter(
+          int(item.tile.level), int(item.tile.x), int(item.tile.z)
+        ) + vec3(0, 0.4'f, 0)
+      worldBarRenderer.addBillboardQuad(
+        anchor,
+        vec2(-0.36'f),
+        vec2(0.72'f),
+        rgbx(255, 255, 255, 255),
+        vec2(entry.x.float32, entry.y.float32) / sk.atlas.size.float32,
+        vec2(entry.width.float32, entry.height.float32) /
+          sk.atlas.size.float32
+      )
+
   proc drawWorldBars(
       viewProjection: Mat4,
       cameraRight,
@@ -947,6 +1005,7 @@ proc runGraphics*() =
     ## Draws hero resources and damage-gated monster health in the world.
     damageTrails.beginFrame()
     worldBarRenderer.clear()
+    addLootIcons(visibleFrom)
     for actor in run.world.actors:
       if actor.id == 0 or not actor.alive or
           int(actor.home.level) < visibleFrom:
@@ -981,7 +1040,8 @@ proc runGraphics*() =
         worldBarRenderer.addResourceBars(anchor, 1.55'f32, bars)
       elif actor.hp < actor.maxHp:
         let
-          anchor = actorRenderPosition(actor) + vec3(0, 1.82'f32, 0)
+          height = HeroTargetHeight * RankScales[actor.species.monsterRank]
+          anchor = actorRenderPosition(actor) + vec3(0, height + 0.2'f, 0)
           bars = [WorldResourceBar(
             value: health,
             maximum: maximumHealth,
@@ -1395,7 +1455,7 @@ proc runGraphics*() =
         # the same range, so hidden floors above never cast down into view.
         let visibleFrom = selectedViewLevel()
 
-        # One loop for both passes: actors and floor treasure render into
+        # One loop for both passes: actors render into
         # the sun's depth map first, then for the camera. The turn smoothing
         # and clip time advance exactly once per frame, in whichever pass
         # runs first.
@@ -1435,55 +1495,7 @@ proc runGraphics*() =
                 visuals[slot].animTime += dt * transport.speed.float32
             drawCharacter(
               scene, model, position, visuals[slot].angle,
-              visuals[slot].clip, visuals[slot].animTime,
-              sizeFactor = if hero: 1.0 else: 0.95)
-
-          # Floor gold and gear, tinted so piles read differently from items.
-          for item in run.world.items:
-            if item.carrier != 0:
-              continue
-            if int(item.tile.level) < visibleFrom:
-              continue
-            if not selectedVisible(item.tile):
-              continue
-            let
-              position = tileCenter(
-                int(item.tile.level), int(item.tile.x), int(item.tile.z))
-              tint =
-                case item.kind
-                of GoldPile:
-                  color(1.0, 0.85, 0.25, 1)
-                of Gemstone:
-                  color(0.72, 0.55, 0.95, 1)
-                of Chalice:
-                  color(0.85, 0.82, 0.55, 1)
-                of Idol:
-                  color(0.62, 0.48, 0.32, 1)
-                of Crown:
-                  color(1.0, 0.78, 0.28, 1)
-                of HealingPotionLoot, FirePhoenixLoot:
-                  color(0.95, 0.28, 0.28, 1)
-                of ManaPotionLoot, NatureTalismanLoot:
-                  color(0.32, 0.52, 0.95, 1)
-                of BattleHornLoot, InfernoAegisLoot, ThornRingLoot:
-                  color(0.95, 0.72, 0.28, 1)
-                of WingedBootLoot, IceWallLoot:
-                  color(0.45, 0.85, 0.55, 1)
-                of IronFlailLoot, BlazingBladeLoot, GaleSlashLoot,
-                    VoidBladeLoot:
-                  color(0.92, 0.42, 0.22, 1)
-                of LightningStormLoot, ArcaneMeteorLoot, ShadowCometLoot,
-                    CosmicFlareLoot:
-                  color(0.55, 0.45, 0.95, 1)
-              scale =
-                if item.kind.lootUsesSlot: 0.38'f32
-                elif item.kind == GoldPile: 0.28'f32
-                else: 0.32'f32
-            drawCharacter(
-              scene, monsterModels[SkeletonSpecies],
-              position + vec3(0, 0.1, 0),
-              run.world.tick.float32 * 0.02,
-              monsterIdle[SkeletonSpecies], 0, tint, scale)
+              visuals[slot].clip, visuals[slot].animTime)
 
         let shadowPassRan =
           sunShadowsActive() and layerVertexRanges.len > visibleFrom

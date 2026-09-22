@@ -9,7 +9,7 @@
 
 import
   fixxy,
-  polyworld/[bodies, cli, common, metrics, pathing, rngs]
+  polyworld/[bodies, cli, metrics, pathing, rngs]
 
 ## Shape of the world
 
@@ -75,7 +75,18 @@ type
     FighterClass, WizardClass, RogueClass, ClericClass
 
   Species* = enum
-    OrcSpecies, SkeletonSpecies, LichSpecies, GolemSpecies
+    DustlingSpecies, GraveStalkerSpecies, CryptAcolyteSpecies,
+    BarrowWardenSpecies, BogRuntSpecies, TuskRaiderSpecies,
+    MireShamanSpecies, IronhideChiefSpecies, DuskThrallSpecies,
+    VelvetStalkerSpecies, BloodCantorSpecies, DreadCountSpecies,
+    CinderImpSpecies, AshReaverSpecies, EmberHexerSpecies,
+    InfernalDukeSpecies
+
+  MonsterFamily* = enum
+    UndeadFamily, OrcFamily, VampireFamily, DemonFamily
+
+  MonsterRank* = enum
+    RuntRank, RaiderRank, CasterRank, ChampionRank
 
   MonsterState* = enum
     ## Native monster AI has no scripting; these are its whole vocabulary.
@@ -342,13 +353,8 @@ const
 ## Class tuning
 
 const
-  # Heroes are outfits of the modular character pack: one shared glb, one
-  # manifest preset per class (knight with shield, wizard, hooded archer,
-  # templar with the cross helm).
-  HeroModelPath* = DataRoot & "/characters/modular_chars/character.glb"
-  HeroManifestPath* = DataRoot & "/characters/modular_chars/manifest.json"
-  ClassPresets*: array[HeroClass, string] = [
-    "Preset 5", "Preset 18", "Preset 11", "Preset 9"
+  HeroPresets*: array[HeroClass, string] = [
+    "Vanguard Knight", "Arcanist", "Ranger", "Druid Warden"
   ]
   ClassSpeeds*: array[HeroClass, int32] = [250, 260, 340, 270]
   ClassHp*: array[HeroClass, int16] = [340, 200, 250, 270]
@@ -359,16 +365,32 @@ const
   ClassCarryWeight*: array[HeroClass, int32] = [120, 45, 70, 80]
   ClassLightRadius*: array[HeroClass, int32] = [6, 8, 5, 6]
 
-  SpeciesModels*: array[Species, string] = [
-    DataRoot & "/characters/orc.glb",
-    DataRoot & "/characters/footman.glb",
-    DataRoot & "/characters/lich.glb",
-    DataRoot & "/characters/rock_golem.glb"
+  SpeciesNames*: array[Species, string] = [
+    "Dustling", "Grave Stalker", "Crypt Acolyte", "Barrow Warden",
+    "Bog Runt", "Tusk Raider", "Mire Shaman", "Ironhide Chief",
+    "Dusk Thrall", "Velvet Stalker", "Blood Cantor", "Dread Count",
+    "Cinder Imp", "Ash Reaver", "Ember Hexer", "Infernal Duke"
   ]
-  SpeciesSpeeds*: array[Species, int32] = [300, 220, 200, 140]
-  SpeciesHp*: array[Species, int16] = [90, 60, 130, 260]
-  SpeciesSight*: array[Species, int32] = [9, 6, 10, 5]
-  SpeciesDamage*: array[Species, int32] = [70, 55, 80, 110]
+  RankScales*: array[MonsterRank, float32] = [0.7'f, 0.9'f, 1.1'f, 1.4'f]
+  FloorFamilies*: array[LevelCount, MonsterFamily] = [
+    UndeadFamily, UndeadFamily, OrcFamily, VampireFamily,
+    VampireFamily, DemonFamily
+  ]
+  SpeciesSpeeds*: array[Species, int32] = [
+    240, 300, 200, 140, 240, 300, 200, 140,
+    240, 300, 200, 140, 240, 300, 200, 140
+  ]
+  SpeciesHp*: array[Species, int16] = [
+    60, 90, 130, 260, 70, 100, 150, 280,
+    80, 110, 170, 300, 90, 130, 190, 340
+  ]
+  SpeciesSight*: array[Species, int32] = [
+    6, 9, 10, 5, 6, 9, 10, 5, 6, 9, 10, 5, 6, 9, 10, 5
+  ]
+  SpeciesDamage*: array[Species, int32] = [
+    55, 70, 80, 110, 60, 75, 85, 115,
+    65, 80, 90, 120, 70, 85, 95, 125
+  ]
     ## Percentage of the base ability damage. Monsters hit for less than a
     ## hero would with the same swing: four heroes against a floor's worth of
     ## monsters lose a straight damage race, and the party is meant to be
@@ -472,6 +494,14 @@ template heroClass*(actor: Actor): HeroClass =
 template species*(actor: Actor): Species =
   ## Reads a monster's species without copying the actor.
   Species(actor.class)
+
+proc monsterRank*(species: Species): MonsterRank =
+  ## Returns the size and strength rank within one family.
+  MonsterRank(species.ord mod 4)
+
+proc monsterFamily*(species: Species): MonsterFamily =
+  ## Returns the faction that supplies the monster's skin color.
+  MonsterFamily(species.ord div 4)
 
 proc encumbrance*(actor: Actor, capacity: int32): int32 =
   ## Zero to three, used to index `EncumbranceScale`.

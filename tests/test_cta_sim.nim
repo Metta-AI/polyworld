@@ -5,6 +5,30 @@ import
   polyworld/[metrics, pathing, rngs, tapes],
   ../examples/call_to_adventure/[content, sim, replays]
 
+echo "Testing CTA family progression and monster strength"
+block:
+  let expected = [
+    UndeadFamily, OrcFamily, VampireFamily, VampireFamily, DemonFamily
+  ]
+  for level in 1 ..< LevelCount:
+    var
+      first = initRng(2026)
+      second = initRng(2026)
+      seen: set[MonsterRank]
+    for i in 0 ..< 1000:
+      let species = levelSpecies(level, first)
+      doAssert species == levelSpecies(level, second)
+      doAssert species.monsterFamily == expected[level - 1]
+      seen.incl species.monsterRank
+    doAssert seen == {RuntRank .. ChampionRank}
+  for species in Species:
+    if species.monsterRank != RuntRank:
+      let smaller = pred(species)
+      doAssert SpeciesHp[species] > SpeciesHp[smaller]
+      doAssert SpeciesDamage[species] > SpeciesDamage[smaller]
+      doAssert RankScales[species.monsterRank] >
+        RankScales[smaller.monsterRank]
+
 proc testSetup(): Setup =
   result = Setup(
     seed: 2026,
@@ -44,12 +68,12 @@ proc populate(world: World) =
   discard world.addActor(Actor(
     id: 0,
     kind: MonsterActor,
-    class: uint8(OrcSpecies),
+    class: uint8(TuskRaiderSpecies),
     home: TileRef(level: 2, x: 40, z: 40),
-    baseSpeed: SpeciesSpeeds[OrcSpecies],
-    speed: SpeciesSpeeds[OrcSpecies],
-    hp: SpeciesHp[OrcSpecies],
-    maxHp: SpeciesHp[OrcSpecies]
+    baseSpeed: SpeciesSpeeds[TuskRaiderSpecies],
+    speed: SpeciesSpeeds[TuskRaiderSpecies],
+    hp: SpeciesHp[TuskRaiderSpecies],
+    maxHp: SpeciesHp[TuskRaiderSpecies]
   ))
   world.items.add Item(
     id: 1,
@@ -205,7 +229,7 @@ block:
   doAssert not world.claimed(tile)
   let slot = world.addActor(Actor(
     kind: MonsterActor,
-    class: uint8(OrcSpecies),
+    class: uint8(TuskRaiderSpecies),
     home: tile,
     hp: 10,
     maxHp: 10
@@ -216,7 +240,7 @@ block:
 
   let rejected = world.addActor(Actor(
     kind: MonsterActor,
-    class: uint8(LichSpecies),
+    class: uint8(CryptAcolyteSpecies),
     home: tile,
     hp: 10,
     maxHp: 10

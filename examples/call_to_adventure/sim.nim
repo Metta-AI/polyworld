@@ -846,14 +846,17 @@ proc hashWorld*(world: World): uint64 =
 
 ## Spawning
 
-proc levelSpecies(level: int, rng: var Rng): Species =
-  ## Deeper levels field nastier things; the surface fields nothing.
-  case level
-  of 1: (if rng.chance(70): SkeletonSpecies else: OrcSpecies)
-  of 2: (if rng.chance(60): OrcSpecies else: SkeletonSpecies)
-  of 3: (if rng.chance(50): OrcSpecies else: LichSpecies)
-  of 4: (if rng.chance(45): LichSpecies else: GolemSpecies)
-  else: (if rng.chance(60): GolemSpecies else: LichSpecies)
+proc levelSpecies*(level: int, rng: var Rng): Species =
+  ## Chooses a weighted rank from the floor's color-coded family.
+  assert level > SurfaceLevel and level < LevelCount
+  let
+    roll = rng.below(100)
+    rank =
+      if roll < 40: RuntRank
+      elif roll < 70: RaiderRank
+      elif roll < 90: CasterRank
+      else: ChampionRank
+  Species(FloorFamilies[level].ord * 4 + rank.ord)
 
 proc freeTileIn(
     game: Game, level: int, room: Room, rng: var Rng
@@ -882,8 +885,7 @@ proc spawnMonster*(game: Game, level: int, rng: var Rng): bool =
     return false
   let species = levelSpecies(level, rng)
   # Deeper monsters are tougher, which is what makes the climb back out worse
-  # than the way down. Widen to int32 for the percentage: a golem at depth is
-  # 400 * 200 / 100, and doing that in int16 overflows.
+  # than the way down. Widen to int32 before multiplying champion health.
   let
     toughness = 100'i32 + int32(level) * 10
     hp = int16(
@@ -1114,11 +1116,12 @@ proc beginAbility(game: Game, slot: int32, ability: Ability, target: int32) =
   game.world.actors[slot].target = target
 
 proc extraLootKind(level: int, species: Species, rng: var Rng): LootKind =
-  ## Picks one extra drop. Deeper floors and golems roll richer treasure.
+  ## Picks one extra drop. Deeper floors and champions roll richer treasure.
   if rng.chance(45):
-    if level >= 5 or (species == GolemSpecies and rng.chance(35)):
-      return Crown
-    if level >= 4 or species == GolemSpecies:
+    if level >= 5 or
+      (species.monsterRank == ChampionRank and rng.chance(35)):
+        return Crown
+    if level >= 4 or species.monsterRank == ChampionRank:
       if rng.chance(55):
         return Idol
       return Chalice
@@ -1140,7 +1143,7 @@ proc dropLoot(game: Game, slot: int32) =
     gold = LootValues[GoldPile] + int32(level) * 8
   discard game.spawnLoot(GoldPile, actor.home, gold)
   var itemChance = 22 + level * 8
-  if actor.species == GolemSpecies:
+  if actor.species.monsterRank == ChampionRank:
     itemChance += 25
   if rng.chance(int32(min(itemChance, 75))):
     discard game.spawnLoot(

@@ -13,7 +13,7 @@ const
   ReplayFormatVersion* = 3'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 22'u16
+  ReplayGameVersion* = 23'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionPickupTarget* = 3'u8
