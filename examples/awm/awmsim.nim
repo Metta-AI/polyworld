@@ -50,6 +50,7 @@ type
     owner*: int     ## Who chooses, and who the rules resolve for.
     sourceId*: int  ## The card in play whose trigger fired.
     trigger*: int   ## Which of that card's `on(...)` rules.
+    attacker*: Choice  ## The attacker, when an attack fired it.
 
   PendingToss* = object
     ## A discard waiting for its player to choose cards from hand. Whatever
@@ -427,8 +428,9 @@ proc triggerSource(game: GameState,
 
 proc triggerContext(game: GameState, pending: PendingTrigger,
     picks: seq[Choice] = @[]): RuleContext =
-  game.ruleContext(picks, allowNoTarget = true,
+  result = game.ruleContext(picks, allowNoTarget = true,
     sourcePlayer = pending.owner, sourceId = pending.sourceId)
+  result.attacker = pending.attacker
 
 proc triggerChoices*(game: GameState, picked: seq[Choice] = @[]): seq[Choice] =
   ## Legal choices for the waiting trigger's next target, after `picked`.
@@ -632,6 +634,22 @@ proc playCard*(
 ): bool =
   game.playCard(cardIndex, @[choice])
 
+proc queueAttackTriggers(game: var GameState, attacker, victim: Choice) =
+  ## After an attack's damage: queues the attacked triggers of cards in
+  ## play, the current player's first, then resolves the queue in order.
+  if game.gameOver:
+    return
+  for offset in 0 ..< PlayerCount:
+    let owner = (game.currentPlayer + offset) mod PlayerCount
+    for permanent in game.players[owner].board:
+      for index, trigger in permanent.card.triggers():
+        var context = game.ruleContext(allowNoTarget = true,
+          sourcePlayer = owner, sourceId = permanent.id)
+        if trigger.trigger.firesOnAttack(context, victim):
+          game.pendingTriggers.add PendingTrigger(owner: owner,
+            sourceId: permanent.id, trigger: index, attacker: attacker)
+  game.advanceTriggers()
+
 proc attackHero*(game: var GameState, minionId: int): bool =
   let location = game.minionLocation(minionId)
   if not location.found: return false
@@ -648,6 +666,8 @@ proc attackHero*(game: var GameState, minionId: int): bool =
     game.players[targetPlayer].life - minion.power)
   game.players[location.player].board[location.index].hasAttacked = true
   game.checkWinCondition()
+  game.queueAttackTriggers(creatureChoice(location.player, minionId),
+    heroChoice(targetPlayer))
   true
 
 proc attackTargets*(game: GameState, attackerId: int): seq[Choice] =
@@ -677,6 +697,8 @@ proc attackMinion*(game: var GameState, attackerId, targetId: int): bool =
     attackerLocation.index].hasAttacked = true
   game.applyEffects([
     Effect(kind: FightEffect, fighterId: attackerId, opponentId: targetId)])
+  game.queueAttackTriggers(creatureChoice(attackerLocation.player, attackerId),
+    creatureChoice(enemy, targetId))
   true
 
 proc attack*(game: var GameState, attackerId: int, target: Choice): bool =

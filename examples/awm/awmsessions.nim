@@ -6,7 +6,7 @@ export awmsim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 9
+  SnapshotSchemaVersion* = 10
 
 type
   SessionOptions* = object
@@ -373,7 +373,8 @@ proc gameToJson*(game: GameState): JsonNode =
   var pendingTriggers = newJArray()
   for pending in game.pendingTriggers:
     pendingTriggers.add %*{"owner": pending.owner,
-      "sourceId": pending.sourceId, "trigger": pending.trigger}
+      "sourceId": pending.sourceId, "trigger": pending.trigger,
+      "attacker": choiceToJson(pending.attacker)}
   %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
     "visualEvents": visualEvents, "visualBeat": game.visualBeat,
@@ -479,7 +480,9 @@ proc gameFromJson*(node: JsonNode): GameState =
       let pending = PendingTrigger(
         owner: entry.field("owner").integer("trigger owner", 0, PlayerCount - 1),
         sourceId: entry.field("sourceId").integer("trigger source", 1),
-        trigger: entry.field("trigger").integer("trigger index", 0))
+        trigger: entry.field("trigger").integer("trigger index", 0),
+        attacker: if entry.hasKey("attacker"):
+          choiceFromJson(entry["attacker"]) else: Canceled)
       let location = result.minionLocation(pending.sourceId)
       if not location.found or location.player != pending.owner or
           pending.trigger >= result.players[location.player].board[

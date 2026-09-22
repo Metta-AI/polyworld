@@ -241,11 +241,17 @@ type
     board*: seq[BoardCard]
     nextMinionId*: int  ## The id the next minion to enter play gets.
 
+  AttackerTarget* = ref object of Target
+    ## `getAttacker()`: the minion whose attack fired this trigger. It makes
+    ## no choice, and if the attacker has left the board it cancels, which
+    ## cancels the whole trigger.
+
   RuleContext* = object
     ## The rule engine sees legal game objects and emits effects, but remains
     ## independent from the concrete GameState in awm.nim.
     sourcePlayer*: int
     sourceId*: int  ## The card in play these rules belong to; 0 for a spell.
+    attacker*: Choice  ## The attacker, for rules an attack triggered.
     allowNoTarget*: bool
     heroes*: seq[Choice]
     creatures*: seq[Choice]
@@ -328,12 +334,16 @@ type
 
   TriggerKind* = enum
     NextTurnStart  ## A player's next turn starts, after their draw.
+    HeroAttacked   ## A player's hero is attacked, after the damage.
+    CardAttacked   ## A card in play is attacked, after the damage.
 
   Trigger* = object
     ## When `on(...)` rules resolve instead of on play.
     case kind*: TriggerKind
-    of NextTurnStart:
+    of NextTurnStart, HeroAttacked:
       player*: RuleValue[Owner]
+    of CardAttacked:
+      card*: RuleValue[Card]
 
   OnRule* = ref object of Rule
     ## Rules a card in play resolves when its trigger fires, not on play.
@@ -512,6 +522,32 @@ method choose*(target: PickedTarget, context: var RuleContext): Choice =
     context.targets[target.index]
   else:
     Canceled
+
+method makesChoice*(target: Target): bool {.base, gcsafe.} =
+  ## Whether a player picks this target. References to an earlier pick or
+  ## to the attacker don't.
+  true
+
+method makesChoice*(target: PickedTarget): bool =
+  false
+
+method makesChoice*(target: AttackerTarget): bool =
+  false
+
+method text*(target: AttackerTarget): string =
+  "the attacker"
+
+method choose*(target: AttackerTarget, context: var RuleContext): Choice =
+  ## The attacker while it's still on the board, else Canceled.
+  if context.attacker.kind == CreatureChoice:
+    for entry in context.game.board:
+      if entry.choice == context.attacker:
+        return context.attacker
+  Canceled
+
+proc getAttacker*(): Target =
+  ## `bounce(getAttacker())`, inside `on(attacked(...), ...)`.
+  AttackerTarget()
 
 proc getTarget*(index = 0): Target =
   ## `fight(getTarget(0), getTarget(1))`: reuses earlier targets' choices.
@@ -797,7 +833,7 @@ method text*(rule: FightRule, card: Card): string =
 
 method targets*(rule: FightRule): seq[Target] =
   for target in [rule.fighter, rule.opponent]:
-    if not (target of PickedTarget):
+    if target.makesChoice():
       result.add target
 
 method needsChoice*(rule: FightRule): bool =
@@ -840,7 +876,7 @@ proc text(what: Selection, card: Card): string =
   of SelectQuery: what.query.text(card)
 
 proc picks(what: Selection): seq[Target] =
-  if what.kind == SelectTarget and not (what.target of PickedTarget):
+  if what.kind == SelectTarget and what.target.makesChoice():
     result.add what.target
 
 proc candidates(what: Selection, context: RuleContext): seq[Choice] =
@@ -1134,6 +1170,15 @@ proc nextTurn*(player: RuleValue[Owner]): Trigger =
 proc text*(trigger: Trigger, card: Card): string =
   ## "at the start of your next turn".
   case trigger.kind
+  of HeroAttacked:
+    let player = trigger.player
+    if player.kind == FixedValue:
+      if player.fixed == You: "when your hero is attacked"
+      else: "when your opponent's hero is attacked"
+    else:
+      "when " & player.text(card) & "'s hero is attacked"
+  of CardAttacked:
+    "when " & trigger.card.text(card) & " is attacked"
   of NextTurnStart:
     let player = trigger.player
     if player.kind == FixedValue:
@@ -1154,6 +1199,41 @@ proc firesAtTurnStart*(
   of NextTurnStart:
     turnPlayer == trigger.player.value(context).playerIndex(context) and
       turn > enteredTurn and turn - enteredTurn <= 2
+  of HeroAttacked, CardAttacked:
+    false
+
+proc firesOnAttack*(
+    trigger: Trigger,
+    context: var RuleContext,
+    victim: Choice
+): bool =
+  ## Whether an attack on `victim` fires the trigger. It fires after the
+  ## attack's damage.
+  case trigger.kind
+  of NextTurnStart:
+    return false
+  of HeroAttacked:
+    return victim.kind == HeroChoice and
+      victim.owner == trigger.player.value(context).playerIndex(context)
+  of CardAttacked:
+    if victim.kind != CreatureChoice:
+      return false
+    if trigger.card.kind == SelfCard:
+      return victim.creatureId == context.sourceId
+    let wanted = trigger.card.value(context)
+    for entry in context.game.board:
+      if entry.choice == victim:
+        # Same printed card: name and cost, as card IDs identify it.
+        return entry.card.name == wanted.name and
+          entry.card.energyCost == wanted.energyCost
+
+proc attacked*(player: RuleValue[Owner]): Trigger =
+  ## `on(attacked(You), ...)`: when that player's hero is attacked.
+  Trigger(kind: HeroAttacked, player: player)
+
+proc attacked*(card: RuleValue[Card]): Trigger =
+  ## `on(attacked(self()), ...)`: when that card is attacked.
+  Trigger(kind: CardAttacked, card: card)
 
 method text*(rule: OnRule, card: Card): string =
   ## One sentence: "At the start of your next turn, draw 1 card and destroy
@@ -1218,7 +1298,8 @@ method run*(
     let choice = creatureChoice(owner, context.game.nextMinionId)
     inc context.game.nextMinionId
     context.game.board.add BoardCard(choice: choice, card: summoned,
-      power: summoned.power, toughness: summoned.toughness)
+      power: (if summoned.kind == Minion: summoned.power else: 0),
+      toughness: (if summoned.kind == Minion: summoned.toughness else: 0))
     context.creatures.add choice
     context.effects.add Effect(kind: SummonEffect,
       summonedId: choice.creatureId, summonedOwner: owner,
@@ -1351,7 +1432,7 @@ proc keywords*(card: Card): set[Keyword] =
 proc picks(rule: Rule): seq[Target] =
   ## The rule's targets that make a new choice: `getTarget` reuses one.
   for target in rule.targets():
-    if not (target of PickedTarget):
+    if target.makesChoice():
       result.add target
 
 proc targets*(rules: Rules): seq[Target] =

@@ -316,10 +316,13 @@ suite "waiting triggers in snapshots":
     game.players[me].board = @[MinionState(id: 3, owner: me,
       card: baseCard("plan-3"), enteredTurn: game.turnNumber)]
     game.nextMinionId = 4
-    game.pendingTriggers = @[PendingTrigger(owner: me, sourceId: 3, trigger: 0)]
+    game.pendingTriggers = @[PendingTrigger(owner: me, sourceId: 3, trigger: 0,
+      attacker: creatureChoice(enemy, 2))]
     let encoded = gameToJson(game)
     let decoded = gameFromJson(encoded)
-    check decoded.pendingTriggers == game.pendingTriggers
+    check decoded.pendingTriggers.len == 1
+    check decoded.pendingTriggers[0].sourceId == 3
+    check decoded.pendingTriggers[0].attacker == creatureChoice(enemy, 2)
     check gameToJson(decoded) == encoded
     var invalid = encoded.copy()
     invalid["pendingTriggers"][0]["sourceId"] = %2

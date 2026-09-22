@@ -10,7 +10,9 @@ when not defined(headless):
 when not defined(headless):
   import
     chroma, opengl, pixie, shady, silky, vmath, windy,
-    cardfaces, cardrenderer, vfxrenderer, awmsessions, awmweb, awmbots, paths,
+    cardfaces, cardrenderer, vfxrenderer, awmsessions, awmweb, awmbots, awmpost,
+    awmpostpanel,
+    awmcourtyard, paths,
     polyworld/[assets, characters, chrome, common, viewers]
 
   const
@@ -19,20 +21,35 @@ when not defined(headless):
     BoardDepth = 11.0'f32
     CardWidth = 1.45'f32
     CardDepth = 2.05'f32
-    CardHeight = 0.12'f32
-    CardPlaneY = 0.18'f32
+    CardHeight = 0.06'f32
+    BoardSurfaceY = 0.015'f32 ## Top of the courtyard stone and brass seams.
+    PadSurfaceY = 0.155'f32   ## Top of the deck and discard pads' trim.
+    CardPlaneY = BoardSurfaceY + CardHeight * 0.5'f32
+    PileCardY = PadSurfaceY + CardHeight * 0.5'f32
+    StackStep = 0.03'f32      ## Height between cards in a pile.
+    # The art's opaque silhouette: 590 x 840 of 600 x 850, 31 px corners.
+    CardBodyWidth = CardWidth * 590.0'f32 / 600.0'f32
+    CardBodyDepth = CardDepth * 840.0'f32 / 850.0'f32
+    CardCornerRadius = CardWidth * 31.0'f32 / 600.0'f32
+    CardCornerSegments = 6
+    CardBackSteel = vec4(0.212, 0.263, 0.29, 1) ## back.svg's lightest steel.
     CardMoveDuration = 0.46'f32
     DrawMoveDuration = 0.72'f32
     AttackLungeDuration = 0.22'f32
     AttackReturnDuration = 0.30'f32
-    GameCameraHeight = 14.0'f32
-    GameCameraDistance = 17.0'f32
-    HandCenterY = 0.60'f32
-    ActiveHandDistance = 5.75'f32
-    OpponentHandDistance = 4.35'f32
+    GameCameraHeight = 12.05'f32
+    GameCameraDistance = 13.08'f32
+    GameCameraPitch = 0.7659'f32 # About 44 degrees below the horizon.
+    CameraNear = 0.1'f32
+    CameraFar = 100.0'f32
+    ActiveHandCenterY = 1.25'f32
+    ActiveHandDistance = 5.86'f32
+    OpponentHandCenterY = 1.52'f32
+    OpponentHandDistance = 3.60'f32
+    HandCardRoll = -0.0684'f32 # About 4 degrees.
     HandFanAngle = 0.24'f32
-    PlayerPanelWidth = 500.0'f32
-    PlayerPanelHeight = 170.0'f32
+    PlayerPanelWidth = 680.0'f32
+    PlayerPanelHeight = 140.0'f32
     ShaderTarget =
       when defined(emscripten):
         glsl3WebGL
@@ -58,6 +75,7 @@ when not defined(headless):
       position: Vec3
       yaw: float32
       pitch: float32
+      roll: float32
 
     CardAnimation = object
       card: Card
@@ -98,6 +116,10 @@ when not defined(headless):
   var
     solidViewProjection: Uniform[Mat4]
     solidLightDirection: Uniform[Vec3]
+
+  when PostLayerControls:
+    const PostLayerKeys: array[PostLayer, Button] =
+      [Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9, Key0]
 
   proc solidVertex(
       gl_Position: var Vec4,
@@ -261,17 +283,30 @@ when not defined(headless):
       value.y * sine + value.z * cosine
     )
 
+  proc rotateAroundZ(value: Vec3, angle: float32): Vec3 =
+    let
+      cosine = cos(angle)
+      sine = sin(angle)
+    vec3(
+      value.x * cosine - value.y * sine,
+      value.x * sine + value.y * cosine,
+      value.z
+    )
+
   proc transformCardVector(
       pose: CardPose,
       value: Vec3
   ): Vec3 =
-    rotateAroundX(rotateAroundY(value, pose.yaw), pose.pitch)
+    ## Roll turns the card about its long axis, then yaw and pitch place it.
+    rotateAroundX(rotateAroundY(rotateAroundZ(value, pose.roll), pose.yaw),
+      pose.pitch)
 
   proc inverseCardVector(
       pose: CardPose,
       value: Vec3
   ): Vec3 =
-    rotateAroundY(rotateAroundX(value, -pose.pitch), -pose.yaw)
+    rotateAroundZ(rotateAroundY(rotateAroundX(value, -pose.pitch), -pose.yaw),
+      -pose.roll)
 
   proc cardNormal(pose: CardPose): Vec3 =
     pose.transformCardVector(vec3(0, 1, 0))
@@ -291,7 +326,8 @@ when not defined(headless):
       topColor: Vec4,
       yaw = 0.0'f32,
       sideFactor = 0.62'f32,
-      pitch = 0.0'f32
+      pitch = 0.0'f32,
+      roll = 0.0'f32
   ) =
     let
       h = size * 0.5'f32
@@ -305,7 +341,7 @@ when not defined(headless):
         vec3(h.x, h.y, h.z),
         vec3(-h.x, h.y, h.z)
       ]
-    let pose = CardPose(yaw: yaw, pitch: pitch)
+    let pose = CardPose(yaw: yaw, pitch: pitch, roll: roll)
     var corners: array[8, Vec3]
     for i, corner in localCorners:
       corners[i] = center + pose.transformCardVector(corner)
@@ -330,6 +366,59 @@ when not defined(headless):
       corners[0], corners[3], corners[7], corners[4], west, sideColor)
     renderer.addQuad(
       corners[1], corners[5], corners[6], corners[2], east, sideColor)
+
+  proc addRoundedSlab(
+      renderer: var SolidRenderer,
+      center,
+      size: Vec3,
+      radius: float32,
+      topColor: Vec4,
+      yaw = 0.0'f32,
+      sideFactor = 0.62'f32,
+      pitch = 0.0'f32,
+      roll = 0.0'f32
+  ) =
+    ## A box with rounded vertical edges: a rounded-rectangle outline
+    ## extruded along the pose's up axis. Side normals follow the curve.
+    let
+      h = size * 0.5'f32
+      r = clamp(radius, 0.0'f32, min(h.x, h.z))
+      pose = CardPose(yaw: yaw, pitch: pitch, roll: roll)
+      sideColor = topColor.darker(sideFactor)
+      bottomColor = topColor.darker(sideFactor * 0.72'f32)
+      up = pose.transformCardVector(vec3(0, 1, 0))
+      top = center + up * h.y
+      bottom = center - up * h.y
+    # Corner arcs counterclockwise from +x, +z, as seen from above.
+    var outline, normals: seq[Vec3]
+    for (cx, cz, start) in [(1.0'f32, 1.0'f32, 0.0'f32),
+        (-1.0'f32, 1.0'f32, 0.5'f32), (-1.0'f32, -1.0'f32, 1.0'f32),
+        (1.0'f32, -1.0'f32, 1.5'f32)]:
+      for step in 0 .. CardCornerSegments:
+        let
+          angle = (start + 0.5'f32 * step.float32 /
+            CardCornerSegments.float32) * PI.float32
+          direction = vec3(cos(angle), 0, sin(angle))
+          corner = vec3(cx * (h.x - r), 0, cz * (h.z - r))
+        outline.add pose.transformCardVector(corner + direction * r)
+        normals.add pose.transformCardVector(direction)
+    for i in 0 ..< outline.len:
+      let
+        j = (i + 1) mod outline.len
+        a = outline[i]
+        b = outline[j]
+      renderer.addVertex(top, up, topColor)
+      renderer.addVertex(top + a, up, topColor)
+      renderer.addVertex(top + b, up, topColor)
+      renderer.addVertex(bottom, -up, bottomColor)
+      renderer.addVertex(bottom + b, -up, bottomColor)
+      renderer.addVertex(bottom + a, -up, bottomColor)
+      renderer.addVertex(bottom + a, normals[i], sideColor)
+      renderer.addVertex(top + a, normals[i], sideColor)
+      renderer.addVertex(top + b, normals[j], sideColor)
+      renderer.addVertex(bottom + a, normals[i], sideColor)
+      renderer.addVertex(top + b, normals[j], sideColor)
+      renderer.addVertex(bottom + b, normals[j], sideColor)
 
   proc draw(
       renderer: var SolidRenderer,
@@ -397,6 +486,29 @@ when not defined(headless):
 
   var activeCameraPlayer: int = 0
 
+  when defined(awmLayoutTuning):
+    # Build with -d:awmLayoutTuning to tune the layout live:
+    # Q/A, S/W, Y/H, U/J, I/K, E/D, R/F, T/G, and Enter prints the values.
+    var
+      cameraHeight = GameCameraHeight
+      cameraDistance = GameCameraDistance
+      cameraPitch = GameCameraPitch
+      activeHandHeight = ActiveHandCenterY
+      activeHandDistance = ActiveHandDistance
+      opponentHandHeight = OpponentHandCenterY
+      opponentHandDistance = OpponentHandDistance
+      handCardRoll = HandCardRoll
+  else:
+    const
+      cameraHeight = GameCameraHeight
+      cameraDistance = GameCameraDistance
+      cameraPitch = GameCameraPitch
+      activeHandHeight = ActiveHandCenterY
+      activeHandDistance = ActiveHandDistance
+      opponentHandHeight = OpponentHandCenterY
+      opponentHandDistance = OpponentHandDistance
+      handCardRoll = HandCardRoll
+
   proc seatSide(playerIndex: int): float32 =
     if playerIndex == 0: 1.0'f32 else: -1.0'f32
 
@@ -427,15 +539,17 @@ when not defined(headless):
       side = playerIndex.seatSide()
       z = side * (
         if side == cameraSide:
-          ActiveHandDistance
+          activeHandDistance
         else:
-          OpponentHandDistance
+          opponentHandDistance
       )
-      center = vec3(0, HandCenterY, z)
+      handY =
+        if side == cameraSide: activeHandHeight else: opponentHandHeight
+      center = vec3(0, handY, z)
       # The near and far hands need different pitches to face the same camera.
       pitch = arctan2(
-        cameraSide * GameCameraDistance - z,
-        GameCameraHeight - HandCenterY
+        cameraSide * cameraDistance - z,
+        cameraHeight - handY
       )
       fanRadius =
         if middle > 0:
@@ -467,7 +581,8 @@ when not defined(headless):
           rotateAroundX(vec3(0, i.float32 * 0.003'f32, 0), pitch),
         # Keep the card's width tangent to the fan circle.
         yaw: playerIndex.cardYaw() + cameraSide * angle,
-        pitch: pitch
+        pitch: pitch,
+        roll: handCardRoll
       )
 
   proc boardPoses(playerIndex, count: int): seq[CardPose] =
@@ -492,7 +607,7 @@ when not defined(headless):
     CardPose(
       position: vec3(
         -7.25,
-        CardPlaneY,
+        PileCardY,
         playerIndex.seatSide() * 3.7'f32
       ),
       yaw: playerIndex.cardYaw()
@@ -502,30 +617,16 @@ when not defined(headless):
     CardPose(
       position: vec3(
         7.25,
-        CardPlaneY,
+        PileCardY,
         playerIndex.seatSide() * 3.7'f32
       ),
       yaw: playerIndex.cardYaw()
     )
 
-  proc addDeckZone(
-      renderer: var SolidRenderer,
-      playerIndex: int,
-      heroClass: HeroClass
-  ) =
-    let pose = deckPose(playerIndex)
-    renderer.addBox(
-      vec3(pose.position.x, 0.035'f32, pose.position.z),
-      vec3(CardWidth + 0.48'f32, 0.07'f32, CardDepth + 0.55'f32),
-      heroClass.classColor().darker(0.34'f32),
-      pose.yaw,
-      0.48'f32
-    )
-
   proc stackTopPose(pose: CardPose, count: int): CardPose =
     result = pose
     result.position.y +=
-      max(0, min(count, 7) - 1).float32 * 0.035'f32
+      max(0, min(count, 7) - 1).float32 * StackStep
 
   proc addCard(
       renderer: var SolidRenderer,
@@ -554,15 +655,18 @@ when not defined(headless):
       edgeColor =
         if targetable: vec4(0.9, 0.04, 0.07, 1)
         elif hovered: vec4(0.92, 0.78, 0.48, 1)
-        else: vec4(0.16, 0.13, 0.095, 1)
+        else: CardBackSteel
       rim = if hovered or targetable: 0.09'f32 else: 0.0'f32
-    renderer.addBox(
+    # The body ends where the art's opaque silhouette does, corners included.
+    renderer.addRoundedSlab(
       raised,
-      vec3(CardWidth + rim, CardHeight, CardDepth + rim),
+      vec3(CardBodyWidth + rim, CardHeight, CardBodyDepth + rim),
+      CardCornerRadius + rim * 0.5'f32,
       edgeColor,
       pose.yaw,
-      0.55,
-      pose.pitch
+      0.85,
+      pose.pitch,
+      pose.roll
     )
     let
       halfWidth = CardWidth * 0.5'f32
@@ -602,7 +706,7 @@ when not defined(headless):
       pose.transformCardVector(vec3(1, 0, 0)),
       pose.transformCardVector(vec3(0, 0, 1)), vec2(CardWidth, CardDepth),
       (if targeting: TargetRed else: HoverGold),
-      pulse * (if hovered: 1.15'f32 else: 0.28'f32))
+      pulse * (if hovered: 0.2875'f32 else: 0.28'f32))
 
   proc addCardStack(
       renderer: var SolidRenderer,
@@ -616,7 +720,7 @@ when not defined(headless):
   ) =
     for i in 0 ..< min(count, 7):
       var cardPose = pose
-      cardPose.position.y += i.float32 * 0.035'f32
+      cardPose.position.y += i.float32 * StackStep
       renderer.addCard(
         faces, sk, cardPose, heroClass, hidden, true, false, card = card
       )
@@ -743,6 +847,9 @@ when not defined(headless):
     result.pitch =
       animation.fromPose.pitch +
       (animation.toPose.pitch - animation.fromPose.pitch) * eased
+    result.roll =
+      animation.fromPose.roll +
+      (animation.toPose.roll - animation.fromPose.roll) * eased
 
   proc advanceAnimations(
       animations: var seq[CardAnimation],
@@ -1053,43 +1160,6 @@ when not defined(headless):
         return model.clipIndex(name)
     0
 
-  proc drawButton(
-      sk: Silky,
-      window: Window,
-      rect: UiRect,
-      label: string,
-      accent: ColorRGBX,
-      enabled = true
-  ): bool =
-    let hovered = rect.contains(sk.mousePos)
-    let fill =
-      if not enabled:
-        rgbx(64, 67, 76, 245)
-      elif hovered:
-        accent
-      else:
-        rgbx(
-          (accent.r.int * 3 div 5).uint8,
-          (accent.g.int * 3 div 5).uint8,
-          (accent.b.int * 3 div 5).uint8,
-          245
-        )
-    sk.drawRect(rect.origin, rect.size, rgbx(19, 22, 30, 245))
-    sk.drawRect(
-      rect.origin + vec2(3),
-      rect.size - vec2(6),
-      fill
-    )
-    sk.drawLabel(
-      label,
-      rect.origin,
-      rect.size,
-      rgbx(248, 248, 244, 255),
-      "Default",
-      CenterAlign
-    )
-    enabled and hovered and window.buttonPressed[MouseLeft]
-
   proc hudScale(window: Window): float32 =
     let density = when defined(emscripten): window.contentScale else: 1.0'f32
     min(density, min(window.size.x.float32 / 2400.0'f32,
@@ -1098,70 +1168,12 @@ when not defined(headless):
   proc hudSize(window: Window): Vec2 =
     window.size.vec2 / max(hudScale(window), 0.01'f32)
 
-  proc finishRect(window: Window): UiRect =
-    UiRect(
-      origin: vec2(hudSize(window).x - 278, hudSize(window).y - 102),
-      size: vec2(248, 70)
-    )
+  include awmhud
 
-  proc drawPlayerPanel(
-      sk: Silky,
-      window: Window,
-      game: GameState,
-      playerIndex: int
-  ) =
-    let
-      width = PlayerPanelWidth
-      origin =
-        if playerIndex == 0:
-          vec2(28, 24)
-        else:
-          vec2(hudSize(window).x - width - 28, 24)
-      rect = UiRect(
-        origin: origin,
-        size: vec2(width, PlayerPanelHeight)
-      )
-      player = game.players[playerIndex]
-      active = playerIndex == game.currentPlayer
-      accent = player.heroClass.classUiColor()
-    sk.drawRect(
-      rect.origin,
-      rect.size,
-      if active: rgbx(29, 33, 45, 248) else: rgbx(18, 21, 29, 232)
-    )
-    sk.drawRect(
-      rect.origin,
-      vec2(rect.size.x, 5),
-      if active: accent else: rgbx(73, 77, 88, 255)
-    )
-    sk.drawLabel(
-      &"PLAYER {playerIndex + 1} | {player.heroClass.className()}",
-      rect.origin + vec2(18, 12),
-      vec2(rect.size.x - 36, 44),
-      accent,
-      "Default"
-    )
-    sk.drawLabel(
-      &"LIFE  {player.life}",
-      rect.origin + vec2(18, 62),
-      vec2(140, 38),
-      rgbx(240, 102, 100, 255),
-      "Hud"
-    )
-    sk.drawLabel(
-      &"ENERGY  {player.energy}/{player.totalEnergy}",
-      rect.origin + vec2(180, 62),
-      vec2(290, 38),
-      rgbx(108, 175, 247, 255),
-      "Hud"
-    )
-    sk.drawLabel(
-      &"Deck {player.deck.len}   Hand {player.hand.len}   Board {player.board.len}   Discard {player.discardPile.len}",
-      rect.origin + vec2(18, 116),
-      vec2(rect.size.x - 36, 34),
-      rgbx(190, 194, 204, 255),
-      "Small"
-    )
+  proc cardReadingRect(window: Window): UiRect =
+    let height = max(120'f32, min(850'f32, hudSize(window).y - 360))
+    UiRect(origin: vec2(28, 198),
+      size: vec2(height * CardFaceWidth.float32 / CardFaceHeight.float32, height))
 
   proc drawCardReadingView(
       sk: Silky,
@@ -1172,11 +1184,10 @@ when not defined(headless):
       hoverIndex: int,
       hidden: bool,
       dying: openArray[DyingMinion] = [],
-      canPlayCards = true,
       discardFlights: openArray[CardAnimation] = [],
       queued: openArray[VisualEvent] = [],
       handOwner = -1
-  ) =
+  ): bool =
     ## The large preview of the hovered card: in hand, on the board, or on
     ## top of a discard pile.
     if hidden:
@@ -1186,8 +1197,6 @@ when not defined(headless):
       power = -1
       toughness = -1
       lost: set[Keyword]
-      onBoard = false
-      inDiscard = false
       found = false
     let
       owner = if handOwner >= 0: handOwner else: game.currentPlayer
@@ -1212,7 +1221,6 @@ when not defined(headless):
             continue
           nearest = offset
           card = minion.card
-          onBoard = true
           found = true
           if card.kind == Minion:
             power = minion.power
@@ -1236,7 +1244,6 @@ when not defined(headless):
           if shown > 0 and mouseHitsCard(window, viewProjection,
               stackTopPose(discardPose(owner), shown)):
             card = pile[shown - 1]
-            inDiscard = true
             found = true
     when defined(takeScreenshot):
       if getEnv("AWM_DEMO_CARD_HOVER") == "1" and player.hand.len > 0:
@@ -1245,53 +1252,43 @@ when not defined(headless):
     if not found:
       return
     let
-      height = max(120.0'f32, min(850.0'f32, hudSize(window).y - 360.0'f32))
-      size = vec2(height * CardFaceWidth.float32 / CardFaceHeight.float32, height)
-      origin = vec2(32, 220)
+      rect = cardReadingRect(window)
+      size = rect.size
+      origin = rect.origin
       liveStats = toughness >= 0
       imageKey = sk.bakedCardImage(card)
-    sk.drawRect(origin + vec2(8, 12), size, rgbx(0, 0, 0, 165))
     sk.drawCardImage(imageKey, origin, size)
     if liveStats:
       sk.drawMinionOverlays(card, power, toughness, lost, origin, size)
-    sk.drawLabel(
-      if onBoard: "ON THE BATTLEFIELD"
-      elif inDiscard: "IN THE DISCARD PILE"
-      elif card.energyCost > player.energy: "NOT ENOUGH ENERGY"
-      elif canPlayCards: "CLICK THE CARD IN YOUR HAND TO PLAY"
-      else: "IN HAND",
-      origin + vec2(0, size.y + 12),
-      vec2(size.x, 34),
-      rgbx(215, 199, 158, 255),
-      "Small",
-      CenterAlign
-    )
+    result = true
 
   proc drawDeckLabels(
       sk: Silky,
       window: Window,
       game: GameState,
-      viewProjection: Mat4
+      viewProjection: Mat4,
+      inspectingCard: bool
   ) =
     for playerIndex in 0 ..< PlayerCount:
-      let screen = screenPosition(
-        window,
-        deckPose(playerIndex).position + vec3(0, 0.28'f32, 0),
-        viewProjection
-      ) / hudScale(window)
-      let rect = UiRect(
-        origin: screen + vec2(-58, -17),
-        size: vec2(116, 30)
-      )
-      sk.drawRect(rect.origin, rect.size, rgbx(12, 15, 20, 225))
-      sk.drawLabel(
-        &"DECK {game.players[playerIndex].deck.len}",
-        rect.origin,
-        rect.size,
-        game.players[playerIndex].heroClass.classUiColor(),
-        "Small",
-        CenterAlign
-      )
+      for discarded in [false, true]:
+        let
+          pose = if discarded: discardPose(playerIndex) else: deckPose(playerIndex)
+          screen = screenPosition(window,
+            pose.position + vec3(0, 0.28'f32, 0), viewProjection) / hudScale(window)
+          count = if discarded: game.players[playerIndex].discardPile.len
+            else: game.players[playerIndex].deck.len
+          origin = screen + vec2(-77, -22)
+          inspector = cardReadingRect(window)
+        # Hide a whole label when the inspector covers it, rather than
+        # leaving a cropped fragment beside the card.
+        if inspectingCard and origin.x < inspector.origin.x + inspector.size.x and
+            origin.x + 154 > inspector.origin.x and
+            origin.y < inspector.origin.y + inspector.size.y and
+            origin.y + 44 > inspector.origin.y:
+          continue
+        sk.hudSprite("pile-label", origin, vec2(154, 44))
+        sk.drawLabel((if discarded: "DISCARD " else: "DECK ") & $count,
+          origin + vec2(5, 0), vec2(144, 44), HudIvory, "Small", CenterAlign)
 
   proc runAwm*() =
     if "--help" in commandLineParams() or "-h" in commandLineParams():
@@ -1320,7 +1317,12 @@ when not defined(headless):
       atlasBuilder = newHudAtlas(4096)
     initCardAssets(cardAssets)
     atlasBuilder.addBaseCardImages()
-    atlasBuilder.addFont(BoldFontPath, "H1", 60.0)
+    atlasBuilder.addAwmHudAssets(cardAssets)
+    when PostPanelControls:
+      # Silky's widget images, for the screen-effects tuning window.
+      const EditorTheme = DataRoot & "/themes/editor/"
+      atlasBuilder.addDir(EditorTheme, EditorTheme)
+    atlasBuilder.addFont(cardAssets / "fonts/Grenze-SemiBold.ttf", "H1", 60.0)
     atlasBuilder.addFont(DefaultFontPath, "Default", 34.5)
     atlasBuilder.addFont(DefaultFontPath, "Hud", 28.5)
     atlasBuilder.addFont(DefaultFontPath, "Small", 22.5)
@@ -1339,6 +1341,8 @@ when not defined(headless):
       solid = initSolidRenderer()
       cardSurfaces = initCardRenderer()
       vfx = initVfxRenderer(cardAssets.parentDir / "vfx" / "textures")
+      post = initPostFx()
+    let courtyard = initCourtyardRenderer()
     let scene = newCharacterScene(window)
     scene.useToonShading()
     var
@@ -1394,6 +1398,11 @@ when not defined(headless):
     var
       botVms: array[PlayerCount, BotVm]
       seedRng = initRand()
+      uiCapturesMouse = false  ## The pointer is over a tuning window.
+
+    template gamePressed(button: Button): bool =
+      ## A press the board should react to (not one meant for a window).
+      window.buttonPressed[button] and not uiCapturesMouse
 
     proc gameSeed(): int64 =
       ## --seed replays one deal; otherwise every game gets a fresh one.
@@ -1692,6 +1701,19 @@ when not defined(headless):
           game.players[0].totalEnergy = 2
           if game.playCard(0):
             statusMessage = "Demo: Study."
+        if getEnv("AWM_DEMO_BUBBLE") == "1":
+          # Player 2's Bear attacks player 1's hero, guarded by two Bubbles.
+          animations.setLen(0)
+          game.players[0].heroClass = Mage
+          for id in [5, 6]:
+            game.players[0].board.add MinionState(id: id, owner: 0,
+              card: baseCard("bubble-0"), enteredTurn: game.turnNumber)
+          game.nextMinionId = 7
+          game.players[1].board = @[MinionState(id: 2, owner: 1,
+            card: Warrior.classCard(), currentToughness: 2, canAttack: true)]
+          game.players[1].hand.setLen(0)
+          game.currentPlayer = 1
+          statusMessage = "Demo: Bubble."
         if getEnv("AWM_DEMO_PRIMORDIAL") == "1":
           # Primordial returns every other card, Plan included, to its
           # owner's hand (see AWM_DEMO_ENEMY_BOARD for the other side).
@@ -1700,7 +1722,7 @@ when not defined(headless):
           game.players[0].board.add MinionState(id: 5, owner: 0,
             card: baseCard("plan-3"), enteredTurn: game.turnNumber)
           game.nextMinionId = max(game.nextMinionId, 6)
-          game.players[0].hand = @[baseCard("primordial-10")]
+          game.players[0].hand = @[baseCard("primordial-8")]
           game.players[0].energy = 10
           game.players[0].totalEnergy = 10
           if game.playCard(0):
@@ -1741,6 +1763,38 @@ when not defined(headless):
 
     window.onFrame = proc() =
       let dt = frameDelta(lastFrameTime)
+      when defined(awmLayoutTuning):
+        # Provisional controls for dialing in the camera and opponent hand.
+        let
+          down = window.buttonDown
+          move = 3.0'f32 * dt
+          turn = 0.35'f32 * dt
+        if down[KeyQ]: opponentHandHeight += move
+        if down[KeyA]: opponentHandHeight -= move
+        if down[KeyS]: opponentHandDistance += move
+        if down[KeyW]: opponentHandDistance -= move
+        if down[KeyY]: activeHandHeight += move
+        if down[KeyH]: activeHandHeight -= move
+        if down[KeyU]: activeHandDistance -= move
+        if down[KeyJ]: activeHandDistance += move
+        if down[KeyI]: handCardRoll += turn
+        if down[KeyK]: handCardRoll -= turn
+        if down[KeyE]: cameraHeight += move
+        if down[KeyD]: cameraHeight -= move
+        if down[KeyR]: cameraDistance -= move
+        if down[KeyF]: cameraDistance += move
+        if down[KeyT]: cameraPitch += turn
+        if down[KeyG]: cameraPitch -= turn
+        if window.buttonPressed[KeyEnter]:
+          echo &"""
+    GameCameraHeight = {cameraHeight:.2f}'f32
+    GameCameraDistance = {cameraDistance:.2f}'f32
+    GameCameraPitch = {cameraPitch:.4f}'f32 # {radToDeg(cameraPitch):.1f} deg down
+    ActiveHandCenterY = {activeHandHeight:.2f}'f32
+    ActiveHandDistance = {activeHandDistance:.2f}'f32
+    OpponentHandCenterY = {opponentHandHeight:.2f}'f32
+    OpponentHandDistance = {opponentHandDistance:.2f}'f32
+    HandCardRoll = {handCardRoll:.4f}'f32 # {radToDeg(handCardRoll):.1f} deg"""
       activeCameraPlayer = cameraPlayer()
       animationTime += dt
       animations.advanceAnimations(dt)
@@ -1748,6 +1802,8 @@ when not defined(headless):
       activeVfx.advance(dt)
       sk.uiScale = hudScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
+      when PostPanelControls:
+        uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
 
       if phase == ChooseClasses and not sessionOptions.human:
         botClassWait -= dt
@@ -1895,16 +1951,20 @@ when not defined(headless):
           else:
             vec3(
               0,
-              GameCameraHeight,
-              GameCameraDistance * currentSide
+              cameraHeight,
+              cameraDistance * currentSide
             )
         cameraTarget =
           if phase == ChooseClasses:
             vec3(0, 1.0, 0)
           else:
-            vec3(0, 0, 0)
+            cameraEye + vec3(
+              0,
+              -sin(cameraPitch),
+              -cos(cameraPitch) * currentSide
+            )
         view = lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
-        projection = perspective(42.0'f32, aspect, 0.1'f32, 100.0'f32)
+        projection = perspective(42.0'f32, aspect, CameraNear, CameraFar)
         viewProjection = projection * view
 
       var
@@ -1932,10 +1992,10 @@ when not defined(headless):
             not game.gameOver:
           let pending = game.pendingToss
           if window.buttonPressed[KeyEscape] or
-              window.buttonPressed[MouseRight]:
+              gamePressed(MouseRight):
             tossPicks.setLen(0)
             statusMessage = "Discard picks cleared."
-          elif window.buttonPressed[MouseLeft] and hoverIndex >= 0:
+          elif gamePressed(MouseLeft) and hoverIndex >= 0:
             let at = tossPicks.find(hoverIndex)
             if at >= 0:
               tossPicks.delete(at)
@@ -1951,7 +2011,7 @@ when not defined(headless):
         elif humanTurn() and presentationIdle() and
             not pendingTargeting and not attackActive and not game.gameOver:
           if hoverIndex >= 0 and
-              window.buttonPressed[MouseLeft] and
+              gamePressed(MouseLeft) and
               not finishRect(window).contains(sk.mousePos):
             let
               player = game.players[game.currentPlayer]
@@ -2055,7 +2115,7 @@ when not defined(headless):
                   statusMessage =
                     &"{card.name} resolves and is discarded."
                   hoverIndex = -1
-          elif window.buttonPressed[MouseLeft] and
+          elif gamePressed(MouseLeft) and
               not finishRect(window).contains(sk.mousePos):
             let
               attackable =
@@ -2087,7 +2147,7 @@ when not defined(headless):
               else:
                 statusMessage = "That minion can't attack this turn."
           elif selectedAttacker != 0 and
-              (window.buttonPressed[MouseRight] or
+              (gamePressed(MouseRight) or
                 window.buttonPressed[KeyEscape]):
             selectedAttacker = 0
             statusMessage = "Attack canceled."
@@ -2106,11 +2166,11 @@ when not defined(headless):
               if pendingTrigger: game.waitingTriggerRules().rules
               else: card.rules
           if pendingTrigger and (window.buttonPressed[KeyEscape] or
-              window.buttonPressed[MouseRight]):
+              gamePressed(MouseRight)):
             statusMessage =
               &"{card.name}'s trigger can't be canceled: choose a target."
           elif window.buttonPressed[KeyEscape] or
-              window.buttonPressed[MouseRight]:
+              gamePressed(MouseRight):
             if card.kind != Spell:
               discard game.runMinionRules(card, NoTarget)
               statusMessage =
@@ -2120,7 +2180,7 @@ when not defined(headless):
             pendingTargeting = false
             pendingCardIndex = -1
             pendingChoices.setLen(0)
-          elif window.buttonPressed[MouseLeft] and
+          elif gamePressed(MouseLeft) and
               not finishRect(window).contains(sk.mousePos):
             var selectedChoice = hoveredTarget
             if selectedChoice.isCanceled and
@@ -2373,18 +2433,6 @@ when not defined(headless):
             sideFactor = 0.55
           )
       else:
-        solid.addBox(
-          vec3(0, -0.32, 0),
-          vec3(BoardWidth, 0.64, BoardDepth),
-          vec4(0.20, 0.27, 0.25, 1),
-          sideFactor = 0.42
-        )
-        solid.addBox(
-          vec3(0, 0.015, 0),
-          vec3(0.16, 0.03, BoardDepth - 0.5),
-          vec4(0.73, 0.55, 0.20, 1),
-          sideFactor = 0.8
-        )
         for playerIndex in 0 ..< PlayerCount:
           let
             player = game.players[playerIndex]
@@ -2392,7 +2440,6 @@ when not defined(headless):
               animations.discardCardsSuppressed(playerIndex) +
               discardFlights.discardCardsSuppressed(playerIndex) +
               dyingDiscards(playerIndex)
-          solid.addDeckZone(playerIndex, player.heroClass)
           solid.addCardStack(
             cardSurfaces, sk,
             deckPose(playerIndex),
@@ -2564,10 +2611,20 @@ when not defined(headless):
             )
             vfx.addCardGlow(atkPose, true, true, true, animationTime)
 
+      if window.buttonPressed[KeyF8]:
+        post.settings.enabled = not post.settings.enabled
+      when PostLayerControls:
+        for layer in PostLayer:
+          if window.buttonPressed[PostLayerKeys[layer]]:
+            post.layer = layer
+            post.settings.enabled = true
+      post.beginScene(window.size, CameraNear, CameraFar)
       glClearColor(0.035, 0.045, 0.065, 1)
       glStencilMask(0xff)
       glClearStencil(0)
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+      if phase == PlayGame:
+        courtyard.draw(viewProjection, cameraEye, animationTime, currentSide)
       solid.draw(viewProjection)
       cardSurfaces.draw(sk, viewProjection)
 
@@ -2647,6 +2704,7 @@ when not defined(headless):
           )
       finishCharacters(scene)
       glDisable(GL_STENCIL_TEST)
+      post.applyOcclusion(projection)
       if phase == PlayGame:
         for playerIndex in 0 ..< PlayerCount:
           vfx.drawCharacterFlash(playerIndex + 1,
@@ -2657,6 +2715,7 @@ when not defined(headless):
             cameraEye, 0.95, 0.8'f32)
         vfx.addEffects(activeVfx, cameraEye)
         vfx.draw(viewProjection)
+      post.present(window.size)
 
       glDisable(GL_DEPTH_TEST)
       glDisable(GL_CULL_FACE)
@@ -2667,6 +2726,14 @@ when not defined(headless):
       glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
       sk.beginUi(window, window.size)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
+      when PostLayerControls:
+        if post.settings.enabled and post.layer != FinalLayer:
+          sk.drawLabel(
+            &"Layer {(post.layer.ord + 1) mod 10}: {post.layer}" &
+              (if post.layerAvailable(): "" else: " (effect off)") &
+              ". Press 1 for the final image.",
+            vec2(32, hudSize(window).y - 110), vec2(1200, 42),
+            HudIvory, "Small")
 
       if phase == ChooseClasses:
         sk.drawRect(
@@ -2704,8 +2771,7 @@ when not defined(headless):
                 sk,
                 window,
                 rect,
-                heroClass.className(),
-                heroClass.classUiColor()
+                heroClass.className()
             ):
               selectedClass = heroClass
               game = newGame(
@@ -2728,31 +2794,10 @@ when not defined(headless):
               else:
                 statusMessage = "Your opponent is thinking..."
       else:
-        drawPlayerPanel(sk, window, game, 0)
-        drawPlayerPanel(sk, window, game, 1)
-        sk.drawLabel(
-          &"TURN {game.turnNumber} | PLAYER {game.currentPlayer + 1}",
-          vec2(PlayerPanelWidth + 58, 31),
-          vec2(
-            hudSize(window).x - (PlayerPanelWidth + 58) * 2,
-            42
-          ),
-          game.players[game.currentPlayer].heroClass.classUiColor(),
-          "Default",
-          CenterAlign
-        )
-        sk.drawLabel(
-          statusMessage,
-          vec2(PlayerPanelWidth + 58, 79),
-          vec2(
-            hudSize(window).x - (PlayerPanelWidth + 58) * 2,
-            32
-          ),
-          rgbx(205, 209, 219, 255),
-          "Small",
-          CenterAlign
-        )
-        drawCardReadingView(
+        drawPlayerPanel(sk, window, game, 0, sessionOptions.human, animationTime)
+        drawPlayerPanel(sk, window, game, 1, sessionOptions.human, animationTime)
+        drawTurnHeader(sk, window, game, sessionOptions.human, statusMessage)
+        let inspectingCard = drawCardReadingView(
           sk,
           window,
           game,
@@ -2763,10 +2808,9 @@ when not defined(headless):
           dying = dyingMinions,
           discardFlights = discardFlights,
           queued = queuedEvents,
-          handOwner = if tossPicking: game.pendingToss.player else: -1,
-          canPlayCards = humanTurn()
+          handOwner = if tossPicking: game.pendingToss.player else: -1
         )
-        drawDeckLabels(sk, window, game, viewProjection)
+        drawDeckLabels(sk, window, game, viewProjection, inspectingCard)
         sk.drawLabel(
           if attackActive:
             "Minions are attacking..."
@@ -2775,35 +2819,35 @@ when not defined(headless):
           elif tossPicking:
             "Click cards in your hand to discard them."
           elif pendingTargeting and pendingTrigger:
-            "Select a highlighted target in the 3D world, or the empty board for none."
+            "Choose a highlighted target, or the empty board for none."
           elif pendingTargeting and pendingCard.kind != Spell:
-            "Select a highlighted target in the 3D world. Right-click: no target."
+            "Choose a highlighted target. Right-click for no target."
           elif pendingTargeting:
-            "Select a highlighted target in the 3D world. Right-click cancels."
+            "Choose a highlighted target. Right-click cancels."
           elif sessionOptions.human:
-            "YOUR GAME | You are Player 1 | Your opponent is a bot"
+            "Hover to inspect a card. Select a card to play."
           else:
             "Hover to inspect a card.",
-          vec2(30, hudSize(window).y - 88),
-          vec2(640, 36),
-          rgbx(186, 190, 201, 255),
+          vec2(32, hudSize(window).y - 66),
+          vec2(820, 42),
+          HudMuted,
           "Small"
         )
-        let finish = finishRect(window)
-        if drawButton(
-            sk,
-            window,
-            finish,
-            (if not humanTurn(): "OPPONENT" else: "FINISH TURN"),
-            rgbx(179, 126, 46, 255),
-            enabled =
-              humanTurn() and
-              not game.waitingChoice and
-              not pendingTargeting and
-              not attackActive and
-              not game.gameOver and
-              presentationIdle()
-        ):
+        let
+          finish = finishRect(window)
+          canFinish = humanTurn() and not game.waitingChoice and
+            not pendingTargeting and not attackActive and not game.gameOver and
+            presentationIdle()
+          finishClicked = drawButton(sk, window, finish,
+            (if game.gameOver: "MATCH ENDED"
+             elif not humanTurn(): "OPPONENT"
+             else: "END TURN"), enabled = canFinish)
+          finishShortcut = when defined(awmLayoutTuning): false
+            else: window.buttonPressed[KeyEnter]
+        sk.drawLabel(if canFinish: "Press Enter" else: "",
+          finish.origin + vec2(0, finish.size.y + 6), vec2(finish.size.x, 32),
+          HudMuted, "Small", CenterAlign)
+        if finishClicked or (canFinish and finishShortcut):
           selectedAttacker = 0
           game.finishTurn()
           botWait = 1.2'f32
@@ -2816,25 +2860,24 @@ when not defined(headless):
         if tossPicking:
           let
             pending = game.pendingToss
-            accent = game.players[pending.player].heroClass.classUiColor()
+            accent = HudClassInk[game.players[pending.player].heroClass]
             ask =
               if pending.count == 1: "Choose a card to discard."
               else: &"Choose {pending.count} cards to discard " &
                 &"({tossPicks.len} of {pending.count} chosen)."
             banner = UiRect(
-              origin: vec2(hudSize(window).x * 0.5'f32 - 430, 204),
+              origin: vec2(hudSize(window).x * 0.5'f32 - 430, HudHelperY),
               size: vec2(860, 112)
             )
-          sk.drawRect(banner.origin, banner.size, rgbx(18, 21, 30, 244))
-          sk.drawRect(banner.origin, vec2(banner.size.x, 5), accent)
+          sk.drawHudNotice(banner)
           sk.drawLabel(ask, banner.origin + vec2(22, 10),
-            vec2(banner.size.x - 44, 30), accent, "Hud", CenterAlign)
+            vec2(banner.size.x - 44, 30), accent, "Prompt", CenterAlign)
           sk.drawLabel(&"{pending.source}: {pending.text}",
             banner.origin + vec2(22, 46), vec2(banner.size.x - 44, 28),
-            rgbx(216, 220, 230, 255), "Small", CenterAlign)
+            HudIvory, "Small", CenterAlign)
           sk.drawLabel("Click cards in your hand. Right-click clears your picks.",
             banner.origin + vec2(22, 76), vec2(banner.size.x - 44, 28),
-            rgbx(160, 166, 180, 255), "Small", CenterAlign)
+            HudMuted, "Small", CenterAlign)
 
         if pendingTargeting:
           let
@@ -2848,7 +2891,7 @@ when not defined(headless):
             # a minion."
             prompt = rules.targetPrompt(card, step)
             accent =
-              game.players[game.actingPlayer()].heroClass.classUiColor()
+              HudClassInk[game.players[game.actingPlayer()].heroClass]
             progress = if count > 1: &" ({step + 1} of {count})" else: ""
             source = if pendingTrigger: &"{card.name}'s trigger" else: card.name
             hint =
@@ -2861,25 +2904,24 @@ when not defined(headless):
             banner = UiRect(
               origin: vec2(
                 hudSize(window).x * 0.5'f32 - 430,
-                204
+                HudHelperY
               ),
               size: vec2(860, 112)
             )
-          sk.drawRect(banner.origin, banner.size, rgbx(18, 21, 30, 244))
-          sk.drawRect(banner.origin, vec2(banner.size.x, 5), accent)
+          sk.drawHudNotice(banner)
           sk.drawLabel(
             prompt.choose & progress,
             banner.origin + vec2(22, 10),
             vec2(banner.size.x - 44, 30),
             accent,
-            "Hud",
+            "Prompt",
             CenterAlign
           )
           sk.drawLabel(
             &"{source}: {prompt.rule}",
             banner.origin + vec2(22, 46),
             vec2(banner.size.x - 44, 28),
-            rgbx(216, 220, 230, 255),
+            HudIvory,
             "Small",
             CenterAlign
           )
@@ -2887,7 +2929,7 @@ when not defined(headless):
             hint,
             banner.origin + vec2(22, 76),
             vec2(banner.size.x - 44, 28),
-            rgbx(160, 166, 180, 255),
+            HudMuted,
             "Small",
             CenterAlign
           )
@@ -2895,32 +2937,31 @@ when not defined(headless):
         if selectedAttacker != 0 and not pendingTargeting:
           let
             accent =
-              game.players[game.currentPlayer].heroClass.classUiColor()
+              HudClassInk[game.players[game.currentPlayer].heroClass]
             instruction =
               if attackActive: "Attacking!"
               else: "Click an enemy minion or hero. Right-click cancels."
             banner = UiRect(
               origin: vec2(
                 hudSize(window).x * 0.5'f32 - 430,
-                204
+                HudHelperY
               ),
               size: vec2(860, 84)
             )
-          sk.drawRect(banner.origin, banner.size, rgbx(18, 21, 30, 244))
-          sk.drawRect(banner.origin, vec2(banner.size.x, 5), accent)
+          sk.drawHudNotice(banner)
           sk.drawLabel(
             "COMBAT",
             banner.origin + vec2(22, 10),
             vec2(banner.size.x - 44, 30),
             accent,
-            "Hud",
+            "Prompt",
             CenterAlign
           )
           sk.drawLabel(
             instruction,
             banner.origin + vec2(22, 46),
             vec2(banner.size.x - 44, 28),
-            rgbx(216, 220, 230, 255),
+            HudIvory,
             "Small",
             CenterAlign
           )
@@ -2943,11 +2984,7 @@ when not defined(headless):
                 hudSize(window).x * 0.5'f32 - 380,
                 hudSize(window).y * 0.5'f32 - 80),
               size: vec2(760, 160))
-          sk.drawRect(overlay.origin - vec2(4), overlay.size + vec2(8),
-            rgbx(0, 0, 0, 180))
-          sk.drawRect(overlay.origin, overlay.size, rgbx(14, 17, 24, 250))
-          sk.drawRect(overlay.origin, vec2(overlay.size.x, 6),
-            winnerAccent)
+          sk.drawHudNotice(overlay)
           sk.drawLabel(
             winnerText,
             overlay.origin + vec2(0, 18),
@@ -2977,6 +3014,8 @@ when not defined(headless):
             summary.add " Ready for your action."
         publishStatus(summary.cstring)
 
+      when PostPanelControls:
+        drawPostPanel(sk, window, post)
       sk.endUi()
       when defined(takeScreenshot):
         if existsEnv("AWM_CAPTURE_SEQUENCE"):

@@ -21,6 +21,38 @@ nim c -o:awm awm.nim
 
 Bot vs bot ignores `--class`/`--opponent` and picks randomly.
 
+Build with `-d:awmLayoutTuning` to tune the camera and opponent hand live:
+Q/A raise/lower the opponent hand, S/W push it away/pull it closer, Y/H raise/lower
+your hand, U/J push it away/pull it closer, I/K turn cards in hand about their
+long axis, E/D raise/lower
+the camera, R/F move it in/out, T/G pitch it down/up, and Enter prints the values
+to paste into `awm.nim`.
+
+### Screen effects
+
+`awmpost.nim` renders the 3D scene offscreen and adds screen-space ambient
+occlusion (before the VFX), bloom from the light the VFX add, FXAA, a light
+grade and a vignette. The HUD is not affected. F8 toggles all of it.
+
+| Variable (native) | Default |
+|---|---|
+| `AWM_POSTFX=0` | all effects on |
+| `AWM_SSAO=0` / `AWM_BLOOM=0` / `AWM_FXAA=0` | each on |
+| `AWM_SSAO_RADIUS` | `1.501` world units |
+| `AWM_SSAO_INTENSITY` | `3.523` |
+| `AWM_SSAO_BIAS` | `0.08` |
+
+Build with `-d:awmPostLayers` to view the intermediate layers: 1 final image,
+2 scene before bloom and grading, 3 depth, 4 normals from depth, 5 unblurred
+occlusion, 6 occlusion, 7 scene before VFX, 8 light added by VFX, 9 bloom
+source, 0 bloom. `AWM_POST_LAYER=N` starts on layer N (for screenshots).
+
+Build with `-d:awmPostPanel` for a draggable tuning window with every setting,
+grouped by layer (F9 shows or hides it; with `-d:awmPostLayers` it also picks
+the layer). "Print settings" writes the values as Nim for
+`defaultPostSettings` in `awmpost.nim`. Clicks over the window don't reach
+the board.
+
 ## Browser
 
 ```sh
@@ -97,9 +129,11 @@ python3 tests/test_server.py
 | Warrior | Footsoldier | 6 | 1 | Minion | 1/2 | — |
 | Warrior | Commander | 4 | 5 | Minion | 2/3 | Summons 2 Footsoldiers |
 | Warrior | Rally | 3 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
-| Mage | Bouncer | 18 | 1 | Minion | 1/1 | Return a minion to owner's hand |
-| Mage | Primordial | 2 | 10 | Minion | 10/10 | Return all other cards to their owners' hands |
-| Mage | Study | 6 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
+| Mage | Bouncer | 16 | 1 | Minion | 1/1 | Return a minion to owner's hand |
+| Mage | Primordial | 2 | 8 | Minion | 10/10 | Return all other cards to their owners' hands |
+| Mage | Study | 7 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
 | Mage | Plan | 7 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
-| Mage | Oozification | 7 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
+| Mage | Oozification | 4 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
 | Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |
+| Mage | Bubble Shield | 4 | 2 | Spell | — | Summon 2 Bubbles |
+| Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |

@@ -151,6 +151,21 @@ let mage = [
     power: 10, toughness: 10
   ),
   Card(
+    name: "Bubble", energyCost: 0,
+    class: some(Mage), kind: Trinket,
+    rules: rules(
+      on(attacked(You),
+        bounce(getAttacker()),
+        destroy(self())
+      )
+    )
+  ),
+  Card(
+    name: "Bubble Shield", energyCost: 2,
+    class: some(Mage), kind: Spell,
+    rules: rules(summon(2, "Bubble"))
+  ),
+  Card(
     name: "Oozification", energyCost: 4,
     class: some(Mage), kind: Spell,
     rules: rules(
@@ -223,6 +238,6 @@ proc baseDeck*(heroClass: HeroClass): seq[Card] =
           ("Tactician", 5), ("Footsoldier", 6), ("Commander", 4),
           ("Rally", 3)])
       of Mage:
-        mage.deck([("Bouncer", 20), ("Oozification", 4), ("Plan", 7),
-          ("Study", 7), ("Primordial", 2)])
+        mage.deck([("Bouncer", 16), ("Oozification", 4), ("Plan", 7),
+          ("Study", 7), ("Primordial", 2), ("Bubble Shield", 4)])
   doAssert result.len == DeckSize

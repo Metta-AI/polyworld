@@ -7,16 +7,18 @@ suite "AWM base set":
     check DeckSize == 40
     let deck = Mage.baseDeck()
     check deck.len == DeckSize
-    var bouncers, oozifications, plans, studies, primordials: int
+    var bouncers, oozifications, plans, studies, primordials, shields: int
     for card in deck:
       check card.class == some(Mage)
       if card == baseCard("bouncer-1"): inc bouncers
       elif card == baseCard("oozification-4"): inc oozifications
       elif card == baseCard("plan-3"): inc plans
       elif card == baseCard("study-2"): inc studies
-      elif card == baseCard("primordial-10"): inc primordials
-    check (bouncers, oozifications, plans, studies, primordials) ==
-      (18, 7, 7, 6, 2)
+      elif card == baseCard("primordial-8"): inc primordials
+      elif card == baseCard("bubble-shield-2"): inc shields
+      check card != baseCard("bubble-0")
+    check (bouncers, oozifications, plans, studies, primordials, shields) ==
+      (16, 4, 7, 7, 2, 4)
 
   test "the Warrior deck is forty cards of every Warrior card":
     let deck = Warrior.baseDeck()
@@ -1867,7 +1869,7 @@ suite "AWM selections and Primordial":
     check not compiles(rules(damage(1, game.board.choose({color: Minion}))))
 
   test "Primordial returns every other card to its owner's hand":
-    let primordial = baseCard("Primordial", 10)
+    let primordial = baseCard("Primordial", 8)
     check primordial.kind == Minion
     check primordial.class == some(Mage)
     check primordial.power == 10
@@ -1928,3 +1930,117 @@ suite "AWM selections and Primordial":
       check minion.lostKeywords == {Ranged}
     check game.players[enemy].board[0].power == 1
     check game.players[enemy].board[1].power == 2
+
+suite "AWM attack triggers and Bubble Shield":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  proc shieldGame(seed: int64): (GameState, int, int) =
+    ## My Bubble Shield resolved, then the enemy's turn with two ready Bears.
+    var game = newGame(Mage, Warrior, seed)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[baseCard("Bubble Shield", 2)]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    game.finishTurn()
+    game.players[enemy].board = @[readyMinion(enemy, 50, Warrior.classCard()),
+      readyMinion(enemy, 51, Warrior.classCard())]
+    game.nextMinionId = 52
+    (game, me, enemy)
+
+  test "Bubble, Bubble Shield and attacked triggers print their rules":
+    let
+      bubble = baseCard("Bubble", 0)
+      shield = baseCard("Bubble Shield", 2)
+    check bubble.kind == Trinket
+    check bubble.targetCount() == 0
+    check not bubble.needsChoice()
+    check bubble.ruleText() == "When your hero is attacked, " &
+      "return the attacker to its owner's hand and destroy this card."
+    check shield.kind == Spell
+    check shield.ruleText() == "Summon 2 Bubbles."
+    check printed(rules(on(attacked(Opponent), draw(1)))) ==
+      "When your opponent's hero is attacked, draw 1 card."
+    check printed(rules(on(attacked(self()), damage(1, getAttacker())))) ==
+      "When this card is attacked, deal 1 damage to the attacker."
+
+  test "Bubble Shield summons two Trinkets":
+    var game = newGame(Mage, Warrior, 1501)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("Bubble Shield", 2)]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    check game.players[me].board.len == 2
+    for bubble in game.players[me].board:
+      check bubble.card == baseCard("Bubble", 0)
+      check bubble.currentToughness == 0
+      check bubble.power == 0
+    check game.eligibleAttackers().len == 0
+    var summons = 0
+    for event in game.takeVisualEvents():
+      if event.kind == SummonVfx:
+        inc summons
+    check summons == 2
+
+  test "each attack on your hero pops one Bubble, after the damage":
+    var (game, me, enemy) = shieldGame(1503)
+    let first = game.players[me].board[0].id
+    let second = game.players[me].board[1].id
+    check game.attack(50, heroChoice(me))
+    check game.players[me].life == StartingLife - 3
+    check not game.minionLocation(50).found
+    check game.players[enemy].hand[^1] == Warrior.classCard()
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].id == second
+    check not game.minionLocation(first).found
+    check game.players[me].discardPile[^1] == baseCard("Bubble", 0)
+    check game.attack(51, heroChoice(me))
+    check game.players[me].life == StartingLife - 6
+    check game.players[me].board.len == 0
+    check game.players[enemy].board.len == 0
+
+  test "attacks on your minions don't fire Bubbles":
+    var (game, me, _) = shieldGame(1505)
+    game.players[me].board.add readyMinion(me, 60, Mage.classCard())
+    check game.attack(50, creatureChoice(me, 60))
+    check game.players[me].board.len == 2
+    check game.minionLocation(50).found
+
+  test "a card's own attacked trigger punishes its attacker":
+    let thorns = Card(name: "Thorns", energyCost: 0, kind: Minion,
+      rules: rules(on(attacked(self()), damage(1, getAttacker()))),
+      power: 1, toughness: 5)
+    var game = newGame(Mage, Warrior, 1507)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[readyMinion(me, 1, thorns)]
+    game.nextMinionId = 2
+    game.finishTurn()
+    game.players[enemy].board = @[readyMinion(enemy, 50, Warrior.classCard())]
+    game.nextMinionId = 51
+    check game.attack(50, creatureChoice(me, 1))
+    # 1 from combat, then 1 from Thorns: the Bear (toughness 2) dies.
+    check not game.minionLocation(50).found
+    check game.players[me].board[0].currentToughness == 2
+
+  test "a trigger whose attacker died in combat fizzles entirely":
+    let spite = Card(name: "Spite", energyCost: 0, kind: Minion,
+      rules: rules(on(attacked(self()), damage(1, getAttacker()), draw(1))),
+      power: 5, toughness: 5)
+    var game = newGame(Mage, Warrior, 1509)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[readyMinion(me, 1, spite)]
+    game.nextMinionId = 2
+    game.finishTurn()
+    game.players[enemy].board = @[readyMinion(enemy, 50, Warrior.classCard())]
+    game.nextMinionId = 51
+    let hand = game.players[me].hand.len
+    check game.attack(50, creatureChoice(me, 1))
+    check not game.minionLocation(50).found
+    # The attacker is gone, so the whole trigger fizzles: no draw either.
+    check game.players[me].hand.len == hand

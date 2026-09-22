@@ -37,7 +37,8 @@ stage_dir="$web_dir/assets"
 # unrelated Polyworld games' models are deliberately outside the package.
 mkdir -p "$stage_dir/polyworld_data/characters/mini_legion/human"
 mkdir -p "$stage_dir/polyworld_data/fonts" "$stage_dir/polyworld_data/themes"
-mkdir -p "$stage_dir/polyworld_data/awm/cards" "$stage_dir/polyworld_data/awm/vfx"
+mkdir -p "$stage_dir/polyworld_data/awm/cards" "$stage_dir/polyworld_data/awm/vfx" \
+  "$stage_dir/polyworld_data/awm/ui"
 for character in archer footman mage; do
   cp "$data_dir/characters/mini_legion/human/$character.glb" \
     "$stage_dir/polyworld_data/characters/mini_legion/human/"
@@ -55,6 +56,7 @@ for directory in art fonts frames icons; do
   cp -R "$data_dir/awm/cards/$directory" "$stage_dir/polyworld_data/awm/cards/"
 done
 cp -R "$data_dir/awm/vfx/textures" "$stage_dir/polyworld_data/awm/vfx/"
+cp -R "$data_dir/awm/ui/hud" "$stage_dir/polyworld_data/awm/ui/"
 
 if [[ -d "$project_dir/players" ]]; then
   mkdir -p "$stage_dir/players"
