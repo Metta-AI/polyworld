@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-22",
+  "version": "2026.9.22.3",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_2cb5d47d-c064-44af-8b44-cef246667920",
+  "canonical": true,
+  "source_commit": "1b70894436b7ffdcd0d421b6b32c2415c9c8bfde",
+  "asset_commit": "5e911e4f45a55ab6d50cfc60cd265a3554be45c0",
+  "replay_version": 58,
+  "changes": [
+    "Every hero receives 500 XP when the enemy god dies, including dead, distant and max-level heroes.",
+    "The once-per-match god reward enters lifetime XP before final scoring.",
+    "GotA browser assets include the consolidated Softmax CC0 license and current asset cleanup."
+  ],
+  "checks": [
+    "Nim check and focused god reward, event, replay codec, recording and seeking regressions passed.",
+    "Regenerated version-58 demo reproduced all 28909 ticks natively and in the browser.",
+    "All ten local certification checks and all ten hosted certification checks passed.",
+    "All five hosted smoke episodes completed with verified integer scores.",
+    "Served JS, WASM and data hashes match the verified built files.",
+    "A winning hosted league replay reproduced all 15069 ticks and exactly five 500-XP god rewards.",
+    "All 24 round rosters have ten distinct policies, with five different policies per team."
+  ],
+  "league_settings_preserved": true,
+  "verification_round": {
+    "round_id": "round_a2b0b3e6-2004-4791-8b23-726c50ffea22",
+    "round_number": 654,
+    "status": "pending",
+    "games": 24,
+    "episode_statuses": {
+      "submitted": 6,
+      "completed": 18
+    },
+    "coworld_id": "cow_2cb5d47d-c064-44af-8b44-cef246667920",
+    "version": "2026.9.22.3",
+    "replay_version": 58,
+    "distinct_policies_per_game": 10,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=35b2686b-2347-454a-bd45-92df80688daa",
+    "verified_at": "2026-09-22T20:52:44.674993+00:00"
+  },
+  "manifest_hash": "sha256:32c0428e80185e9a479892912f2418858b868b5d5fa2eaa413cafe785fab2dd6",
+  "viewer_sha256": {
+    "wasm": "b4e8defb0f1089da595256dd7d3735e6daae7e75bcbd8193ccc2050b28ab9823",
+    "data": "166fe87da67a2a2f778a2af6b8c68554cef12802818f155ca67b59d873e4ae6d",
+    "js": "13240f11b9ea62fb7755dd6416cddbe49c60a9d9b27ea5be73298d9412032e16"
+  },
+  "verified_at": "2026-09-22T20:52:57.844817+00:00"
+}
