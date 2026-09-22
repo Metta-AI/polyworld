@@ -4556,8 +4556,8 @@ proc finishTick(game: Game) =
     except ReplayError as error:
       game.recordingError = error.msg
 
-proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
-  ## Advances exactly one authoritative integer simulation tick.
+iterator tickWorldSteps*(game: Game): bool {.closure.} =
+  ## Suspends at the authoritative hero turn; resuming completes the same tick.
   let world = game.world
   when defined(replayEvents):
     world.events.setLen(0)
@@ -4584,8 +4584,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       while game.replayPlayer.takeActionAt(uint32(world.tick), action):
         if world.applyReplayAction(action):
           game.metrics.command(world.heroIndex(action.heroId), world.tick)
-    elif decide and onHeroTurn != nil:
-      onHeroTurn()
+    elif decide:
+      yield true
     if world.phase == Drafting and world.draftTicksLeft() == 0:
       var available: seq[HeroClass]
       for class in HeroClass:
@@ -4623,8 +4623,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       world.heroTurnStart = (world.heroTurnStart + 1) mod world.heroes.len
     else:
       profileBlock "decisions":
-        if onHeroTurn != nil:
-          onHeroTurn()
+        yield true
 
   profileBlock "footmen":
     for footman in world.footmen.mitems:
@@ -4739,6 +4738,12 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       )
 
   game.finishTick()
+
+proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
+  ## Advances exactly one authoritative integer simulation tick.
+  for _ in tickWorldSteps(game):
+    if onHeroTurn != nil:
+      onHeroTurn()
 
 proc initLanePaths(map: MapData) =
   ## Samples symmetric lane goals without baking live buildings into roads.
