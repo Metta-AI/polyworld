@@ -123,12 +123,20 @@ the initial 150 gold and includes rewards already spent in the shop. K/D/A
 are separate averages; the exported KDA ratio is total kills plus assists
 divided by total deaths, with a denominator of one when there are no deaths.
 
-Current GOTA league lineups are fixed by faction. All five heroes in a faction
-share its match outcomes, so faction win rate cannot isolate an individual
-hero's effect. Use the individual economy and combat statistics as leads for
-controlled balance tests. Reported player counts and version splits help
-expose other confounders. Damage and healing totals are not instrumented in
-these GOTA versions, so the tool does not report them as zero.
+Level, XP, and gold show mean plus or minus a 95% confidence margin. The tool
+uses Student t critical values and game-clustered standard errors. Repeated
+appearances within one game stay together; one game cannot establish a
+confidence interval. CSV and JSON include both margins and interval bounds.
+These describe sampling uncertainty in the mean, not the spread of individual
+games. They assume independent games, so repeated policies across games can
+make the margins too narrow. Overlap alone is not a test of a hero difference.
+
+Drafted heroes can appear on either faction. Roles, policies, draft order,
+and team composition affect performance, so these comparisons cannot isolate
+a hero's causal effect. Compare releases separately before adjusting balance.
+Older fixed-lineup versions share team outcomes across five heroes. Damage
+and healing totals are not instrumented in these reports and are not shown
+as zero.
 
 Run the focused regression tests:
 

@@ -1,7 +1,8 @@
 import
-  std/[json, os, times],
+  std/[json, math, os, times],
   zippy,
   ../examples/gods_of_the_arena/tools/herostats,
+  ../examples/gods_of_the_arena/tools/confidences,
   ../examples/gods_of_the_arena/[maps, replays, sim]
 
 echo "Testing fractional completion-window boundaries"
@@ -73,6 +74,10 @@ block:
   doAssert row["avg_banked_gold"].getFloat == 10
   doAssert row["gold_per_minute"].getFloat == 40
   doAssert row["players"].getInt == 1
+  doAssert abs(row["avg_xp_margin95"].getFloat -
+    250 * 12.706204736432) < 1e-8
+  doAssert row["avg_gold_margin95"].getFloat == 0
+  doAssert aggregate(records, "one")[0]["avg_xp_ci95"].kind == JNull
   doAssert aggregate(records, "one")[0]["win_rate"].getFloat == 1
   records[0]["heroes"].add(hero.copy())
   let duplicate = aggregate(records)[0]
@@ -82,6 +87,18 @@ block:
   records[0]["verified"] = %false
   doAssert aggregate(records)[0]["games"].getInt == 1
   doAssert abs(wilson(50, 100)[0] - 0.4038315) < 0.000001
+
+echo "Testing mean confidence margins and independent game counts"
+block:
+  let
+    values = [10.0, 20.0, 30.0]
+    margin = margin95(values, [1, 1, 1])
+  doAssert abs(margin - 4.3026527296961 * 10 / sqrt(3.0)) < 1e-10
+  doAssert margin95([10.0, 10.0, 10.0], [1, 1, 1]) == 0
+  doAssert abs(margin95([100.0, 200.0, 300.0], [10, 10, 10]) -
+    margin) < 1e-10, "Duplicate heroes must not create independent games"
+  doAssert abs(critical95(31) - 2.0395134463964077) < 0.00001
+  doAssert abs(critical95(1000) - 1.9623390808264074) < 0.0000001
 
 echo "Testing exact replay playback and rejection of corrupt state hashes"
 block:
