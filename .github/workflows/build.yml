@@ -3,7 +3,7 @@ on:
   push:
     branches: [ main, master ]
   pull_request:
-    branches: [ main, master, relh/gota-native-batch-prototype ]
+    branches: [ main, master ]
   workflow_dispatch:
 jobs:
   build:
