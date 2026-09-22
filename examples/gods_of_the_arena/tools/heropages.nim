@@ -1,13 +1,12 @@
 import
   std/[json, os, sets, strutils],
   jsony,
-  ../content
+  ../[assets, content]
 
 const
   Template = staticRead(
     currentSourcePath().parentDir / "hero_stats_template.html"
   )
-  Portraits = [1, 13, 16, 17, 2, 3, 11, 12, 6, 14]
   Assets = [
     ("logo", "themes/gota/gota_logo.png", "logo.png"),
     ("font", "fonts/Rubik-Regular.ttf", "Rubik-Regular.ttf"),
@@ -131,10 +130,11 @@ proc writeHeroStats*(path: string, summary, appearances: JsonNode,
   createDir(assets)
   for (key, source, target) in Assets:
     copyFile(dataRoot / source, assets / target)
+  copyFile(dataRoot / "fonts/OFL-Rubik.txt", assets / "OFL-Rubik.txt")
   for class in HeroClass:
     copyFile(
-      dataRoot / "characters/modular_chars" / ("character.preset_" &
-        $Portraits[class.ord] & ".profile.png"),
+      dataRoot / "characters/chargen/portraits" /
+        HeroPortraitPaths[class].extractFilename(),
       assets / (slug(class.heroSpec.name) & ".png")
     )
   for ability in Ability:

@@ -7,6 +7,23 @@ Existing build commands and `POLYWORLD_DATA` continue to work.
 Native games still read the original assets at their original quality. Heartleaf
 keeps its existing packaging path.
 
+## GotA asset licenses
+
+GotA no longer loads or packages the Toon Enchanted Meadow camp crate, barrel,
+or unused decorations. Its selected artwork uses the project-generated CC0
+assets, Quaternius CC0 animations, CC BY grass, OFL fonts, and MIT water maps.
+The bundle includes eight license and attribution files, starting with
+`polyworld_data/licenses/gota.md`. Hero documentation and exported statistics
+use generated portraits; exported statistics also include Rubik's OFL notice.
+
+The 2026-09-22 local build contained 850 files totaling 30,771,349 bytes.
+Every packaged byte matched the staging files. The audit found no remaining
+Unity, Blizzard, or noncommercial artwork in this GotA bundle. This finding
+does not cover the other games or the entire data repository, which still
+contain separately licensed legacy assets.
+
+## Asset declarations
+
 Each game's `assets.nim` shares its model paths, selected parts, props, portraits,
 animation names, and terrain settings with its renderer. Shared declarations live
 in `src/polyworld/assets.nim`. Change these declarations when adding content.

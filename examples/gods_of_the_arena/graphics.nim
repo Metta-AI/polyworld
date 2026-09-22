@@ -49,16 +49,6 @@ proc renderFacing(value: Heading): float32 =
   ## Converts an integer heading to the renderer's angular convention.
   arctan2(value.x.float32, value.z.float32)
 
-proc renderSite(point: PathPoint): Vec3 =
-  ## Positions a generated structure on the packed ground beneath its feet.
-  result = vec3(
-    point.x.float32 / PathUnitsPerTile.float32,
-    0,
-    point.z.float32 / PathUnitsPerTile.float32
-  )
-  result.y = groundHeight(result.x, result.z) +
-    groundOffset(result.x, result.z)
-
 proc addAbilityIcons(builder: AtlasBuilder) =
   ## Packs every hero ability art file used by the action bar.
   const AbilityDir = DataRoot & "/abilities/"
@@ -393,7 +383,6 @@ proc runGraphics*() =
       )
   var
     towerPacks: array[Team, PropPack]
-    decorPack: PropPack
     grove: Grove
   let brush = mixBrush(layers[GroundLayer], run.map.preset.seed)
   profileBlock "props":
@@ -407,19 +396,8 @@ proc runGraphics*() =
       for name in FortModelNames:
         doAssert towerPacks[team].hasProp(name), "Missing fort model: " & name
     towerPacks.placeStaticStructures()
-    decorPack = loadPropPack(
-      arenaDecorPaths(), textured = true, textureSize = GotaDecorTextureSize)
-    for nodes in ArenaDecorNodes:
-      for name in nodes:
-        doAssert decorPack.hasProp(name), "missing arena decoration: " & name
     grove = generateGrove(run.map.preset.seed)
     grove.plantGrove(brush, run.map.preset.seed)
-    for camp in run.map.layout.camps:
-      let center = renderSite(camp)
-      decorPack.placeProp("wood_crate_01a", center, scale = 0.6'f)
-      decorPack.placeProp(
-        "wood_barrel_01a", center + vec3(0.6'f, 0, 0.4'f), scale = 0.65'f
-      )
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
     for i, color in run.map.minimap.mpairs:

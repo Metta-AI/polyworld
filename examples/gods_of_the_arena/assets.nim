@@ -5,6 +5,12 @@ import
 
 const
   LogoPath* = DataRoot & "/themes/gota/gota_logo.png"
+  LicensePaths* = [
+    "licenses/gota.md", "licenses/CC0-1.0.txt", "licenses/generated.md",
+    "licenses/ai-ui.md", "fonts/OFL-Rubik.txt", "fonts/OFL-OverpassMono.txt",
+    "terrain/water_normals/license.md",
+    "animations/quaternius/universal_standard/README.txt"
+  ]
   FortTextures* = ["mossy-building-stone-1", "courtyard-stone-1"]
   CryptTextures* = [
     "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-flagstone-1",
@@ -19,30 +25,10 @@ const
   FortTextureSize* =
     when defined(emscripten): 512
     else: 1024
-  ArenaDecorPacks* = [
-    DataRoot & "/terrain/toon_enchanted_meadow/props.glb",
-    DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb"
-  ]
-  ArenaDecorNodes*: array[2, seq[string]] = [
-    @["lamp_post_01a", "wood_barrel_01a", "wood_crate_01a",
-      "wood_fence_pole_01a", "pier_bollard_01a", "pier_bollard_02a",
-      "boat_01a", "boat_wreck_01a", "rope_01a", "wood_cart_01a",
-      "wood_fence_01a", "wood_wheel_01a"],
-    @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
-      "flower_bush_01a", "flower_bush_02a",
-      "grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
-      "grass_patch_04a", "grass_patch_05a", "lily_flower_01a",
-      "lily_flower_02a", "lily_flower_03a", "plant_01a", "plant_02a",
-      "plant_03a", "plant_04a", "plant_05a", "plant_06a", "plant_07a",
-      "mushroom_01a", "mushroom_03a", "mushroom_06a"]
-  ]
   GotaTerrainAssets* =
     when defined(emscripten): WebTerrainAssets
     else: DefaultTerrainAssets
   GotaTreeStyle* = NoTrees
-  GotaDecorTextureSize* =
-    when defined(emscripten): 256
-    else: 512
   CreepPresets* = ["Purple Creep", "Blue Creep"]
   CreepClips* = [
     "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack",
@@ -148,11 +134,6 @@ proc fortModelPaths*(team: int): seq[string] =
   for name in FortModelNames:
     result.add FortModelRoot & FortFactions[team] & "/" & name & ".glb"
 
-proc arenaDecorPaths*(): seq[string] =
-  ## Uses whole packs natively and independently packed nodes in browsers.
-  for i, pack in ArenaDecorPacks:
-    result.add propPaths(pack, ArenaDecorNodes[i])
-
 proc deathEyesPart*(manifest: Manifest): PartItem =
   ## Finds the authored death expression used by all arena characters.
   for category in manifest.categories:
@@ -200,6 +181,8 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
+  for path in LicensePaths:
+    result.add fileAsset(path)
   result.add terrainAssets(
     GotaTreeStyle, GeneratedTerrain, NoRocks, WebTerrainAssets, ArenaTextures
   )
@@ -209,8 +192,6 @@ proc browserAssets*(): seq[Asset] =
   for team in 0 ..< FortFactions.len:
     for path in fortModelPaths(team):
       result.add modelAsset(path, textureSize = 512)
-  for i, pack in ArenaDecorPacks:
-    result.add propAssets(pack, ArenaDecorNodes[i], textureSize = 256)
   result.add generatedCharacterAssets()
   for path in HeroPortraitPaths:
     result.add fileAsset(path)
