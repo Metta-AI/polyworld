@@ -33,7 +33,10 @@ proc usage() =
   echo "  --minutes NUMBER        Battle minutes (default 20)."
   echo "  --ticks NUMBER          Battle ticks (default 28800)."
   echo "Drafting allows 10 seconds per pick, separate from battle time."
-  echo "  --seed NUMBER           Match seed, independent of mapPreset.seed."
+  echo "  --seed NUMBER           Match seed for draft order, bot turn order,"
+  echo "                          and combat randomness; the arena stays fixed."
+  echo "  --map-seed NUMBER       Regenerate the arena from another seed (the"
+  echo "                          league always plays the preset's own seed)."
   echo "  --config PATH           JSON match settings, including mapPreset."
   echo "  --spawn-interval NUMBER Seconds between waves."
   echo "  --play=false            Start the graphical transport paused."
@@ -70,6 +73,11 @@ proc parseGameOptions(): GameOptions =
       case argument
       of "--config":
         discard arguments.argumentValue(index, "--config")
+      of "--map-seed":
+        matchConfig.mapPreset.seed = parseInt32(
+          arguments.argumentValue(index, "--map-seed"),
+          "--map-seed"
+        )
       of "--spawn-interval":
         var seconds: float64
         try:
@@ -194,6 +202,15 @@ proc teamHeroXp(team: Team): int =
     if hero.team == team:
       result += hero.totalXp
 
+proc teamHeroXps(team: Team): string =
+  ## Formats each hero's lifetime XP for one team, in slot order.
+  for hero in run.world.heroes:
+    if hero.team != team:
+      continue
+    if result.len > 0:
+      result.add " "
+    result.add $hero.totalXp
+
 proc teamHeroGold(team: Team): int =
   ## Returns all unspent gold earned by one team's heroes.
   for hero in run.world.heroes:
@@ -254,13 +271,16 @@ when defined(headless):
       redFortHp = max(run.world.forts[0].hp, 0'i32)
       blueFortHp = max(run.world.forts[1].hp, 0'i32)
       outcome =
-        if run.world.gameOver:
+        if run.world.draw:
+          "draw"
+        elif run.world.gameOver:
           if run.world.winner == RedTeam: "red won" else: "blue won"
         elif run.world.phase == Drafting:
           "draft incomplete"
         else:
           "time limit"
     echo &"result: {outcome}"
+    echo &"seeds: match {run.map.seed}, map {run.map.preset.seed}"
     echo &"simulated: {simulated:.2f} s in {elapsed:.4f} s " &
       &"({speedup:.1f}x real time)"
     echo &"draft: {draftSeconds:.2f} s, battle: {battleSeconds:.2f} s"
@@ -274,6 +294,7 @@ when defined(headless):
     echo &"economy: red {teamHeroXp(RedTeam)} XP / " &
       &"{teamHeroGold(RedTeam)} gold, blue {teamHeroXp(BlueTeam)} XP / " &
       &"{teamHeroGold(BlueTeam)} gold"
+    echo &"xp: red {teamHeroXps(RedTeam)}, blue {teamHeroXps(BlueTeam)}"
     if run.replayMode:
       echo &"replay: {vmStatus.decisions}/" &
         &"{run.replayData.actions.len} actions"

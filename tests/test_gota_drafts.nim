@@ -24,6 +24,30 @@ proc decide(game: Game) =
   if turn == 0 or turn == game.world.draftHeroId():
     game.runBotDecisions()
 
+echo "Testing reference policies draft the same heroes after swapping teams"
+for policy in [BasePolicy, RusherPolicy]:
+  var picks: array[Team, seq[HeroClass]]
+  for firstTeam in Team:
+    let game = draftGame()
+    game.world.draftOrder.setLen(0)
+    for turn in 0 ..< 10:
+      let team = (firstTeam.ord + turn) mod 2
+      game.world.draftOrder.add(team * 5 + turn div 2)
+    game.loadBots([BotGroup(path: policy, count: 10)])
+    for tick in 0 ..< 200:
+      if game.world.phase != Drafting:
+        break
+      game.tickWorld(proc() =
+        ## Uses the production BASIC decision loop for each draft pick.
+        game.decide()
+      )
+    doAssert game.world.phase == Playing
+    for vm in game.heroVms:
+      doAssert vm != nil and not vm.failed
+    for index in game.world.draftOrder:
+      picks[firstTeam].add(game.world.heroes[index].class)
+  doAssert picks[RedTeam] == picks[BlueTeam], policy
+
 echo "Testing random first team and alternating spawn order"
 block:
   let

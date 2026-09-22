@@ -5,12 +5,12 @@ when defined(headless):
   runHeadless()
   when defined(coworld):
     import polyworld/coworld
-    import sim
+    import sim, scores
     finishCoworld(CoworldResults(
-      scores: run.world.scores(),
+      scores: scores(run.world.totalXp(), int(run.world.tick)),
       ticks: run.world.tick,
       seed: options.seed,
-      outcome: (if run.world.gameOver: $run.world.winner else: "time_limit")
+      outcome: run.world.outcome()
     ), run.world.totalXp())
 else:
   import graphics

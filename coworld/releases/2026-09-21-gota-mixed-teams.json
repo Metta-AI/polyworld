@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-21",
+  "verified_at": "2026-09-22T01:19:15.783700+00:00",
+  "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "change": "Restore mixed-policy teams by setting distinct_teammates to true.",
+  "scheduler": {
+    "strategy": "team_n",
+    "team_count": 2,
+    "team_layout": "blocks",
+    "matchmaking": "random",
+    "distinct_teammates": true,
+    "num_episodes": 24,
+    "insufficient_players": "filler_policy"
+  },
+  "ranking_unchanged": true,
+  "round_interval_minutes": 32,
+  "verification": {
+    "round_id": "round_7f2995f9-0750-4291-bd97-ba75f712abbe",
+    "round_number": 617,
+    "round_status": "pending",
+    "episodes_checked": 24,
+    "distinct_policies_per_episode": 10,
+    "distinct_policies_per_team": 5,
+    "filler_seats": 0
+  },
+  "short_roster_behavior": "Distinct real policies are preferred; baseline fillers cover missing seats.",
+  "deployment_required": false
+}

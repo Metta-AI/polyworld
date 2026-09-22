@@ -303,3 +303,50 @@ block:
   doAssert lineClear(first, last, runtimeTileOpen)
   doAssert edgeMask(0, 2, 2, walkable = runtimeTileOpen) == 15
   doAssert (edgeMask(0, 1, 2, walkable = runtimeTileOpen) and 1) == 1
+
+echo "Testing rotated discovery order for complete and partial paths"
+block:
+  const Side = 7
+  let floor = QuadLayer(
+    width: Side, depth: Side, tiles: newSeq[Tile](Side * Side)
+  )
+  for i, tile in floor.tiles.mpairs:
+    tile = openTile()
+    let
+      x = i mod Side
+      z = i div Side
+    tile.impassable = x == 3 and z in [1, 2, 4, 5]
+  installImmutableLayers(@[floor])
+  var checked = 0
+  for first in 0 ..< Side * Side:
+    if not isWalkable(0, first mod Side, first div Side):
+      continue
+    for last in 0 ..< Side * Side:
+      if not isWalkable(0, last mod Side, last div Side):
+        continue
+      for neighbors in PathNeighbors:
+        for budget in [0, 1, 7]:
+          let
+            query = PathQuery(
+              startX: first mod Side, startZ: first div Side,
+              finishX: last mod Side, finishZ: last div Side,
+              neighbors: neighbors, tieOrder: ForwardTies,
+              maxExpansions: budget, partial: true
+            )
+            path = findTilePath(query)
+          var reversed = query
+          reversed.startX = Side - 1 - query.startX
+          reversed.startZ = Side - 1 - query.startZ
+          reversed.finishX = Side - 1 - query.finishX
+          reversed.finishZ = Side - 1 - query.finishZ
+          reversed.tieOrder = ReverseTies
+          let other = findTilePath(reversed)
+          doAssert path.complete == other.complete
+          doAssert path.expansions == other.expansions
+          doAssert path.tiles.len == other.tiles.len
+          for i, tile in path.tiles:
+            doAssert tile.layer == other.tiles[i].layer
+            doAssert tile.x + other.tiles[i].x == Side - 1
+            doAssert tile.z + other.tiles[i].z == Side - 1
+          inc checked
+  echo "Mirrored path searches checked: ", checked

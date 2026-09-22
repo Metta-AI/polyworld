@@ -76,9 +76,18 @@ ARM and x86 coverage. `tools/replay_probe.html` captures the Softmax iframe prot
 
 CTA stores authoritative per-hero banked gold and return flags.
 They are cloned, restored and hashed with the world. Surviving returned heroes tied
-for the most banked gold receive 1; every other hero receives 0. The other games also
-emit binary scores in zero-based platform slot order. Platform Elo remains the
-standings algorithm.
+for the most banked gold receive 1; every other hero receives 0. Light vs Dark
+also emits binary scores. GotA emits lifetime XP minus 200 per simulated minute
+as integer scores, rounded down and clamped to zero, in zero-based platform
+slot order.
+GotA uses random pairings and averages scores within each round, then updates
+standings with 15% of the new round average and 85% of the previous standing.
+Its league scheduler must preserve `strategy: "team_n"`, `team_count: 2`,
+`team_layout: "blocks"`, `matchmaking: "random"`, and
+`distinct_teammates: true`. With ten eligible policies, each controls one hero
+in a mixed five-versus-five match. Omitting `distinct_teammates` instead clones
+one policy across each team's five seats. Keep this league setting intact
+when publishing releases or changing scoring.
 
 ## Release acceptance
 

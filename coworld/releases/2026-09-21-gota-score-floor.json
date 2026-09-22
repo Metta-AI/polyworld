@@ -1,0 +1,49 @@
+{
+  "date": "2026-09-21",
+  "version": "2026.9.21.5",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_e5445477-d55e-432d-ac38-bd1eae66e6d3",
+  "canonical": true,
+  "source_commit": "f776d5e55d439706a8d49878d17d7ba1f6a1f7ce",
+  "uncommitted_source": true,
+  "source_diff_sha256": "16c695b52430de18b52275dd1406933365c15a99ea1d8884c89c2c0c38026a9c",
+  "scores_source_sha256": "8eca00ca0128267c656549fbe662d0032efc66c140ddfd8846ffebab92577f33",
+  "replay_version": 51,
+  "scoring": {
+    "formula": "max(0, lifetime_xp - 200 * ticks / 1440)",
+    "round": "mean",
+    "standing": "previous + 0.15 * (round_mean - previous)",
+    "first_round": "round_mean",
+    "matchmaking": "random",
+    "zero_floor": "Applied to each hero before policy/game/round averaging."
+  },
+  "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "migration": {
+    "recomputed_rounds": [
+      612,
+      613
+    ],
+    "standings_recomputed": 20,
+    "ranked_players": 19,
+    "historical_rounds_preserved": true,
+    "scheduling_resumed": true
+  },
+  "checks": [
+    "Nim checks for all three Coworld entrypoints",
+    "Full headless suite before the final zero-floor adjustment",
+    "Tournament score regressions, including zero floor before averages",
+    "Hero-statistics replay checks and intentional corruption rejection",
+    "Native runtime contracts for all three games",
+    "Local and hosted certification passed",
+    "All five hosted smoke episodes publish the exact zero-floor formula",
+    "Round 613 moving averages verified for all 20 players",
+    "Corrected live standings, settings, and guide verified"
+  ],
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:71b25287c5c1c45a181f57acc9b45e2051192da731a6195c3b8b3ecc1a9208fd",
+  "verification_round": {
+    "id": "round_146a7b52-9397-4fdc-ab4c-26910f1d4f5e",
+    "number": 613,
+    "status": "completed",
+    "players_verified": 20
+  }
+}

@@ -1,4 +1,5 @@
 import
+  std/algorithm,
   ../examples/gods_of_the_arena/[content, maps, observations, sim]
 
 proc observationWorld(): World =
@@ -32,6 +33,56 @@ proc warning(heroId: int32, x = 0'i32): SpellCast =
     impact: 30,
     ends: 42
   )
+
+proc checkWarningFrames() =
+  ## Verifies frozen warning ordering without mutating live spell storage.
+  var expected: array[2, seq[SpellCast]]
+  for reversed in [false, true]:
+    for rotated in [false, true]:
+      let world = observationWorld()
+      world.casts = @[
+        warning(101, WorldScale * 8),
+        warning(105, WorldScale * 5),
+        warning(105, WorldScale * 3)
+      ]
+      for cells in world.teamVisible.mitems:
+        for cell in cells.mitems:
+          cell = 255
+      if reversed:
+        world.casts.reverse()
+      if rotated:
+        for hero in world.heroes:
+          hero.team = if hero.team == RedTeam: BlueTeam else: RedTeam
+          hero.position.x = -hero.position.x
+          hero.position.z = -hero.position.z
+        for spell in world.casts.mitems:
+          spell.origin.x = -spell.origin.x
+          spell.origin.z = -spell.origin.z
+          spell.position.x = -spell.position.x
+          spell.position.z = -spell.position.z
+      let original = world.casts
+      doAssert world.freezeObservations()
+      doAssert not world.freezeObservations()
+      doAssert world.casts == original, "Sorting changed live cast storage."
+      for index, observer in [100'i32, 105'i32]:
+        var actual: seq[SpellCast]
+        for i in 0 ..< world.visibleSpellCount(observer):
+          var spell: SpellCast
+          doAssert world.visibleSpellAt(observer, i, spell)
+          if rotated:
+            spell.origin.x = -spell.origin.x
+            spell.origin.z = -spell.origin.z
+            spell.position.x = -spell.position.x
+            spell.position.z = -spell.position.z
+          actual.add spell
+        if not reversed and not rotated:
+          expected[index] = actual
+        else:
+          doAssert actual == expected[index]
+      world.casts.setLen(0)
+      doAssert world.visibleSpellCount(100) == 3
+      world.thawObservations()
+      doAssert world.visibleSpellCount(100) == 0
 
 echo "Testing allied spells and visible enemy warnings use team vision"
 block:
@@ -112,3 +163,6 @@ block:
   doAssert absent.visibleSpellCount(100) == 0
   doAssert not absent.visibleSpellAt(100, 0, spell)
   doAssert absent.visibleSpellCasterId(100, world.casts[0]) == 0
+
+echo "Testing warning frames ignore cast storage order and rotate with teams"
+checkWarningFrames()

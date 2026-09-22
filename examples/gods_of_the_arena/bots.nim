@@ -6,6 +6,7 @@ import
   polyworld/[metrics, bodies, cli, controllers, pathing, profiles, tapes],
   content,
   maps,
+  motions,
   observations,
   sim,
   replays,
@@ -166,7 +167,7 @@ proc objectProc(heroId: int32, field: ObjectField): HostProc =
       else:
         value.itemCounts[slot]
     of ObjectFacingX, ObjectFacingY:
-      let direction = normalize(fixedVec2(
+      let direction = motions.normalized(fixedVec2(
         worldToTiles(value.facing.x, WorldScale),
         worldToTiles(value.facing.z, WorldScale)
       ))
@@ -202,9 +203,9 @@ proc spellProc(heroId: int32, field: SpellField): HostProc =
     of SpellCasterId:
       world.visibleSpellCasterId(heroId, value)
     of SpellX:
-      mapCoordinate(value.position.x)
+      mapCoordinate(value.position.x, world.heroById(heroId).team)
     of SpellY:
-      mapCoordinate(value.position.z)
+      mapCoordinate(value.position.z, world.heroById(heroId).team)
     of SpellImpactTick:
       value.impact
 
@@ -351,7 +352,7 @@ proc initHeroHost(heroId: int32): Host =
   ): int32 =
     var value: WorldObject
     if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
-      mapCoordinate(value.position.x)
+      mapCoordinate(value.position.x, activeGame.world.heroById(heroId).team)
     else:
       0
   let objectYProc: HostProc = proc(
@@ -359,7 +360,7 @@ proc initHeroHost(heroId: int32): Host =
   ): int32 =
     var value: WorldObject
     if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
-      mapCoordinate(value.position.z)
+      mapCoordinate(value.position.z, activeGame.world.heroById(heroId).team)
     else:
       0
   let objectHpProc: HostProc = proc(
@@ -808,11 +809,11 @@ proc runHeroScript(game: Game, index: int) =
     )
     vm.runtime.setData(
       heroDataIds[DataSelfX],
-      mapCoordinate(hero.position.x)
+      mapCoordinate(hero.position.x, hero.team)
     )
     vm.runtime.setData(
       heroDataIds[DataSelfY],
-      mapCoordinate(hero.position.z)
+      mapCoordinate(hero.position.z, hero.team)
     )
     vm.runtime.setData(heroDataIds[DataSelfHp], max(hero.hp, 0'i32))
     vm.runtime.setData(heroDataIds[DataSelfMaxHp], hero.maxHp)
@@ -867,6 +868,10 @@ proc runBotDecisions*(game: Game) {.measure.} =
   if game.world.phase == Drafting:
     runHeroScript(game, game.world.heroIndex(game.world.draftHeroId()))
     return
+  let ownsFrame = game.world.freezeObservations()
+  defer:
+    if ownsFrame:
+      game.world.thawObservations()
   for offset in 0 ..< game.world.heroes.len:
     let index = (game.world.heroTurnStart + offset) mod game.world.heroes.len
     runHeroScript(game, index)

@@ -5,7 +5,7 @@
 
 
 ' Draft roles: 0 frontline, 1 carry, 2 mage, 3 support, 4 fighter.
-' Prefer roles missing from our team, then our faction's familiar heroes.
+' Prefer roles missing from our team, independent of faction.
 sub chooseHero()
   if draftTurnId <> selfId then
     exit sub
@@ -29,9 +29,6 @@ sub chooseHero()
         end if
         player = player + 1
       wend
-      if candidate \ 5 = selfTeam then
-        score = score + 1
-      end if
       if score > bestScore then
         bestScore = score
         bestClass = candidate
@@ -48,6 +45,13 @@ if drafting then
   chooseHero()
   end
 end if
+
+' Use the same team-relative coordinates for every spatial decision.
+side = 1 - selfTeam * 2
+originX = selfTeam * (mapWidth - 1)
+originY = selfTeam * (mapHeight - 1)
+myX = originX + side * selfX
+myY = originY + side * selfY
 
 ' Spend points explicitly, prioritizing the ultimate and primary spell.
 for upgrade = 1 to 4
@@ -74,12 +78,12 @@ sub rush()
   while index < objects
     if objectTeam(index) = selfTeam then
       if objectKind(index) = 1 then
-        homeX = objectX(index)
-        homeY = objectY(index)
+        homeX = originX + side * objectX(index)
+        homeY = originY + side * objectY(index)
       end if
       if objectKind(index) = 2 and objectAlive(index) then
-        allyX(count) = objectX(index)
-        allyY(count) = objectY(index)
+        allyX(count) = originX + side * objectX(index)
+        allyY(count) = originY + side * objectY(index)
         sumX = sumX + allyX(count)
         sumY = sumY + allyY(count)
         count = count + 1
@@ -115,7 +119,7 @@ sub rush()
     regroup = 0
   end if
   if regroup then
-    walkTo(centerX, centerY)
+    walkTo(originX + side * centerX, originY + side * centerY)
     exit sub
   end if
 
@@ -124,10 +128,10 @@ sub rush()
   index = 0
   while index < objects
     if objectTeam(index) <> selfTeam and objectAlive(index) then
-      x = objectX(index)
-      y = objectY(index)
-      dx = x - selfX
-      dy = y - selfY
+      x = originX + side * objectX(index)
+      y = originY + side * objectY(index)
+      dx = x - myX
+      dy = y - myY
       if dx * dx + dy * dy <= 400 then
         dx = x - centerX
         dy = y - centerY
@@ -148,20 +152,20 @@ sub rush()
   ' Pass through the middle before pushing onward to the enemy god.
   middleX = mapWidth \ 2
   middleY = mapHeight \ 2
-  dx = selfX - homeX
-  dy = selfY - homeY
+  dx = myX - homeX
+  dy = myY - homeY
   if dx * dx + dy * dy <= 100 then
     crossedMiddle = 0
   end if
-  dx = selfX - middleX
-  dy = selfY - middleY
+  dx = myX - middleX
+  dy = myY - middleY
   if dx * dx + dy * dy <= 36 then
     crossedMiddle = 1
   end if
   if crossedMiddle then
-    attackMove(mapWidth - 1 - homeX, mapHeight - 1 - homeY)
+    attackMove(originX + side * (mapWidth - 1 - homeX), originY + side * (mapHeight - 1 - homeY))
   else
-    attackMove(middleX, middleY)
+    attackMove(originX + side * middleX, originY + side * middleY)
   end if
 end sub
 

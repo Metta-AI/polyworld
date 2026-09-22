@@ -66,15 +66,15 @@ for team in Team:
   var action = game.decide()
   doAssert action.kind == ActionAttackMove
   doAssert hero.attackMoving
-  doAssert action.first == mapTiles() div 2
-  doAssert action.second == mapTiles() div 2
+  doAssert action.first == mapTiles() div 2 - team.ord
+  doAssert action.second == mapTiles() div 2 - team.ord
 
   ally.place(origin.offset(11))
   action = game.decide()
   doAssert action.kind == ActionWalkTo
   doAssert not hero.attackMoving
-  doAssert action.first == mapCoordinate(origin.x) + 2
-  doAssert action.second == mapCoordinate(origin.z)
+  doAssert action.first == mapCoordinate(origin.x, team) + 2 + team.ord
+  doAssert action.second == mapCoordinate(origin.z, team)
   ally.place(origin.offset(9))
   doAssert game.decide().kind == ActionWalkTo
   ally.place(origin.offset(8))

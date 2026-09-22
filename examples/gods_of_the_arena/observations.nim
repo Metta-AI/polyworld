@@ -16,7 +16,7 @@ proc visibleSpellCount*(world: World, heroId: int32): int =
   if observer < 0:
     return 0
   let team = world.heroes[observer].team
-  for spell in world.casts:
+  for spell in world.observedCasts(team):
     if world.spellVisible(team, spell):
       inc result
 
@@ -26,7 +26,7 @@ proc visibleSpellAt*(
     index: int,
     value: var SpellCast
 ): bool =
-  ## Reads a zero-based visible spell in simulation order without mutation.
+  ## Reads a warning from the common decision frame without mutation.
   if world == nil or index < 0:
     return false
   let observer = world.heroIndex(heroId)
@@ -34,7 +34,7 @@ proc visibleSpellAt*(
     return false
   let team = world.heroes[observer].team
   var visibleIndex = 0
-  for spell in world.casts:
+  for spell in world.observedCasts(team):
     if not world.spellVisible(team, spell):
       continue
     if visibleIndex == index:
@@ -57,8 +57,8 @@ proc visibleSpellCasterId*(
   let team = world.heroes[observer].team
   if not world.spellVisible(team, spell):
     return 0
-  let caster = world.heroes[world.heroIndex(spell.heroId)]
-  if caster.team == team or world.visible(team, caster.position):
+  var caster: WorldObject
+  if world.worldObjectById(heroId, spell.heroId, caster):
     caster.id
   else:
     0

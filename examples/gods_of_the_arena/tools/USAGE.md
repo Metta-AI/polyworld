@@ -123,11 +123,17 @@ and 100 gold. Both remaining totals must give nonnegative integer kill counts.
 This accounting needs review when a later replay version changes rewards.
 
 Win/loss is average binary team victory, with no MMR adjustment. Score is lifetime
-XP minus 100 per simulated minute, including fractional minutes and negative
-scores. Glory gives winners that same time-adjusted XP and everyone else zero.
-Score keeps losing players' time-adjusted XP. Neither ladder clamps negative
-values. Mono policies average their five heroes first. Timeouts score zero for
+XP minus 200 per simulated minute, including fractional minutes, rounded down
+to whole points and clamped to zero for each hero before averaging. Glory gives winners that same time-adjusted XP
+and everyone else zero. Score keeps losing players' time-adjusted XP. Mono
+policies average their five heroes. Timeouts score zero for
 win/loss and glory, while Score retains their XP minus time.
+
+The live GotA ladder uses this same Score formula. It averages each player's
+scores within a round, then updates their standing with 15% of that round's
+average and 85% of their previous standing. The first scored round establishes
+the initial standing. Pairings are random and higher standings rank first.
+The tournament reports themselves show cumulative arithmetic averages.
 
 Each format shares its games across all three ladders. Every checkpoint compares
 cumulative displayed ranks. `stabilityScore` counts policies whose ranks changed;
