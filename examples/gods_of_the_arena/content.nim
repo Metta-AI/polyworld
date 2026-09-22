@@ -177,7 +177,7 @@ const
       role: "Mobile ranged carry",
       attackStyle: RangedAttack,
       baseHitPoints: 200,
-      hitPointsPerLevel: 38,
+      hitPointsPerLevel: 19,
       baseMana: 110,
       manaPerLevel: 8,
       baseDamage: 25,
@@ -270,7 +270,7 @@ const
       hitPointsPerLevel: 42,
       baseMana: 80,
       manaPerLevel: 6,
-      baseDamage: 46,
+      baseDamage: 69,
       damagePerLevel: 9,
       baseMovePerTick: 6_000,
       movePerLevel: 60,
@@ -535,7 +535,7 @@ const
       slot: SecondaryAbility,
       name: "Dread Totem", icon: "dread_totem",
       kind: Strike, cooldownTicks: 216, manaCost: 42,
-      range: 240_000, damage: 58
+      range: 240_000, damage: 87
     ),
     VoidPortal: AbilitySpec(
       slot: UltimateAbility,

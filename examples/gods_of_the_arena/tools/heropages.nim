@@ -57,6 +57,9 @@ proc heroSummary*(summary, appearances: JsonNode): JsonNode =
   for field in ["start", "end", "verified_games", "hero_appearances",
       "fixed_faction_lineups"]:
     result[field] = summary[field].copy()
+  for field in ["first_round", "last_round"]:
+    if summary.hasKey(field):
+      result[field] = summary[field].copy()
   result["excluded_count"] = %summary["excluded"].len
   result["versions"] = newJArray()
   for version in summary["versions"]:
