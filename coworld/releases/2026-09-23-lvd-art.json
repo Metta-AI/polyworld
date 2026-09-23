@@ -1,0 +1,89 @@
+{
+  "date": "2026-09-23",
+  "version": "2026.9.23.1",
+  "coworld_id": "cow_3f64cef1-313a-48b4-9cae-1b1da39ef52b",
+  "canonical": true,
+  "source_commit": "02a426dc9f08e7eded3f1111c1708f89811ccd18",
+  "art_commit": "2ec852fda0b414788ab2ae75ebf0a7b9b499502d",
+  "replay_version": 18,
+  "manifest_hash": "sha256:6f2ef8d9123406b381f404c8fc1f4b3082eaf771c561a54a5a7ed2e754bd880a",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:52d7b14d145ec4b40a925d24e45d6444e30b3587e42efe05c6663f7e209b1db2",
+  "viewer_bundle": "sha256:1a20711aeb67b6f94df4710ba7bdbfd360b19fc98dd5f91f040e78b0249dd6fd",
+  "changes": [
+    "Generated CharGen units, bald faction appearances, team-colored health bars and cloth symbols.",
+    "Generated buildings and construction stages, faction trims, TreeGen trees, RockGen rocks and mines, and cleared terrain assets.",
+    "Rectangular building footprints and baseline placement; starting mines hold 45,000 gold and expansions hold 25,000."
+  ],
+  "checks": {
+    "nim_check": "passed",
+    "simulation_tests": "passed",
+    "character_building_and_trim_tests": "passed",
+    "art_inventory": "2172 pinned files verified",
+    "local_certification": "10 steps passed",
+    "hosted_certification": "10 steps passed",
+    "hosted_smoke_episodes": 5,
+    "local_replay": "28800 ticks matched; full browser replay completed without errors or divergence.",
+    "hosted_replay": "28800 ticks matched every recorded hash.",
+    "viewer_assets": "Served JS, WASM, and data SHA256 match the built artifacts.",
+    "browser": "Hosted smoke and competition replays visually verified with the generated art."
+  },
+  "league_id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+  "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+  "league_settings_preserved": true,
+  "filler_policies_unchanged": true,
+  "verification_round": {
+    "round_id": "round_059c0a7c-cb17-4f53-b16e-c5be426621e9",
+    "round_number": 617,
+    "status": "completed",
+    "games": 12,
+    "completed_games": 8,
+    "player_failures": 4,
+    "coworld_id": "cow_3f64cef1-313a-48b4-9cae-1b1da39ef52b",
+    "version": "2026.9.23.1",
+    "outcomes": {
+      "winner_1": 4,
+      "winner_0": 4
+    },
+    "verified_at": "2026-09-23T15:30:24.019942+00:00",
+    "completed_at": "2026-09-23T15:25:57.683484Z",
+    "game_errors": 0,
+    "binary_scores_verified": 16,
+    "all_entrants_gained_one_round": true,
+    "player_failure_policy": "aaron-lvd:v2",
+    "player_failure_disposition": "Non-blocking. The policy author can submit a corrected v3.",
+    "completed_episode_request_ids": [
+      "ereq_4d399c23-6b9f-4bc4-b36d-e9f630751971",
+      "ereq_a0355efe-5e59-41f6-8f89-2be56ef6f3a4",
+      "ereq_5484f59d-859c-4244-b61c-cdc02928701e",
+      "ereq_20bd24ef-1f85-4358-a47c-4ec90a9f0746",
+      "ereq_ea4a711a-326e-4b09-8dc7-a4c0891839f4",
+      "ereq_35580ed6-a255-4aa0-a98f-5eb993394b51",
+      "ereq_6a72ab44-31a4-4738-bfbf-c133d7dc69ef",
+      "ereq_80786ac5-5f9d-4554-9c8b-7d5cb58e0836"
+    ]
+  },
+  "replay": {
+    "episode_request_id": "ereq_4d399c23-6b9f-4bc4-b36d-e9f630751971",
+    "episode_id": "f022a925-7a71-474b-ab88-9edbde18286d",
+    "viewer_url": "https://d1kovwradqjymp.cloudfront.net/bundles/1a20711aeb67b6f94df4710ba7bdbfd360b19fc98dd5f91f040e78b0249dd6fd/963c1d4dd7e6495da0bdefc09532ac2c/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2Fb9bcc191-4cfe-4db2-ba61-8af0a61809b7.replay",
+    "ticks": 28800,
+    "viewer_assets": {
+      "wasm": {
+        "bytes": 10773038,
+        "sha256": "6deaf5241d4a136d4c6b0cdc66a1b5fb7bfeaa3400c85fcb86be5f389012e34a"
+      },
+      "data": {
+        "bytes": 28111287,
+        "sha256": "ff09fe8e9b3a0cffe11932af9b00e6be9aabc6d3e28ecb640e0958bbe8542444"
+      },
+      "js": {
+        "bytes": 386620,
+        "sha256": "5846ef63d3196eeb9a63e39f63b4d79cf0f6627d656ea02f634c72d94fe2f8ee"
+      }
+    }
+  },
+  "limitations": [
+    "The public /light-vs-dark watch page shows Nothing is playing here, although the public league API lists LvD as enabled and visible. The direct hosted viewer works."
+  ],
+  "verified_at": "2026-09-23T15:33:01.318883+00:00"
+}
