@@ -177,7 +177,7 @@ const
       role: "Mobile ranged carry",
       attackStyle: RangedAttack,
       baseHitPoints: 200,
-      hitPointsPerLevel: 19,
+      hitPointsPerLevel: 29,
       baseMana: 110,
       manaPerLevel: 8,
       baseDamage: 25,
@@ -270,7 +270,7 @@ const
       hitPointsPerLevel: 42,
       baseMana: 80,
       manaPerLevel: 6,
-      baseDamage: 69,
+      baseDamage: 58,
       damagePerLevel: 9,
       baseMovePerTick: 6_000,
       movePerLevel: 60,
@@ -441,7 +441,7 @@ const
       slot: SecondaryAbility,
       name: "Gale Slash", icon: "gale_slash",
       kind: Strike, cooldownTicks: 168, manaCost: 28,
-      range: 120_000, damage: 52
+      range: 120_000, damage: 65
     ),
     ShadowComet: AbilitySpec(
       slot: UltimateAbility,
@@ -452,7 +452,7 @@ const
     SanguineChalice: AbilitySpec(
       slot: PassiveAbility,
       name: "Sanguine Chalice", icon: "sanguine_chalice",
-      kind: Heal, cooldownTicks: 192, heal: 36
+      kind: Heal, cooldownTicks: 192, heal: 45
     ),
     AfterlightSickle: AbilitySpec(
       slot: PrimaryAbility,
