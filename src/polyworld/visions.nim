@@ -385,6 +385,35 @@ proc revealVisionCached*(
     nextSources[source] = move(cache.sources[source])
   cache.sources = move(nextSources)
 
+proc revealCircles*(
+    visible: var seq[uint8],
+    width, height: int32,
+    sources: openArray[VisionSource]
+) =
+  ## Marks every tile inside each source's sight circle, ignoring occluders.
+  initVisionKernel()
+  visible.setLen(int(width * height))
+  zeroMem(visible[0].addr, visible.len)
+  for source in sources:
+    if source.radius <= 0 or source.radius > MaxVisionRadius:
+      continue
+    let radius = source.radius
+    for dz in -radius .. radius:
+      let z = source.z + dz
+      if z < 0 or z >= height:
+        continue
+      # Widest dx on this row inside the circle.
+      var span = radius
+      while span * span + dz * dz > radius * radius:
+        dec span
+      let
+        first = max(0'i32, source.x - span)
+        last = min(width - 1, source.x + span)
+      if first <= last:
+        let row = z * width
+        for x in first .. last:
+          visible[row + x] = 255
+
 proc blurVisibility*(visible: openArray[uint8], width, height: int32): seq[uint8] =
   ## Softens only presentation edges with one deterministic box-blur pass.
   result = newSeq[uint8](visible.len)

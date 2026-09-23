@@ -680,15 +680,24 @@ proc rebuildVision*(world: World) {.measure.} =
     for fort in world.forts:
       if fort.team == team and fort.hp > 0:
         addVisionSource(fort.center, FortSightRadius, 28)
-    revealVisionCached(
-      world.visionCache[team.ord],
-      world.teamVisible[team.ord],
-      mapTiles().int32,
-      mapTiles().int32,
-      sightTerrain.terrainHeights,
-      visionBlockers,
-      visionSources
-    )
+    when defined(gotaCircleVision):
+      # Experiment: sight circles without terrain or structure occlusion.
+      revealCircles(
+        world.teamVisible[team.ord],
+        mapTiles().int32,
+        mapTiles().int32,
+        visionSources
+      )
+    else:
+      revealVisionCached(
+        world.visionCache[team.ord],
+        world.teamVisible[team.ord],
+        mapTiles().int32,
+        mapTiles().int32,
+        sightTerrain.terrainHeights,
+        visionBlockers,
+        visionSources
+      )
     for i, value in world.teamVisible[team.ord]:
       if value != 0:
         world.teamExplored[team.ord][i] = 255
