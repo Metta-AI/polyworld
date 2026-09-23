@@ -6,10 +6,13 @@
 ## trainer last chose for it, so scripts never block and no threads are
 ## needed. `step` applies one action per agent, runs `actionTicks` ticks of
 ## every lane, and returns each agent's newest features and team reward.
-## The reward follows the hosted leaderboard score: each hero is worth
-## max(0, XP * 1440 - tick * 200), summed over the team; a step's reward is
-## the change divided by 5 * 1440 * 1000, and a loss or timeout drops the
-## team's potential to zero, as the leaderboard scores non-winners zero.
+## Two rewards, picked by RewardMode:
+## - LeaderboardReward follows the hosted score: each hero is worth
+##   max(0, XP * 1440 - tick * 200), summed over the team; a step's reward
+##   is the change divided by 5 * 1440 * 1000, and a loss or timeout drops
+##   the team's potential to zero, as the leaderboard scores non-winners zero.
+## - XpReward is the change in the team's total XP divided by 1000, with no
+##   tick penalty and no reset on a loss, so a policy learns from scratch.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
 ## Finished lanes restart with the next seed inside the same step.
@@ -24,8 +27,12 @@ const
   ScoreDenominator = 5 * ScoreTicksPerMinute * 1000
   GotaSourceCommit {.strdefine.} = ""
   TeamSize = 5
+  XpDenominator = 1000
 
 type
+  RewardMode* = enum
+    LeaderboardReward, XpReward
+
   LaneStats* {.bycopy.} = object
     ## Summary of one finished match, from the first policy team's side.
     finished*, outcome*, tick*, selfPlay*: int32
@@ -49,6 +56,7 @@ type
     opponents: seq[string]
     maxTicks, actionTicks: int
     selfPlay: bool
+    rewardMode: RewardMode
     agentsPerLane*: int
 
 proc teamPotential(world: World, team: Team): int64 =
@@ -57,6 +65,12 @@ proc teamPotential(world: World, team: Team): int64 =
     if hero.team == team:
       result += max(int64(hero.totalXp) * ScoreTicksPerMinute -
         int64(world.tick) * ScoreXpPerMinute, 0)
+
+proc teamXp(world: World, team: Team): int64 =
+  ## Total XP earned by one team's heroes.
+  for hero in world.heroes:
+    if hero.team == team:
+      result += int64(hero.totalXp)
 
 proc outcome(world: World, team: Team, timedOut: bool): int32 =
   ## 1 for a win, -1 for a loss or timeout, 0 while playing.
@@ -133,12 +147,16 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
         batch.installPolicy(lane, index)
   doAssert lane.agents.len == batch.agentsPerLane
   for side in Team:
-    lane.potentials[side] = teamPotential(game.world, side)
+    lane.potentials[side] =
+      case batch.rewardMode
+      of LeaderboardReward: teamPotential(game.world, side)
+      of XpReward: teamXp(game.world, side)
 
 proc newStepBatch*(
     configPath, bot, opponent, policy: string,
     count, maxTicks, actionTicks: int,
-    selfPlay: bool
+    selfPlay: bool,
+    rewardMode = LeaderboardReward
 ): StepBatch =
   ## Starts `count` lanes seeded 0 ..< count.
   doAssert count > 0 and maxTicks in 1 .. 28_800 and actionTicks > 0
@@ -152,6 +170,7 @@ proc newStepBatch*(
     maxTicks: maxTicks,
     actionTicks: actionTicks,
     selfPlay: selfPlay,
+    rewardMode: rewardMode,
     agentsPerLane: if selfPlay: 2 * TeamSize else: TeamSize
   )
   result.lanes.setLen(count)
@@ -214,12 +233,19 @@ proc step*(
       world = game.world
     var reward: array[Team, float32]
     for side in Team:
-      let potential =
-        if done and outcome(world, side, true) != 1: 0'i64
-        else: teamPotential(world, side)
-      reward[side] = float32(potential - lane.potentials[side]) /
-        float32(ScoreDenominator)
-      lane.potentials[side] = potential
+      case batch.rewardMode
+      of LeaderboardReward:
+        let potential =
+          if done and outcome(world, side, true) != 1: 0'i64
+          else: teamPotential(world, side)
+        reward[side] = float32(potential - lane.potentials[side]) /
+          float32(ScoreDenominator)
+        lane.potentials[side] = potential
+      of XpReward:
+        let xp = teamXp(world, side)
+        reward[side] = float32(xp - lane.potentials[side]) /
+          float32(XpDenominator)
+        lane.potentials[side] = xp
     stats[laneIndex] = LaneStats()
     if done:
       stats[laneIndex] = LaneStats(
@@ -244,10 +270,12 @@ proc gota_stats_size(): cint {.cdecl, exportc, dynlib.} =
 
 proc gota_create(
     config, bot, opponent, policy: cstring,
-    count, maxTicks, actionTicks, selfPlay: cint
+    count, maxTicks, actionTicks, selfPlay, rewardMode: cint
 ): pointer {.cdecl, exportc, dynlib.} =
+  doAssert rewardMode in 0 .. RewardMode.high.ord, "unknown reward mode"
   let batch = newStepBatch($config, $bot, $opponent, readFile($policy),
-    int(count), int(maxTicks), int(actionTicks), selfPlay != 0)
+    int(count), int(maxTicks), int(actionTicks), selfPlay != 0,
+    RewardMode(rewardMode))
   GC_ref(batch)
   cast[pointer](batch)
 
