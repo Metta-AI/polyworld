@@ -40,6 +40,7 @@ when not defined(headless):
     GameCameraHeight = 12.05'f32
     GameCameraDistance = 13.08'f32
     GameCameraPitch = 0.7659'f32 # About 44 degrees below the horizon.
+    HeroTargetRadius = 0.95'f32 ## Matches the ring drawn around a hero.
     CameraNear = 0.1'f32
     CameraFar = 100.0'f32
     ActiveHandCenterY = 1.25'f32
@@ -478,7 +479,10 @@ when not defined(headless):
     of Mage:
       rgbx(76, 121, 236, 255)
 
-  var activeCameraPlayer: int = 0
+  var activeCameraPlayer: proc(): int = proc(): int = 0
+    ## The player the camera sits behind, read live: bots and turn changes
+    ## flip it mid-frame, and a cached value would build poses facing the
+    ## old camera (a drawn card flew in upside down).
 
   when defined(awmLayoutTuning):
     # Build with -d:awmLayoutTuning to tune the layout live:
@@ -507,7 +511,7 @@ when not defined(headless):
     if playerIndex == 0: 1.0'f32 else: -1.0'f32
 
   proc cardYaw(playerIndex: int): float32 =
-    if activeCameraPlayer == 0: 0.0'f32 else: PI.float32
+    if activeCameraPlayer() == 0: 0.0'f32 else: PI.float32
 
   proc avatarPosition(playerIndex: int): Vec3 =
     vec3(
@@ -1025,22 +1029,30 @@ when not defined(headless):
       viewProjection: Mat4,
       choices: openArray[Choice]
   ): Choice =
+    ## The hit area follows the hero on screen: as wide as the target ring
+    ## drawn at its feet, and at least as tall as the body it covers. A
+    ## fixed pixel radius would miss at another resolution, camera or size.
     result = Canceled
-    var closestDistanceSquared = 72.0'f32 * 72.0'f32
+    var closestRatio = 1.0'f32
     for playerIndex in 0 ..< PlayerCount:
       let wanted = heroChoice(playerIndex)
       if not choices.choiceIsLegal(wanted):
         continue
       let
-        screen = screenPosition(
-          window,
-          avatarPosition(playerIndex) + vec3(0, 1.25, 0),
-          viewProjection
-        )
-        delta = screen - window.mousePos.vec2
-        distanceSquared = delta.x * delta.x + delta.y * delta.y
-      if distanceSquared <= closestDistanceSquared:
-        closestDistanceSquared = distanceSquared
+        feet = avatarPosition(playerIndex)
+        center = screenPosition(window, feet + vec3(0, HeroHeight * 0.5'f32, 0),
+          viewProjection)
+        head = screenPosition(window, feet + vec3(0, HeroHeight, 0),
+          viewProjection)
+        side = screenPosition(window, feet + vec3(HeroTargetRadius, 0, 0),
+          viewProjection)
+        ground = screenPosition(window, feet, viewProjection)
+        radius = max(abs(side.x - ground.x), abs(center.y - head.y))
+        delta = center - window.mousePos.vec2
+        ratio = (delta.x * delta.x + delta.y * delta.y) /
+          max(radius * radius, 1.0'f32)
+      if ratio <= closestRatio:
+        closestRatio = ratio
         result = wanted
 
   var hiddenSummons: array[PlayerCount, int]
@@ -1437,6 +1449,8 @@ when not defined(headless):
       if sessionOptions.human or phase == ChooseClasses: 0
       else: game.currentPlayer
 
+    activeCameraPlayer = cameraPlayer
+
     proc humanTurn(): bool =
       sessionOptions.human and botVms[game.currentPlayer] == nil
 
@@ -1815,7 +1829,6 @@ when not defined(headless):
     OpponentHandCenterY = {opponentHandHeight:.2f}'f32
     OpponentHandDistance = {opponentHandDistance:.2f}'f32
     HandCardRoll = {handCardRoll:.4f}'f32 # {radToDeg(handCardRoll):.1f} deg"""
-      activeCameraPlayer = cameraPlayer()
       animationTime += dt
       animations.advanceAnimations(dt)
       discardFlights.advanceAnimations(dt)
