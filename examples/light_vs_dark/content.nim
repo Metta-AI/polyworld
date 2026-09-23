@@ -351,8 +351,8 @@ const
   WoodPerTree* = 400'i16
     ## Four trips, after which the tile is removed from the map.
   DepositTicks* = 5'i32
-  MainMineGold* = 25_000'i32
-  ExpansionMineGold* = 15_000'i32
+  MainMineGold* = 45_000'i32
+  ExpansionMineGold* = 25_000'i32
   FoodCapMax* = 100'i32
   UnitsPerPlayer* = 100'i32
   DeathTicks* = 36'i32
