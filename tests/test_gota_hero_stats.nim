@@ -102,8 +102,9 @@ block:
 
 echo "Testing exact replay playback and rejection of corrupt state hashes"
 block:
+  createDir("tmp")
   let
-    path = getTempDir() / ("gota-hero-stats-" & $getCurrentProcessId() &
+    path = "tmp" / ("gota-hero-stats-" & $getCurrentProcessId() &
       ".replay")
     game = newGame(
       generateMap(2026),

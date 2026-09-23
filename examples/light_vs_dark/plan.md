@@ -178,11 +178,11 @@ nim c -d:release -d:headless -o:lvd examples/light_vs_dark/lvd.nim
 ```
 
 ```bash
-./lvd --bot examples/light_vs_dark/players/base.bas:2 --seconds 600 --record examples/light_vs_dark/replays/demo.replay
+./lvd --bot examples/light_vs_dark/players/base.bas:2 --seconds 600 --record tmp/replays/lvd.replay
 ```
 
 ```bash
-./lvd --replay examples/light_vs_dark/replays/demo.replay
+./lvd --replay tmp/replays/lvd.replay
 ```
 
 ```bash

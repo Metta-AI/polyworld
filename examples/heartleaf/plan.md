@@ -274,11 +274,11 @@ nim r examples/heartleaf/heartleaf.nim --bot examples/heartleaf/players/base.bas
 ```
 
 ```bash
-nim r -d:headless examples/heartleaf/heartleaf.nim --seed 1988 --bot examples/heartleaf/players/base.bas:9 --record examples/heartleaf/replays/demo.replay
+nim r -d:headless examples/heartleaf/heartleaf.nim --seed 1988 --bot examples/heartleaf/players/base.bas:9 --record tmp/replays/heartleaf.replay
 ```
 
 ```bash
-nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay
+nim r examples/heartleaf/heartleaf.nim --replay tmp/replays/heartleaf.replay
 ```
 
 ```bash
@@ -329,20 +329,20 @@ destination; otherwise playback continues there.
 
 ```sh
 # Open the third nightly scorecard, paused.
-nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:3:scorecard --play=false
+nim r examples/heartleaf/heartleaf.nim --replay tmp/replays/heartleaf.replay --seek-event day:3:scorecard --play=false
 
 # Open final results for the bundled seven-day replay.
-nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:7:scorecard --play=false
+nim r examples/heartleaf/heartleaf.nim --replay tmp/replays/heartleaf.replay --seek-event day:7:scorecard --play=false
 
 # Inspect an exact tick, or another event.
-nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-tick 4320 --play=false
-nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:2:dinner --play=false
+nim r examples/heartleaf/heartleaf.nim --replay tmp/replays/heartleaf.replay --seek-tick 4320 --play=false
+nim r examples/heartleaf/heartleaf.nim --replay tmp/replays/heartleaf.replay --seek-event day:2:dinner --play=false
 
 # Run current scripted bots directly to a scorecard.
 nim r examples/heartleaf/heartleaf.nim --seed 1988 --bot examples/heartleaf/players/base.bas:9 --seek-event day:1:scorecard --play=false
 
 # Inspect the same destination without opening a window; print scores and exit.
-nim r -d:headless examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay --seek-event day:3:scorecard
+nim r -d:headless examples/heartleaf/heartleaf.nim --replay tmp/replays/heartleaf.replay --seek-event day:3:scorecard
 ```
 
 Seeking requires a replay or all scripted villagers; it rejects human-player

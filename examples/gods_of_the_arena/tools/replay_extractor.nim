@@ -1,13 +1,15 @@
-## Edit the replay path and loops below to explore a match.
+## Pass a generated replay path and edit the loops below to explore a match.
 
 import
+  std/os,
   polyworld/tapes,
   ../[maps, replays, sim]
 
-const ReplayPath = "examples/gods_of_the_arena/replays/demo.replay"
+if paramCount() != 1:
+  quit("Usage: replay_extractor tmp/replays/gota.replay", 1)
 
 let
-  replay = loadReplay(ReplayPath)
+  replay = loadReplay(paramStr(1))
   game = newGame(
     generateMap(replay.config.seed, replay.config.mapPreset),
     replay.config.spawnIntervalTicks,

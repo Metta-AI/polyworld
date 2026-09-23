@@ -12,7 +12,7 @@ export fixxy
 
 const
   ReplayGame* = "gods_of_the_arena"
-  ReplayFormatVersion* = 5'u16
+  ReplayFormatVersion* = 6'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
   ReplayGameVersion* = 58'u16

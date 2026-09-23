@@ -36,6 +36,9 @@
   </head>
   <body>
     <!--
+      Generate and verify fresh recordings before building the WASM clients:
+        nim r tools/gen_replays.nim
+      Replays stay in tmp/replays/. See deploy.md for the full build commands.
       Serve from the polyworld repo root so the wasm bundles and bots resolve:
         python3 -m http.server 8766 --bind 127.0.0.1
       Then open /tools/demo/

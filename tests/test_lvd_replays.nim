@@ -127,7 +127,8 @@ doAssert hashes.hashAt(MatchTicks, hash) and hash == decoded.hashes[^1]
 doAssert not hashes.hashAt(MatchTicks + 1, hash)
 
 echo "Testing replay file I/O and privacy shape"
-let path = getTempDir() / "polyworld-lvd-test.replay"
+createDir("tmp")
+let path = "tmp" / ("polyworld-lvd-" & $getCurrentProcessId() & ".replay")
 saveReplay(path, recorder.data)
 let loaded = loadReplay(path)
 doAssert loaded.actions == decoded.actions

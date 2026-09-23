@@ -438,6 +438,7 @@ end if
   playback.world.restore(snapshot)
   doAssert playback.world.heroes[0].lastActionError == ActionInvalidSlot
   doAssert playback.world.events.len == 0
+  createDir("tmp")
   saveReplay("tmp/events-example.replay", replay)
 
 echo "test_gota_events: all checks passed"

@@ -45,7 +45,7 @@ proc testRecording() =
   when defined(recordGota):
     startReplayRecording(96)
   let
-    directory = getTempDir() / ("polyworld-recording-" & $getCurrentProcessId())
+    directory = "tmp" / ("polyworld-recording-" & $getCurrentProcessId())
     path = directory / "test.replay"
     setup = run.recorder.data.header.setup
   createDir(directory)
@@ -70,6 +70,15 @@ proc testRecording() =
 
   echo "Testing each client rejects every other gameplay version"
   let encoded = empty.encodeReplay()
+  for version in 0'u16 ..< ReplayFileVersion:
+    var obsolete = encoded
+    obsolete[ReplayMagic.len] = char(version and 0xff)
+    obsolete[ReplayMagic.len + 1] = char(version shr 8)
+    try:
+      discard decodeReplay(obsolete)
+      doAssert false, "old replay formats must fail before payload decoding"
+    except ReplayError as error:
+      doAssert error.msg.contains("unsupported Polyworld replay format")
   for version in 0'u16 .. ReplayGameVersion + 1:
     if version == ReplayGameVersion:
       continue
@@ -96,11 +105,6 @@ proc testRecording() =
       doAssert false, "the payload must also match this gameplay version"
     except ReplayError:
       discard
-
-  echo "Testing the bundled demo belongs to this client"
-  let demo = loadReplay("examples" / ReplayGame / "replays" / "demo.replay")
-  doAssert demo.header.gameVersion == ReplayGameVersion
-  doAssert demo.hashes.len > 0
 
   echo "Testing replay config agrees with the recorded match"
   for check in 0 ..< 4:

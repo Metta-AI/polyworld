@@ -1,7 +1,7 @@
 import
   std/times,
   vmath, polyworld/[player, chrome, tapes],
-  ../examples/heartleaf/[content, maps, sim, scorecard, seeking, replays]
+  ../examples/heartleaf/[bots, content, maps, sim, scorecard, seeking, replays]
 
 let gameMap = generateMap(DefaultSeed)
 
@@ -199,21 +199,52 @@ block screenBounds:
     doAssert scoreLayoutFits(size / scale)
     doAssert scale >= 0.5
 block replayReports:
-  let data = loadReplay("examples/heartleaf/replays/demo.replay")
-  let game = newGame(generateMap(data.header.setup.mapSeed), int32(data.header.setup.dayCount))
+  const BotSource = staticRead("../examples/heartleaf/players/base.bas")
+  let
+    live = newGame(gameMap, 3)
+    destination = parseSeekTarget("--seek-event", "day:3:scorecard")
+  var sources: array[VillagerCount, string]
+  for source in sources.mitems:
+    source = BotSource
+  live.loadBots(sources)
+  live.recorder = initReplayRecorder(Setup(
+    mapSeed: DefaultSeed,
+    tickRate: uint16(TickRate),
+    gridTiles: uint16(GridSide),
+    decisionTicks: uint16(DecisionTicks),
+    dayCount: 3,
+    maximumTicks: uint32(gameLengthTicks(3)),
+    mapHash: gameMap.hash,
+    contentHash: contentHash()
+  ))
+  proc recordDecisions(w: World) =
+    ## Records fresh bot commands for the scorecard seek scenario.
+    live.runBotDecisions()
+  while not destination.reached(live.world):
+    live.world.tickWorld(recordDecisions)
+    live.recorder.recordHash(live.stateHash())
+  let
+    data = decodeReplay(encodeReplay(live.recorder.data))
+    game = newGame(
+      generateMap(data.header.setup.mapSeed),
+      int32(data.header.setup.dayCount)
+    )
+  doAssert data.actions.len > 0
   var tape = initReplayPlayer(data)
   proc decide(w: World) =
+    ## Applies the newly recorded commands during playback and seeking.
     var action: ReplayAction
     while tape.takeActionAt(uint32(w.tick), action):
       w.applyReplayAction(action)
-  let destination = parseSeekTarget("--seek-event", "day:3:scorecard")
   var checkpoint: World
   while not destination.reached(game.world):
     game.world.tickWorld(decide)
     doAssert game.stateHash() == data.hashes[game.world.tick - 1]
-    if game.world.day == 2 and game.world.phase == ScorePhase and checkpoint == nil:
-      checkpoint = game.world.clone()
+    if game.world.day == 2 and game.world.phase == ScorePhase and
+      checkpoint == nil:
+        checkpoint = game.world.clone()
   let expected = game.world.dailyReports
+  doAssert expected == live.world.dailyReports
   let fingerprint = game.stateHash()
   game.world.restore(checkpoint)
   tape.syncCursor(uint32(game.world.tick))

@@ -186,11 +186,7 @@ proc shownBuilding*(structure: Building): bool =
 proc runGraphics*() =
   ## Runs the native or Emscripten spectator.
   startGameProfile()
-  let
-    matchCreated =
-      if run.recorder != nil: run.recorder.data.header.createdUnixMs
-      else: run.replayData.header.createdUnixMs
-    order = factionOrder(matchCreated xor run.mapSeed.int64)
+  let order = factionOrder(run.mapSeed.int64)
   var playerFactions: array[PlayerCount, Faction]
   for player in 0 ..< PlayerCount:
     playerFactions[player] = order[Faction(player)]

@@ -1,7 +1,7 @@
 ## Shared Polyworld replay header, Flatty payload, file I/O, and action tape.
 
 import
-  std/[os, strutils, times],
+  std/[os, strutils],
   flatty,
   configs
 
@@ -9,7 +9,7 @@ export configs
 
 const
   ReplayMagic* = "POLYWORLDREPLAY"
-  ReplayFileVersion* = 1'u16
+  ReplayFileVersion* = 2'u16
   DefaultMaxReplayBytes* = 64 * 1024 * 1024
   MaximumReplayGameBytes* = 64
   HeaderFixedBytes = 6
@@ -181,10 +181,9 @@ type
     error*: string
 
   TapeHeader*[Setup] = object
-    ## Versions, creation time, and the game's immutable match setup.
+    ## Versions and the game's immutable match setup.
     formatVersion*: uint16
     gameVersion*: uint16
-    createdUnixMs*: int64
     setup*: Setup
 
   ActionTape*[Setup, Action; Metrics = void; Config = GameConfig] = object
@@ -321,7 +320,6 @@ proc initActionTape*[Setup, Action](
   result.header = TapeHeader[Setup](
     formatVersion: formatVersion,
     gameVersion: gameVersion,
-    createdUnixMs: toUnix(getTime()) * 1000,
     setup: setup
   )
 

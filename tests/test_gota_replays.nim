@@ -137,7 +137,8 @@ doAssert directPlayer.takeActionAt(19, action)
 doAssert directPlayer.finished
 
 echo "Testing replay file I/O and privacy shape"
-let path = getTempDir() / "polyworld-gota-test.replay"
+createDir("tmp")
+let path = "tmp" / ("polyworld-gota-" & $getCurrentProcessId() & ".replay")
 saveReplay(path, recorder.data)
 let loaded = loadReplay(path)
 doAssert loaded.actions == decoded.actions

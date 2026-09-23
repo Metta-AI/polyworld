@@ -12,7 +12,7 @@ export fixxy
 
 const
   ReplayGame* = "heartleaf"
-  ReplayFormatVersion* = 2'u16
+  ReplayFormatVersion* = 3'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
   ReplayGameVersion* = 7'u16

@@ -8,11 +8,18 @@ Build ordinary WASM clients, without `-d:replayViewer`, before packaging:
 
 ```sh
 export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
+nim r tools/gen_replays.nim
 nim c -d:emscripten examples/gods_of_the_arena/gota.nim
 nim c -d:emscripten examples/light_vs_dark/lvd.nim
 nim c -d:emscripten examples/call_to_adventure/cta.nim
 nim r tools/demo/package.nim tmp/polyworld-site --release UNIQUE_RELEASE
 ```
+
+The generation step records the three games to `tmp/replays/`, repeats each
+match with the same seed and players to check identical bytes, then verifies
+every tick during playback. CI runs the same check, including Heartleaf.
+Replays are generated locally and in CI, never committed. Tests also write
+replay files under `tmp/`. The live browser demo still runs its bots directly.
 
 The output contains `demo/index.html` and a versioned `releases/UNIQUE_RELEASE`
 directory. Each game has its HTML, JavaScript, WASM, asset bundle, loading logo
