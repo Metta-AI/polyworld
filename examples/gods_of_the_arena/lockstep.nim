@@ -6,6 +6,10 @@
 ## trainer last chose for it, so scripts never block and no threads are
 ## needed. `step` applies one action per agent, runs `actionTicks` ticks of
 ## every lane, and returns each agent's newest features and team reward.
+## The reward follows the hosted leaderboard score: each hero is worth
+## max(0, XP * 1440 - tick * 200), summed over the team; a step's reward is
+## the change divided by 5 * 1440 * 1000, and a loss or timeout drops the
+## team's potential to zero, as the leaderboard scores non-winners zero.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
 ## Finished lanes restart with the next seed inside the same step.
@@ -15,7 +19,9 @@ include bots
 const
   GotaFeatureCount* {.intdefine.} = 8
   GotaActionCount* {.intdefine.} = 8
-  GotaOutcomeReward* = 100'f32
+  ScoreTicksPerMinute = 1440'i64
+  ScoreXpPerMinute = 200'i64
+  ScoreDenominator = 5 * ScoreTicksPerMinute * 1000
   GotaSourceCommit {.strdefine.} = ""
   TeamSize = 5
 
@@ -24,7 +30,7 @@ type
     ## Summary of one finished match, from the first policy team's side.
     finished*, outcome*, tick*, selfPlay*: int32
     potential*: int64
-      ## XP and structure HP lead at the end, see teamPotential.
+      ## Leaderboard score numerator at the end; points = potential / 7200.
 
   StepLane = object
     game: Game
@@ -46,15 +52,11 @@ type
     agentsPerLane*: int
 
 proc teamPotential(world: World, team: Team): int64 =
-  ## XP and structure HP relative to the other team.
+  ## The hosted leaderboard score numerator for one team.
   for hero in world.heroes:
-    result += (if hero.team == team: 1 else: -1) * hero.totalXp
-  for building in world.buildings:
-    if building.kind == TowerBuilding:
-      result += 2 * (if building.team == team: 1 else: -1) *
-        max(building.hp, 0)
-  for fort in world.forts:
-    result += 20 * (if fort.team == team: 1 else: -1) * max(fort.hp, 0)
+    if hero.team == team:
+      result += max(int64(hero.totalXp) * ScoreTicksPerMinute -
+        int64(world.tick) * ScoreXpPerMinute, 0)
 
 proc outcome(world: World, team: Team, timedOut: bool): int32 =
   ## 1 for a win, -1 for a loss or timeout, 0 while playing.
@@ -212,9 +214,11 @@ proc step*(
       world = game.world
     var reward: array[Team, float32]
     for side in Team:
-      let potential = teamPotential(world, side)
-      reward[side] = float32(potential - lane.potentials[side]) / 1000'f32 +
-        float32(outcome(world, side, done)) * GotaOutcomeReward
+      let potential =
+        if done and outcome(world, side, true) != 1: 0'i64
+        else: teamPotential(world, side)
+      reward[side] = float32(potential - lane.potentials[side]) /
+        float32(ScoreDenominator)
       lane.potentials[side] = potential
     stats[laneIndex] = LaneStats()
     if done:
@@ -223,7 +227,7 @@ proc step*(
         outcome: outcome(world, lane.team, true),
         tick: world.tick,
         selfPlay: int32(batch.selfPlay),
-        potential: lane.potentials[lane.team]
+        potential: teamPotential(world, lane.team)
       )
     for i, index in lane.agents:
       rewards[agent + i] = reward[world.heroes[index].team]
