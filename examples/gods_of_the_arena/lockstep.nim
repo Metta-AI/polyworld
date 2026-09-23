@@ -11,7 +11,7 @@
 ##   max(0, XP * 1440 - tick * 200), summed over the team; a step's reward
 ##   is the change divided by 5 * 1440 * 1000, and a loss or timeout drops
 ##   the team's potential to zero, as the leaderboard scores non-winners zero.
-## - XpReward is the change in the team's total XP divided by 1000, with no
+## - XpReward is the change in the team's total XP divided by 100, with no
 ##   tick penalty and no reset on a loss, so a policy learns from scratch.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
@@ -27,7 +27,7 @@ const
   ScoreDenominator = 5 * ScoreTicksPerMinute * 1000
   GotaSourceCommit {.strdefine.} = ""
   TeamSize = 5
-  XpDenominator = 1000
+  XpDenominator = 100
 
 type
   RewardMode* = enum
