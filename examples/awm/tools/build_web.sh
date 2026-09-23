@@ -28,35 +28,42 @@ if [[ ! -f "$polyworld_repo/src/polyworld/common.nim" ]]; then
   exit 1
 fi
 polyworld_repo="$(cd -- "$polyworld_repo" && pwd)"
-data_dir="$(dirname -- "$polyworld_repo")/polyworld_data"
+art_dir="${POLYWORLD_ART:-$(dirname -- "$polyworld_repo")/polyworld_art}"
+if [[ ! -d "$art_dir/awm" ]]; then
+  echo "Clone polyworld_art beside Polyworld, or set POLYWORLD_ART." >&2
+  exit 1
+fi
 mkdir -p "$web_dir"
 web_dir="$(cd -- "$web_dir" && pwd)"
 stage_dir="$web_dir/assets"
+art_stage="$stage_dir/polyworld_art"
 
 # Keep the downloadable asset pack small. Screenshots, source prompts and the
 # unrelated Polyworld games' models are deliberately outside the package.
-mkdir -p "$stage_dir/polyworld_data/characters/mini_legion/human"
-mkdir -p "$stage_dir/polyworld_data/fonts" "$stage_dir/polyworld_data/themes"
-mkdir -p "$stage_dir/polyworld_data/awm/cards" "$stage_dir/polyworld_data/awm/vfx" \
-  "$stage_dir/polyworld_data/awm/ui"
-for character in archer footman mage; do
-  cp "$data_dir/characters/mini_legion/human/$character.glb" \
-    "$stage_dir/polyworld_data/characters/mini_legion/human/"
+rm -rf "$art_stage"
+mkdir -p "$art_stage/fonts" "$art_stage/themes" "$art_stage/icons"
+mkdir -p "$art_stage/awm/cards" "$art_stage/awm/vfx" \
+  "$art_stage/awm/ui" "$art_stage/awm/battlefield"
+# Only the CharGen parts, palettes, rig and clips of the six hero looks.
+chargen_dir="$art_dir/characters/chargen"
+(cd "$project_dir" && "$nim_command" r --hints:off \
+  --out:"$web_dir/list_hero_assets" tools/list_hero_assets.nim) |
+while IFS= read -r path; do
+  mkdir -p "$art_stage/characters/chargen/$(dirname -- "$path")"
+  cp "$chargen_dir/$path" "$art_stage/characters/chargen/$path"
 done
-cp "$data_dir/characters/mini_legion/human/human_albedo.png" \
-  "$stage_dir/polyworld_data/characters/mini_legion/human/"
 for font in Rubik-Regular.ttf Rubik-Bold.ttf; do
-  cp "$data_dir/fonts/$font" "$stage_dir/polyworld_data/fonts/"
+  cp "$art_dir/fonts/$font" "$art_stage/fonts/"
 done
-cp -R "$data_dir/themes/main" "$stage_dir/polyworld_data/themes/"
-cp -R "$data_dir/ui" "$stage_dir/polyworld_data/"
-mkdir -p "$stage_dir/polyworld_data/icons"
-cp "$data_dir"/icons/*.png "$stage_dir/polyworld_data/icons/"
+cp -R "$art_dir/themes/main" "$art_stage/themes/"
+cp -R "$art_dir/ui" "$art_stage/"
+cp "$art_dir"/icons/*.png "$art_stage/icons/"
 for directory in art fonts frames icons; do
-  cp -R "$data_dir/awm/cards/$directory" "$stage_dir/polyworld_data/awm/cards/"
+  cp -R "$art_dir/awm/cards/$directory" "$art_stage/awm/cards/"
 done
-cp -R "$data_dir/awm/vfx/textures" "$stage_dir/polyworld_data/awm/vfx/"
-cp -R "$data_dir/awm/ui/hud" "$stage_dir/polyworld_data/awm/ui/"
+cp -R "$art_dir/awm/vfx/textures" "$art_stage/awm/vfx/"
+cp -R "$art_dir/awm/ui/hud" "$art_stage/awm/ui/"
+cp -R "$art_dir/awm/battlefield/textures" "$art_stage/awm/battlefield/"
 
 if [[ -d "$project_dir/players" ]]; then
   mkdir -p "$stage_dir/players"

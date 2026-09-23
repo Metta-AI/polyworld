@@ -12,8 +12,8 @@ when not defined(headless):
     chroma, opengl, pixie, shady, silky, vmath, windy,
     cardfaces, cardrenderer, vfxrenderer, awmsessions, awmweb, awmbots, awmpost,
     awmpostpanel,
-    awmcourtyard, paths,
-    polyworld/[assets, characters, chrome, common, viewers]
+    awmcourtyard, awmheroes, paths,
+    polyworld/[assets, characters, chargen, chrome, common, viewers]
 
   const
     WindowTitle = "AWM — Archers Warriors Mages"
@@ -55,12 +55,6 @@ when not defined(headless):
         glsl3WebGL
       else:
         glsl4Desktop
-
-    CharacterPaths: array[HeroClass, string] = [
-      DataRoot & "/characters/mini_legion/human/archer.glb",
-      DataRoot & "/characters/mini_legion/human/footman.glb",
-      DataRoot & "/characters/mini_legion/human/mage.glb"
-    ]
 
   type
     AppPhase = enum
@@ -1151,14 +1145,33 @@ when not defined(headless):
     for candidate in candidates:
       let root = absolutePath(candidate)
       if fileExists(root / "src" / "polyworld" / "common.nim") and
-          dirExists(root / ".." / "polyworld_data"):
+          dirExists(root / ".." / "polyworld_art"):
         return root
 
-  proc idleClip(model: CharacterModel): int =
-    for name in ["Idle", "Idle01", "Idle_Battle", "Idle_Normal"]:
-      if model.clips.hasKey(name):
-        return model.clipIndex(name)
-    0
+  proc lightLikeCourtyard(scene: CharacterScene, cameraSide: float32) =
+    ## Gives the heroes the courtyard's lighting: a cool hemisphere ambient,
+    ## the same warm key from the same direction, and a moonlit rim that
+    ## keeps a dark silhouette readable against dark stone. Call after
+    ## beginCharacters, which sets the shared defaults.
+    let
+      context = scene.context
+      # Heroes have no mapped relief, so they take less fill and a stronger
+      # key than the stone: shape has to come from the light alone.
+      ambient = (CourtyardAmbientGround + CourtyardAmbientSky) * 0.30'f32
+      key = CourtyardKeyColor * 1.15'f32
+      keyDirection = courtyardKeyDirection(cameraSide)
+    context.ambientLightColor =
+      color(ambient.x, ambient.y, ambient.z, 1.0)
+    # The PBR shader negates the light vectors.
+    context.sunLightDirection = -keyDirection
+    context.sunLightColor = color(key.x, key.y, key.z, 1.0)
+    context.rimLightDirection =
+      normalize(vec3(-keyDirection.x, 0.35, -keyDirection.z))
+    context.rimLightColor = color(0.55, 0.62, 0.78, 0.30)
+    # A daylight probe would wash out a night courtyard, and a hot specular
+    # on a hero's head would feed the bloom.
+    context.environmentMapStrength = 0.25
+    context.exposure = 0.9
 
   proc hudScale(window: Window): float32 =
     let density = when defined(emscripten): window.contentScale else: 1.0'f32
@@ -1249,6 +1262,8 @@ when not defined(headless):
       if getEnv("AWM_DEMO_CARD_HOVER") == "1" and player.hand.len > 0:
         card = player.hand[0]
         found = true
+      if getEnv("AWM_CAPTURE_NO_HOVER") == "1":
+        found = false
     if not found:
       return
     let
@@ -1342,18 +1357,23 @@ when not defined(headless):
       cardSurfaces = initCardRenderer()
       vfx = initVfxRenderer(cardAssets.parentDir / "vfx" / "textures")
       post = initPostFx()
-    let courtyard = initCourtyardRenderer()
+    var courtyard = initCourtyardRenderer()
     let scene = newCharacterScene(window)
-    scene.useToonShading()
+    # AWM lights heroes with the courtyard's own night rig, not the shared
+    # toon ramp: see lightLikeCourtyard.
+    scene.shading = PbrCharacters
     var
-      models: array[HeroClass, CharacterModel]
-      idleClips: array[HeroClass, int]
-    for heroClass in HeroClass:
-      models[heroClass] = loadCharacterModel(
-        CharacterPaths[heroClass],
-        2.6
-      )
-      idleClips[heroClass] = models[heroClass].idleClip()
+      models: array[HeroSeats, array[HeroClass, CharacterModel]]
+      idleClips: array[HeroSeats, array[HeroClass, int]]
+    let
+      heroManifest = readManifest(ChargenLibrary)
+      heroPresets = readHeroPresets()
+    for seat in 0 ..< HeroSeats:
+      for heroClass in HeroClass:
+        models[seat][heroClass] = heroManifest.loadHeroModel(
+          heroPresets[seat][heroClass], heroClass)
+        idleClips[seat][heroClass] =
+          models[seat][heroClass].clipIndex(HeroIdleClips[heroClass])
 
     var
       phase = ChooseClasses
@@ -2258,6 +2278,10 @@ when not defined(headless):
               pendingChoices.setLen(0)
 
       when defined(takeScreenshot):
+        if getEnv("AWM_CAPTURE_NO_HOVER") == "1":
+          hoverIndex = -1
+          hoveredBoard = Canceled
+          hoveredTarget = Canceled
         if getEnv("AWM_DEMO_HALO") == "1":
           if pendingTargeting:
             for choice in pendingChoices:
@@ -2623,13 +2647,18 @@ when not defined(headless):
       glStencilMask(0xff)
       glClearStencil(0)
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+      let environmentTime =
+        when defined(takeScreenshot):
+          parseFloat(getEnv("AWM_SCENE_TIME", $animationTime)).float32
+        else: animationTime
       if phase == PlayGame:
-        courtyard.draw(viewProjection, cameraEye, animationTime, currentSide)
+        courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide)
+        courtyard.drawSky(viewProjection, cameraEye, environmentTime)
       solid.draw(viewProjection)
       cardSurfaces.draw(sk, viewProjection)
 
-      scene.setToonHour(14)
       beginCharacters(scene, window, view, projection, cameraEye)
+      scene.lightLikeCourtyard(currentSide)
       glEnable(GL_STENCIL_TEST)
       glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
       glStencilFunc(GL_ALWAYS, 0, 0xff)
@@ -2640,10 +2669,10 @@ when not defined(headless):
             chosen = selectedClass == heroClass
           drawCharacter(
             scene,
-            models[heroClass],
+            models[0][heroClass],
             vec3(x, 0.15, 0),
             0,
-            idleClips[heroClass],
+            idleClips[0][heroClass],
             animationTime,
             tint =
               if chosen:
@@ -2674,10 +2703,10 @@ when not defined(headless):
               cameraEye, 0.95, if targetHovered: 1.1'f32 else: 0.28'f32)
           drawCharacter(
             scene,
-            models[player.heroClass],
+            models[playerIndex][player.heroClass],
             avatarPosition(playerIndex),
             if playerIndex == 0: PI.float32 else: 0,
-            idleClips[player.heroClass],
+            idleClips[playerIndex][player.heroClass],
             animationTime,
             tint =
               if damageFlash > 0:
@@ -2704,6 +2733,10 @@ when not defined(headless):
           )
       finishCharacters(scene)
       glDisable(GL_STENCIL_TEST)
+      if phase == PlayGame and post.beginMaterialNormals():
+        courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide,
+          normalsOnly = true, normalView = view)
+        post.endMaterialNormals()
       post.applyOcclusion(projection)
       if phase == PlayGame:
         for playerIndex in 0 ..< PlayerCount:
@@ -3015,7 +3048,7 @@ when not defined(headless):
         publishStatus(summary.cstring)
 
       when PostPanelControls:
-        drawPostPanel(sk, window, post)
+        drawPostPanel(sk, window, post, courtyard)
       sk.endUi()
       when defined(takeScreenshot):
         if existsEnv("AWM_CAPTURE_SEQUENCE"):

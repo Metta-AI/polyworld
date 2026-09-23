@@ -45,7 +45,7 @@ when defined(emscripten):
   --define:noSignalHandler
   --define:noAutoGLerrorCheck
   switch("passL", "--preload-file " &
-    quoteShell(awmWebAssets / "polyworld_data" & "@/polyworld_data"))
+    quoteShell(awmWebAssets / "polyworld_art" & "@/polyworld_art"))
   switch("passL", "--preload-file " &
     quoteShell(awmWebAssets / "players" & "@/players"))
   switch("passL", "--pre-js " &

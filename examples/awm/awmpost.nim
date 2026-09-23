@@ -3,10 +3,12 @@
 ## The 3D scene renders into an offscreen target instead of the window:
 ##
 ## 1. Opaque pass (table, cards, characters) into `scene`.
-## 2. `applyOcclusion`: screen-space ambient occlusion from the scene depth,
+## 2. Visible material normals are replayed against the finished depth. Other
+##    surfaces retain the depth-reconstructed normal; the sky has no normal.
+## 3. `applyOcclusion`: screen-space ambient occlusion from the scene depth,
 ##    at half resolution, blurred with a depth-aware filter and multiplied
 ##    into the scene. It runs before the VFX, so glows are never darkened.
-## 3. The VFX draw on top. `present` extracts the light they added (plus the
+## 4. The VFX draw on top. `present` extracts the light they added (plus the
 ##    brightest scene highlights) into a bloom chain, then writes the scene to
 ##    the window with FXAA, bloom, a gentle grade, vignette and dither.
 ##
@@ -36,7 +38,7 @@ type
     FinalLayer = "final image"
     SceneLayer = "scene before bloom and grading"
     DepthLayer = "depth"
-    NormalLayer = "normals from depth"
+    NormalLayer = "surface normals"
     RawOcclusionLayer = "occlusion, unblurred"
     OcclusionLayer = "occlusion"
     BeforeVfxLayer = "scene before VFX"
@@ -63,6 +65,7 @@ type
     occlusionBias*: float32       ## Cosine ignored, hides flat-surface noise.
     occlusionTint*: Vec3          ## Color occlusion fades toward.
     occlusionSharpness*: float32  ## How hard the blur stops at depth edges.
+    occlusionNormalDetail*: float32 ## Mapped surface relief the AO reacts to.
     bloomThreshold*: float32      ## Scene brightness that starts to glow.
     bloomVfx*: float32            ## How much of the VFX light glows.
     bloomStrength*: float32
@@ -78,6 +81,7 @@ type
     sceneFramebuffer: GLuint
     sceneColor: GLuint
     sceneDepth: GLuint            ## Depth-stencil, sampled for occlusion.
+    materialNormals: RenderTarget ## View-space RGB; alpha marks mapped surfaces.
     occlusion: array[2, RenderTarget]
     beforeVfx: RenderTarget       ## Half-res copy of the scene before VFX.
     bloom: array[BloomLevels, RenderTarget]
@@ -102,6 +106,7 @@ void main() {
 
   ViewFromDepth = """
 uniform highp sampler2D depthTexture;
+uniform sampler2D normalTexture;
 uniform mat4 inverseProjection;
 uniform vec2 texel;
 
@@ -126,6 +131,13 @@ vec3 viewNormal(vec2 p, vec3 center) {
   vec3 dy = abs(up.z) < abs(down.z) ? up : down;
   return normalize(cross(dx, dy));
 }
+
+vec3 surfaceNormal(vec2 p, vec3 center, float detail) {
+  vec3 geometric = viewNormal(p, center);
+  vec4 surface = texture(normalTexture, p);
+  if (surface.a < 0.5) return geometric;
+  return normalize(mix(geometric, normalize(surface.rgb * 2.0 - 1.0), detail));
+}
 """
 
   OcclusionFragment = ViewFromDepth & """
@@ -133,6 +145,7 @@ uniform vec2 projectionScale;
 uniform float radius;
 uniform float intensity;
 uniform float bias;
+uniform float normalDetail;
 in vec2 uv;
 out vec4 fragColor;
 
@@ -150,7 +163,9 @@ void main() {
     return;
   }
   vec3 center = viewPosition(base);
-  vec3 normal = viewNormal(base, center);
+  // Small surface relief affects the AO hemisphere without making a flat
+  // slab self-occlude as heavily as a real geometric crease.
+  vec3 normal = surfaceNormal(base, center, normalDetail);
   vec2 uvRadius = 0.5 * projectionScale * radius / max(-center.z, 0.1);
   float spin = hash(gl_FragCoord.xy) * 6.2831853;
   const int Taps = 16;
@@ -359,7 +374,7 @@ void main() {
     color = depth >= 1.0 ? vec3(0.0) : vec3(1.0 - 0.85 * clamp((z - 5.0) / 30.0, 0.0, 1.0));
   } else if (mode == 2) {
     vec3 center = viewPosition(uv);
-    color = depth >= 1.0 ? vec3(0.0) : viewNormal(uv, center) * 0.5 + 0.5;
+    color = depth >= 1.0 ? vec3(0.0) : surfaceNormal(uv, center, 1.0) * 0.5 + 0.5;
   } else if (mode == 3) {
     color = max(color - texture(otherTexture, uv).rgb, 0.0) * 2.0;
   }
@@ -386,6 +401,7 @@ proc defaultPostSettings*(): PostSettings =
     occlusionBias: envFloat("AWM_SSAO_BIAS", 0.08),
     occlusionTint: vec3(0.10, 0.10, 0.16),
     occlusionSharpness: 40,
+    occlusionNormalDetail: 0.45,
     bloomThreshold: 0.922,
     bloomVfx: 1.0,
     bloomStrength: 0.75,
@@ -498,6 +514,7 @@ proc ensureSize(post: var PostFx, size: IVec2) =
   if size == post.size:
     return
   post.size = size
+  post.materialNormals.release()
   if post.sceneFramebuffer != 0:
     glDeleteFramebuffers(1, post.sceneFramebuffer.addr)
     glDeleteTextures(1, post.sceneColor.addr)
@@ -514,6 +531,16 @@ proc ensureSize(post: var PostFx, size: IVec2) =
     GL_TEXTURE_2D, post.sceneDepth, 0)
   if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
     raise newException(CatchableError, "AWM post scene target is incomplete")
+  post.materialNormals.initTarget(size)
+  glBindTexture(GL_TEXTURE_2D, post.materialNormals.texture)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+  # The normal replay shares the finished depth, so nearer cards and heroes
+  # reject the floor's normals. No extra depth copy or float extension needed.
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+    GL_TEXTURE_2D, post.sceneDepth, 0)
+  if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+    raise newException(CatchableError, "AWM material normal target is incomplete")
   let half = ivec2(max(size.x div 2, 1), max(size.y div 2, 1))
   for target in post.occlusion.mitems:
     target.initTarget(half)
@@ -575,8 +602,25 @@ proc beginScene*(post: var PostFx, size: IVec2, near, far: float32) =
   post.ensureSize(ivec2(max(size.x, 1), max(size.y, 1)))
   post.near = near
   post.far = far
+  post.materialNormals.bindTarget()
+  glClearColor(0, 0, 0, 0)
+  glClear(GL_COLOR_BUFFER_BIT)
   glBindFramebuffer(GL_FRAMEBUFFER, post.sceneFramebuffer)
   glViewport(0, 0, post.size.x.GLsizei, post.size.y.GLsizei)
+
+proc beginMaterialNormals*(post: PostFx): bool =
+  ## Call after opaque geometry, before SSAO. Re-render only normal-mapped
+  ## objects with depth EQUAL and no depth writes; color/stencil stay intact.
+  if not post.settings.enabled or
+      (not post.settings.occlusion and not post.showing(NormalLayer)):
+    return false
+  post.materialNormals.bindTarget()
+  glDisable(GL_STENCIL_TEST)
+  return true
+
+proc endMaterialNormals*(post: PostFx) =
+  glDepthFunc(GL_LESS)
+  post.restoreSceneTarget()
 
 proc applyOcclusion*(post: var PostFx, projection: Mat4) =
   ## Darkens creases and contact points in everything drawn so far, then
@@ -591,6 +635,7 @@ proc applyOcclusion*(post: var PostFx, projection: Mat4) =
     post.occlusion[0].bindTarget()
     glUseProgram(post.occlusionPass.program)
     post.occlusionPass.setTexture("depthTexture", 0, post.sceneDepth)
+    post.occlusionPass.setTexture("normalTexture", 1, post.materialNormals.texture)
     var inverseProjection = projection.inverse
     glUniformMatrix4fv(post.occlusionPass.location("inverseProjection"), 1,
       GL_FALSE, cast[ptr float32](inverseProjection.addr))
@@ -601,6 +646,7 @@ proc applyOcclusion*(post: var PostFx, projection: Mat4) =
     post.occlusionPass.setFloat("radius", settings.occlusionRadius)
     post.occlusionPass.setFloat("intensity", settings.occlusionIntensity)
     post.occlusionPass.setFloat("bias", settings.occlusionBias)
+    post.occlusionPass.setFloat("normalDetail", settings.occlusionNormalDetail)
     post.drawFullscreen()
 
     glUseProgram(post.blurPass.program)
@@ -675,6 +721,7 @@ when PostLayerControls:
     pass[].setTexture("colorTexture", 0, color)
     pass[].setTexture("otherTexture", 1, other)
     pass[].setTexture("depthTexture", 2, post.sceneDepth)
+    pass[].setTexture("normalTexture", 3, post.materialNormals.texture)
     glUniformMatrix4fv(pass[].location("inverseProjection"), 1, GL_FALSE,
       cast[ptr float32](post.inverseProjection.addr))
     pass[].setVec2("texel",

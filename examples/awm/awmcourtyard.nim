@@ -13,7 +13,7 @@ type
     uv*: Vec2
   CourtyardMesh* = object
     vertices*: seq[CourtyardVertex]
-    commonCount*, backdropCount*: int
+    commonCount*, backdropCount*, pavingCount*: int
 
 const
   Stone = 0.0'f32
@@ -22,10 +22,23 @@ const
   Cloth = 3.0'f32
   Flame = 4.0'f32
   Earth = 5.0'f32
-  Shadow = 6.0'f32
+  PavingHalfWidth* = 10.15'f32
+  PavingHalfDepth* = 7.30'f32
   Tau = 2.0'f32 * PI.float32
   Sandstone = vec3(0.43, 0.395, 0.33)
   Brass = vec3(0.43, 0.31, 0.13)
+
+const
+  # The courtyard's own night lighting. courtyard.frag uses the same values;
+  # awm.nim lights the heroes with them so they belong to the scene.
+  CourtyardKeyColor* = vec3(0.67, 0.53, 0.36)
+  CourtyardAmbientGround* = vec3(0.33, 0.35, 0.39)
+  CourtyardAmbientSky* = vec3(0.62, 0.64, 0.68)
+  CourtyardLampColor* = vec3(1.0, 0.45, 0.115)
+
+proc courtyardKeyDirection*(cameraSide: float32): Vec3 =
+  ## Toward the key light, for the seat the camera sits at.
+  normalize(vec3(-0.48'f32 * cameraSide, 0.85, 0.35'f32 * cameraSide))
 
 proc triangle(m: var CourtyardMesh, a, b, c: Vec3, color: Vec3,
     material = Stone, ua = vec2(0), ub = vec2(0), uc = vec2(0)) =
@@ -110,18 +123,6 @@ proc ring(m: var CourtyardMesh, inner, outer, y: float32,
       vec3(cos(b) * inner, y, sin(b) * inner),
       vec3(cos(b) * outer, y, sin(b) * outer),
       vec3(cos(a) * outer, y, sin(a) * outer), color, material)
-
-proc shadow(m: var CourtyardMesh, center: Vec3, size: Vec2) =
-  ## Soft contact patch; UV distance supplies the feathered opacity.
-  for i in 0 ..< 32:
-    let
-      a = Tau * i.float32 / 32
-      b = Tau * (i + 1).float32 / 32
-      u = vec2(cos(a), sin(a))
-      v = vec2(cos(b), sin(b))
-    m.triangle(center, center + vec3(v.x * size.x, 0, v.y * size.y),
-      center + vec3(u.x * size.x, 0, u.y * size.y),
-      vec3(0.10, 0.105, 0.105), Shadow, vec2(0), v, u)
 
 proc leaf(m: var CourtyardMesh, center, along, across: Vec3, color: Vec3) =
   let ridge = center + vec3(0, 0.025, 0.025)
@@ -262,7 +263,7 @@ proc lantern(m: var CourtyardMesh, center: Vec3) =
   m.beam(center + vec3(0, 0.60, 0), center + vec3(0, 0.79, 0), 0.055, Brass)
 
 proc buildBackdrop(m: var CourtyardMesh, rng: var Rand) =
-  m.arch(rng, vec3(0, -0.04, -9.6), 2.05, 2.2, 0.66)
+  m.arch(rng, vec3(0, -0.04, -7.05), 2.05, 2.2, 0.66)
   # Low ruined enclosure, with an open route through the central arch.
   for side in [-1.0'f32, 1.0'f32]:
     for column in 0 ..< 7:
@@ -278,54 +279,48 @@ proc buildBackdrop(m: var CourtyardMesh, rng: var Rand) =
     # Banner piers are outside both the hand and piles.
     let x = side * 8.6'f32
     for row in 0 ..< 7:
-      m.addBlock(vec3(x, row.float32 * 0.46'f32 + 0.21'f32, -7.4),
+      m.addBlock(vec3(x, row.float32 * 0.46'f32 + 0.21'f32, -7.15),
         vec3(1.55, 0.43, 1.0), Sandstone * rng.rand(0.85 .. 1.08).float32,
         rng.rand(-0.02 .. 0.02).float32)
-    m.addBlock(vec3(x, 3.25, -7.4), vec3(1.84, 0.23, 1.22), Sandstone)
-    m.banner(vec3(x, 3.07, -6.82))
+    m.addBlock(vec3(x, 3.25, -7.15), vec3(1.84, 0.23, 1.22), Sandstone)
+    m.banner(vec3(x, 3.07, -6.55))
     m.lantern(vec3(side * 6.75'f32, 1.25, -6.32))
     for i in 0 ..< 12:
       m.ivy(rng, vec3(side * rng.rand(3.0 .. 9.9).float32,
         0.03, -6.52), rng.rand(0.45 .. 1.95).float32)
     for i in 0 ..< 32:
-      let p = vec3(side * rng.rand(3.0 .. 10.7).float32,
-        0.035, rng.rand(-8.8 .. -5.9).float32)
+      let p = vec3(side * rng.rand(3.0 .. 9.5).float32,
+        0.035, rng.rand(-6.5 .. -5.9).float32)
       if i mod 3 == 0:
         m.addBlock(p + vec3(0, 0.08, 0),
           vec3(rng.rand(0.25 .. 0.65).float32, rng.rand(0.16 .. 0.35).float32,
             rng.rand(0.23 .. 0.51).float32),
           Sandstone * rng.rand(0.73 .. 1.0).float32, rng.rand(Tau))
       else: m.grass(rng, p, rng.rand(0.7 .. 1.3).float32)
-  # Receding ruins and low hills take the place of the black void. Fog in
-  # the material shader desaturates them naturally with world-space depth.
-  for side in [-1.0'f32, 1.0'f32]:
-    m.arch(rng, vec3(side * 8.0'f32, -0.5, -19), 1.7, 3.4, 0.68)
-    for i in 0 ..< 20:
-      let
-        x = side * rng.rand(3.0 .. 28.0).float32
-        z = rng.rand(-36.0 .. -17.0).float32
-        h = rng.rand(1.0 .. 5.0).float32
-      m.addBlock(vec3(x, h * 0.5'f32 - 1.0'f32, z),
-        vec3(rng.rand(1.4 .. 3.8).float32, h, rng.rand(1.6 .. 3.5).float32),
-        vec3(0.27, 0.30, 0.31), rng.rand(-0.1 .. 0.1).float32, bevel = 0.18)
-  m.addBlock(vec3(0, -0.48, -24), vec3(68, 0.3, 34),
-    vec3(0.25, 0.275, 0.265), bevel = 0, material = Earth)
 
 proc buildCourtyardMesh*(): CourtyardMesh =
   var rng = initRand(20260921)
-  result.addBlock(vec3(0, -0.31, 0), vec3(25, 0.34, 23),
-    vec3(0.19, 0.18, 0.145), bevel = 0.05, material = Earth)
-  # Staggered outer paving, kept broad and subdued under the gameplay.
-  for row in -9 .. 9:
-    for col in -9 .. 9:
+  # Clip the paving to the wall footprint, including the end of odd rows.
+  # The ground beyond the enclosure is intentionally open to the night sky.
+  for row in -6 .. 6:
+    for col in -8 .. 8:
       let
         x = col.float32 * 1.30'f32 + (row mod 2).float32 * 0.65'f32
         z = row.float32 * 1.17'f32
+        left = max(-PavingHalfWidth, x - 0.63'f32)
+        right = min(PavingHalfWidth, x + 0.63'f32)
+        near = max(-PavingHalfDepth, z - 0.565'f32)
+        far = min(PavingHalfDepth, z + 0.565'f32)
+      if right - left < 0.09 or far - near < 0.09: continue
       if x * x + z * z < 4.7'f32 * 4.7'f32: continue
-      result.addBlock(vec3(x, -0.09, z),
-        vec3(1.26, 0.15, 1.13),
+      result.addBlock(vec3((left + right) * 0.5'f32, -0.09,
+          (near + far) * 0.5'f32),
+        vec3(right - left, 0.15, far - near),
         Sandstone * rng.rand(0.87 .. 1.10).float32,
-        rng.rand(-0.008 .. 0.008).float32, bevel = 0.025)
+        bevel = 0.025)
+  result.pavingCount = result.vertices.len
+  result.addBlock(vec3(0, -0.42, 0), vec3(21.1, 0.56, 15.6),
+    vec3(0.19, 0.18, 0.145), bevel = 0.05, material = Earth)
   # Five concentric courses of hand-cut stone, each piece a separate mesh.
   for course in 0 ..< 6:
     let
@@ -360,7 +355,6 @@ proc buildCourtyardMesh*(): CourtyardMesh =
     # Both seats use the existing pile coordinates and card heights.
     for x in [-7.25'f32, 7.25'f32]:
       let p = vec3(x, -0.075, side * 3.7'f32)
-      result.shadow(vec3(p.x, -0.012, p.z), vec2(1.27, 1.56))
       result.addBlock(p, vec3(2.04, 0.28, 2.65), Sandstone * 0.96'f32,
         bevel = 0.075)
       result.addBlock(p + vec3(0, 0.142, 0), vec3(1.72, 0.012, 2.32),
@@ -380,7 +374,7 @@ proc buildCourtyardMesh*(): CourtyardMesh =
           rng.rand(-0.028 .. 0.028).float32)
     for i in 0 ..< 95:
       let
-        x = side * rng.rand(9.1 .. 11.9).float32
+        x = side * rng.rand(9.1 .. 10.15).float32
         z = rng.rand(-6.1 .. 6.1).float32
       if i mod 4 == 0:
         result.addBlock(vec3(x, 0.07, z),
@@ -390,10 +384,8 @@ proc buildCourtyardMesh*(): CourtyardMesh =
       else:
         result.grass(rng, vec3(x, 0.005, z), rng.rand(0.55 .. 1.1).float32)
     for i in 0 ..< 24:
-      result.ivy(rng, vec3(side * rng.rand(9.58 .. 10.45).float32,
+      result.ivy(rng, vec3(side * rng.rand(9.58 .. 10.05).float32,
         0.03, rng.rand(-6.0 .. 6.0).float32), rng.rand(0.35 .. 1.15).float32)
-  result.shadow(vec3(-7, 0.008, 1.65), vec2(0.9, 0.72))
-  result.shadow(vec3(7, 0.008, -1.65), vec2(0.9, 0.72))
   result.commonCount = result.vertices.len
   result.buildBackdrop(rng)
   result.backdropCount = result.vertices.len - result.commonCount
@@ -407,20 +399,38 @@ proc buildCourtyardMesh*(): CourtyardMesh =
     result.vertices.add vertex
 
 when not defined(headless):
-  import opengl
+  import std/os
+  import opengl, pixie
+  import paths
 
-  type CourtyardRenderer* = object
-    program, vao, vbo: GLuint
-    shadows: array[2, GLuint]
-    lightMatrices: array[2, Mat4]
-    commonCount, backdropCount: int
-    viewLocation, lightLocation, eyeLocation, timeLocation, sideLocation,
-      shadowLocation: GLint
+  type
+    CourtyardMaterial* = object
+      ## Live stone material controls (the tuning panel edits these).
+      normalStrength*: float32  ## 0 leaves the flat geometric normals.
+      lampIntensity*: float32   ## Brightness of the two courtyard lanterns.
+      slopeBroad*: float32      ## Weight of the fractured rock-face map.
+      scaleBroad*: float32      ## World units one tile covers.
+
+    CourtyardRenderer* = object
+      material*: CourtyardMaterial
+      program, vao, vbo: GLuint
+      normalMap: GLuint
+      skyProgram: GLuint
+      skyViewLocation, skyEyeLocation, skyTimeLocation: GLint
+      shadows: array[2, GLuint]
+      lightMatrices: array[2, Mat4]
+      commonCount, backdropCount: int
+      viewLocation, lightLocation, eyeLocation, timeLocation, sideLocation,
+        shadowLocation, normalLocation,
+        normalStrengthLocation, normalsOnlyLocation, normalViewLocation,
+        slopeBroadLocation, scaleBroadLocation, lampLocation: GLint
 
   const
     ShadowSize = 2048
     VertexSource = staticRead("shaders/courtyard.vert")
     FragmentSource = staticRead("shaders/courtyard.frag")
+    SkyVertexSource = staticRead("shaders/night-sky.vert")
+    SkyFragmentSource = staticRead("shaders/night-sky.frag")
     ShaderHeader = when defined(emscripten):
       "#version 300 es\nprecision highp float;\nprecision highp int;\n"
     else: "#version 330 core\n"
@@ -463,11 +473,43 @@ when not defined(headless):
     var data = value
     glUniformMatrix4fv(location, 1, GL_FALSE, cast[ptr float32](data.addr))
 
+  proc loadNormalTexture(path: string): GLuint =
+    let image = readImage(path)
+    glGenTextures(1, result.addr)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D, result)
+    # RGBA8, not SRGB: all normal channels are linear vector components.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint,
+      image.width.GLsizei, image.height.GLsizei, 0,
+      GL_RGBA, GL_UNSIGNED_BYTE, image.data[0].addr)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT.GLint)
+    glGenerateMipmap(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, 0)
+
+  proc defaultCourtyardMaterial*(): CourtyardMaterial =
+    ## AWM_STONE_NORMALS=0 flattens the stone for comparison.
+    CourtyardMaterial(
+      normalStrength: if getEnv("AWM_STONE_NORMALS") == "0": 0 else: 0.7,
+      lampIntensity: 4.5,
+      slopeBroad: 1.25,
+      scaleBroad: 6.0
+    )
+
   proc initCourtyardRenderer*(): CourtyardRenderer =
     let mesh = buildCourtyardMesh()
     result.commonCount = mesh.commonCount
     result.backdropCount = mesh.backdropCount
     result.program = program(VertexSource, FragmentSource)
+    let textureRoot = artworkRoot() / "battlefield/textures"
+    result.normalMap = loadNormalTexture(textureRoot / "stone-slab-normal.png")
+    result.material = defaultCourtyardMaterial()
+    result.skyProgram = program(SkyVertexSource, SkyFragmentSource)
+    result.skyViewLocation = glGetUniformLocation(result.skyProgram, "inverseViewProjection")
+    result.skyEyeLocation = glGetUniformLocation(result.skyProgram, "cameraEye")
+    result.skyTimeLocation = glGetUniformLocation(result.skyProgram, "time")
     glGenVertexArrays(1, result.vao.addr)
     glBindVertexArray(result.vao)
     glGenBuffers(1, result.vbo.addr)
@@ -490,7 +532,14 @@ when not defined(headless):
         ("cameraEye", result.eyeLocation.addr),
         ("time", result.timeLocation.addr),
         ("cameraSide", result.sideLocation.addr),
-        ("shadowMap", result.shadowLocation.addr)]:
+        ("shadowMap", result.shadowLocation.addr),
+        ("stoneNormalMap", result.normalLocation.addr),
+        ("normalStrength", result.normalStrengthLocation.addr),
+        ("lampIntensity", result.lampLocation.addr),
+        ("slopeBroad", result.slopeBroadLocation.addr),
+        ("scaleBroad", result.scaleBroadLocation.addr),
+        ("normalsOnly", result.normalsOnlyLocation.addr),
+        ("normalView", result.normalViewLocation.addr)]:
       destination[] = glGetUniformLocation(result.program, name.cstring)
 
     # Bake the static sun shadows for both camera directions once. No scene
@@ -553,11 +602,34 @@ void main() {}
     glBindVertexArray(0)
     glDeleteProgram(depthProgram)
 
-  proc draw*(renderer: CourtyardRenderer, viewProjection: Mat4,
-      cameraEye: Vec3, time, cameraSide: float32) =
-    let seat = if cameraSide > 0: 0 else: 1
+  proc drawSky*(renderer: CourtyardRenderer, viewProjection: Mat4,
+      cameraEye: Vec3, time: float32) =
+    # The sky never writes depth: SSAO sees the clear depth of 1.0, and all
+    # opaque objects and VFX can occlude it without treating it as a wall.
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDepthMask(GL_FALSE)
+    glDisable(GL_STENCIL_TEST)
+    glDisable(GL_BLEND)
+    glDisable(GL_CULL_FACE)
+    glUseProgram(renderer.skyProgram)
+    matrix(renderer.skyViewLocation, viewProjection.inverse)
+    glUniform3f(renderer.skyEyeLocation, cameraEye.x, cameraEye.y, cameraEye.z)
+    glUniform1f(renderer.skyTimeLocation, time)
+    glBindVertexArray(renderer.vao)
+    glDrawArrays(GL_TRIANGLES, 0, 3)
+    glBindVertexArray(0)
     glEnable(GL_DEPTH_TEST)
     glDepthMask(GL_TRUE)
+    glDepthFunc(GL_LESS)
+
+  proc draw*(renderer: CourtyardRenderer, viewProjection: Mat4,
+      cameraEye: Vec3, time, cameraSide: float32,
+      normalsOnly = false, normalView = mat4()) =
+    let seat = if cameraSide > 0: 0 else: 1
+    glEnable(GL_DEPTH_TEST)
+    glDepthMask(if normalsOnly: GL_FALSE else: GL_TRUE)
+    glDepthFunc(if normalsOnly: GL_EQUAL else: GL_LESS)
     glDisable(GL_BLEND)
     glDisable(GL_CULL_FACE)
     glUseProgram(renderer.program)
@@ -566,13 +638,27 @@ void main() {}
     glUniform3f(renderer.eyeLocation, cameraEye.x, cameraEye.y, cameraEye.z)
     glUniform1f(renderer.timeLocation, time)
     glUniform1f(renderer.sideLocation, cameraSide)
+    glUniform1f(renderer.normalStrengthLocation,
+      renderer.material.normalStrength)
+    glUniform1f(renderer.lampLocation, renderer.material.lampIntensity)
+    glUniform1f(renderer.slopeBroadLocation, renderer.material.slopeBroad)
+    glUniform1f(renderer.scaleBroadLocation, renderer.material.scaleBroad)
+    glUniform1i(renderer.normalsOnlyLocation, if normalsOnly: 1 else: 0)
+    matrix(renderer.normalViewLocation, normalView)
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, renderer.shadows[seat])
     glUniform1i(renderer.shadowLocation, 0)
+    glActiveTexture(GL_TEXTURE1)
+    glBindTexture(GL_TEXTURE_2D, renderer.normalMap)
+    glUniform1i(renderer.normalLocation, 1)
     glBindVertexArray(renderer.vao)
     glDrawArrays(GL_TRIANGLES, 0, renderer.commonCount.GLsizei)
     glDrawArrays(GL_TRIANGLES,
       (renderer.commonCount + seat * renderer.backdropCount).GLint,
       renderer.backdropCount.GLsizei)
     glBindVertexArray(0)
-    glBindTexture(GL_TEXTURE_2D, 0)
+    for unit in [GL_TEXTURE3, GL_TEXTURE2, GL_TEXTURE1, GL_TEXTURE0]:
+      glActiveTexture(unit)
+      glBindTexture(GL_TEXTURE_2D, 0)
+    glDepthMask(GL_TRUE)
+    glDepthFunc(GL_LESS)

@@ -24,6 +24,21 @@ suite "Old Crossroads battlefield":
       if abs(length(v.normal) - 1) > 0.0001: valid = false
     check valid
 
+  test "outer paving stops at the tower walls":
+    var inside = true
+    check mesh.pavingCount > 0
+    for i in 0 ..< mesh.pavingCount:
+      let p = mesh.vertices[i].position
+      if abs(p.x) > PavingHalfWidth + 0.0001 or
+          abs(p.z) > PavingHalfDepth + 0.0001: inside = false
+    check inside
+
+  test "background scenery no longer covers the sky beyond the enclosure":
+    var inside = true
+    for v in mesh.vertices:
+      if abs(v.position.z) > 8.0 or abs(v.position.x) > 10.8: inside = false
+    check inside
+
   test "no raised scenery intersects either row of cards":
     var clear = true
     for i in 0 ..< mesh.commonCount:

@@ -6,10 +6,37 @@ in vec4 shadowPosition;
 in vec2 surfaceUv;
 flat in float surfaceMaterial;
 uniform sampler2DShadow shadowMap;
+uniform sampler2D stoneNormalMap;
+uniform float normalStrength;
+uniform float slopeBroad;
+uniform float scaleBroad;
+uniform float lampIntensity;
+uniform bool normalsOnly;
+uniform mat4 normalView;
 uniform vec3 cameraEye;
 uniform float cameraSide;
 uniform float time;
 out vec4 outputColor;
+
+vec2 stoneSlope(vec2 uv) {
+    // The normal texture is linear data, with +Y green, mipmapped, repeated.
+    vec3 broad = texture(stoneNormalMap, uv / max(scaleBroad, 0.01)).xyz * 2.0 - 1.0;
+    return broad.xy / max(broad.z, 0.45) * slopeBroad * normalStrength;
+}
+vec3 stoneNormal(vec3 p, vec3 n) {
+    // World-aligned triplanar slopes need no mesh tangents and keep the
+    // curved ring slabs, bevels, wall faces and rotated stones consistent.
+    vec3 s = mix(vec3(-1), vec3(1), greaterThanEqual(n, vec3(0)));
+    vec3 weights = pow(abs(n), vec3(4));
+    weights /= max(dot(weights, vec3(1)), 0.0001);
+    vec2 x = stoneSlope(vec2(-s.x * p.z, p.y));
+    vec2 y = stoneSlope(vec2(p.x, -s.y * p.z));
+    vec2 z = stoneSlope(vec2(s.z * p.x, p.y));
+    vec3 slope = vec3(0, x.y, -s.x * x.x) * weights.x +
+                 vec3(y.x, 0, -s.y * y.y) * weights.y +
+                 vec3(s.z * z.x, z.y, 0) * weights.z;
+    return normalize(n + slope - n * dot(slope, n));
+}
 
 float hash(vec3 p) {
     p = fract(p * 0.1031);
@@ -36,33 +63,35 @@ float visibility(vec3 n, vec3 light) {
                                          p.z - bias));
     return sum / 9.0;
 }
+// Key light, ambient and lamp color mirror awmcourtyard's Courtyard*
+// constants, which light the heroes the same way.
 vec3 lamp(vec3 p, vec3 n, vec3 source, float phase) {
     vec3 delta = source - p;
     float d = length(delta);
     float flicker = 0.96 + 0.025 * sin(time * 5.1 + phase) +
                           0.018 * sin(time * 8.3 + phase);
-    return vec3(1.0, 0.45, 0.115) * (1.5 / (1.0 + d * d * 1.2)) *
+    return vec3(1.0, 0.45, 0.115) * (lampIntensity / (1.0 + d * d * 1.2)) *
         (0.18 + 0.82 * max(0.0, dot(n, normalize(delta)))) * flicker;
 }
 void main() {
     vec3 p = worldPosition;
     vec3 n = normalize(worldNormal);
+    vec3 geometricNormal = n;
     vec3 base = surfaceColor;
     float material = surfaceMaterial;
     float grain = noise(p * 37.0);
     float broad = noise(p * 2.4) * 0.64 + noise(p * 8.6) * 0.36;
     if (material < 0.5 || material > 4.5) {
-        base *= 0.81 + broad * 0.28 + grain * 0.13;
+        base *= 0.845 + broad * 0.28 + grain * 0.06;
         // Fine worn limestone pores, broad mineral variation, restrained moss.
         float pore = smoothstep(0.73, 0.88, noise(p * 71.0));
-        base *= 1.0 - pore * 0.14;
+        base *= 1.0 - pore * 0.06;
         float edge = max(smoothstep(8.4, 10.2, abs(p.x)),
                          smoothstep(5.6, 8.5, abs(p.z)));
         float moss = smoothstep(0.55, 0.76, broad) * edge *
             (0.35 + 0.45 * max(n.y, 0.0));
         base = mix(base, vec3(0.20, 0.235, 0.105), moss * 0.50);
-        n = normalize(n + (vec3(noise(p*25.0 + 4.0), noise(p*25.0 + 9.0),
-                               noise(p*25.0 + 15.0)) - 0.5) * 0.12);
+        if (material < 0.5) n = stoneNormal(p, n);
     } else if (material < 1.5) {
         base *= 0.88 + grain * 0.20;
     } else if (material < 2.5) {
@@ -84,8 +113,15 @@ void main() {
         n = normalize(cross(dFdx(p), dFdy(p)));
         if (dot(n, cameraEye - p) < 0.0) n = -n;
     }
+    if (normalsOnly) {
+        // Replayed with the finished scene depth: hidden slabs cannot put
+        // their normals on a card or hero. Alpha marks a valid material normal.
+        outputColor = vec4(normalize(mat3(normalView) * n) * 0.5 + 0.5, 1.0);
+        return;
+    }
     vec3 light = normalize(vec3(-0.48 * cameraSide, 0.85, 0.35 * cameraSide));
-    float sun = visibility(n, light);
+    // Shadow bias follows the actual mesh; detail normals must not cause acne.
+    float sun = visibility(geometricNormal, light);
     float diffuse = max(0.0, dot(n, light));
     vec3 ambient = mix(vec3(0.33, 0.35, 0.39), vec3(0.62, 0.64, 0.68),
                        max(0.0, n.y));
@@ -99,16 +135,9 @@ void main() {
     }
     if (material > 3.5 && material < 4.5)
         result = vec3(1.0, 0.68, 0.25) * (0.95 + 0.04 * sin(time * 6.0));
-    if (material > 5.5) {
-        // Feathered contact shadows use ordered coverage instead of blending,
-        // which keeps the static geometry in one depth-correct draw call.
-        float alpha = (1.0 - smoothstep(0.12, 1.0, length(surfaceUv))) * 0.34;
-        if (hash(vec3(floor(gl_FragCoord.xy), 0)) > alpha) discard;
-        result = base * 0.63;
-    }
     float depth = max(0.0, -p.z * cameraSide - 8.0);
     float fog = 1.0 - exp(-depth * 0.055);
-    vec3 mist = vec3(0.25, 0.29, 0.335);
+    vec3 mist = vec3(0.035, 0.055, 0.10);
     result = mix(result, mist, fog);
     // Keep the floor quiet and the perimeter shaded around the original HUD.
     float edgeShade = 1.0 - smoothstep(6.8, 14.0, length(p.xz)) * 0.18;

@@ -6,13 +6,14 @@
 import
   std/strutils,
   silky, vmath, windy,
-  awmpost
+  awmcourtyard, awmpost
 
 when PostPanelControls:
   const
     PanelTitle = "Screen effects"
     PanelOrigin = vec2(24, 150)
     PanelSize = vec2(560, 1180)
+    StoneDefaults = defaultCourtyardMaterial()
 
   var postPanelOpen* = true
 
@@ -49,6 +50,8 @@ when PostPanelControls:
     echo "    occlusionTint: vec3(" & nimFloat(tint.x) & ", " &
       nimFloat(tint.y) & ", " & nimFloat(tint.z) & "),"
     echo "    occlusionSharpness: " & nimFloat(settings.occlusionSharpness) & ","
+    echo "    occlusionNormalDetail: " &
+      nimFloat(settings.occlusionNormalDetail) & ","
     echo "    bloomThreshold: " & nimFloat(settings.bloomThreshold) & ","
     echo "    bloomVfx: " & nimFloat(settings.bloomVfx) & ","
     echo "    bloomStrength: " & nimFloat(settings.bloomStrength) & ","
@@ -58,7 +61,14 @@ when PostPanelControls:
     echo "    saturation: " & nimFloat(settings.saturation) & ","
     echo "    contrast: " & nimFloat(settings.contrast)
 
-  proc drawPostPanel*(sk: Silky, window: Window, post: var PostFx) =
+  proc printMaterial(material: CourtyardMaterial) =
+    echo "      normalStrength: " & nimFloat(material.normalStrength) & ","
+    echo "      lampIntensity: " & nimFloat(material.lampIntensity) & ","
+    echo "      slopeBroad: " & nimFloat(material.slopeBroad) & ","
+    echo "      scaleBroad: " & nimFloat(material.scaleBroad)
+
+  proc drawPostPanel*(sk: Silky, window: Window, post: var PostFx,
+      courtyard: var CourtyardRenderer) =
     ## Draws the tuning window when it is open. Call inside beginUi/endUi.
     if window.buttonPressed[KeyF9]:
       postPanelOpen = not postPanelOpen
@@ -90,6 +100,9 @@ when PostPanelControls:
         text "Bias (hides flat-surface noise)"
         scrubber("ssaoBias", settings.occlusionBias, 0.0'f32, 0.5'f32,
           shown(settings.occlusionBias))
+        text "Mapped surface detail"
+        scrubber("ssaoNormalDetail", settings.occlusionNormalDetail, 0.0'f32,
+          1.0'f32, shown(settings.occlusionNormalDetail))
         text "Blur edge sharpness"
         scrubber("ssaoSharpness", settings.occlusionSharpness, 0.0'f32,
           120.0'f32, shown(settings.occlusionSharpness))
@@ -99,6 +112,21 @@ when PostPanelControls:
         scrubber("ssaoTintG", tint.y, 0.0'f32, 1.0'f32, shown(tint.y))
         scrubber("ssaoTintB", tint.z, 0.0'f32, 1.0'f32, shown(tint.z))
         settings.occlusionTint = tint
+
+        heading "Stone material (layer 4)"
+        template stone: untyped = courtyard.material
+        text "Normal strength"
+        scrubber("stoneNormals", stone.normalStrength, 0.0'f32, 3.0'f32,
+          shown(stone.normalStrength))
+        text "Lantern intensity"
+        scrubber("stoneLamps", stone.lampIntensity, 0.0'f32, 12.0'f32,
+          shown(stone.lampIntensity))
+        text "Rock face weight"
+        scrubber("stoneBroad", stone.slopeBroad, 0.0'f32, 2.0'f32,
+          shown(stone.slopeBroad))
+        text "Rock face tile (world units)"
+        scrubber("stoneScaleBroad", stone.scaleBroad, 0.1'f32, 12.0'f32,
+          shown(stone.scaleBroad))
 
         heading "Bloom (layers 7 to 0)"
         checkBox "Bloom", settings.bloom
@@ -131,10 +159,12 @@ when PostPanelControls:
 
         button "Print settings":
           printSettings(settings)
+          printMaterial(courtyard.material)
         button "Reset":
           let enabled = settings.enabled
           settings = defaultPostSettings()
           settings.enabled = enabled
+          courtyard.material = StoneDefaults
     finally:
       sk.endDsl()
       sk.textStyle = textStyle

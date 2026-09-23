@@ -5,5 +5,5 @@ awm_*.png
 nimcache/
 build/
 
-# Source artwork and previews belong in the sibling polyworld_data repo.
+# Source artwork and previews belong in the sibling polyworld_art repo.
 /artwork/

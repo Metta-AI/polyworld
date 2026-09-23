@@ -43,7 +43,7 @@ grade and a vignette. The HUD is not affected. F8 toggles all of it.
 | `AWM_SSAO_BIAS` | `0.08` |
 
 Build with `-d:awmPostLayers` to view the intermediate layers: 1 final image,
-2 scene before bloom and grading, 3 depth, 4 normals from depth, 5 unblurred
+2 scene before bloom and grading, 3 depth, 4 surface normals, 5 unblurred
 occlusion, 6 occlusion, 7 scene before VFX, 8 light added by VFX, 9 bloom
 source, 0 bloom. `AWM_POST_LAYER=N` starts on layer N (for screenshots).
 
@@ -52,6 +52,42 @@ grouped by layer (F9 shows or hides it; with `-d:awmPostLayers` it also picks
 the layer). "Print settings" writes the values as Nim for
 `defaultPostSettings` in `awmpost.nim`. Clicks over the window don't reach
 the board.
+
+### Night courtyard materials
+
+The paving ends at the enclosure walls. The background is a three-layer
+starfield with camera parallax, scrolling, twinkling and soft star halos.
+Blue-violet nebulas drift and pulse behind it. It writes no depth, so SSAO
+ignores the sky while the brightest stars can feed bloom.
+
+Stone uses two seamless linear OpenGL (+Y) normal maps: broad fractured rock
+faces and restrained fine grain. A weathering texture adds mineral variation
+without baking in a light direction. Triplanar mapping keeps the
+circular slabs, wall faces and bevels at the same material scale. Assets live
+in `polyworld_art/awm/battlefield/textures` and are staged by the web build.
+The original generated rock source and its prompt are retained in
+`polyworld_art/awm/battlefield/source`; rebuilding conditions the edges and
+normalizes the vectors after resizing. Rebuild them with:
+
+```sh
+nim r --out:build/render-stone-normals tools/render_stone_normals.nim
+```
+
+Lighting uses the mapped normals. A depth-tested normal replay supplies the
+visible stone normals to SSAO and layer 4; cards and characters keep their
+depth-derived normals. The replay shares scene depth and never writes it,
+so floor detail cannot leak onto foreground cards. SSAO uses a restrained
+blend of surface detail while the debug layer shows the full mapped normals.
+`AWM_STONE_NORMALS=0` disables the normal perturbation for comparison. Neither
+the material nor the sky changes the HUD or card artwork.
+
+```sh
+nim r -d:headless --out:build/test_courtyard tests/test_courtyard.nim
+nim r --out:build/test_courtyard_render tests/test_courtyard_render.nim
+```
+
+Screenshot builds support `AWM_CAPTURE_NO_HOVER=1` and `AWM_SCENE_TIME=0` for
+repeatable material comparisons without the card inspector.
 
 ## Browser
 
