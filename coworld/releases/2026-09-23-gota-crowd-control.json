@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-23",
+  "version": "2026.9.23.3",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_9ff2e22a-c7e3-4500-ae49-62f42970d699",
+  "canonical": true,
+  "source_commit": "e42c4822f44e04726b09bb4ffe853152c7a18207",
+  "asset_commit": "c27904fdd8efaeb0ddff2f64f70b81e46d508dca",
+  "replay_version": 61,
+  "changes": [
+    "Add stun, silence, and root to four hero abilities, with approximately 20 percent less damage. Apply controls to enemy heroes and creeps on impact.",
+    "Show status icons and countdown rings. Add LOS-filtered BASIC control observations, update the baseline and docs, and include the new Rooted icon in the web data bundle.",
+    "Support only gameplay replay version 61."
+  ],
+  "checks": [
+    "Nim check, full test suite, focused control regressions on both teams, replay events, and deterministic native recording/playback passed.",
+    "All ten local and ten hosted certification checks passed.",
+    "All five hosted smoke matches completed with verified integer scores.",
+    "The web player rendered and verified all 25141 ticks of a fresh version-61 replay without divergence.",
+    "Served JavaScript, WASM and data hashes match the built artifacts; hosted browser playback passed.",
+    "A Linux certification replay and a new league replay reproduced exactly on the native client."
+  ],
+  "league_settings_preserved": true,
+  "verification_round": {
+    "round_id": "round_6f57c3d1-a74b-4e43-9608-f7a8bbbd9f8e",
+    "round_number": 700,
+    "status": "completed",
+    "games": 24,
+    "coworld_id": "cow_9ff2e22a-c7e3-4500-ae49-62f42970d699",
+    "version": "2026.9.23.3",
+    "integer_scores_verified": 240,
+    "outcomes": {
+      "BlueTeam": 11,
+      "RedTeam": 13
+    },
+    "replay_version": 61,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=3461e0e0-2f13-4e2c-b518-a4d0e70eab6e",
+    "verified_at": "2026-09-23T21:32:18.394160+00:00"
+  },
+  "manifest_hash": "sha256:949e202b1f1204cdda2cb1643587a5e1578180d6efce5714e252a03aad4bed27",
+  "viewer_sha256": {
+    "wasm": "a9a9ae39f6c00ae6b6e7ba28fc80f862005c935b3b74789d468201f0339bc5c4",
+    "data": "83fef3afdd7281040036da66ce120f29ea8dfda30518d294e66c0f644234771b",
+    "js": "446c6f0e300a81498c78e5f6df1f6e513fc4f4e6dc06fe978e4edc4438e4433e"
+  },
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/35921756983",
+  "verified_at": "2026-09-23T21:32:26.809438+00:00"
+}
