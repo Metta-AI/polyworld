@@ -9,7 +9,7 @@
 ## VM type on `Game` but never runs a program.
 
 import
-  std/algorithm,
+  std/[algorithm, tables],
   bassy, fixxy,
   polyworld/[bodies, hashes, metrics, noises, pathing, profiles, rngs, tapes,
     visions, mailboxes],
@@ -76,6 +76,10 @@ type
     lastError*: string
     decisions*: int
     lastWork*, lastInstructions*: int64
+
+  PathCacheKey = object
+    startLayer, startX, startZ, finishLayer, finishX, finishZ: int
+    tieOrder: PathTieOrder
 
   Footman* = object
     id*: int32
@@ -279,6 +283,8 @@ type
     buildings*: seq[Building]
     occupancy*: seq[seq[int16]]
     navigationRevision*: int32
+    pathCache: Table[PathCacheKey, seq[PathTile]]
+    pathCacheRevision: int32
     spawnIntervalTicks*: int32
     spawnTimerTicks*: int32
     gameOver*: bool
@@ -1607,6 +1613,10 @@ proc buildingFootprint(building: Building): seq[PathTile] =
       if touches:
         result.add PathTile(layer: layer.int32, x: localX.int32, z: localZ.int32)
 
+proc bindNavigation*(world: World) =
+  ## Points pathing at one world, e.g. after another match ran mid-tick.
+  navigationWorld = world
+
 proc syncBuildings*(world: World) =
   ## Releases destroyed footprints and invalidates paths and stale targets.
   navigationWorld = world
@@ -2455,6 +2465,25 @@ proc movementPath(tiles: seq[PathTile], start: WorldPoint,
     position = destination
     anchor = reach
 
+proc navigationPath(world: World, query: PathQuery,
+    tiles: var seq[PathTile]) =
+  ## Runs A* over navigationOpen, reusing results until occupancy changes.
+  const MaxCachedPaths = 4096
+  if world.pathCacheRevision != world.navigationRevision or
+      world.pathCache.len >= MaxCachedPaths:
+    world.pathCache.clear()
+    world.pathCacheRevision = world.navigationRevision
+  let key = PathCacheKey(
+    startLayer: query.startLayer, startX: query.startX, startZ: query.startZ,
+    finishLayer: query.finishLayer, finishX: query.finishX,
+    finishZ: query.finishZ, tieOrder: query.tieOrder)
+  when not defined(gotaNoPathCache):
+    world.pathCache.withValue(key, cached):
+      tiles = cached[]
+      return
+  discard fillTilePath(query, tiles)
+  world.pathCache[key] = tiles
+
 proc followCreepPath(world: World, footman: var Footman, goal: WorldPoint) =
   ## Follows a cached route and throttles changed chase goals and failed searches.
   if footman.controls[RootControl].ends > world.tick:
@@ -2479,11 +2508,12 @@ proc followCreepPath(world: World, footman: var Footman, goal: WorldPoint) =
       int(mapCoordinate(goal.z, footman.team)), goal.y, last,
       reverseSearch = footman.team == RedTeam
     ):
-      let route = findTilePath(PathQuery(
+      var route: seq[PathTile]
+      world.navigationPath(PathQuery(
         startLayer: first.layer, startX: first.x, startZ: first.z,
         finishLayer: last.layer, finishX: last.x, finishZ: last.z,
         tieOrder: (if footman.team == RedTeam: ReverseTies else: ForwardTies),
-        walkable: navigationOpen)).tiles
+        walkable: navigationOpen), route)
       footman.movePath = movementPath(route, footman.position, footman.team)
       # The first tile is the search origin, not a movement destination.
       if footman.movePath.len > 1:
@@ -2541,7 +2571,7 @@ proc setHeroDestination(
       not nearestNavTile(targetX, targetY, referenceY, finishTile,
         reverseSearch = hero.team == RedTeam):
     return false
-  discard fillTilePath(PathQuery(
+  navigationWorld.navigationPath(PathQuery(
     startLayer: startTile.layer,
     startX: startTile.x,
     startZ: startTile.z,
