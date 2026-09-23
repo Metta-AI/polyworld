@@ -28,6 +28,7 @@ const
   ActionLevelAbility* = 16'u8
   ActionBuyback* = 17'u8
   ActionDraft* = 18'u8
+  ActionStop* = 19'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -112,7 +113,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionManualSpells and
       action.kind != ActionLevelAbility and
       action.kind != ActionBuyback and
-      action.kind != ActionDraft:
+      action.kind != ActionDraft and
+      action.kind != ActionStop:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
 
@@ -325,7 +327,8 @@ proc validate*(data: ReplayData) =
         action.kind != ActionManualSpells and
         action.kind != ActionLevelAbility and
         action.kind != ActionBuyback and
-        action.kind != ActionDraft:
+        action.kind != ActionDraft and
+        action.kind != ActionStop:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:

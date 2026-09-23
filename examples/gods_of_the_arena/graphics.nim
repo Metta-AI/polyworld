@@ -1511,6 +1511,8 @@ proc runGraphics*() =
     ## Casts quick actions and current targets, or selects an aimed ability.
     if not playerMode() or shopOpen or run.world.phase == Drafting:
       return
+    if window.buttonPressed[KeyS]:
+      queueStop(playerHeroId())
     for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
       if window.buttonPressed[key]:
         let hero = heroById(run.world, playerHeroId())

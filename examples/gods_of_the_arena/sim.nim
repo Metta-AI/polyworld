@@ -147,6 +147,7 @@ type
     hasMoveTarget*: bool
     moveRevision*: int32
     stuckTicks*: int32
+    holding*: bool
     inventory*: array[InventorySlots, Item]
     itemCounts*: array[InventorySlots, int32]
     abilityLevels*: array[HeroAbilitySlot, int32]
@@ -2615,6 +2616,7 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32,
     return world.finishAction(heroId, ActionWalkTo, 0, mapX, mapY, error, offset)
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = false
+  world.heroes[index].holding = false
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
   world.heroes[index].targetBuildingId = 0
@@ -2665,6 +2667,7 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
     )
   world.heroes[index].attackObjectId = 0
   world.heroes[index].attackMoving = true
+  world.heroes[index].holding = false
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
   world.heroes[index].targetBuildingId = 0
@@ -2752,10 +2755,29 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
       ActionTargetUnavailable
     )
   world.heroes[index].attackMoving = false
+  world.heroes[index].holding = false
   if world.heroes[index].attackObjectId != targetId:
     world.heroes[index].hasMoveTarget = false
   world.heroes[index].attackObjectId = targetId
   world.finishAction(heroId, ActionAttackTarget, 0, targetId, 0, NoActionError)
+
+proc applyStop*(world: World, heroId: int32): bool =
+  ## Cancels a hero's current path and attack without choosing a new target.
+  if world.phase == Drafting:
+    return world.finishAction(heroId, ActionStop, 0, 0, 0, ActionDrafting)
+  let index = heroIndex(world, heroId)
+  if index < 0 or world.heroes[index].state == Dying or
+      world.heroes[index].hp <= 0:
+    return world.finishAction(heroId, ActionStop, 0, 0, 0, ActionNotAlive)
+  world.heroes[index].attackObjectId = 0
+  world.heroes[index].attackMoving = false
+  world.heroes[index].targetFootmanId = 0
+  world.heroes[index].targetHeroId = 0
+  world.heroes[index].targetBuildingId = 0
+  world.heroes[index].attackingFort = false
+  world.heroes[index].stopHeroPath()
+  world.heroes[index].holding = true
+  world.finishAction(heroId, ActionStop, 0, 0, 0, NoActionError)
 
 proc purchaseError(world: World, heroId, itemId: int32): ActionError =
   ## Returns the first failing purchase check without allocating a string.
@@ -3193,6 +3215,7 @@ proc respawn(world: World, hero: Hero) =
   hero.attackObjectId = 0
   hero.attackMoving = false
   hero.hasMoveTarget = false
+  hero.holding = false
   hero.movePath.setLen(0)
   hero.movePathIndex = 0
   hero.swingTicks = -1
@@ -4310,6 +4333,8 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     if index >= 0:
       world.heroes[index].manualSpells = action.first != 0
     false
+  of ActionStop:
+    applyStop(world, action.heroId)
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
@@ -4469,6 +4494,8 @@ proc nearestEnemy(
 
 proc acquireRadius(world: World, hero: Hero): int32 =
   ## Returns the search radius for idle or attack-move acquisition.
+  if hero.holding:
+    return 0
   if hero.attackMoving:
     if hero.class.heroSpec.attackStyle == MeleeAttack:
       return HeroMeleeAttackMoveRange
@@ -4907,6 +4934,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(int32(hero.moveOffset.x))
     hash.addHashy(int32(hero.moveOffset.y))
     hash.addHashy(hero.hasMoveTarget)
+    hash.addHashy(hero.holding)
     for slot in 0 ..< InventorySlots:
       hash.addHashy(hero.inventory[slot].ord)
       hash.addHashy(hero.itemCounts[slot])
