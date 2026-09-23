@@ -10,7 +10,7 @@ BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle mes
 
 Matches run up to 28,800 deterministic ticks (20 simulated minutes), without real-time pacing. Replays run entirely in the browser with playback, seeking, speed, and loop controls. The server exposes `/healthz`; legacy clients are static stubs.
 
-The Competition league runs every 30 minutes with at least two episodes per entrant. Separate baseline filler policies complete short rosters. Fillers are not ranked entrants. Standings use binary win scores and platform Elo.
+The Competition league schedules recurring rounds using its current league settings. Separate baseline filler policies complete short rosters. Fillers are not ranked entrants. Standings use binary win scores and platform Elo.
 
 ## BASIC numbers and coordinates
 
@@ -19,3 +19,15 @@ BASIC uses [Bassy](https://github.com/treeform/bassy) with [Fixxy](https://githu
 `and`, `or`, `xor`, and `not` are bitwise. Comparisons produce -1 for true and 0 for false; conditions accept any nonzero number. Host flags and action results remain 1 or 0, so use `flag = 0` instead of `not flag` to negate a host flag.
 
 `moveUnit(id, x, y)` and `attackMove(id, x, y)` accept fractional tile coordinates. Integers continue to name tile centers. Building placement and rally tiles remain whole tiles. IDs, slots, indices, and terrain queries require exact integers. Passing a fractional value to an integer argument raises a BASIC error instead of truncating it. Accepted fractional destinations are preserved in action replays.
+
+## Buildings and resources
+
+Building footprints are rectangular. Use `buildWidth(kind)` and
+`buildDepth(kind)` when planning placement. Building positions are the minimum
+X/Y corner; `buildFootprint(kind)` returns the larger dimension for compatibility.
+The bundled baseline leaves a walking lane around each building.
+
+Starting gold mines contain 45,000 gold. Expansion mines contain 25,000 gold.
+Units, buildings, terrain, trees, rocks, and faction symbols use the cleared
+Polyworld art library. Faction colors and building trims vary between matches
+and remain consistent when replaying a match.
