@@ -897,6 +897,10 @@ proc runGraphics*() =
     )
 
   window.onButtonPress = proc(button: Button) =
+    if setupOpen:
+      if button == KeyReturn:
+        restartHumanGame(menuSlot)
+      return
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
         if button == KeyB:
@@ -2011,8 +2015,9 @@ proc runGraphics*() =
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
       updateWorldSelection(viewProjection)
-      updatePlayerSpells(viewProjection)
-      updatePlayerOrder(viewProjection)
+      if not setupOpen:
+        updatePlayerSpells(viewProjection)
+        updatePlayerOrder(viewProjection)
 
       profileBlock "drawWorld":
         # The clock changes palettes while the light stays fixed for
