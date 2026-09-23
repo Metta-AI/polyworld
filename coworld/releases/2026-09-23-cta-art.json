@@ -1,0 +1,118 @@
+{
+  "date": "2026-09-23",
+  "version": "2026.9.23.1",
+  "coworld_id": "cow_66468412-ef68-49ff-a304-2ca7708de506",
+  "canonical": true,
+  "source_commit": "d6827a4bd3a55a46cf86f88e921f147137709c64",
+  "art_commit": "2ec852fda0b414788ab2ae75ebf0a7b9b499502d",
+  "replay_version": 23,
+  "manifest_hash": "sha256:540455a7fcecaddf1fa9446fe37be16ae60d4d4304a3122d1e0f62b1d7b6925e",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:f5bd4ca19cc969d3047e69e2c8d01755df1f26b455c0f94f7ca3e7feef384588",
+  "viewer_bundle": "sha256:2894b337293bb0dff19321c9ad42e050d90c75ff2a6dbe02bfbac5bca01e6f84",
+  "changes": [
+    "Generated GotA hero presets and sixteen tier-colored CtA mobs with weapons.",
+    "Generated terrain textures and corrected loot rendering.",
+    "Pinned public polyworld_art assets and current committed CtA runtime."
+  ],
+  "checks": {
+    "nim_check": "passed",
+    "cta_sim_tests": "passed",
+    "art_verification": "2172 files and source records verified; chargen mesh and animation checks passed.",
+    "local_certification": "10 steps passed",
+    "hosted_certification": "10 steps passed",
+    "hosted_smoke_episodes": 5,
+    "hosted_smoke_scores_verified": 20,
+    "local_replay": "14884 ticks and 52407 actions matched, including replay from the Linux container.",
+    "hosted_replay": "15114 ticks and 53628 actions matched, final hash 00000000B842A9F4.",
+    "viewer_assets": "Served JS, WASM, data, and loading logo match built files. HTML matches after removing the platform replay URL bootstrap.",
+    "browser": "Local and hosted smoke replay reached the final frame with the new art. Competition replay visually checked in the hosted viewer."
+  },
+  "league_id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+  "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+  "league_settings_preserved": true,
+  "filler_policy_unchanged": true,
+  "verification_round": {
+    "round_id": "round_a6e01848-facf-48f7-a911-64fb335b98b1",
+    "round_number": 616,
+    "status": "completed",
+    "completed_at": "2026-09-23T15:29:14.231927Z",
+    "games": 12,
+    "episode_errors": 0,
+    "binary_scores_verified": 48,
+    "outcomes": {
+      "escaped": 11,
+      "time_limit": 1
+    },
+    "entrants_updated": 7,
+    "all_entrants_gained_one_round": true,
+    "episode_request_ids": [
+      "ereq_f63ba490-c390-4e67-925a-80733c658b98",
+      "ereq_af9d1992-46d2-4c6e-94a2-942e1b0a9788",
+      "ereq_25976259-88c4-4393-83c4-2466f770672f",
+      "ereq_d9a809a4-e3c5-44a4-a4da-2928ee2fc566",
+      "ereq_a00ebf9a-5ac0-4c84-9354-d5658526296f",
+      "ereq_568a546a-7d6c-4c11-bca6-f1c1a1e50441",
+      "ereq_9776427b-87d5-4845-96f5-1ddf2f767d63",
+      "ereq_2033b029-0cb5-4dcf-8c57-e043f7aceaab",
+      "ereq_55a0d5ff-b225-4fe7-b41b-aa2bd1cfd1a7",
+      "ereq_cc5d2f2f-e73b-4f93-97fa-fbcd8cc5d337",
+      "ereq_c547ae60-9443-4f10-84eb-86c972e29939",
+      "ereq_b7e28190-8498-494b-8dd7-a9254b3b2c69"
+    ]
+  },
+  "replay": {
+    "episode_request_id": "ereq_d9a809a4-e3c5-44a4-a4da-2928ee2fc566",
+    "episode_id": "bd6530c7-0a18-40b8-9fa9-dadae156d67b",
+    "viewer_url": "https://d1kovwradqjymp.cloudfront.net/bundles/2894b337293bb0dff19321c9ad42e050d90c75ff2a6dbe02bfbac5bca01e6f84/dfac9ca72bb94cc5b8c15f2e10193c2f/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2Fa5e0891f-2029-4ec3-9f60-f17b98b54798.replay",
+    "ticks": 15114,
+    "banked_gold": 5857,
+    "artifact_checks": {
+      "episode_request_id": "ereq_d9a809a4-e3c5-44a4-a4da-2928ee2fc566",
+      "episode_id": "bd6530c7-0a18-40b8-9fa9-dadae156d67b",
+      "watch_url": "https://softmax.com/call-to-adventure?e=bd6530c7-0a18-40b8-9fa9-dadae156d67b",
+      "results": {
+        "bytes": 139,
+        "sha256": "3853ac42cac5d678c5c20cd991656f11a87928d3335561b7596cb4b88390df43"
+      },
+      "replay": {
+        "bytes": 1854940,
+        "sha256": "63de6a18710943ef35685f738573f8d09dea52022049bdb189aad6b53fe42287",
+        "version": 23
+      },
+      "logs": {
+        "bytes": 1678,
+        "sha256": "155ceb1722fa85b5727980135719991482b88ce3568c3e163765dbd580b7b7b4"
+      },
+      "index.html": {
+        "bytes": 5162,
+        "sha256": "c9b80b027b92bf6454738047581ae05d291ee1881e1f701b9d7f8aa5f752b43b",
+        "matches_build": false
+      },
+      "cta.js": {
+        "bytes": 393216,
+        "sha256": "2e1179b83f536fb2fa5fbb754874751439abbd2966c531724fb6d3952a0f9325",
+        "matches_build": true
+      },
+      "cta.wasm": {
+        "bytes": 9886775,
+        "sha256": "2f403d6a9aabe8a2e5bcf2fdad3e7537007adf32e5d22c1ff0c353218f601b46",
+        "matches_build": true
+      },
+      "cta.data": {
+        "bytes": 26255368,
+        "sha256": "91e0960e52aff106b969d98d7b86ef6f457cb277fb12e4fcaace6273c6b74e34",
+        "matches_build": true
+      },
+      "loading-logo.png": {
+        "bytes": 128697,
+        "sha256": "febfaac412691bde4e3500c9f78eab29f00a6d77df897e95376e3b745fc007fe",
+        "matches_build": true
+      }
+    }
+  },
+  "limitations": [
+    "Local Softmax service was not running at localhost:3002. Local Docker certification and the hosted path were verified.",
+    "The public /call-to-adventure watch page shows Nothing is playing here even though the public league API lists CtA as enabled, visible, and canonical. The direct hosted viewer works. The legacy Observatory episode watch URL also returns 404."
+  ],
+  "verified_at": "2026-09-23T15:31:09.288331+00:00"
+}
