@@ -13,6 +13,8 @@
 ##   the team's potential to zero, as the leaderboard scores non-winners zero.
 ## - XpReward is the change in the team's total XP divided by 100, with no
 ##   tick penalty and no reset on a loss, so a policy learns from scratch.
+## - XpOutcomeReward is XpReward plus OutcomeBonus for a win and minus it
+##   for a loss or timeout, so surviving matters beyond the next XP.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
 ## Finished lanes restart with the next seed inside the same step.
@@ -28,10 +30,11 @@ const
   GotaSourceCommit {.strdefine.} = ""
   TeamSize = 5
   XpDenominator = 100
+  OutcomeBonus = 50'f32
 
 type
   RewardMode* = enum
-    LeaderboardReward, XpReward
+    LeaderboardReward, XpReward, XpOutcomeReward
 
   LaneStats* {.bycopy.} = object
     ## Summary of one finished match, from the first policy team's side.
@@ -150,7 +153,7 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     lane.potentials[side] =
       case batch.rewardMode
       of LeaderboardReward: teamPotential(game.world, side)
-      of XpReward: teamXp(game.world, side)
+      of XpReward, XpOutcomeReward: teamXp(game.world, side)
 
 proc newStepBatch*(
     configPath, bot, opponent, policy: string,
@@ -241,10 +244,13 @@ proc step*(
         reward[side] = float32(potential - lane.potentials[side]) /
           float32(ScoreDenominator)
         lane.potentials[side] = potential
-      of XpReward:
+      of XpReward, XpOutcomeReward:
         let xp = teamXp(world, side)
         reward[side] = float32(xp - lane.potentials[side]) /
           float32(XpDenominator)
+        if batch.rewardMode == XpOutcomeReward and done:
+          reward[side] +=
+            float32(outcome(world, side, true)) * OutcomeBonus
         lane.potentials[side] = xp
     stats[laneIndex] = LaneStats()
     if done:
