@@ -1540,5 +1540,9 @@ proc runGraphics*() =
   while not window.closeRequested:
     pollEvents()
   saveRecording()
+  clickMarks.closeClickMarks()
+  worldShapes.closeShapeRenderer()
+  worldBarRenderer.closeWorldBarRenderer()
+  selectionOutline.closeSelectionOutline()
   particles.closeParticles()
   finishGameProfile()

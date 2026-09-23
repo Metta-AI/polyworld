@@ -160,6 +160,16 @@ proc initShapeRenderer*(): ShapeRenderer =
     )
   glBindVertexArray(0)
 
+proc closeShapeRenderer*(renderer: var ShapeRenderer) =
+    ## Releases owned GPU resources while the renderer's context is current.
+    ## The externally supplied texture is borrowed and remains alive.
+    ## Safe to repeat. Initialize a new renderer before drawing again.
+    glDeleteProgram(renderer.program)
+    glDeleteVertexArrays(1, renderer.vertexArray.addr)
+    glDeleteBuffers(1, renderer.vertexBuffer.addr)
+    glDeleteTextures(1, renderer.whiteTexture.addr)
+    renderer = ShapeRenderer()
+
 proc clear*(renderer: var ShapeRenderer) =
   ## Starts one empty batch while retaining its vertex allocation.
   renderer.vertices.setLen(0)
