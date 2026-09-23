@@ -1,0 +1,49 @@
+{
+  "date": "2026-09-23",
+  "version": "2026.9.23.2",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_f2dcdbcd-f984-445b-af5b-ee9481a7f362",
+  "canonical": true,
+  "source_commit": "fd315c8fa30f8923c7a7709a577c40ac071b1c2a",
+  "asset_commit": "2ec852fda0b414788ab2ae75ebf0a7b9b499502d",
+  "replay_version": 60,
+  "changes": [
+    "Remove automatic ability casting and its manual-spell flag. Abilities and consumables require explicit commands; basic attacks still acquire visible enemies.",
+    "Fix base policy ability ranking, ally healing, projectile targeting, and damaging ring placement. Synchronize the hosted baseline and guide.",
+    "Support only gameplay replay version 60."
+  ],
+  "checks": [
+    "Nim check, full test suite, all forty abilities on both teams, and deterministic native recording/playback passed.",
+    "All ten local and ten hosted certification checks passed.",
+    "All five hosted smoke matches completed with verified integer scores.",
+    "The web player rendered and verified all 28909 ticks of a fresh version-60 replay without divergence.",
+    "Served JavaScript, WASM and data hashes match the built artifacts; hosted browser playback passed.",
+    "A Linux certification replay and a new league replay reproduced exactly on the native client."
+  ],
+  "league_settings_preserved": true,
+  "verification_round": {
+    "round_id": "round_82a90fe0-c349-4ad1-9064-fe68ab0f6f4d",
+    "round_number": 694,
+    "status": "completed",
+    "games": 24,
+    "coworld_id": "cow_f2dcdbcd-f984-445b-af5b-ee9481a7f362",
+    "version": "2026.9.23.2",
+    "integer_scores_verified": 240,
+    "outcomes": {
+      "time_limit": 2,
+      "RedTeam": 13,
+      "BlueTeam": 9
+    },
+    "replay_version": 60,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=235a8a46-4f19-4b41-9866-6c5a89a482cc",
+    "verified_at": "2026-09-23T18:21:14.433814+00:00"
+  },
+  "manifest_hash": "sha256:68e081003ec7af8b0baf00450149c1f7493276ef5a658a560bbe481946908db9",
+  "viewer_sha256": {
+    "wasm": "ab77883468b12becb5ce340ef08e567b7f56cbb4ddeb38c144e8c3e71bb33514",
+    "data": "08414034150f6015f6e90c2ea64493b08d537dd8b276c41e8e9b9510a7c7ec6d",
+    "js": "b2fc0ff4834ea4fdad54b00707b0a32dee67a242f0a19dc7009057a423d98dc9"
+  },
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/35899940305",
+  "verified_at": "2026-09-23T18:21:29.642806+00:00"
+}
