@@ -7,9 +7,11 @@ privateAccess(WorldBarRenderer)
 privateAccess(ShapeRenderer)
 
 proc alive(bars: WorldBarRenderer, expected: bool) =
+  ## Checks whether all owned world-bar resources remain alive.
   doAssert (glIsProgram(bars.program) == GL_TRUE) == expected
   doAssert (glIsVertexArray(bars.vertexArray) == GL_TRUE) == expected
   doAssert (glIsBuffer(bars.vertexBuffer) == GL_TRUE) == expected
+  doAssert (glIsTexture(bars.whiteTexture) == GL_TRUE) == expected
 
 proc alive(shapes: ShapeRenderer, expected: bool) =
   doAssert (glIsProgram(shapes.program) == GL_TRUE) == expected
