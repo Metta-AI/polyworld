@@ -1,4 +1,4 @@
-# Wind Waker water with original imagegen masks and scrolling foam layers.
+# Cartoon water with original imagegen masks and scrolling foam layers.
 # G compares generated and procedural textures, T shows the texture sheet.
 # Keys 1-8 toggle layers, H toggles heave, Space pauses, drag orbits.
 # See notes.md for running, capturing, texture prompts, and controls.
@@ -25,7 +25,8 @@ const
   SkyColor = (0.55'f, 0.72'f, 0.9'f)
   HorizonColor = vec3(SkyColor[0], SkyColor[1], SkyColor[2])
   ShallowColor = vec3(0.10'f, 0.55'f, 0.83'f)
-  ShotPath = currentSourcePath.parentDir / "windwaker_water_generated.png"
+  ShotPath = currentSourcePath.parentDir.parentDir.parentDir /
+    "tmp/cartoon_water/generated.png"
   ShaderTarget =
     when defined(emscripten):
       glsl3WebGL
@@ -600,6 +601,8 @@ proc screenshot(lab: Lab) =
     image.data[0].addr)
   image.flipVertical()
   let path = getEnv("SCREENSHOT_PATH", ShotPath)
+  if path.parentDir.len > 0:
+    createDir(path.parentDir)
   image.writeFile(path)
   echo "wrote ", path
 
@@ -652,7 +655,7 @@ proc main() =
       raise newException(WaterError, "Unknown argument: " & argument)
   var lab = Lab(
     window: newWindow(
-      "Wind Waker water - " & $source,
+      "Cartoon water - " & $source,
       WindowSize,
       visible = maxFrames == 0,
       vsync = maxFrames == 0
@@ -709,7 +712,7 @@ proc main() =
       lab.textures[source][kind] = makeTexture(images[kind], wrap, wrapT)
   echo "loaded textures in ",
     formatFloat(epochTime() - started, ffDecimal, 2), "s"
-  echo "Wind Waker water: G texture source, 1-3 lattice, 4 wobble, " &
+  echo "Cartoon water: G texture source, 1-3 lattice, 4 wobble, " &
     "5-8 shoreline, H heave, T textures, Space pause, drag orbit, wheel zoom"
   echo "texture source: ", lab.source
 
@@ -739,7 +742,7 @@ proc main() =
         lab.source = Procedural
       of Procedural:
         lab.source = Generated
-      lab.window.title = "Wind Waker water - " & $lab.source
+      lab.window.title = "Cartoon water - " & $lab.source
       echo "texture source: ", lab.source
     of KeyT:
       lab.overlay = not lab.overlay

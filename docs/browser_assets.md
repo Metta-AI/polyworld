@@ -13,11 +13,14 @@ owner approves publication. Heartleaf and AWM assets are excluded.
 
 GotA no longer loads or packages the Toon Enchanted Meadow camp crate, barrel,
 or unused decorations. Its selected artwork uses the project-generated CC0
-assets, Quaternius CC0 animations, CC BY grass, OFL fonts, and MIT water maps.
+assets, Quaternius CC0 animations, OFL fonts, and MIT water maps.
 The bundle includes six license and attribution files, including the root
 `polyworld_art/LICENSE` and `polyworld_art/licenses/gota.md`.
 Hero documentation and exported statistics
 use generated portraits; exported statistics also include Rubik's OFL notice.
+
+GotA disables grass model loading in both native and browser terrain settings.
+The unused Low Poly Grass Pack is no longer part of the art repository or bundle.
 
 Before consolidating the CC0 notices into the root license, the 2026-09-22
 local build contained 850 files totaling 30,771,349 bytes.

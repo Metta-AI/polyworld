@@ -1,14 +1,15 @@
 # Exports the original procedural comparison textures for inspection.
-# Imagegen artwork is stored separately in textures/generated.
-# Run with nim r experiments/windwaker_water/gen_textures.nim.
+# Imagegen artwork is stored separately in polyworld_art.
+# Run with nim r experiments/cartoon_water/gen_textures.nim.
 
-import std/os, pixie, textures
-
-const Directory = "experiments/windwaker_water/textures"
+import
+  std/os,
+  pixie,
+  assets, textures
 
 proc main() =
   ## Saves the procedural masks without touching the imagegen artwork.
-  createDir(Directory)
+  createDir(TextureDirectory)
   let sheet = [
     ("foam_lattice", foamLattice()),
     ("sea_preview", seaPreview()),
@@ -20,7 +21,7 @@ proc main() =
     ("shore_lattice", shoreLattice())
   ]
   for (name, image) in sheet:
-    let path = Directory / name & ".png"
+    let path = TextureDirectory / name & ".png"
     image.writeFile(path)
     echo "wrote ", path
 

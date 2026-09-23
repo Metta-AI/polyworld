@@ -34,9 +34,13 @@ repository:
 
 ```sh
 git lfs install
-git clone git@github.com:Metta-AI/polyworld_art.git ../polyworld_art
+git clone --depth 1 git@github.com:Metta-AI/polyworld_art.git ../polyworld_art
 git -C ../polyworld_art lfs pull
 ```
+
+This downloads the current art checkout with shallow Git history. LFS fetches
+the files for that checkout, rather than every historical version. Omit
+`--depth 1` if you want the full commit history for contributing to the art.
 
 The art repository is private until its owner approves publication. It contains
 CC0 project artwork and openly licensed third-party assets with their notices.

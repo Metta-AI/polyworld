@@ -3,7 +3,11 @@ import
   pixie,
   textures
 
-const AssetDirectory* = currentSourcePath.parentDir / "textures/generated"
+const
+  ArtDirectory* = currentSourcePath.parentDir.parentDir.parentDir.parentDir /
+    "polyworld_art" / "terrain/cartoon_water"
+  TextureDirectory* = ArtDirectory / "textures"
+  AssetDirectory* = TextureDirectory / "generated"
 
 type
   WaterError* = object of CatchableError

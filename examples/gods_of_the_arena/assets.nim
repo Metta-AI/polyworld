@@ -25,9 +25,12 @@ const
   FortTextureSize* =
     when defined(emscripten): 512
     else: 1024
+  GotaWebTerrainAssets* = TerrainAssets(
+    water: true, splitProps: true, size: 256
+  )
   GotaTerrainAssets* =
-    when defined(emscripten): WebTerrainAssets
-    else: DefaultTerrainAssets
+    when defined(emscripten): GotaWebTerrainAssets
+    else: TerrainAssets(water: true, size: 1024)
   GotaTreeStyle* = NoTrees
   CreepPresets* = ["Purple Creep", "Blue Creep"]
   CreepClips* = [
@@ -184,7 +187,7 @@ proc browserAssets*(): seq[Asset] =
   for path in LicensePaths:
     result.add fileAsset(path)
   result.add terrainAssets(
-    GotaTreeStyle, GeneratedTerrain, NoRocks, WebTerrainAssets, ArenaTextures
+    GotaTreeStyle, GeneratedTerrain, NoRocks, GotaWebTerrainAssets, ArenaTextures
   )
   for path in TreegenTextures:
     result.add imageAsset(path, GeneratorTextureSize)

@@ -1,8 +1,6 @@
-## Procedural, seamlessly tiling textures for the Wind Waker water
-## experiment. Every image here is our own take on the maps the "How Wind
-## Waker Builds Its Water Materials" video shows: a foam lattice, a zigzag
-## displacement map, and the shoreline foam strips. All of them wrap on both
-## axes so the shaders can scroll them forever.
+## Procedural, seamlessly tiling textures for the cartoon water experiment.
+## Original foam lattices, displacement maps, and shoreline strips wrap on
+## both axes so the shaders can scroll them continuously.
 ##
 ## Foam strips put the shoreline at the TOP of the image (v = 0) and open
 ## water at the bottom (v = 1), which is the shore ring's uv convention.
@@ -118,9 +116,8 @@ proc gray(value: float32): Rgb =
 ## The maps
 
 proc latticeValue(u, v: float32, cells, seed: int): float32 =
-  ## White Voronoi edges with a small hole at every junction, like the
-  ## triangular gaps in Wind Waker's foam lattice. The sample point is
-  ## domain-warped first so the cells bulge instead of staying straight.
+  ## White Voronoi edges with triangular holes at their junctions.
+  ## The sample point is warped first so the cells bulge.
   let
     warpU = u + (fbm(u, v, 3, seed + 300) - 0.5'f) * 0.09'f
     warpV = v + (fbm(u, v, 3, seed + 400) - 0.5'f) * 0.09'f

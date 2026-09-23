@@ -1,4 +1,4 @@
-# Wind Waker water experiment
+# Cartoon water experiment
 
 An ocean and shoreline study based on
 [Dooge's water material breakdown](https://www.youtube.com/watch?v=8NL9Cc05CYk).
@@ -7,10 +7,11 @@ using the built-in imagegen tool.
 
 ## Run
 
+Clone `polyworld_art` beside `polyworld` using the main README's instructions.
 From the polyworld repository:
 
 ```sh
-nim r experiments/windwaker_water/windwaker_water.nim
+nim r experiments/cartoon_water/cartoon_water.nim
 ```
 
 The generated artwork loads by default. The window title identifies the active
@@ -39,10 +40,23 @@ sets under the same updated shader and scene settings.
 
 ## Textures
 
-The six unmodified imagegen PNGs and their exact prompts are in
-[textures/generated](textures/generated/prompts.md): ocean lattice, displacement,
-shore lace, crest, lapping band, and contact foam. The existing procedural mask
-still controls the shoreline's overall coverage.
+The six original imagegen PNGs and their prompt notes are in
+[polyworld_art](../../../polyworld_art/terrain/cartoon_water/textures/generated/prompts.md):
+ocean lattice, displacement, shore lace, crest, lapping band, and contact foam.
+The existing procedural mask still controls the shoreline's overall coverage.
+
+All textures and saved previews live in `polyworld_art/terrain/cartoon_water/`
+under CC0. The loader finds that sibling checkout from the source location.
+The shader and procedural generation code stay here under MIT.
+
+To export the procedural comparison textures into the art repository:
+
+```sh
+nim r experiments/cartoon_water/gen_textures.nim
+```
+
+Review any changed images and update `polyworld_art/licenses/assets.json`
+before committing generated art.
 
 The active ocean mask is `foam_lattice_thick.png`, an imagegen edit with thicker
 white lines. `foam_lattice.png` preserves the initial thin version.
@@ -72,28 +86,31 @@ toward open water, and ocean foam recedes near the beach. The island summit omit
 degenerate faces, its slopes use three lighting bands, and distant water fades
 to the sky color so the sea plane's edge disappears.
 
-This experiment focuses on the Great Sea and a simplified beach treatment.
+This experiment focuses on an open ocean and a simplified beach treatment.
 The video's rivers, waterfalls, radial splash ripples, and full nine-layer beach
 material are future extensions.
 
 ## Capture
 
 ```sh
-nim c -d:takeScreenshot -o:/tmp/windwaker_water \
-  experiments/windwaker_water/windwaker_water.nim
-/tmp/windwaker_water --frames=120
+nim c -d:takeScreenshot -o:/tmp/cartoon_water \
+  experiments/cartoon_water/cartoon_water.nim
+/tmp/cartoon_water --frames=120
 ```
 
 Capture builds advance by exactly 1/60 second per frame. The default image is
-`windwaker_water_generated.png` beside the source. `SCREENSHOT_PATH` changes the
+`tmp/cartoon_water/generated.png` in Polyworld. `SCREENSHOT_PATH` changes the
 output path. `CAM_YAW`, `CAM_PITCH`, and `CAM_DIST` set the orbit camera, and
 `OVERLAY=1` enables the texture inspector. Angles use radians.
 
+The default capture directory is ignored by Git. Reviewed reference captures
+are stored in `polyworld_art/terrain/cartoon_water/previews/`.
+
 ```sh
 OVERLAY=1 SCREENSHOT_PATH=/tmp/water_textures.png \
-  /tmp/windwaker_water --frames=120
+  /tmp/cartoon_water --frames=120
 CAM_PITCH=0.9 CAM_DIST=40 SCREENSHOT_PATH=/tmp/water_shore.png \
-  /tmp/windwaker_water --frames=240
+  /tmp/cartoon_water --frames=240
 ```
 
 Shader and asset failures raise `WaterError` with the relevant compiler log or

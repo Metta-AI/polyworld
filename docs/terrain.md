@@ -375,9 +375,7 @@ Smaller depth makes the transition sharper. Pure paint endpoints stay pure.
 
 For stamps, keep alpha and height separate. Alpha bounds the footprint. Height
 decides which surface details survive the blend. This gives clearer individual
-stones and leaves than ordinary translucent color overlap:
-
-![Alpha and height stamp blending](images/terrain-stamp-blending.png)
+stones and leaves than ordinary translucent color overlap.
 
 [`stamps.nim`](../tools/terrain/stamps.nim) keeps a color canvas and a
 floating-point height buffer. Attach the original color alpha to the height map
