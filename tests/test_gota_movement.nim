@@ -18,7 +18,6 @@ proc arena(): Game =
     hero.hp = 0
     hero.state = Dying
     hero.deathTicks = -100_000
-    hero.manualSpells = true
 
 proc middle(): WorldPoint =
   ## Reads a cell center on the actual middle lane.
@@ -109,7 +108,7 @@ block:
   game.tickWorld(nil)
   doAssert game.world.footmen[0].targetHeroId == hero.id
 
-echo "Testing immediate automatic healing survives the unit commit"
+echo "Testing explicit immediate healing survives the unit commit"
 for reverse in [false, true]:
   let
     game = arena()
@@ -121,7 +120,6 @@ for reverse in [false, true]:
   caster.state = Marching
   caster.hp = caster.maxHp div 2
   caster.mana = caster.maxMana
-  caster.manualSpells = false
   caster.abilityLevels[PassiveAbility] = 1
   caster.charges[PassiveAbility] = 1
   caster.spellsReady = true
@@ -130,7 +128,13 @@ for reverse in [false, true]:
     game.world.heroes.reverse()
     for i, hero in game.world.heroes:
       game.world.stats.teams[i] = hero.team.ord
-  game.tickWorld(nil)
+  game.world.heroTurnTicks = 1
+  game.tickWorld(proc() =
+    ## Submits the healing command before unit planning and commit.
+    doAssert game.world.applyCastTarget(
+      caster.id, PassiveAbility.ord.int32, caster.id
+    )
+  )
   doAssert caster.hp > hp
   doAssert caster.hp <= caster.maxHp
 

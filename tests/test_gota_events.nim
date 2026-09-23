@@ -225,7 +225,6 @@ proc quietGame(class: HeroClass): Game =
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
-    hero.manualSpells = true
     hero.hp = 0
     hero.state = Dying
     hero.deathTicks = -100_000
@@ -249,7 +248,7 @@ proc quietStep(game: Game) =
     hero.attackObjectId = 0
   game.tickWorld(nil)
 
-echo "Testing delayed and area damage, regeneration and automatic errors"
+echo "Testing delayed and area damage, regeneration and command errors"
 for class in [Arcanist, Ranger]:
   let
     game = quietGame(class)
@@ -280,7 +279,6 @@ for class in [Arcanist, Ranger]:
         doAssert event.amount == ability.abilitySpec.damage
         inc hits
   doAssert hits == (if class == Arcanist: 2 else: 1)
-  hero.manualSpells = false
   hero.mana = 0
   doAssert not world.applyCastTarget(hero.id, -7, hero.id)
   var regenerated = 0

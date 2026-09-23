@@ -15,7 +15,6 @@ proc arena(): Game =
     hero.hp = 0
     hero.state = Dying
     hero.deathTicks = -100_000
-    hero.manualSpells = true
 
 proc middle(): WorldPoint =
   ## Returns a valid cell center from the actual middle lane.
@@ -64,42 +63,6 @@ for creep in [false, true]:
   doAssert first != 0
   doAssert first == second,
     "creep=" & $creep & ", targets=" & $first & "," & $second
-
-proc healed(reverse: bool): int32 =
-  ## Reads the automatic healing target with either ally storage order.
-  let
-    game = arena()
-    hero = game.world.heroes[0]
-    origin = middle()
-  hero.class = DruidWarden
-  hero.refreshHeroStats()
-  hero.place(origin)
-  hero.hp = hero.maxHp
-  hero.mana = hero.maxMana
-  hero.state = Marching
-  hero.manualSpells = false
-  hero.abilityLevels[PrimaryAbility] = 1
-  hero.charges[PrimaryAbility] = 1
-  hero.spellsReady = true
-  for i in 1 .. 2:
-    let ally = game.world.heroes[i]
-    ally.state = Marching
-    ally.hp = ally.maxHp div 2
-    var point = origin
-    if i == 1:
-      point.x += WorldScale
-    else:
-      point.z += WorldScale
-    ally.place(point)
-  if reverse:
-    swap(game.world.heroes[1], game.world.heroes[2])
-  game.tickWorld(nil)
-  doAssert game.world.casts.len == 1
-  doAssert game.world.casts[0].ability == HealingBloom
-  game.world.casts[0].targetId
-
-echo "Testing automatic healing ignores ally storage order"
-doAssert healed(false) == healed(true)
 
 proc shot(reverse: bool): int32 =
   ## Sweeps a real ground projectile across two equally distant opponents.

@@ -762,7 +762,6 @@ proc loadBots*(
   var bound = false
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
-      game.world.heroes[i].manualSpells = true
       continue
     let program =
       when defined(coworld):

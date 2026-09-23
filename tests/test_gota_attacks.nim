@@ -3,7 +3,7 @@ import
   ../examples/gods_of_the_arena/[content, controls, maps, replays, sim]
 
 proc attackGame(class: HeroClass): Game =
-  ## Isolates basic attacks in the arena with manual spell control.
+  ## Isolates basic attacks in the arena without bot decisions.
   # The measured chase corridor belongs to the original 128 tile preset.
   var preset = defaultConfig()
   preset.mapSize = 128
@@ -19,7 +19,6 @@ proc attackGame(class: HeroClass): Game =
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
-    hero.manualSpells = true
     hero.hp = 0
     hero.state = Dying
     hero.deathTicks = -100_000
@@ -58,12 +57,12 @@ proc addCreep(game: Game, id: int32, offset: int32, team = BlueTeam) =
   creep.place(point)
   game.world.footmen.add creep
 
-echo "Testing all ten heroes acquire the nearest creep before other enemies"
+echo "Testing all ten heroes acquire the nearest visible enemy"
 for class in HeroClass:
   let
     game = attackGame(class)
     hero = game.world.heroes[0]
-    other = game.enemyHero(40_000)
+    other = game.enemyHero(140_000)
   game.addCreep(1000, 60_000)
   game.addCreep(1001, 110_000)
   game.addCreep(1002, 20_000, RedTeam)
@@ -169,11 +168,13 @@ block:
   game.tickWorld(nil)
   doAssert hero.hasMoveTarget
   other.hp = 1
-  hero.manualSpells = false
   doAssert game.world.applyLevelAbility(hero.id, PrimaryAbility.ord.int32)
   for slot in HeroAbilitySlot:
     hero.charges[slot] = 0
   hero.charges[PrimaryAbility] = 1
+  doAssert game.world.applyCastTarget(
+    hero.id, PrimaryAbility.ord.int32, other.id
+  )
   game.tickWorld(nil)
   doAssert other.hp <= 0
   doAssert hero.attacksLanded == 0
@@ -183,12 +184,20 @@ block:
   game.tickWorld(nil)
   doAssert hero.attackObjectId == 1000
 
-echo "Testing idle heroes leave enemy heroes alone without a selected target"
-for class in [VanguardKnight, Ranger, Arcanist]:
-  let game = attackGame(class)
-  discard game.enemyHero(60_000)
+echo "Testing idle heroes attack nearby heroes without a selected target"
+for class in HeroClass:
+  let
+    game = attackGame(class)
+    hero = game.world.heroes[0]
+    enemy = game.enemyHero(60_000)
+  game.addCreep(1000, 110_000)
   game.tickWorld(nil)
-  doAssert game.world.heroes[0].attackObjectId == 0
+  doAssert hero.attackObjectId == enemy.id, $class
+  doAssert hero.targetHeroId == enemy.id
+  for tick in 0 ..< game.world.heroAttackTicks(hero):
+    game.tickWorld(nil)
+  doAssert enemy.hp < 100_000, $class
+  doAssert hero.attacksLanded > 0 and game.world.casts.len == 0
 
 echo "Testing attack cooldown predicts both windup and repeat hits"
 for class in HeroClass:

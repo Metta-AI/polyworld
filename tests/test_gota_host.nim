@@ -542,7 +542,6 @@ block:
   hero.spellsReady = false
   doAssert game.world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
   hero.refreshHeroStats()
-  hero.manualSpells = true
   writeFile(path, "accepted = castPoint(2.0, selfX + 0.25, selfY - 0.25)\n")
   game.loadBots([BotGroup(path: path, count: 10)])
   for i in 1 ..< game.heroVms.len:

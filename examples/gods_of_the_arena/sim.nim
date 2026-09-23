@@ -154,7 +154,6 @@ type
     charges*: array[HeroAbilitySlot, int32]
     recharges*: array[HeroAbilitySlot, int32]
     spellsReady*: bool
-    manualSpells*: bool
     potionCooldownEnds*: array[RecoveryKind, int32]
     recoveryItems*: array[RecoveryKind, Item]
     recoveryStarted*, recoveryApplied*: array[RecoveryKind, int32]
@@ -4305,112 +4304,13 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     applyLevelAbility(world, action.heroId, action.slot)
   of ActionDraft:
     applyDraft(world, action.heroId, action.first)
-  of ActionManualSpells:
-    let index = world.heroIndex(action.heroId)
-    if index >= 0:
-      world.heroes[index].manualSpells = action.first != 0
-    false
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
-proc tryCastAbility(
-    world: World,
-    hero: Hero,
-    slot: HeroAbilitySlot,
-    targetFootman, targetHero, targetBuilding, fortIndex: int
-): bool =
-  ## Attempts an automatic cast using the current spell rules.
-  if hero.abilityLevels[slot] == 0:
-    return false
-  let spec = heroAbility(hero.class, slot).abilitySpec(hero.abilityLevels[slot])
-  var targetId = 0'i32
-  if spec.kind != Strike:
-    if spec.casting == SelfCast:
-      return world.castAbility(
-        hero, slot, hero.id, hero.position
-      ) == NoActionError
-    var allies: seq[Hero]
-    for ally in world.heroes:
-      if ally.team == hero.team and ally.hp > 0 and ally.hp < ally.maxHp and
-        ally.state != Dying and
-        within(hero.position, ally.position, spec.range):
-          allies.add ally
-    allies.sort(proc(first, second: Hero): int =
-      ## Keeps automatic healing independent of hero storage order.
-      if first.id == second.id: 0
-      elif targetBefore(first.position, first.id,
-        second.position, second.id, hero.team): -1
-      else: 1
-    )
-    for ally in allies:
-      if world.castAbility(
-        hero, slot, ally.id, ally.position
-      ) == NoActionError:
-        return true
-    return false
-  if targetFootman >= 0:
-    targetId = world.footmen[targetFootman].id
-  elif targetHero >= 0:
-    targetId = world.heroes[targetHero].id
-  elif targetBuilding >= 0:
-    targetId = world.buildings[targetBuilding].id
-  elif fortIndex >= 0:
-    targetId = world.forts[fortIndex].id
-  if targetId == 0:
-    return false
-  world.castAbility(hero, slot, targetId, hero.position) == NoActionError
-
-proc tryCombatAbilities(
-    world: World,
-    hero: Hero,
-    targetFootman, targetHero, targetBuilding, fortIndex: int
-) =
-  ## Fires the passive, then the strongest ready strike or support ability.
-  if hero.manualSpells:
-    return
-  discard tryCastAbility(
-    world,
-    hero,
-    PassiveAbility,
-    targetFootman,
-    targetHero,
-    targetBuilding,
-    fortIndex
-  )
-  if tryCastAbility(
-      world,
-      hero,
-      UltimateAbility,
-      targetFootman,
-      targetHero,
-      targetBuilding,
-      fortIndex
-    ):
-    return
-  if tryCastAbility(
-      world,
-      hero,
-      SecondaryAbility,
-      targetFootman,
-      targetHero,
-      targetBuilding,
-      fortIndex
-    ):
-    return
-  discard tryCastAbility(
-    world,
-    hero,
-    PrimaryAbility,
-    targetFootman,
-    targetHero,
-    targetBuilding,
-    fortIndex
-  )
-
 proc nearestEnemy(
-    world: World, hero: Hero, radius: int32, creepsOnly = false
+    world: World, hero: Hero, radius: int32
 ): int32 =
-  ## Returns the closest visible enemy, optionally restricting it to creeps.
+  ## Returns the closest visible, attackable enemy within the radius.
   var
     bestSquared = int64(radius) * int64(radius)
     bestPosition: WorldPoint
@@ -4427,8 +4327,6 @@ proc nearestEnemy(
         bestSquared = squared
         bestPosition = footman.position
         result = footman.id
-  if creepsOnly:
-    return
   for other in world.heroes:
     if other.id == hero.id or
         other.team == hero.team or
@@ -4576,9 +4474,7 @@ proc updateHero(world: World, hero: Hero) =
   if hero.attackObjectId == 0:
     let radius = world.acquireRadius(hero)
     if radius > 0:
-      hero.attackObjectId = world.nearestEnemy(
-        hero, radius, creepsOnly = true
-      )
+      hero.attackObjectId = world.nearestEnemy(hero, radius)
       if hero.attackObjectId != 0:
         targetFootman = footmanIndex(world, hero.attackObjectId)
         if targetFootman >= 0:
@@ -4613,14 +4509,6 @@ proc updateHero(world: World, hero: Hero) =
     if targetBuilding >= 0: world.buildings[targetBuilding].id else: 0
 
   world.regenHeroMana(hero, world.tick)
-  tryCombatAbilities(
-    world,
-    hero,
-    targetFootman,
-    targetHero,
-    targetBuilding,
-    fortIndex
-  )
 
   if not world.isEnemyTarget(hero, hero.attackObjectId):
     if hero.attackObjectId != 0 and not hero.attackMoving:
@@ -4917,7 +4805,6 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.spellsReady)
     for rank in hero.abilityLevels:
       hash.addHashy(rank)
-    hash.addHashy(hero.manualSpells)
     hash.addHashy(hero.lastActionError.ord)
     for kind in RecoveryKind:
       hash.addHashy(hero.potionCooldownEnds[kind])

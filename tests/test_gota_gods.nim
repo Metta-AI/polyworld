@@ -17,7 +17,6 @@ proc quietGame(size = 116): Game =
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
-    hero.manualSpells = true
     hero.state = Dying
     hero.deathTicks = -100_000
     hero.hp = 0

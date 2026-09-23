@@ -116,10 +116,10 @@ replay payloads and state hashes, and never accumulates a match history.
 | `XpGained`, `GoldGained` | Recipient, defeated source entity, amount, and related death. XP before/after is lifetime XP. |
 | `GoldSpent`, `LevelChanged` | Actual resource changes. Spent amounts are negative. |
 | `HealthAdjusted`, `ManaChanged` | Equipment, level, respawn, regeneration, consumable, or ability changes, distinguished by cause. Stat adjustments are not healing. |
-| `SpellReleased` | Successful automatic or explicit cast with caster, aim target ID if any, slot, and ability ID. |
+| `SpellReleased` | Successful explicit cast with caster, aim target ID if any, slot, and ability ID. |
 | `AbilityLeveled` | Explicit unlock or upgrade with hero, ability ID, and rank before/after. |
 | `ItemPurchased`, `ItemConsumed` | Item ID and stack count before/after. Consumption amounts are negative. |
-| `ActionRejected` | Explicit command, original numeric arguments, and typed rejection reason. Internal auto-cast candidate failures are omitted. |
+| `ActionRejected` | Explicit command, original numeric arguments, and typed rejection reason. |
 | `EntitySpawned`, `EntityRespawned`, `EntityRemoved` | Entity lifecycle; corpse expiration is distinct from death. |
 | `MatchEnded` | God destruction or configured time limit. `amount` is winning team (0 red, 1 blue), or -1 for timeout. A partial recording does not imply a match ended. |
 | `PortalStarted`, `PortalCompleted`, `PortalInterrupted` | Scroll channel lifecycle. Start/interruption reference the selected tower; completion references the hero at arrival. |
@@ -134,16 +134,16 @@ and zero for absent entity ID/kind. Rejected commands preserve raw IDs in
 `first`, `second`, and `slot` without resolving hidden target metadata.
 
 The event log preserves current damage, reward, and validation rules. No
-new nearby-player XP or gold distribution is introduced. Movement traces,
-pathfinding logs, and automatic failure spam are not included.
+new nearby-player XP or gold distribution is introduced. Movement traces
+and pathfinding logs are not included.
 
 ### Live action errors
 
 `lastActionError()` is available to BASIC even without `replayEvents`.
 A successful submitted action clears it to `NoActionError` (0). A rejected
 action sets the first failing validator's reason. Queries and automatic
-casts leave it unchanged. Read it immediately after a command to diagnose
-that attempt; multiple commands in one decision replace the latest value.
+basic attacks leave it unchanged. Read it immediately after a command to
+diagnose that attempt; multiple commands in one decision replace the latest value.
 This per-hero value is checkpointed and hashed, because a bot can branch
 on it. It reveals only that hero's own command error. Unavailable targets
 use a generic reason rather than revealing hidden object state.

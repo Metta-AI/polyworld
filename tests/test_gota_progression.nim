@@ -17,7 +17,6 @@ proc quietGame(class = VanguardKnight): Game =
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
-    hero.manualSpells = true
     hero.state = Dying
     hero.hp = 0
     hero.deathTicks = -100_000
@@ -62,7 +61,6 @@ block:
     game = quietGame()
     world = game.world
     hero = world.heroes[0]
-  hero.manualSpells = false
   hero.hp -= 50
   game.step(50)
   doAssert hero.abilityPoints == 1

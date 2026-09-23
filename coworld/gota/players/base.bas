@@ -2,7 +2,7 @@
 ' Every GotA host function has a gameplay use here; calls remain conditional.
 ' Object indices last only for this decision. IDs may be remembered.
 ' Read the bot guide for units, LOS restrictions, and action error constants.
-' Automatic spells remain enabled as a fallback between our decisions.
+' Abilities and items are used only by our explicit policy commands.
 
 dim owned(22)
 dim inventorySlot(22)
@@ -10,6 +10,8 @@ dim allyIds(9)
 dim seenMaxHp(9)
 dim castRange(3)
 dim castDelay(3)
+dim castGround(3)
+dim castMinimum(3)
 
 sub chooseHero()
   if draftTurnId <> selfId then
@@ -56,13 +58,12 @@ sub learnAbilities()
       if rank < abilityMaxLevel(spellSlot) then
         if selfLevel >= abilityRequiredLevel(spellSlot) then
           if canLevelAbility(spellSlot) then
-            score = 10 - rank
+            ' Prefer R, W, E, Q whenever the next rank is legal.
+            score = spellSlot
             if spellSlot = 1 then
-              score = score + 20
-            elseif spellSlot = 3 then
-              score = score + 40
-            elseif rank = 0 then
-              score = score + 10
+              score = 2
+            elseif spellSlot = 2 then
+              score = 1
             end if
             if score > upgradeScore then
               upgradeScore = score
@@ -120,7 +121,7 @@ sub readObject(index)
         friendlyPower = friendlyPower + objectLevel(index) + 2
       end if
       missing = seenMaxHp(class) - hp
-      if distance <= 16 and missing > healMissing then
+      if distance <= healRange * healRange and missing > healMissing then
         healMissing = missing
         healId = id
       end if
@@ -486,6 +487,9 @@ sub spells()
         if healing > 0 and healMissing >= healing \ 2 then
           if selfClass = DruidWarden and spellSlot > 0 then
             castId = healId
+          elseif selfClass = VanguardKnight and spellSlot = 2 then
+            ' Aegis heals around us, even when only an ally is wounded.
+            castId = selfId
           elseif selfMaxHp - selfHp >= healing \ 2 then
             castId = selfId
           end if
@@ -493,16 +497,18 @@ sub spells()
           castId = selfId
         elseif damage > 0 and bestId <> 0 then
           if bestDistance <= castRange(spellSlot) * castRange(spellSlot) then
-            ' Save the last recharging charge for valuable targets.
-            if bestKind <> 3 or charges > 1 or recharge <= tickRate then
-              castId = bestId
-            elseif bestHp <= damage then
-              castId = bestId
+            if bestDistance >= castMinimum(spellSlot) * castMinimum(spellSlot) then
+              ' Save the last recharging charge for valuable targets.
+              if bestKind <> 3 or charges > 1 or recharge <= tickRate then
+                castId = bestId
+              elseif bestHp <= damage then
+                castId = bestId
+              end if
             end if
           end if
         end if
         if castId <> 0 then
-          if castId = bestId and spellSlot >= 2 then
+          if castId = bestId and castGround(spellSlot) then
             ' Area spells lead the observed movement, with a bounded lead.
             leadX = velocityX * castDelay(spellSlot)
             leadY = velocityY * castDelay(spellSlot)
@@ -527,12 +533,14 @@ sub spells()
                 end if
               end if
             end if
-          else
-            accepted = castTarget(spellSlot, castId)
-            actionError = lastActionError()
-            if accepted then
-              exit sub
-            end if
+          end if
+          ' Targeted projectiles track their target. Targeted ground rings
+          ' offset their center so the enemy is inside the damaging band.
+          ' Also fall back here if a led point is outside the map or vision.
+          accepted = castTarget(spellSlot, castId)
+          actionError = lastActionError()
+          if accepted then
+            exit sub
           end if
         end if
       end if
@@ -595,8 +603,15 @@ if initialized = 0 then
   castRange(3) = 2
   castDelay(2) = 24
   castDelay(3) = 24
+  healRange = 4
+  for spellSlot = 0 to 3
+    castGround(spellSlot) = spellSlot >= 2
+    castMinimum(spellSlot) = 0
+  next spellSlot
   if selfClass = VanguardKnight then
-    castRange(3) = 1.8
+    healRange = 7 / 3
+    castRange(2) = 7 / 3
+    castRange(3) = 11 / 6
     castDelay(2) = 12
     castDelay(3) = 6
   elseif selfClass = Ranger then
@@ -611,32 +626,39 @@ if initialized = 0 then
     castDelay(2) = 48
     castDelay(3) = 72
   elseif selfClass = DruidWarden then
-    castRange(3) = 3.3
+    castRange(1) = 4
+    castRange(2) = 4
+    castRange(3) = 10 / 3
   elseif selfClass = DemonHunter then
     castRange(2) = 2
     castRange(3) = 5
     castDelay(2) = 6
+    castGround(3) = 0
   elseif selfClass = DeathKnight then
-    castRange(2) = 2.6
-    castRange(3) = 2.3
+    castRange(2) = 8 / 3
+    castRange(3) = 7 / 3
     castDelay(3) = 12
+    castGround(3) = 0
+    castMinimum(3) = 2 / 3
   elseif selfClass = Crossbowman then
     castRange(0) = 7
-    castRange(1) = 6.6
+    castRange(1) = 20 / 3
     castRange(2) = 6
     castRange(3) = 7.5
     castDelay(2) = 12
   elseif selfClass = Lich then
     castRange(0) = 6
-    castRange(1) = 6.6
+    castRange(1) = 20 / 3
     castRange(2) = 5
     castRange(3) = 6.5
+    castGround(3) = 0
   elseif selfClass = Warlock then
-    castRange(1) = 4.6
+    castRange(1) = 14 / 3
     castRange(2) = 4
     castRange(3) = 5
+    castGround(3) = 0
   elseif selfClass = Berserker then
-    castRange(3) = 2.1
+    castRange(3) = 13 / 6
     castDelay(2) = 12
     castDelay(3) = 48
   end if

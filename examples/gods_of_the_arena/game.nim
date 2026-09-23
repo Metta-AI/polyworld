@@ -167,13 +167,6 @@ block:
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
-  if run.world.tick == 0 and not run.replayMode and
-    not run.historyPlayback and run.recorder != nil:
-      for hero in run.world.heroes:
-        if hero.manualSpells:
-          run.recorder.record ReplayAction(
-            tick: 1, heroId: hero.id, kind: ActionManualSpells, first: 1
-          )
   tickWorld(run, proc() =
     let draftTurn = run.world.draftHeroId()
     flushPlayerCommands(run)

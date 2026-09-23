@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 6'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 59'u16
+  ReplayGameVersion* = 60'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -23,7 +23,6 @@ const
   ActionAttackMove* = 5'u8
   ActionCastTarget* = 6'u8
   ActionCastPoint* = 10'u8
-  ActionManualSpells* = 14'u8
   ActionUseItemAt* = 15'u8
   ActionLevelAbility* = 16'u8
   ActionBuyback* = 17'u8
@@ -109,7 +108,6 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionAttackMove and
       action.kind != ActionCastTarget and
       action.kind != ActionCastPoint and
-      action.kind != ActionManualSpells and
       action.kind != ActionLevelAbility and
       action.kind != ActionBuyback and
       action.kind != ActionDraft:
@@ -322,7 +320,6 @@ proc validate*(data: ReplayData) =
         action.kind != ActionAttackMove and
         action.kind != ActionCastTarget and
         action.kind != ActionCastPoint and
-        action.kind != ActionManualSpells and
         action.kind != ActionLevelAbility and
         action.kind != ActionBuyback and
         action.kind != ActionDraft:

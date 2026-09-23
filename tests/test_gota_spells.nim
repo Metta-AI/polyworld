@@ -15,7 +15,6 @@ proc spellGame(class: HeroClass): Game =
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:
-    hero.manualSpells = true
     hero.state = Dying
     hero.deathTicks = -100_000
     hero.hp = 0
@@ -392,14 +391,16 @@ block:
   doAssert enemy.hp == 10_000
   doAssert corpse.hp == 0 and corpse.state == Dying
 
-echo "Testing AI releases the same delayed map casts"
+echo "Testing explicit target commands release delayed map casts"
 block:
   let
     game = spellGame(Arcanist)
     hero = game.world.heroes[0]
     other = game.target(5, 90_000)
-  hero.manualSpells = false
   hero.attackObjectId = other.id
+  doAssert game.world.applyCastTarget(
+    hero.id, UltimateAbility.ord.int32, other.id
+  )
   game.tickWorld(nil)
   var pending = false
   for spell in game.world.casts:
@@ -409,7 +410,7 @@ block:
       pending = true
   doAssert pending
 
-echo "Testing automatic healing while walking without a combat target"
+echo "Testing explicit healing while walking without a combat target"
 for (class, slot) in [
   (DruidWarden, PrimaryAbility),
   (DruidWarden, SecondaryAbility),
@@ -424,7 +425,6 @@ for (class, slot) in [
       spec = ability.abilitySpec
     game.step()
     patient.hp = patient.maxHp - 100
-    hero.manualSpells = false
     for other in HeroAbilitySlot:
       hero.cooldowns[other] = 100_000
     hero.cooldowns[slot] = 0
@@ -435,6 +435,7 @@ for (class, slot) in [
     let
       hp = patient.hp
       mana = hero.mana
+    doAssert game.world.applyCastTarget(hero.id, slot.ord.int32, patient.id)
     game.tickWorld(nil)
     doAssert hero.hasMoveTarget and hero.attackObjectId == 0
     doAssert game.world.casts.len == 1, $ability
@@ -446,60 +447,40 @@ for (class, slot) in [
       game.tickWorld(nil)
     doAssert patient.hp == hp + spec.heal, $ability
 
-echo "Testing automatic healing respects manual control and cast requirements"
-for blocked in ["manual", "cooldown", "charges", "mana", "healthy"]:
-  let
-    game = spellGame(DruidWarden)
-    hero = game.world.heroes[0]
-  game.step()
-  hero.manualSpells = false
-  hero.hp -= 100
-  for slot in HeroAbilitySlot:
-    hero.cooldowns[slot] = 100_000
-  hero.cooldowns[SecondaryAbility] = 0
-  case blocked
-  of "manual":
-    hero.manualSpells = true
-  of "cooldown":
-    hero.cooldowns[SecondaryAbility] = 100_000
-  of "charges":
-    hero.charges[SecondaryAbility] = 0
-  of "mana":
-    hero.mana = 0
-  of "healthy":
-    hero.hp = hero.maxHp
-  else:
-    discard
-  doAssert game.world.applyWalkTo(
-    hero.id, mapCoordinate(hero.position.x) + 3,
-    mapCoordinate(hero.position.z)
-  )
-  let
-    hp = hero.hp
-    mana = hero.mana
-    charges = hero.charges
-  game.tickWorld(nil)
-  doAssert game.world.casts.len == 0, blocked
-  doAssert hero.hp == hp and hero.mana == mana
-  doAssert hero.charges == charges
-
-echo "Testing automatic strikes still require a combat target while walking"
+echo "Testing heroes never use abilities or items without an explicit command"
 for class in HeroClass:
-  let
-    game = spellGame(class)
-    hero = game.world.heroes[0]
-    enemy = game.target(5, 60_000)
-  game.step()
-  hero.manualSpells = false
-  doAssert game.world.applyWalkTo(
-    hero.id, mapCoordinate(hero.position.x) + 3,
-    mapCoordinate(hero.position.z)
-  )
-  let charges = hero.charges
-  game.tickWorld(nil)
-  doAssert hero.hasMoveTarget and hero.attackObjectId == 0, $class
-  doAssert game.world.casts.len == 0 and hero.charges == charges, $class
-  doAssert enemy.hp == 10_000
+  for walking in [false, true]:
+    let
+      game = spellGame(class)
+      hero = game.world.heroes[0]
+      enemy = game.target(5, 60_000)
+    discard game.target(1, 80_000, true)
+    game.step()
+    hero.hp = hero.maxHp div 2
+    hero.mana = hero.maxMana div 2
+    hero.inventory = [HealthPotion, VitalityElixir, ManaPotion,
+      ManaElixir, PoisonPotion, PortalScroll]
+    hero.itemCounts = [3'i32, 3, 3, 3, 3, 3]
+    if walking:
+      doAssert game.world.applyWalkTo(
+        hero.id, mapCoordinate(hero.position.x) + 3,
+        mapCoordinate(hero.position.z)
+      )
+    else:
+      doAssert game.world.applyAttackTarget(hero.id, enemy.id)
+    let
+      charges = hero.charges
+      items = hero.itemCounts
+      mana = hero.mana
+    for tick in 0 ..< TickRate:
+      game.tickWorld(nil)
+      doAssert game.world.casts.len == 0, $class
+      doAssert hero.charges == charges, $class
+      doAssert hero.cooldowns == default(array[HeroAbilitySlot, int32])
+      doAssert hero.itemCounts == items, $class
+      doAssert hero.recoveryItems == [NoItem, NoItem]
+      doAssert hero.portalEnds == 0
+      doAssert hero.mana >= mana, $class
 
 echo "Testing zero-mana melee and rejected casts preserve resources"
 block:

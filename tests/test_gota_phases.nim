@@ -31,7 +31,6 @@ proc fighter(game: Game, index: int, class = VanguardKnight): Hero =
   result.hp = 1
   result.refreshHeroStats()
   result.hp = 1
-  result.manualSpells = true
   result.place(middle())
   result.swingClip = heroAttackClips[0]
   result.swingTicks = game.world.heroHitTicks(result) - 1
@@ -267,23 +266,22 @@ block:
       doAssert event.amount == -1 and event.cause == GodDestroyed
   doAssert endings == 1
 
-echo "Testing hero action order rotates with the simulation tick"
+echo "Testing hero attack starts rotate with the simulation tick"
 for tick in 0 .. 10:
   let game = arena()
   game.world.tick = tick.int32
+  game.world.rng = initRng(1234)
   for i in 0 ..< game.world.heroes.len:
     let hero = game.fighter(i)
     hero.hp = hero.maxHp
-    hero.mana = hero.maxMana
-    hero.manualSpells = false
-    hero.abilityLevels[PrimaryAbility] = 1
-    hero.charges[PrimaryAbility] = 1
+    hero.swingTicks = -1
     hero.attackObjectId = game.world.heroes[(i + 5) mod 10].id
+  var expected = game.world.rng
   game.tickWorld(nil)
-  doAssert game.world.casts.len == 10
-  for offset, spell in game.world.casts:
-    let index = (tick + 1 + offset) mod 10
-    doAssert spell.heroId == game.world.heroes[index].id
+  for offset in 0 ..< game.world.heroes.len:
+    let index = (tick + 1 + offset) mod game.world.heroes.len
+    doAssert game.world.heroes[index].swingClip ==
+      heroAttackClips[expected.below(2)]
 
 echo "Testing creep attack starts rotate with the simulation tick"
 for tick in 0 .. 5:

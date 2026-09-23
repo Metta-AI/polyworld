@@ -18,7 +18,6 @@ proc policyGame(team = RedTeam, size = 116): Game =
   result.loadBots([BotGroup(path: Policy, count: 10)])
   result.recorder = initReplayRecorder(result.currentSetup(1000), preset)
   for i, hero in result.world.heroes:
-    hero.manualSpells = true
     hero.abilityLevels[PassiveAbility] = 1
     hero.spellsReady = true
     hero.gold = 0
@@ -60,6 +59,7 @@ proc middle(game: Game): WorldPoint =
 
 echo "Testing base policy calls cover the current GotA host API"
 block:
+  doAssert readFile(Policy) == readFile(Root / "coworld/gota/players/base.bas")
   let host = readFile(Root / "examples/gods_of_the_arena/bots.nim")
   var
     names: HashSet[string]
@@ -80,6 +80,83 @@ block:
   doAssert names.len >= 68
   for name in names:
     doAssert name & "(" in source, "Base policy omits host call " & name
+
+echo "Testing base spends ability points in R, W, E, Q order at legal levels"
+for class in HeroClass:
+  let
+    game = policyGame()
+    hero = game.world.heroes[0]
+  hero.class = class
+  hero.abilityLevels = [0'i32, 0, 0, 0]
+  var expected: array[HeroAbilitySlot, int32]
+  for level in 1 .. HeroMaxLevel:
+    hero.level = level
+    hero.refreshHeroStats()
+    hero.hp = hero.maxHp
+    hero.mana = hero.maxMana
+    var points = level.int32
+    for rank in expected:
+      points -= rank
+    for slot in [UltimateAbility, PrimaryAbility, SecondaryAbility,
+      PassiveAbility]:
+        while points > 0 and expected[slot] < slot.abilityMaxLevel and
+          level >= slot.abilityRequiredLevel(expected[slot] + 1):
+            inc expected[slot]
+            dec points
+    let actions = game.decide()
+    doAssert hero.abilityLevels == expected, $class & " level " & $level
+    for action in actions:
+      if action.kind == ActionLevelAbility:
+        let slot = HeroAbilitySlot(action.slot)
+        doAssert level >= slot.abilityRequiredLevel(expected[slot])
+  doAssert hero.abilityLevels == [4'i32, 4, 4, 3]
+
+echo "Testing all forty abilities are explicitly cast at suitable targets"
+for team in Team:
+  for class in HeroClass:
+    let
+      game = policyGame(team)
+      hero = game.world.heroes[team.ord * 5]
+      enemy = game.world.heroes[(1 - team.ord) * 5]
+      point = game.middle()
+    hero.class = class
+    hero.level = 18
+    hero.abilityLevels = [4'i32, 4, 4, 3]
+    hero.refreshHeroStats()
+    hero.maxMana = 1000
+    hero.place(point)
+    enemy.place(WorldPoint(
+      x: point.x + WorldScale, y: point.y, z: point.z
+    ))
+    enemy.hp = enemy.maxHp
+    enemy.state = Marching
+    for slot in HeroAbilitySlot:
+      let
+        ability = class.heroAbility(slot)
+        spec = ability.abilitySpec(hero.abilityLevels[slot])
+      hero.hp = hero.maxHp
+      hero.mana = hero.maxMana
+      if spec.kind == Heal:
+        hero.hp = hero.maxHp div 2
+      elif spec.kind == Restore:
+        hero.mana -= spec.restore
+      hero.cooldowns = [0'i32, 0, 0, 0]
+      hero.charges = [0'i32, 0, 0, 0]
+      hero.charges[slot] = spec.charges
+      game.world.casts.setLen(0)
+      let actions = game.decide()
+      doAssert game.world.casts.len == 1, $team & " " & $ability
+      let spell = game.world.casts[0]
+      doAssert spell.ability == ability
+      doAssert actions.hasAction(ActionCastTarget) or
+        actions.hasAction(ActionCastPoint)
+      doAssert hero.charges[slot] == spec.charges - 1
+      if spec.casting == AreaCast:
+        let target = if spec.kind == Heal: hero.position else: enemy.position
+        doAssert spell.spellContains(spec.area, target), $team & " " & $ability
+      else:
+        let target = if spec.kind == Strike: enemy.id else: hero.id
+        doAssert spell.targetId == target, $team & " " & $ability
 
 echo "Testing base shopping, safe portals, channels, and shared cooldowns"
 for team in Team:
@@ -131,6 +208,36 @@ block:
   doAssert not game.decide().hasAction(ActionAttackTarget)
 
 echo "Testing explicit allied healing and led area casts"
+for class in [VanguardKnight, DruidWarden]:
+  for distance in [1'i32, 4'i32, 5'i32]:
+    let
+      game = policyGame()
+      hero = game.world.heroes[0]
+      ally = game.world.heroes[1]
+      point = game.middle()
+    hero.class = class
+    hero.refreshHeroStats()
+    hero.hp = hero.maxHp
+    hero.mana = hero.maxMana
+    hero.abilityLevels = [0'i32, 0, 1, 0]
+    hero.place(point)
+    ally.place(WorldPoint(
+      x: point.x + distance * WorldScale, y: point.y, z: point.z
+    ))
+    ally.hp = ally.maxHp
+    ally.state = Marching
+    discard game.decide()
+    ally.hp -= 100
+    hero.charges[SecondaryAbility] = 1
+    let
+      actions = game.decide()
+      inRange = distance == 1 or (class == DruidWarden and distance == 4)
+    doAssert actions.hasAction(ActionCastTarget) == inRange
+    if inRange:
+      let spell = game.world.casts[^1]
+      doAssert spell.ability == class.heroAbility(SecondaryAbility)
+      doAssert spell.spellContains(spell.ability.abilitySpec.area, ally.position)
+
 block:
   let
     game = policyGame()
@@ -180,6 +287,66 @@ block:
   for action in actions:
     if action.kind == ActionCastPoint:
       doAssert action.offset != FixedVec2Zero
+
+echo "Testing base skips unavailable and out-of-range spells"
+for reason in [ActionNoCharges, ActionCooldown, ActionInsufficientMana,
+  ActionOutOfRange]:
+    let
+      game = policyGame()
+      hero = game.world.heroes[0]
+      enemy = game.world.heroes[5]
+      point = game.middle()
+    hero.class = Arcanist
+    hero.refreshHeroStats()
+    hero.hp = hero.maxHp
+    hero.mana = hero.maxMana
+    hero.abilityLevels = [0'i32, 1, 0, 0]
+    hero.charges[PrimaryAbility] = 1
+    hero.place(point)
+    enemy.place(point)
+    enemy.hp = enemy.maxHp
+    enemy.state = Marching
+    case reason
+    of ActionNoCharges:
+      hero.charges[PrimaryAbility] = 0
+    of ActionCooldown:
+      hero.cooldowns[PrimaryAbility] = 1
+    of ActionInsufficientMana:
+      hero.mana = 0
+    of ActionOutOfRange:
+      enemy.place(WorldPoint(
+        x: point.x + 7 * WorldScale, y: point.y, z: point.z
+      ))
+    else:
+      doAssert false
+    let actions = game.decide()
+    doAssert not actions.hasAction(ActionCastTarget)
+    doAssert not actions.hasAction(ActionCastPoint)
+    doAssert game.world.casts.len == 0
+
+echo "Testing Death Knight keeps enemies outside the ring's empty center"
+block:
+  let
+    game = policyGame()
+    hero = game.world.heroes[0]
+    enemy = game.world.heroes[5]
+    point = game.middle()
+  hero.class = DeathKnight
+  hero.refreshHeroStats()
+  hero.hp = hero.maxHp
+  hero.mana = hero.maxMana
+  hero.abilityLevels = [0'i32, 0, 0, 1]
+  hero.charges[UltimateAbility] = 1
+  hero.place(point)
+  enemy.place(point)
+  enemy.hp = enemy.maxHp
+  enemy.state = Marching
+  discard game.decide()
+  doAssert game.world.casts.len == 0
+  enemy.place(WorldPoint(x: point.x + WorldScale, y: point.y, z: point.z))
+  discard game.decide()
+  doAssert game.world.casts.len == 1
+  doAssert game.world.casts[0].ability == DarkEclipse
 
 echo "Testing safe gradual recovery and emergency burst consumables"
 for item in [HealthPotion, ManaPotion, VitalityElixir, ManaElixir]:

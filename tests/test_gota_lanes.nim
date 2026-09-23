@@ -184,7 +184,6 @@ block:
     hero.hp = 0
     hero.state = Dying
     hero.deathTicks = -100_000
-    hero.manualSpells = true
   let enemy = game.world.heroes[5]
   enemy.hp = enemy.maxHp
   enemy.state = Marching
@@ -209,7 +208,6 @@ block:
     other.hp = 0
     other.state = Dying
     other.deathTicks = -100_000
-    other.manualSpells = true
   hero.hp = 100_000
   hero.state = Marching
   var victim = -1

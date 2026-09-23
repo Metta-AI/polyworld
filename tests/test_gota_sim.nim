@@ -16,10 +16,9 @@ doAssert run.world.heroes.len == 10,
   "run this test with " &
     "--bot:examples/gods_of_the_arena/players/base.bas:10"
 
-echo "Testing human spell commands, AI casts, and charges replay exactly"
+echo "Testing human and bot spell commands and charges replay exactly"
 block:
   let hero = run.world.heroes[0]
-  hero.manualSpells = true
   let initial = run.world.clone()
   for tick in 0 ..< 1000:
     if tick mod 48 == 0:
@@ -31,7 +30,7 @@ block:
       )
       queueCastTarget(hero.id, int32(PassiveAbility), hero.id)
     advanceGame()
-  doAssert run.recorder.data.actions[0].kind == ActionManualSpells
+  doAssert run.recorder.data.actions.len > 0
   let
     data = decodeReplay(run.recorder.data.encodeReplay())
     replay = newGame(
@@ -43,7 +42,6 @@ block:
     replay.tickWorld(nil)
   doAssert replay.hashCheck.mismatches == 0, replay.hashCheck.error
   doAssert replay.stateHash() == run.stateHash()
-  doAssert replay.world.heroes[0].manualSpells
   doAssert replay.world.heroes[0].charges == hero.charges
   let
     frontier = run.stateHash()
@@ -343,7 +341,7 @@ block:
           bought = true
   doAssert bought, "the base bot did not buy a shop item"
 
-echo "Testing heroes spend a combat ability"
+echo "Testing explicit hero commands spend a combat ability"
 block:
   var
     blue = -1
@@ -360,7 +358,6 @@ block:
   beside.x += 40_000
   run.world.heroes[red].place(beside)
   run.world.heroes[blue].attackObjectId = run.world.heroes[red].id
-  run.world.heroes[blue].manualSpells = false
   run.world.heroes[blue].hp = run.world.heroes[blue].maxHp div 2
   run.world.heroes[blue].mana = run.world.heroes[blue].maxMana
   for slot in HeroAbilitySlot:
@@ -368,6 +365,15 @@ block:
     run.world.heroes[blue].charges[slot] =
       heroAbility(run.world.heroes[blue].class, slot).abilitySpec.charges
     run.world.heroes[blue].recharges[slot] = 0
+  queueCastTarget(
+    run.world.heroes[blue].id,
+    PrimaryAbility.ord.int32,
+    if heroAbility(run.world.heroes[blue].class,
+        PrimaryAbility).abilitySpec.kind == Strike:
+      run.world.heroes[red].id
+    else:
+      run.world.heroes[blue].id
+  )
   run.world.heroTurnTicks = 1
   advanceGame()
   var used = false

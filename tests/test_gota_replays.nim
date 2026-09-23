@@ -63,12 +63,9 @@ doAssert decoded.actions[2].first == 70
 doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
-echo "Testing every spell slot and manual control round trip"
+echo "Testing every explicit spell slot round trip"
 block:
   let spells = initReplayRecorder(setup)
-  spells.record ReplayAction(
-    tick: 1, heroId: 100, kind: ActionManualSpells, first: 1
-  )
   for slot in 0'i32 .. 3'i32:
     spells.recordCast(2, 100, slot, 105, 0, false)
     spells.recordCast(2, 100, slot, 64, 42, true)

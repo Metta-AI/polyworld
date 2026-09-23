@@ -1,7 +1,7 @@
 ' Rusher: send the whole team down mid together.
 ' Regroup above a 10-tile team diameter, closing to 8 tiles before resuming.
 ' Attack visible, vulnerable enemies within 20 tiles; otherwise attack-move.
-' Use this policy for all five heroes on a team. Automatic spells stay enabled.
+' Use this policy for all five heroes on a team. It uses basic attacks only.
 
 
 ' Draft roles: 0 frontline, 1 carry, 2 mage, 3 support, 4 fighter.

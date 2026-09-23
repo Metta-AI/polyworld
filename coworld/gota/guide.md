@@ -27,16 +27,24 @@ visible warnings, and uses enemy stats and equipment to judge fights. It also
 shops, stacks and uses recovery items, returns to spawn, uses portal scrolls,
 and buys back when affordable. Actions are conditional on a useful opportunity,
 so one match need not exercise every mechanic. Its observation scans are bounded
-and its main decisions run every six ticks. Automatic spells remain enabled.
+and its main decisions run every six ticks. Abilities and items require
+explicit policy commands; the engine never casts or uses them automatically.
 Spell ranges and shapes are not queryable, so their small policy table must
 follow balance changes in `content.nim`; health, damage, costs, and ranks use
 live observations. This is an editable starting point, not an optimal policy.
 
-Every hero has a free single-target melee or ranged basic attack in addition to four abilities. Basic damage grows each level and includes equipment bonuses. Idle heroes automatically acquire nearby visible enemy creeps. `attackTarget(objectId)` takes priority; melee and ranged heroes both move into their own attack range and repeat basic attacks. `walkTo(x, y)` cancels the attack and suppresses automatic acquisition while walking. Basic attacks do not spend mana or spell charges.
+Every hero has a free single-target melee or ranged basic attack in addition
+to four abilities. Basic damage grows each level and includes equipment bonuses.
+Idle heroes automatically acquire the nearest visible, attackable enemy,
+including enemy creeps, heroes, and exposed buildings. `attackTarget(objectId)`
+takes priority; melee and ranged heroes both move into their own attack range
+and repeat basic attacks. `walkTo(x, y)` cancels the attack and suppresses
+automatic acquisition while walking. Basic attacks do not spend mana or spell
+charges.
 
 `attackMove(x, y)` uses the same attack-move order as the player controls. It follows a path toward that tile, stops for enemies in the hero's normal acquisition range, and resumes afterward. Like other actions, it returns 1 when accepted and 0 when rejected, and is recorded in replays.
 
-The bundled `players/rusher.bas` sends all five heroes down mid together. It regroups toward the living team's center when any pair is more than 10 tiles apart, closing to 8 tiles before resuming. It attacks visible, vulnerable enemies within 20 tiles, favoring the enemy closest to the group's center. Otherwise it attack-moves through the middle and toward the opposing god. Dead allies are ignored until they respawn. Automatic abilities remain enabled.
+The bundled `players/rusher.bas` sends all five heroes down mid together. It regroups toward the living team's center when any pair is more than 10 tiles apart, closing to 8 tiles before resuming. It attacks visible, vulnerable enemies within 20 tiles, favoring the enemy closest to the group's center. Otherwise it attack-moves through the middle and toward the opposing god. Dead allies are ignored until they respawn. This policy uses basic attacks only; add explicit casting commands to use abilities.
 
 ## Drafting
 
@@ -113,9 +121,10 @@ points and refills only learned abilities.
 Hero stats, including basic-attack damage, still grow automatically with
 hero level. Ability ranks never increase automatically. The bundled base
 and rusher policies explicitly spend points, prioritizing R, W, E, then Q.
-Their existing automatic casting uses only learned abilities. Custom
-policies can bank points or choose another order. At level 20, fully ranking
-all four abilities leaves five banked points.
+Ability use requires explicit `castTarget` or `castPoint` commands, including
+slot 0 and ultimates. Items require `useItem` or `useItemAt`. Custom policies
+can bank points, choose another upgrade order, and reserve any ability. At
+level 20, fully ranking all four abilities leaves five banked points.
 
 | BASIC function | Meaning |
 | --- | --- |
@@ -312,7 +321,7 @@ end if
 `lastActionError()` returns the reason for your hero's latest submitted
 command. A successful action clears it to `NoActionError` (0). A failed
 action returns 0 as before, and sets the first failing validation reason.
-Read-only queries and internal automatic spell attempts do not change it.
+Read-only queries and automatic basic attacks do not change it.
 Unlike the sampled self data, this query updates immediately after commands.
 
 ```basic

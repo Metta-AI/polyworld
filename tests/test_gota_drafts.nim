@@ -255,9 +255,6 @@ block:
     human = game.world.heroes[humanIndex]
   game.loadBots([BotGroup(path: BasePolicy, count: 9)],
     playerSlot = humanIndex.int32 + 1)
-  game.recorder.record ReplayAction(
-    tick: 1, heroId: human.id, kind: ActionManualSpells, first: 1
-  )
   for i in 0 ..< 24:
     game.tickWorld(proc() =
       ## Leaves the active human slot waiting for its queued choice.
