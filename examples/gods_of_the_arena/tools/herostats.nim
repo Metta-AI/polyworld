@@ -503,5 +503,5 @@ proc publishStats*(directory: string, manifest: JsonNode): JsonNode =
     directory / "report.html",
     result,
     appearances,
-    getEnv("POLYWORLD_DATA", StatsRoot.parentDir / "polyworld_data")
+    getEnv("POLYWORLD_ART", StatsRoot.parentDir / "polyworld_art")
   )

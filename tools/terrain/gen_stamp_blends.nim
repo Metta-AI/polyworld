@@ -5,7 +5,7 @@ import
 
 const
   DataRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir /
-    "polyworld_data/terrain"
+    "polyworld_art/terrain"
   OutputRoot = SampleRoot / "stamp-blends"
   Groups = [
     ["grass-1", "grass-2", "grass-3"],

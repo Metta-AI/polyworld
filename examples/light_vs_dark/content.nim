@@ -125,6 +125,8 @@ const
     ## Highest kind an overlord may pass to `build`.
 
 type
+  Footprint* = tuple[width, depth: int32]
+
   UnitStats* = object
     gold*, wood*: int32
     trainTicks*: int32
@@ -152,8 +154,8 @@ type
     buildTicks*: int32
     hp*: int32
     sightTiles*: int32
-    footprint*: int32
-      ## Square side in tiles.
+    footprint*: Footprint
+      ## Occupied width and depth in tiles at half the authored model scale.
     foodProvided*: int32
     damage*, cooldownTicks*, rangeTiles*: int32
       ## Zero for everything that is not a tower.
@@ -288,48 +290,48 @@ proc attackDamage*(stats: UnitStats, armor: int32): int32 =
 const BuildingTable*: array[BuildingKind, BuildingStats] = [
   TownHallBuilding: BuildingStats(
     gold: 1200, wood: 800, buildTicks: 720,
-    hp: 1200, sightTiles: 6, footprint: 3, foodProvided: 5,
+    hp: 1200, sightTiles: 6, footprint: (4, 3), foodProvided: 5,
     dropOffGold: true, dropOffWood: true, requires: {}
   ),
   FarmBuilding: BuildingStats(
     gold: 400, wood: 200, buildTicks: 240,
-    hp: 400, sightTiles: 3, footprint: 2, foodProvided: 4,
+    hp: 400, sightTiles: 3, footprint: (2, 2), foodProvided: 4,
     requires: {}
   ),
   BarracksBuilding: BuildingStats(
     gold: 600, wood: 400, buildTicks: 480,
-    hp: 800, sightTiles: 4, footprint: 3, foodProvided: 0,
+    hp: 800, sightTiles: 4, footprint: (2, 2), foodProvided: 0,
     requires: {}
   ),
   LumberMillBuilding: BuildingStats(
     gold: 500, wood: 300, buildTicks: 360,
-    hp: 600, sightTiles: 4, footprint: 3, foodProvided: 0,
+    hp: 600, sightTiles: 4, footprint: (2, 2), foodProvided: 0,
     dropOffWood: true, requires: {}
   ),
   TowerBuilding: BuildingStats(
     gold: 500, wood: 300, buildTicks: 360,
-    hp: 700, sightTiles: 9, footprint: 2, foodProvided: 0,
+    hp: 700, sightTiles: 9, footprint: (2, 2), foodProvided: 0,
     damage: 12, cooldownTicks: 24, rangeTiles: 6,
     requires: {LumberMillBuilding}
   ),
   StablesBuilding: BuildingStats(
     gold: 600, wood: 400, buildTicks: 480,
-    hp: 700, sightTiles: 4, footprint: 3, foodProvided: 0,
+    hp: 700, sightTiles: 4, footprint: (3, 2), foodProvided: 0,
     requires: {BarracksBuilding}
   ),
   ChurchBuilding: BuildingStats(
     gold: 700, wood: 400, buildTicks: 480,
-    hp: 700, sightTiles: 4, footprint: 3, foodProvided: 0,
+    hp: 700, sightTiles: 4, footprint: (2, 2), foodProvided: 0,
     requires: {BarracksBuilding}
   ),
   BlacksmithBuilding: BuildingStats(
     gold: 600, wood: 400, buildTicks: 360,
-    hp: 700, sightTiles: 4, footprint: 3, foodProvided: 0,
+    hp: 700, sightTiles: 4, footprint: (2, 3), foodProvided: 0,
     requires: {BarracksBuilding}
   ),
   GoldMineBuilding: BuildingStats(
     gold: 0, wood: 0, buildTicks: 0,
-    hp: 2000, sightTiles: 0, footprint: 2, foodProvided: 0,
+    hp: 2000, sightTiles: 0, footprint: (3, 3), foodProvided: 0,
     requires: {}
   )
 ]
@@ -431,7 +433,8 @@ proc contentHash*(): uint64 =
     hash.addHashy(stats.buildTicks)
     hash.addHashy(stats.hp)
     hash.addHashy(stats.sightTiles)
-    hash.addHashy(stats.footprint)
+    hash.addHashy(stats.footprint.width)
+    hash.addHashy(stats.footprint.depth)
     hash.addHashy(stats.foodProvided)
     hash.addHashy(stats.damage)
     hash.addHashy(stats.cooldownTicks)

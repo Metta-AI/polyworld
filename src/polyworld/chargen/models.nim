@@ -113,6 +113,11 @@ proc rotateAttachment(root: Node, item: PartItem) =
 
 proc readCharacter*(directory: string, manifest: Manifest): GltfFile =
   ## Assembles the library's selected inventory around a single animated rig.
+  for spec in manifest.clips:
+    spec.validateClip()
+  for category in manifest.categories:
+    for item in category.items:
+      item.validatePart()
   result = readModel(directory, manifest.rig)
   let joints = rigNodes(result.root)
   var loaded: HashSet[string]

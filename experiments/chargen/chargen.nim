@@ -1,12 +1,12 @@
 ## A modular character viewer backed by editable Blender assets.
 ## Run with `nim r experiments/chargen/chargen.nim`.
 ## Rebuild assets with Blender's background Python runner and build_model.py.
-## Add meshes, outfits, colors, and clips in polyworld_data/characters/chargen.
+## Add meshes, outfits, colors, and clips in polyworld_art/characters/chargen.
 
 import
   std/[os, random, sets, strformat, strutils, tables, times],
   bumpy, chroma, gltf, silky, vmath,
-  polyworld/[animblend, chargen, toon], references, weights, lineups
+  polyworld/[animblend, chargen, toon], weights, lineups
 
 when defined(takeScreenshot):
   import pixie
@@ -15,7 +15,7 @@ const
   ExperimentDir = currentSourcePath().parentDir
   AssetDir = ChargenLibrary
   ThemeDir = ExperimentDir.parentDir.parentDir.parentDir /
-    "polyworld_data/themes/main"
+    "polyworld_art/themes/main"
   TempDir = ExperimentDir.parentDir.parentDir / "tmp/chargen"
   AtlasPath = TempDir / "viewer.atlas.png"
   RowWidth = 320
@@ -24,9 +24,6 @@ const
 type
   Shading = enum
     Clay, Toon, Weights
-
-  ClipFamily = enum
-    Universal, SwordShield, HeldPoses
 
 proc cycle(current, step, count: int): int =
   ## Cycles through None and the available choices in either direction.
@@ -107,9 +104,6 @@ proc run() =
     boneLabels = false
     restWrist = false
     focusBone = false
-    compareOriginal = getEnv("COMPARE_ORIGINAL", "0") == "1"
-    originalOutfit = getEnv("ORIGINAL_OUTFIT", "0") == "1"
-    reference: Reference
     lineup: seq[LineupActor]
     lineupGroup = "Gnomes"
     showLineup = false
@@ -118,8 +112,6 @@ proc run() =
     palette = 0
     showParts = true
     showAnimations = true
-    clipFamily = Universal
-    editingOriginal = getEnv("PARTS_MODEL", "Chargen") == "Original"
     unlitFace = true
     rimLight = true
     msaa = true
@@ -174,15 +166,6 @@ proc run() =
     if name.len > 0 and player.clipIndex(name) < 0:
       raise newException(ChargenError, "Unknown animation: " & name)
     player.play(name, duration)
-    for clip in manifest.clips:
-      if clip.name == name:
-        clipFamily =
-          case clip.kind
-          of "universal": Universal
-          of "pose": HeldPoses
-          else: SwordShield
-    if reference != nil:
-      reference.player.play(name, duration)
     player.paused = false
 
   proc clipPosition(): float32 =
@@ -195,18 +178,6 @@ proc run() =
       if spec.name == clip.name and spec.loop and clip.duration > 0:
         result = player.currentTime -
           floor(player.currentTime / clip.duration) * clip.duration
-
-  proc prepareComparison() =
-    ## Loads the original once and frames both independently skinned models.
-    if reference == nil:
-      reference = readReference(manifest.clips)
-      reference.setOutfit(originalOutfit)
-      reference.sync(player)
-    yaw = 0
-    pitch = 0.04
-    distance = 7.5
-    target = vec3(0, 1.52, 0)
-    focusBone = false
 
   proc applyParts() =
     ## Applies the current independent face and ear choices.
@@ -229,7 +200,7 @@ proc run() =
       skinRgb[i] = manifest.skins[skin].color[i] * 255
 
   proc loadPreset(index: int) =
-    ## Loads an outfit and its suggested animation.
+    ## Loads an outfit while preserving the current animation and transport.
     presetIndex = index
     randomTitle = ""
     let preset = manifest.presets[index]
@@ -246,7 +217,6 @@ proc run() =
     if preset.pupilColor.len > 0:
       pupil = manifest.pupilColors.colorIndex(preset.pupilColor)
       pupilTint = manifest.pupilColors[pupil].rgb
-    playClip(preset.pose, fade)
     if preset.group == "Gota Gods":
       distance = 7.5
       target = vec3(0.4, 1.85, 0)
@@ -282,8 +252,6 @@ proc run() =
       if lineup.len == 0 or lineupGroup != group:
         lineup = readLineup(directory, manifest, model.root, group)
       lineupGroup = group
-      compareOriginal = false
-      editingOriginal = false
       showParts = false
       showBones = false
       restWrist = false
@@ -293,8 +261,6 @@ proc run() =
         playClip("Sword_Attack", 0)
         player.seek(CreepStrikeTime)
         player.paused = true
-      else:
-        gnomePose()
     else:
       showParts = true
       yaw = 0.22
@@ -381,16 +347,13 @@ proc run() =
     let defaultClip =
       if manifest.defaultAnimation.len > 0:
         manifest.defaultAnimation
-      elif player.clipIndex("Walk") >= 0:
-        "Walk"
+      elif player.clipIndex("Walk_Loop") >= 0:
+        "Walk_Loop"
       elif manifest.clips.len > 0:
         manifest.clips[0].name
       else:
         ""
     playClip(getEnv("ANIM", defaultClip), 0)
-  if compareOriginal or editingOriginal:
-    compareOriginal = true
-    prepareComparison()
   yaw = envNumber("CAM_YAW", yaw)
   pitch = clamp(envNumber("CAM_PITCH", pitch), -1.2, 1.4)
   distance = clamp(envNumber("CAM_DIST", distance), 2, 12)
@@ -420,9 +383,6 @@ proc run() =
     distance = envNumber("CAM_DIST", 1.6)
   restWrist = getEnv("REST_WRIST", "0") != "0"
   wireframe = getEnv("WIREFRAME", if shading == Weights: "1" else: "0") != "0"
-  if reference != nil:
-    reference.sync(player)
-
   if getEnv("GNOME_LINEUP", "0") == "1":
     setLineup(true)
   if getEnv("GOTA_LINEUP", "0") == "1":
@@ -536,7 +496,7 @@ proc run() =
         titleSize = sk.getTextSize(sk.textStyle, title)
         titleRect = rect(sk.placedAt(titleSize), titleSize)
       text title
-      if selected >= 0 and not editingOriginal and
+      if selected >= 0 and
         sk.mousePos.overlaps(titleRect) and
         sk.mousePos.overlaps(sk.clipRect) and
         sk.mouseIdleTime >= sk.tooltipThreshold:
@@ -594,14 +554,10 @@ proc run() =
       scrubber("Hat " & channel, hatTint[i], 0.0'f, 1.0'f, channel)
 
   proc selectedPreset(index: int) =
-    ## Applies the active model's preset and the shared animation.
-    if editingOriginal:
-      reference.loadPreset(index)
-      playClip(reference.manifest.presets[index].pose, fade)
-    else:
-      if showLineup:
-        setLineup(false)
-      loadPreset(index)
+    ## Applies a character preset without changing animation playback.
+    if showLineup:
+      setLineup(false)
+    loadPreset(index)
 
   proc clothControls(category: string) =
     ## Edits a garment slot's fabric without tinting its metal details.
@@ -616,22 +572,13 @@ proc run() =
           )
 
   proc partsPanel() =
-    ## Keeps the complete part browser available during side-by-side playback.
+    ## Browses generated character parts and presets.
     subWindow("Character", showParts, vec2(10, 10), vec2(360, 880)):
-      let wasOriginal = editingOriginal
-      group "model parts":
-        box RowWidth, 34
-        layout LeftToRight
-        radioButton("Chargen", editingOriginal, false)
-        radioButton("Original", editingOriginal, true)
-      if editingOriginal and not wasOriginal and not compareOriginal:
-        compareOriginal = true
-        prepareComparison()
-      let source = if editingOriginal: reference.manifest else: manifest
+      let source = manifest
       if source.presets.len > 0:
-        let choice = if editingOriginal: reference.preset else: presetIndex
+        let choice = presetIndex
         text:
-          if not editingOriginal and randomTitle.len > 0:
+          if randomTitle.len > 0:
             randomTitle
           else:
             source.presets[choice].name
@@ -645,56 +592,48 @@ proc run() =
           button ">":
             selectedPreset((choice + 1) mod source.presets.len)
           button "Random":
-            if editingOriginal:
-              reference.randomize(rng)
-            else:
-              randomize()
+            randomize()
           button "Clear":
-            if editingOriginal:
-              reference.clearParts()
-            else:
-              selection = manifest.defaultSelection()
-              for i, category in manifest.categories:
-                if category.key notin ["Body", "Face"]:
-                  selection[i] = -1
-              applyParts()
-      if not editingOriginal:
-        group "preset groups":
-          box RowWidth, 34
-          layout LeftToRight
-          itemSpacing 4
-          if hasGota:
-            button "Gota presets":
-              presetGroup =
-                if presetGroup == "Gota": "" else: "Gota"
-          if hasGnomes:
-            button "Gnome presets":
-              presetGroup =
-                if presetGroup == "Gnomes": "" else: "Gnomes"
-        if hasGods:
-          button "God presets":
+            selection = manifest.defaultSelection()
+            for i, category in manifest.categories:
+              if category.key notin ["Body", "Face"]:
+                selection[i] = -1
+            applyParts()
+      group "preset groups":
+        box RowWidth, 34
+        layout LeftToRight
+        itemSpacing 4
+        if hasGota:
+          button "Gota presets":
             presetGroup =
-              if presetGroup == "Gota Gods": "" else: "Gota Gods"
-        if presetGroup.len > 0:
-          for i, preset in manifest.presets:
-            if preset.group == presetGroup:
-              button preset.name:
-                selectedPreset(i)
-                presetGroup = ""
-        group "aligned random":
-          box RowWidth, 34
-          layout LeftToRight
-          itemSpacing 4
-          button "Good random":
-            randomize(GoodOnly)
-          button "Evil random":
-            randomize(EvilOnly)
-        if hasGnomeParts:
-          button "Random gnome":
-            randomize(GnomeOnly)
+              if presetGroup == "Gota": "" else: "Gota"
+        if hasGnomes:
+          button "Gnome presets":
+            presetGroup =
+              if presetGroup == "Gnomes": "" else: "Gnomes"
+      if hasGods:
+        button "God presets":
+          presetGroup =
+            if presetGroup == "Gota Gods": "" else: "Gota Gods"
+      if presetGroup.len > 0:
+        for i, preset in manifest.presets:
+          if preset.group == presetGroup:
+            button preset.name:
+              selectedPreset(i)
+      group "aligned random":
+        box RowWidth, 34
+        layout LeftToRight
+        itemSpacing 4
+        button "Good random":
+          randomize(GoodOnly)
+        button "Evil random":
+          randomize(EvilOnly)
+      if hasGnomeParts:
+        button "Random gnome":
+          randomize(GnomeOnly)
       if source.skins.len > 0:
         var
-          choice = if editingOriginal: reference.skin else: skin
+          choice = skin
           changed = false
         group "skin":
           box RowWidth, 34
@@ -707,16 +646,11 @@ proc run() =
             choice = (choice + 1) mod source.skins.len
             changed = true
           text "Skin: " &
-            (if customSkin and not editingOriginal: "Custom"
+            (if customSkin: "Custom"
              else: source.skins[choice].name)
         if changed:
-          if editingOriginal:
-            reference.skin = choice
-            reference.applyParts()
-          else:
-            chooseSkin(choice)
-        if not editingOriginal:
-          skinControls()
+          chooseSkin(choice)
+        skinControls()
       var categoryOrder: seq[int]
       for key in ["Headgear", "Chest", "Belt", "Jacket",
                   "Suspenders", "Leg", "Foot", "Left hand",
@@ -733,42 +667,30 @@ proc run() =
         let category = source.categories[i]
         if category.items.len == 0:
           continue
-        var choice =
-          if editingOriginal: reference.selection[i] else: selection[i]
+        var choice = selection[i]
         if partPicker(category, choice):
-          if editingOriginal:
-            reference.selection[i] = choice
-            reference.applyParts()
-          else:
-            selection[i] = choice
-            applyParts()
-        if not editingOriginal and category.key == "Headgear":
-          hatControls()
-        if not editingOriginal:
-          if choice >= 0:
-            clothControls(category.key)
-        if not editingOriginal and category.key == "Hair":
-          hairControls()
-        if not editingOriginal and category.key == "Brow":
-          checkBox("Brows match hair color", matchBrows)
-        if not editingOriginal and category.key == "Beard":
-          text "Beard uses hair color."
-      if not editingOriginal:
-        pupilControls()
-      button "Reset parts":
-        if editingOriginal:
-          reference.clearParts()
-        else:
-          selection = manifest.defaultSelection()
+          selection[i] = choice
           applyParts()
+        if category.key == "Headgear":
+          hatControls()
+        if choice >= 0:
+          clothControls(category.key)
+        if category.key == "Hair":
+          hairControls()
+        if category.key == "Brow":
+          checkBox("Brows match hair color", matchBrows)
+        if category.key == "Beard":
+          text "Beard uses hair color."
+      pupilControls()
+      button "Reset parts":
+        selection = manifest.defaultSelection()
+        applyParts()
       text "Drag: orbit. Right drag: pan."
       text "Scroll: zoom. P: parts. A: controls."
       button "Reset camera":
         focusBone = false
         if showLineup:
           frameLineup()
-        elif compareOriginal:
-          prepareComparison()
         else:
           yaw = 0.22
           pitch = 0.08
@@ -776,7 +698,7 @@ proc run() =
           target = vec3(0, 1.52, 0)
 
   proc clipButtons() =
-    ## Packs the selected animation family into readable button rows.
+    ## Packs supported animations into readable button rows.
     proc label(name: string): string =
       ## Shortens button labels while keeping the exported clip names intact.
       if name == "A_TPose":
@@ -787,13 +709,6 @@ proc run() =
       rows: seq[seq[string]] = @[@[]]
       used = 0.0'f
     for clip in manifest.clips:
-      let family =
-        case clip.kind
-        of "universal": Universal
-        of "pose": HeldPoses
-        else: SwordShield
-      if family != clipFamily:
-        continue
       let width = sk.getTextSize(sk.textStyle, label(clip.name)).x +
         sk.theme.padding.float32 * 3
       if used + width > RowWidth.float32 and rows[^1].len > 0:
@@ -804,7 +719,7 @@ proc run() =
     for i, names in rows:
       if names.len == 0:
         continue
-      group "clips " & $clipFamily & " " & $i:
+      group "clips " & $i:
         box RowWidth, 36
         layout LeftToRight
         itemSpacing 4
@@ -881,16 +796,6 @@ proc run() =
         button "Lineup T pose":
           gnomePose()
           frameLineup()
-      let previousComparison = compareOriginal
-      checkBox("Side by side with original", compareOriginal)
-      if compareOriginal and not previousComparison:
-        showLineup = false
-        showParts = true
-        prepareComparison()
-      elif not compareOriginal and previousComparison:
-        editingOriginal = false
-        target = vec3(0, 1.52, 0)
-        distance = 5.8
       text "Parts: P. Controls: A."
       group "playback":
         box RowWidth, 36
@@ -900,8 +805,6 @@ proc run() =
           player.paused = not player.paused
         button "Restart":
           player.restart()
-          if reference != nil:
-            reference.player.restart()
         button "Bind pose":
           playClip("", fade)
       if player.current >= 0:
@@ -935,8 +838,6 @@ proc run() =
         if position != previous or stepped:
           player.paused = true
           player.seek(position)
-          if reference != nil:
-            reference.sync(player)
       else:
         text "Playing: bind pose"
       text &"Speed: {speed:.2f}x"
@@ -989,22 +890,7 @@ proc run() =
           text &"Wrist bend: {weightPreview.jointBend(selectedBone):.1f} deg"
         text "W: weights. B: bones. F: focus."
       text "Animation clips"
-      group "animation family":
-        box RowWidth, 36
-        layout LeftToRight
-        itemSpacing 4
-        radioButton("Universal", clipFamily, Universal)
-        radioButton("RPG", clipFamily, SwordShield)
-        radioButton("Poses", clipFamily, HeldPoses)
-      case clipFamily
-      of Universal:
-        text "Quaternius Standard - in-place"
-        if compareOriginal:
-          text "Universal clips play on Chargen only."
-      of SwordShield:
-        text "RPG Tiny Hero Duo - sword and shield"
-      of HeldPoses:
-        text "Layer Lab - static poses"
+      text "Quaternius Standard - in-place"
       clipButtons()
 
   when defined(takeScreenshot):
@@ -1041,19 +927,10 @@ proc run() =
     if restWrist and weightPreview.bones[selectedBone].name.endsWith("Hand"):
       let joint = weightPreview.bones[selectedBone].node
       joint.rot = joint.baseRot
-    let modelTransform =
-      if compareOriginal:
-        translate(vec3(1.2, 0, 0))
-      else:
-        mat4()
+    let modelTransform = mat4()
     model.root.updateTransforms(modelTransform)
     if showLineup:
       lineup.sync()
-    if reference != nil:
-      reference.player.paused = player.paused
-      reference.player.timeScale = speed
-      reference.player.update(dt)
-      reference.root.updateTransforms(reference.transform)
     if focusBone:
       let ends = weightPreview.bones[selectedBone].endpoints()
       target = (ends.head + ends.tail) / 2
@@ -1113,10 +990,6 @@ proc run() =
       glDisable(GL_MULTISAMPLE)
     case shading
     of Clay, Weights:
-      if compareOriginal:
-        pbr.transform = reference.transform
-        pbr.draw(reference.root)
-        pbr.transform = modelTransform
       if showLineup:
         for actor in lineup:
           pbr.transform = actor.transform
@@ -1131,16 +1004,6 @@ proc run() =
           (unlitFace and (name.startsWith("Mouth_") or
                          name.startsWith("Brow_"))):
             toon.unlitNodes.incl name
-      if reference != nil:
-        for name in reference.nodes.keys:
-          if name.startsWith("Eye_") or
-            (unlitFace and (name.startsWith("Mouth_") or
-                           name.startsWith("Brow_"))):
-              toon.unlitNodes.incl name
-      if compareOriginal:
-        toon.transform = reference.transform
-        toon.draw(reference.root)
-        toon.transform = modelTransform
       if showLineup:
         for actor in lineup:
           toon.transform = actor.transform
@@ -1152,10 +1015,6 @@ proc run() =
       glEnable(GL_POLYGON_OFFSET_LINE)
       glPolygonOffset(-1, -1)
       toon.tint = color(0, 0, 0, 1)
-      if compareOriginal:
-        toon.transform = reference.transform
-        toon.draw(reference.root)
-        toon.transform = modelTransform
       if showLineup:
         for actor in lineup:
           toon.transform = actor.transform
@@ -1180,24 +1039,6 @@ proc run() =
       discard sk.drawText(
         sk.textStyle, title, vec2(24, 24), rgbx(235, 241, 249, 255)
       )
-    if compareOriginal:
-      let originalTitle =
-        if reference.player.current < 0:
-          "ORIGINAL KIT (BIND POSE)"
-        else:
-          "ORIGINAL KIT"
-      for (x, title) in [(-1.2'f, originalTitle),
-                         (1.2'f, "CHARGEN MODEL")]:
-        let
-          point = projection * view * vec4(x, 3.18, 0, 1)
-          size = sk.getTextSize(sk.textStyle, title)
-          position = vec2(
-            (point.x / point.w + 1) * window.size.x.float32 / 2 - size.x / 2,
-            35
-          )
-        discard sk.drawText(
-          sk.textStyle, title, position, rgbx(235, 241, 249, 255)
-        )
     if showBones:
       weightPreview.drawSkeleton(
         sk, projection * view, window.size.vec2, selectedBone, boneLabels

@@ -28,7 +28,7 @@ Pass this node directly to the game's renderer, for example `toon.draw(rock)`.
 It contains the mesh, flat normals, UVs, vertex shading, tinted material,
 and trim texture. GPU upload and cleanup follow the renderer's normal node
 lifecycle. Generation needs no window, GLB files, or experiment imports.
-The 512-pixel atlas lives in `polyworld_data/terrain/rockgen` and loads at
+The 512-pixel atlas lives in `polyworld_art/terrain/rockgen` and loads at
 runtime through the shared asset path. Run native programs from the Polyworld
 repository. Browser builds package the atlas in `.data`, outside `.wasm`.
 
@@ -131,7 +131,7 @@ lightweight approximation of the reference's richer painted texture.
 
 ## Texture
 
-`polyworld_data/terrain/rockgen/rock-trim-atlas.png` is the supplied atlas
+`polyworld_art/terrain/rockgen/rock-trim-atlas.png` is the supplied atlas
 downsampled to 512 by 512. It keeps the normalized four-by-four layout:
 
 | Row | Column 1 | Column 2 | Column 3 | Column 4 |

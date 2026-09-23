@@ -77,6 +77,20 @@ type
     skins*: seq[Skin]
     presets*: seq[Preset]
 
+proc validatePart*(item: PartItem) =
+  ## Rejects retired imported eye variants before opening their assets.
+  if item.id in ["eyes/original2", "eyes/neutral", "eyes/happy", "eyes/angry"]:
+    raise newException(ChargenError, "Retired character part: " & item.id)
+  for node in item.nodes:
+    if node in ["Eyes_Original2", "Eyes_Neutral", "Eyes_Happy", "Eyes_Angry"] or
+      node.startsWith("QuickRigCharacter2_"):
+        raise newException(ChargenError, "Retired character node: " & node)
+
+proc validateClip*(clip: ClipInfo) =
+  ## Allows the supported animation source before opening a clip file.
+  if clip.kind != "universal":
+    raise newException(ChargenError, "Unsupported animation source: " & clip.name)
+
 proc assetPath*(directory, path: string): string =
   ## Resolves a library-relative file while rejecting external paths.
   if path.len == 0 or path.isAbsolute or ":" in path or
@@ -90,6 +104,8 @@ proc readManifest*(directory: string): Manifest =
     result = readFile(directory / "manifest.json").fromJson(Manifest)
     if result.version != 2:
       raise newException(ChargenError, "Unsupported character library version.")
+    for clip in result.clips:
+      clip.validateClip()
     result.skins = readFile(directory.assetPath(result.skinPalette)).
       fromJson(seq[Skin])
     result.hairColors = readFile(directory.assetPath(result.hairPalette)).
@@ -122,6 +138,7 @@ proc readManifest*(directory: string): Manifest =
       category.selected = -1
       for path in paths:
         let item = readFile(path).fromJson(PartItem)
+        item.validatePart()
         if item.id.len == 0 or item.id in identities or item.files.len == 0:
           raise newException(ChargenError, "Invalid or duplicate part: " & path)
         identities.incl item.id

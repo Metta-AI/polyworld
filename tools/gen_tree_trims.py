@@ -4,7 +4,7 @@ from PIL import Image
 
 repository = Path(__file__).resolve().parents[1]
 root = repository / 'src/polyworld/treegen'
-textures = repository.parent / 'polyworld_data/terrain/treegen'
+textures = repository.parent / 'polyworld_art/terrain/treegen'
 atlas = Image.open(textures / 'tree-foliage-atlas.png').convert('RGBA')
 size = atlas.width // 4
 

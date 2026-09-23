@@ -33,8 +33,16 @@ Use Nim 2.2.10 or newer with the dependencies in
 repository:
 
 ```sh
-git clone git@github.com:Metta-AI/polyworld-data.git ../polyworld_data
+git lfs install
+git clone git@github.com:Metta-AI/polyworld_art.git ../polyworld_art
+git -C ../polyworld_art lfs pull
 ```
+
+The art repository is private until its owner approves publication. It contains
+CC0 project artwork and openly licensed third-party assets with their notices.
+See its README and per-file license inventory for reuse and contribution terms.
+Git LFS is required for models, images, fonts and editable art sources.
+Heartleaf and AWM assets are not part of this migration.
 
 From the repository root, launch a game with its bundled baseline agents:
 

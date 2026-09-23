@@ -69,7 +69,7 @@ proc main() =
     path,
     summary,
     appearances,
-    getEnv("POLYWORLD_DATA", Root.parentDir / "polyworld_data")
+    getEnv("POLYWORLD_ART", Root.parentDir / "polyworld_art")
   )
   updateHeroSite(path, site)
   echo "Report: ", path

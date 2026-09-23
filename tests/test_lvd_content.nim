@@ -31,8 +31,10 @@ block positiveBuildingStats:
   for kind in BuildingKind:
     let stats = BuildingTable[kind]
     doAssert stats.hp > 0, &"{kind} spawns destroyed"
-    doAssert stats.footprint > 0, &"{kind} occupies no tiles"
-    doAssert stats.footprint <= 4, &"{kind} has an unreasonable footprint"
+    doAssert stats.footprint.width > 0 and stats.footprint.depth > 0,
+      &"{kind} occupies no tiles"
+    doAssert stats.footprint.width <= 8 and stats.footprint.depth <= 8,
+      &"{kind} has an unreasonable footprint"
     doAssert stats.sightTiles >= 0, &"{kind} has negative sight"
     doAssert stats.foodProvided >= 0, &"{kind} removes food"
     if kind <= BuildableHigh:

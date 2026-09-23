@@ -1051,7 +1051,8 @@ proc atlasLayer(images: var seq[Image], image: Image): float32 =
 proc collectPropModels(
     node: gltf.Node, parent: Mat4, models: var seq[PropModel],
     skipPrefix = "", only: seq[string] = @[], images: ptr seq[Image] = nil,
-    centerModels = true, materialColors = false
+    centerModels = true, materialColors = false,
+    textureOverride: Image = nil
 ) =
   ## Flattens renderable glTF nodes into normalized colored triangle models.
   ## With `only` given, nodes not named in it are skipped. With `images`
@@ -1074,7 +1075,12 @@ proc collectPropModels(
     for primitive in node.mesh.primitives:
       let
         image =
-          if primitive.material != nil: primitive.material.baseColor else: nil
+          if primitive.material == nil or primitive.material.baseColor == nil:
+            nil
+          elif textureOverride != nil:
+            textureOverride
+          else:
+            primitive.material.baseColor
         layer =
           if images != nil and image != nil: atlasLayer(images[], image)
           else: 0.0'f32
@@ -1179,11 +1185,13 @@ proc collectPropModels(
   for child in node.nodes:
     collectPropModels(
       child, world, models, skipPrefix, only, images, centerModels,
-      materialColors)
+      materialColors, textureOverride)
 
 proc mergePropModels(models: seq[PropModel], name: string): PropModel =
   ## Centers a complete asset once, preserving offsets between its meshes.
   result = PropModel(name: name)
+  if models.len > 0:
+    result.materialColors = models[0].materialColors
   var
     low = vec3(float32.high)
     high = vec3(float32.low)
@@ -1420,20 +1428,27 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
 proc loadPropPack*(
     paths: openArray[string], unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false,
-    textureSize = 0, mergeNodes = false
+    textureSize = 0, mergeNodes = false, materialColors = false,
+    textureOverride: Image = nil
 ): PropPack =
   ## Loads named glTF props, scaled to unit height unless disabled.
   ## MergeNodes joins each file into one prop named after its file stem.
   ## Textured keeps material images and requires a current GL context.
-  ## TextureSize caps atlas resolution; repeatTexture allows tiled UVs.
+  ## TextureOverride swaps textured materials without changing their UVs.
   result = PropPack()
   var images: seq[Image]
+  if textured and materialColors:
+    # Untextured primitives use layer zero with their material color.
+    let white = newImage(1, 1)
+    white.fill(rgbx(255, 255, 255, 255))
+    images.add white
   for path in paths:
     var models: seq[PropModel]
     collectPropModels(
       readGltfFile(path).root, mat4(), models, only = only,
       images = if textured: images.addr else: nil,
-      centerModels = not mergeNodes)
+      centerModels = not mergeNodes, materialColors = materialColors,
+      textureOverride = textureOverride)
     if mergeNodes:
       result.models.add mergePropModels(models, path.splitFile.name)
     else:
@@ -1468,12 +1483,13 @@ proc loadPropPack*(
 proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false,
-    textureSize = 0, mergeNodes = false
+    textureSize = 0, mergeNodes = false, materialColors = false,
+    textureOverride: Image = nil
 ): PropPack =
   ## Loads an original single-file prop pack through the shared collector.
   loadPropPack(
     @[path], unitHeight, brightness, only, textured, repeatTexture,
-    textureSize, mergeNodes)
+    textureSize, mergeNodes, materialColors, textureOverride)
 
 proc createPropPack*(
     nodes: openArray[gltf.Node], textureSize = 512,
@@ -3506,6 +3522,13 @@ proc initTerrain*(
     )
   if settings.water:
     waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
+  else:
+    # Flat shader water needs a complete sampler without imported normal maps.
+    let flat = newImage(1, 1)
+    flat.fill(rgbx(128, 128, 255, 255))
+    waterNormalTextureArray = buildTextureArray(
+      @[@[flat], @[flat]], GL_REPEAT.GLint
+    )
   visibilitySize = GridTiles
   glGenTextures(1, visibilityTexture.addr)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)

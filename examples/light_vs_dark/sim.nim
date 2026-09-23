@@ -79,7 +79,7 @@ type
       ## Owner is -1 for a neutral gold mine.
     kind*: BuildingKind
     origin*: Tile2
-    side*: int32
+    footprint*: Footprint
     hp*, maxHp*: int32
     state*: BuildingState
     buildTicks*, buildTotal*, builderId*: int32
@@ -228,28 +228,28 @@ proc goalClaimed(w: World, tile: Tile2, ignoreId: int32): bool =
       return true
   false
 
-proc covers*(origin: Tile2, side, x, y: int32): bool =
-  ## Returns whether a square footprint contains a tile.
-  x >= int32(origin.x) and x < int32(origin.x) + side and
-    y >= int32(origin.y) and y < int32(origin.y) + side
+proc covers*(origin: Tile2, size: Footprint, x, y: int32): bool =
+  ## Returns whether a rectangular footprint contains a tile.
+  x >= int32(origin.x) and x < int32(origin.x) + size.width and
+    y >= int32(origin.y) and y < int32(origin.y) + size.depth
 
-proc adjacentToFootprint*(origin: Tile2, side, x, y: int32): bool =
+proc adjacentToFootprint*(origin: Tile2, size: Footprint, x, y: int32): bool =
   ## Returns whether a tile touches a footprint's outer ring.
-  x >= int32(origin.x) - 1 and x < int32(origin.x) + side + 1 and
-    y >= int32(origin.y) - 1 and y < int32(origin.y) + side + 1 and
-    not covers(origin, side, x, y)
+  x >= int32(origin.x) - 1 and x < int32(origin.x) + size.width + 1 and
+    y >= int32(origin.y) - 1 and y < int32(origin.y) + size.depth + 1 and
+    not covers(origin, size, x, y)
 
-proc freeTileAround*(w: World, origin: Tile2, side: int32): Tile2 =
+proc freeTileAround*(w: World, origin: Tile2, size: Footprint): Tile2 =
   ## Returns the first free tile in the ring around a footprint, scanning
   ## row-major so the choice is reproducible. Off-map when the ring is full.
-  for y in int32(origin.y) - 1 .. int32(origin.y) + side:
-    for x in int32(origin.x) - 1 .. int32(origin.x) + side:
-      if not covers(origin, side, x, y) and w.tileFree(x, y):
+  for y in int32(origin.y) - 1 .. int32(origin.y) + size.depth:
+    for x in int32(origin.x) - 1 .. int32(origin.x) + size.width:
+      if not covers(origin, size, x, y) and w.tileFree(x, y):
         return tile2(x, y)
   NoTile
 
 proc approachTile*(
-    w: World, origin: Tile2, side: int32, fromTile: Tile2,
+    w: World, origin: Tile2, size: Footprint, fromTile: Tile2,
     ignoreId: int32
 ): Tile2 =
   ## Returns a ring tile around a footprint. Prefers empty unclaimed
@@ -259,9 +259,9 @@ proc approachTile*(
   var
     bestFree, bestClaimed, bestOpen = NoTile
     bestFreeDist, bestClaimedDist, bestOpenDist = int32.high
-  for y in int32(origin.y) - 1 .. int32(origin.y) + side:
-    for x in int32(origin.x) - 1 .. int32(origin.x) + side:
-      if covers(origin, side, x, y) or not w.tileOpen(x, y):
+  for y in int32(origin.y) - 1 .. int32(origin.y) + size.depth:
+    for x in int32(origin.x) - 1 .. int32(origin.x) + size.width:
+      if covers(origin, size, x, y) or not w.tileOpen(x, y):
         continue
       let
         tile = tile2(x, y)
@@ -318,7 +318,8 @@ proc fillVisionKeys(w: World, dest: var seq[int32]) =
     dest.add int32(structure.state.ord)
     dest.add int32(structure.origin.x)
     dest.add int32(structure.origin.y)
-    dest.add structure.side
+    dest.add structure.footprint.width
+    dest.add structure.footprint.depth
 
 proc paintVisible(
     w: World,
@@ -401,9 +402,9 @@ proc rebuildVision*(w: World) {.measure.} =
         continue
       let radius = BuildingTable[structure.kind].sightTiles
       for y in int32(structure.origin.y) ..<
-          int32(structure.origin.y) + structure.side:
+          int32(structure.origin.y) + structure.footprint.depth:
         for x in int32(structure.origin.x) ..<
-            int32(structure.origin.x) + structure.side:
+            int32(structure.origin.x) + structure.footprint.width:
           w.paintVisible(player, x, y, radius, 24)
   copyVisionKeys(visionSkipKeys, visionSkipNow)
   visionSkipWorld = cast[pointer](w)
@@ -445,9 +446,9 @@ proc buildingVisible*(w: World, player: int32, structure: Building): bool =
   if structure.owner == player:
     return true
   for y in int32(structure.origin.y) ..<
-      int32(structure.origin.y) + structure.side:
+      int32(structure.origin.y) + structure.footprint.depth:
     for x in int32(structure.origin.x) ..<
-        int32(structure.origin.x) + structure.side:
+        int32(structure.origin.x) + structure.footprint.width:
       if w.visible(player, x, y):
         return true
   false
@@ -716,11 +717,11 @@ proc setGoal(w: World, index: int32, goal: Tile2,
   w.requestPath(index)
 
 proc footprintGoal(w: World, index: int32, origin: Tile2,
-    side: int32): bool =
+    size: Footprint): bool =
   ## Points a unit at the ring around a footprint. Returns false, and drops
   ## the order, when nothing around it can be stood on.
   let approach = w.approachTile(
-    origin, side, w.units[index].tile, w.units[index].id
+    origin, size, w.units[index].tile, w.units[index].id
   )
   if not inGrid(approach):
     w.units[index].clearOrder(true)
@@ -779,17 +780,17 @@ proc removeTree(w: World, index: int32) =
     w.blocker[index] = 0
   w.terrainEdits.add TileEdit(tick: w.tick, index: index)
 
-proc occupyFootprint(w: World, origin: Tile2, side, id: int32) =
+proc occupyFootprint(w: World, origin: Tile2, size: Footprint, id: int32) =
   ## Claims every tile of a footprint for a structure.
-  for y in int32(origin.y) ..< int32(origin.y) + side:
-    for x in int32(origin.x) ..< int32(origin.x) + side:
+  for y in int32(origin.y) ..< int32(origin.y) + size.depth:
+    for x in int32(origin.x) ..< int32(origin.x) + size.width:
       if inGrid(x, y):
         w.blocker[tileIndex(x, y)] = id
 
-proc releaseFootprint(w: World, origin: Tile2, side: int32) =
+proc releaseFootprint(w: World, origin: Tile2, size: Footprint) =
   ## Releases every tile of a footprint.
-  for y in int32(origin.y) ..< int32(origin.y) + side:
-    for x in int32(origin.x) ..< int32(origin.x) + side:
+  for y in int32(origin.y) ..< int32(origin.y) + size.depth:
+    for x in int32(origin.x) ..< int32(origin.x) + size.width:
       if inGrid(x, y):
         w.blocker[tileIndex(x, y)] = 0
 
@@ -878,7 +879,7 @@ proc registerBuilding(w: World, structure: Building) =
     w.buildingSlot.add(-1)
   w.buildingSlot[slot] = int32(w.buildings.len)
   w.buildings.add structure
-  w.occupyFootprint(structure.origin, structure.side, structure.id)
+  w.occupyFootprint(structure.origin, structure.footprint, structure.id)
 
 proc recomputeFoodCap(w: World, player: int32) =
   ## Recounts supply from completed structures.
@@ -917,9 +918,9 @@ proc footprintDistance(w: World, tile: Tile2, structure: Building): int32 =
   ## structure is no harder to reach than a narrow one.
   result = int32.high
   for y in int32(structure.origin.y) ..<
-      int32(structure.origin.y) + structure.side:
+      int32(structure.origin.y) + structure.footprint.depth:
     for x in int32(structure.origin.x) ..<
-        int32(structure.origin.x) + structure.side:
+        int32(structure.origin.x) + structure.footprint.width:
       result = min(result, tileDistance(tile, tile2(x, y)))
 
 proc rangeToTarget(w: World, unit: Unit, id: int32): int32 =
@@ -981,11 +982,11 @@ proc razeBuilding(w: World, index: int32) =
     if w.units[unitIndex].state == UnitInMine and
         w.units[unitIndex].sourceId == w.buildings[index].id:
       let exit = w.freeTileAround(w.buildings[index].origin,
-        w.buildings[index].side)
+        w.buildings[index].footprint)
       if inGrid(exit):
         w.place(w.units[unitIndex], exit)
         w.units[unitIndex].clearOrder(true)
-  w.releaseFootprint(w.buildings[index].origin, w.buildings[index].side)
+  w.releaseFootprint(w.buildings[index].origin, w.buildings[index].footprint)
   w.recomputeFoodCap(owner)
 
 proc damageEntity*(w: World, id, amount: int32, attacker = -1'i32) =
@@ -1173,7 +1174,7 @@ proc beginMineTrip(w: World, index, mineId: int32) =
     w.units[index].clearOrder(true)
     return
   if not w.footprintGoal(index, w.buildings[mine].origin,
-      w.buildings[mine].side):
+      w.buildings[mine].footprint):
     return
   w.units[index].state = UnitToMine
   w.units[index].targetId = mineId
@@ -1187,7 +1188,7 @@ proc beginTreeTrip(w: World, index, treeIndex: int32) =
     return
   ## A tree fills its own tile, so the goal is the ring around it.
   let tile = tile2(treeIndex mod GridSide, treeIndex div GridSide)
-  if not w.footprintGoal(index, tile, 1):
+  if not w.footprintGoal(index, tile, (1'i32, 1'i32)):
     return
   w.units[index].state = UnitToTree
   w.units[index].targetId = NoEntity
@@ -1207,7 +1208,7 @@ proc beginDropOff(w: World, index: int32, wantWood: bool) =
     return
   let structure = w.buildingIndex(target)
   if not w.footprintGoal(index, w.buildings[structure].origin,
-      w.buildings[structure].side):
+      w.buildings[structure].footprint):
     return
   w.units[index].state = if wantWood: UnitToDropWood else: UnitToDropGold
   w.units[index].targetId = target
@@ -1240,7 +1241,7 @@ proc handleInMine(w: World, index: int32) =
   if mine < 0:
     return  # razeBuilding puts stranded miners back on the map
   let exit = w.freeTileAround(w.buildings[mine].origin,
-    w.buildings[mine].side)
+    w.buildings[mine].footprint)
   if not inGrid(exit):
     return  # the ring is full; try again next tick
   let carried = min(GoldPerTrip, w.buildings[mine].goldLeft)
@@ -1443,7 +1444,7 @@ proc handleCombat(w: World, index: int32) =
     if target.isBuildingId:
       let structure = w.buildingIndex(target)
       if not w.footprintGoal(index, w.buildings[structure].origin,
-          w.buildings[structure].side):
+          w.buildings[structure].footprint):
         return
       w.units[index].state = UnitChasing
       w.units[index].targetId = target
@@ -1502,8 +1503,12 @@ proc advanceUnit(w: World, index: int32) =
     if mine < 0:
       w.units[index].clearOrder(true)
       return
-    if adjacentToFootprint(w.buildings[mine].origin, w.buildings[mine].side,
-        int32(tile.x), int32(tile.y)):
+    if adjacentToFootprint(
+      w.buildings[mine].origin,
+      w.buildings[mine].footprint,
+      int32(tile.x),
+      int32(tile.y)
+    ):
       w.handleMineArrival(index)
       return
   of UnitToTree:
@@ -1524,7 +1529,7 @@ proc advanceUnit(w: World, index: int32) =
       w.beginDropOff(index, w.units[index].carryWood > 0)
       return
     if adjacentToFootprint(w.buildings[structure].origin,
-        w.buildings[structure].side, int32(tile.x), int32(tile.y)):
+        w.buildings[structure].footprint, int32(tile.x), int32(tile.y)):
       w.units[index].state =
         if w.units[index].carryWood > 0: UnitDepositWood else: UnitDepositGold
       w.units[index].stateTicks = DepositTicks
@@ -1536,8 +1541,12 @@ proc advanceUnit(w: World, index: int32) =
     if site < 0 or w.buildings[site].state != BuildingUnderConstruction:
       w.units[index].clearOrder(true)
       return
-    if adjacentToFootprint(w.buildings[site].origin, w.buildings[site].side,
-        int32(tile.x), int32(tile.y)):
+    if adjacentToFootprint(
+      w.buildings[site].origin,
+      w.buildings[site].footprint,
+      int32(tile.x),
+      int32(tile.y)
+    ):
       w.buildings[site].builderId = w.units[index].id
       w.units[index].state = UnitBuilding
       w.units[index].hasGoal = false
@@ -1585,7 +1594,7 @@ proc advanceBuilding(w: World, index: int32) =
       let
         kind = UnitKind(w.buildings[index].queue[0] - 1)
         spawn = w.freeTileAround(w.buildings[index].origin,
-          w.buildings[index].side)
+          w.buildings[index].footprint)
       if inGrid(spawn):
         let
           owner = w.buildings[index].owner
@@ -1655,9 +1664,9 @@ proc techMet*(w: World, player: int32, requires: set[BuildingKind]): bool =
 proc canPlace*(w: World, kind: BuildingKind, x, y: int32): bool =
   ## Returns whether a footprint would fit: on the map, on open terrain, and
   ## clear of trees, other structures, and every unit.
-  let side = BuildingTable[kind].footprint
-  for tileY in y ..< y + side:
-    for tileX in x ..< x + side:
+  let size = BuildingTable[kind].footprint
+  for tileY in y ..< y + size.depth:
+    for tileX in x ..< x + size.width:
       if not w.tileFree(tileX, tileY):
         return false
   true
@@ -1822,8 +1831,8 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
     kind = BuildingKind(kindValue)
     stats = BuildingTable[kind]
     origin = tile2(x, y)
-  if not inGrid(x, y) or not inGrid(x + stats.footprint - 1,
-      y + stats.footprint - 1):
+  if not inGrid(x, y) or not inGrid(x + stats.footprint.width - 1,
+      y + stats.footprint.depth - 1):
     return false
   if not w.techMet(player, stats.requires):
     return false
@@ -1854,7 +1863,7 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
       owner: player,
       kind: kind,
       origin: origin,
-      side: stats.footprint,
+      footprint: stats.footprint,
       hp: 1,
       maxHp: stats.hp,
       state: BuildingUnderConstruction,
@@ -1867,7 +1876,11 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
   let site = w.buildingIndex(siteId)
   w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
-  if w.footprintGoal(index, w.buildings[site].origin, w.buildings[site].side):
+  if w.footprintGoal(
+    index,
+    w.buildings[site].origin,
+    w.buildings[site].footprint
+  ):
     w.units[index].state = UnitToBuild
     w.units[index].targetId = siteId
   else:
@@ -1930,7 +1943,7 @@ proc applyCancel*(w: World, player, entityId: int32): bool =
     let builderIndex = w.unitIndex(w.buildings[index].builderId)
     if builderIndex >= 0:
       w.units[builderIndex].clearOrder(false)
-    w.releaseFootprint(w.buildings[index].origin, w.buildings[index].side)
+    w.releaseFootprint(w.buildings[index].origin, w.buildings[index].footprint)
     w.buildings[index].state = BuildingDying
     w.buildings[index].deathTicks = 0
     return true
@@ -2099,7 +2112,8 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(structure.owner)
     hash.addHashy(int32(structure.kind.ord))
     hash.mixTile(structure.origin)
-    hash.addHashy(structure.side)
+    hash.addHashy(structure.footprint.width)
+    hash.addHashy(structure.footprint.depth)
     hash.addHashy(structure.hp)
     hash.addHashy(structure.maxHp)
     hash.addHashy(int32(structure.state.ord))
@@ -2369,7 +2383,7 @@ proc newWorld*(map: MapData, maximumTicks: int32): World =
       owner: -1,
       kind: GoldMineBuilding,
       origin: mine.origin,
-      side: BuildingTable[GoldMineBuilding].footprint,
+      footprint: BuildingTable[GoldMineBuilding].footprint,
       hp: BuildingTable[GoldMineBuilding].hp,
       maxHp: BuildingTable[GoldMineBuilding].hp,
       state: BuildingComplete,
@@ -2385,7 +2399,7 @@ proc newWorld*(map: MapData, maximumTicks: int32): World =
       owner: player,
       kind: TownHallBuilding,
       origin: map.hallOrigin[player],
-      side: stats.footprint,
+      footprint: stats.footprint,
       hp: stats.hp,
       maxHp: stats.hp,
       state: BuildingComplete,

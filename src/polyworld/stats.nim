@@ -25,6 +25,8 @@ type
   StatsRow* = object
     slot*: int
     name*, subtitle*, portrait*, outcome*: string
+    portraitTint*: ColorRGBX
+      ## An unset alpha keeps the default portrait coloring.
     team*: int
     selected*, fallen*: bool
     metrics*: MetricRow
@@ -332,6 +334,7 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
         size: vec2(StatsRowHeight))
       tint =
         if row.fallen: rgbx(135, 135, 145, 255)
+        elif row.portraitTint.a > 0: row.portraitTint
         else: rgbx(255, 255, 255, 255)
       textX = rowPanel.origin.x + StatsRowHeight + 10
       textWidth = max(identityWidth - StatsRowHeight - 18, 0)

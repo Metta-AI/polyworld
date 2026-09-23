@@ -1,0 +1,370 @@
+{
+  "players": [
+    {
+      "name": "A / Sand",
+      "skin": "Sand",
+      "ears": "Round",
+      "eyes": "01 Bright",
+      "mouth": "01 Relaxed smile",
+      "pupil": "Blue"
+    },
+    {
+      "name": "B / Green",
+      "skin": "Green",
+      "ears": "Elf",
+      "eyes": "06 Fierce",
+      "mouth": "Evil 09 Orc sneer",
+      "pupil": "Amber"
+    },
+    {
+      "name": "C / Purple",
+      "skin": "Purple",
+      "ears": "Gnome cups",
+      "eyes": "08 Sly",
+      "mouth": "02 Confident smirk",
+      "pupil": "Violet"
+    }
+  ],
+  "roles": [
+    {
+      "name": "Peon",
+      "previous": "Peasant / Peon",
+      "notes": "Ochre tunic, brown trousers,\ntravel boots. Hands empty.",
+      "pose": "Idle_Loop",
+      "height": 1.7,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Chest",
+          "item": "05 Ochre tunic"
+        },
+        {
+          "category": "Leg",
+          "item": "09 Brown trousers"
+        },
+        {
+          "category": "Foot",
+          "item": "16 Folded travel boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Simple leather belt"
+        }
+      ],
+      "missing": "MISSING: pickaxe"
+    },
+    {
+      "name": "Swordsman",
+      "previous": "Footman / Grunt",
+      "notes": "Red work shirt, shared trousers\nand boots. Vanguard sword.",
+      "pose": "Sword_Idle",
+      "height": 1.7,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Chest",
+          "item": "04 Red work shirt"
+        },
+        {
+          "category": "Leg",
+          "item": "09 Brown trousers"
+        },
+        {
+          "category": "Foot",
+          "item": "16 Folded travel boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Simple leather belt"
+        },
+        {
+          "category": "Right hand",
+          "item": "Vanguard sword"
+        }
+      ],
+      "missing": ""
+    },
+    {
+      "name": "Archer",
+      "previous": "Archer / Spearman",
+      "notes": "Ranger hood, tunic and quiver.\nExisting bow and arrow.",
+      "pose": "Idle_Loop",
+      "height": 1.7,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Gota base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Headgear",
+          "item": "Ranger fitted hood"
+        },
+        {
+          "category": "Chest",
+          "item": "Ranger tunic and cape"
+        },
+        {
+          "category": "Leg",
+          "item": "Ranger trousers"
+        },
+        {
+          "category": "Foot",
+          "item": "Ranger cuff boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Ranger buckle belt"
+        },
+        {
+          "category": "Back",
+          "item": "Ranger light quiver"
+        },
+        {
+          "category": "Left hand",
+          "item": "Ranger bow"
+        },
+        {
+          "category": "Right hand",
+          "item": "Ranger arrow"
+        }
+      ],
+      "missing": "MISSING: bow animation"
+    },
+    {
+      "name": "Mage",
+      "previous": "Conjurer / Warlock",
+      "notes": "Arcanist robe, leggings, boots\nand staff. No circlet or orbs.",
+      "pose": "Spell_Simple_Idle_Loop",
+      "height": 1.7,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Gota base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Chest",
+          "item": "Gota Arcanist violet robe"
+        },
+        {
+          "category": "Leg",
+          "item": "Gota Arcanist leggings"
+        },
+        {
+          "category": "Foot",
+          "item": "Gota Arcanist boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Gota Arcanist amethyst belt"
+        },
+        {
+          "category": "Right hand",
+          "item": "Arcanist staff"
+        }
+      ],
+      "missing": ""
+    },
+    {
+      "name": "Armored knight",
+      "previous": "Knight / Raider",
+      "notes": "Vanguard armor, sword, shield.\nOn foot, 25% larger body.",
+      "pose": "Sword_Idle",
+      "height": 2.125,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Gota base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Headgear",
+          "item": "Vanguard Knight helmet"
+        },
+        {
+          "category": "Chest",
+          "item": "Vanguard Knight body"
+        },
+        {
+          "category": "Leg",
+          "item": "Vanguard Knight legs"
+        },
+        {
+          "category": "Foot",
+          "item": "Vanguard Knight boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Vanguard Knight belt"
+        },
+        {
+          "category": "Left hand",
+          "item": "Vanguard shield"
+        },
+        {
+          "category": "Right hand",
+          "item": "Vanguard sword"
+        }
+      ],
+      "missing": ""
+    },
+    {
+      "name": "Sapper / bomber",
+      "previous": "Catapult / Catapult",
+      "notes": "Crossbowman outfit and crossbow.\nPlanned bomb-launching siege role.",
+      "missing": "MISSING: bombs + firing clip",
+      "pose": "Idle_Loop",
+      "height": 1.7,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Gota base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Headgear",
+          "item": "Gota Crossbowman hood"
+        },
+        {
+          "category": "Chest",
+          "item": "Gota Crossbowman leather tunic"
+        },
+        {
+          "category": "Leg",
+          "item": "Gota Crossbowman trousers"
+        },
+        {
+          "category": "Foot",
+          "item": "Gota Crossbowman boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Gota Crossbowman belt"
+        },
+        {
+          "category": "Right hand",
+          "item": "Medieval crossbow"
+        }
+      ]
+    },
+    {
+      "name": "Cleric",
+      "previous": "Cleric / Necrolyte",
+      "notes": "Druid mantle, leaf skirt, boots,\nbelt, staff and green orb.",
+      "missing": "",
+      "pose": "Idle_Loop",
+      "height": 1.7,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Gota base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Chest",
+          "item": "Gota Druid Warden bark mantle"
+        },
+        {
+          "category": "Leg",
+          "item": "Gota Druid Warden leaf skirt"
+        },
+        {
+          "category": "Foot",
+          "item": "Gota Druid Warden boots"
+        },
+        {
+          "category": "Belt",
+          "item": "Gota Druid Warden hexagon belt"
+        },
+        {
+          "category": "Right hand",
+          "item": "Druid staff"
+        },
+        {
+          "category": "Left hand",
+          "item": "Druid orb"
+        }
+      ]
+    },
+    {
+      "name": "Fire elemental",
+      "previous": "Elemental / Daemon",
+      "notes": "Solid orange for every player.\nNo eyes, mouth, ears or clothing.",
+      "missing": "",
+      "pose": "Idle_Loop",
+      "height": 2.21,
+      "parts": [
+        {
+          "category": "Body",
+          "item": "Base"
+        },
+        {
+          "category": "Hair",
+          "item": "None"
+        },
+        {
+          "category": "Brow",
+          "item": "None"
+        },
+        {
+          "category": "Nose",
+          "item": "None"
+        },
+        {
+          "category": "Eyes",
+          "item": "None"
+        },
+        {
+          "category": "Mouth",
+          "item": "None"
+        },
+        {
+          "category": "Ears",
+          "item": "None"
+        }
+      ],
+      "skin": "LvD Fire orange"
+    }
+  ],
+  "skins": [
+    {
+      "name": "LvD Fire orange",
+      "color": [
+        1.0,
+        0.36,
+        0.02,
+        1.0
+      ]
+    }
+  ]
+}

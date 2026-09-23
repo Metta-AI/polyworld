@@ -1,143 +1,187 @@
 import
   std/os,
-  polyworld/[assets, common],
-  content
+  jsony,
+  polyworld/[assets, chargen, common, terrainsurfaces],
+  content, factions
 
 const
   LogoPath* = DataRoot & "/themes/lvd/lvd_logo.png"
+  UnitSymbolsPath* = DataRoot & "/themes/lvd/unit-symbols.png"
+  LvdTerrainTiles* = ["crypt-rock-1", "courtyard-stone-1"]
+  LvdRockSurface* = SurfaceNames.len.float32
+  LvdStoneSurface* = LvdRockSurface + 1
+  LvdWebTerrainAssets* = TerrainAssets(splitProps: true, size: 256)
   LvdTerrainAssets* =
-    when defined(emscripten): WebTerrainAssets
-    else: DefaultTerrainAssets
-  UnitModels* = [
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/human/worker.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/human/footman.glb",
-      ArcherUnit: DataRoot & "/characters/mini_legion/human/archer.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/human/mage.glb",
-      KnightUnit: DataRoot & "/characters/mini_legion/human/horseman.glb",
-      CatapultUnit: DataRoot &
-        "/characters/mini_legion/human/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/sentinel/druid.glb",
-      SummonUnit: DataRoot &
-        "/characters/mini_legion/sentinel/rock_golem.glb"
-    ],
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/warband/minion.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/warband/grunt.glb",
-      ArcherUnit: DataRoot &
-        "/characters/mini_legion/warband/head_hunter.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/warband/warlock.glb",
-      KnightUnit: DataRoot &
-        "/characters/mini_legion/warband/hog_rider.glb",
-      CatapultUnit: DataRoot &
-        "/characters/mini_legion/undead/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/undead/lich.glb",
-      SummonUnit: DataRoot & "/characters/rpg_monsters/demon_king.glb"
-    ]
+    when defined(emscripten): LvdWebTerrainAssets
+    else: TerrainAssets(size: 1024)
+  RosterPath* = ChargenLibrary & "/lvd.json"
+  CharacterClips* = [
+    "Idle_Loop", "Jog_Fwd_Loop", "Death01", "Dance_Loop", "Interact",
+    "Sword_Idle", "Sword_Attack", "Pistol_Idle_Loop", "Pistol_Shoot",
+    "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot"
   ]
   UnitHeights* = [
-    PeonUnit: 1.05'f,
-    SoldierUnit: 1.15'f,
+    PeonUnit: 1.20'f,
+    SoldierUnit: 1.20'f,
     ArcherUnit: 1.20'f,
-    MageUnit: 1.25'f,
-    KnightUnit: 1.55'f,
-    CatapultUnit: 1.40'f,
-    ClericUnit: 1.22'f,
-    SummonUnit: 1.90'f
+    MageUnit: 1.20'f,
+    KnightUnit: 1.50'f,
+    CatapultUnit: 1.20'f,
+    ClericUnit: 1.20'f,
+    SummonUnit: 1.56'f
   ]
-  LightPropPack* = DataRoot & "/terrain/low_poly_village.glb"
-  DarkPropPack* = DataRoot & "/terrain/tower_defense_kit.glb"
-  BuildingProps* = [
-    [
-      TownHallBuilding: "house_lvl7",
-      FarmBuilding: "farm_lvl4",
-      BarracksBuilding: "farm_house_lvl5",
-      LumberMillBuilding: "farm_house_lvl3",
-      TowerBuilding: "tower_lvl5",
-      StablesBuilding: "farm_house_lvl6",
-      ChurchBuilding: "house_lvl4",
-      BlacksmithBuilding: "farm_house_lvl2",
-      GoldMineBuilding: ""
-    ],
-    [
-      TownHallBuilding: "building1",
-      FarmBuilding: "farm_lvl2",
-      BarracksBuilding: "building3",
-      LumberMillBuilding: "building2",
-      TowerBuilding: "tower_square_tall1",
-      StablesBuilding: "tower_tall1",
-      ChurchBuilding: "tower_square_tall2",
-      BlacksmithBuilding: "tower_square_small1",
-      GoldMineBuilding: ""
-    ]
+  UnitNames*: array[UnitKind, string] = [
+    "Peon", "Swordsman", "Archer", "Mage", "Armored knight", "Bomber",
+    "Cleric", "Fire elemental"
   ]
-  BuildingPropHeights* = [
-    TownHallBuilding: 3.0'f,
-    FarmBuilding: 1.6'f,
-    BarracksBuilding: 2.6'f,
-    LumberMillBuilding: 2.4'f,
-    TowerBuilding: 3.2'f,
-    StablesBuilding: 2.5'f,
-    ChurchBuilding: 2.8'f,
-    BlacksmithBuilding: 2.2'f,
-    GoldMineBuilding: 1.8'f
+  BuildingModelRoot* = DataRoot & "/terrain/lvd_buildings/models"
+  FactionTextureRoot* = DataRoot & "/terrain/lvd_buildings/textures/factions"
+  ConstructionManifestPath* =
+    DataRoot & "/terrain/lvd_buildings/construction-manifest.json"
+  ConstructionNames* = ["foundation", "walls"]
+  BuildingScale* = 0.5'f
+  BuildingProps*: array[BuildingKind, string] = [
+    "town_hall", "farm", "barracks", "lumber_mill", "tower",
+    "stables", "church", "blacksmith", "gold_mine"
   ]
-  MineProps* = ["mineral1", "mineral3", "rock2"]
-  ConstructionProps* = ["box1", "barel1", "wall1"]
-  RubbleProps* = ["rock1", "stump1"]
+
+type
+  ConstructionStage* = enum
+    FoundationStage, WallsStage
+  UnitPreset* = object
+    kind*: string
+    preset*: Preset
+    skinRgb*: array[3, float32]
+  CharacterRoster* = object
+    factions*: seq[Faction]
+    players*: seq[seq[UnitPreset]]
+
+proc readCharacterRoster*(
+  factions: openArray[Faction] = []
+): CharacterRoster =
+  ## Loads approved looks in the stable player and simulation role order.
+  try:
+    result = readFile(RosterPath).fromJson(CharacterRoster)
+  except IOError, JsonError, ValueError:
+    raise newException(
+      ChargenError, "Cannot read LvD roster: " & getCurrentExceptionMsg()
+    )
+  if result.players.len != PlayerCount:
+    raise newException(ChargenError, "LvD roster needs two player looks.")
+  if result.factions.len != PlayerCount:
+    raise newException(ChargenError, "LvD roster needs a faction per player.")
+  if factions.len > 0:
+    if factions.len != PlayerCount:
+      raise newException(ChargenError, "LvD needs one color per player.")
+    result.factions = @factions
+  for player, units in result.players.mpairs:
+    if units.len != UnitKind.high.ord + 1:
+      raise newException(ChargenError, "LvD roster needs all eight roles.")
+    for kind in UnitKind:
+      if kind != SummonUnit:
+        units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      let entry = units[kind.ord]
+      if entry.kind != $kind:
+        raise newException(ChargenError, "LvD roster is missing " & $kind)
+      for channel in entry.skinRgb:
+        if not (channel >= 0 and channel <= 1):
+          raise newException(ChargenError, "Invalid LvD skin color.")
 
 proc unitPortraitPath*(player: int32, kind: UnitKind): string =
-  ## Returns the on-disk profile next to one unit model.
-  UnitModels[player][kind].changeFileExt("profile.png")
+  ## Returns a runtime-rendered portrait of the approved player and role.
+  DataRoot / "characters/chargen/portraits/lvd" /
+    ($player & "_" & $kind.ord & ".png")
 
-proc buildingPack*(player: int32, kind: BuildingKind): string =
-  ## Returns the GLB pack that holds this building's prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack
-  elif player == LightPlayer or kind == FarmBuilding:
-    LightPropPack
-  else:
-    DarkPropPack
+proc constructionProp*(
+  kind: BuildingKind,
+  stage: ConstructionStage
+): string =
+  ## Names one authored construction stage for a buildable structure.
+  BuildingProps[kind] & "_" & ConstructionNames[stage.ord]
+
+proc buildingModelPaths*(): seq[string] =
+  ## Lists completed buildings and both stages of each buildable structure.
+  for name in BuildingProps:
+    result.add BuildingModelRoot / (name & ".glb")
+  for kind in TownHallBuilding .. BuildableHigh:
+    for stage in ConstructionStage:
+      result.add BuildingModelRoot / "construction" /
+        ConstructionNames[stage.ord] / (constructionProp(kind, stage) & ".glb")
 
 proc buildingPortraitPath*(player: int32, kind: BuildingKind): string =
-  ## Returns the on-disk profile for one building prop.
+  ## Returns the shared portrait rendered from the game's CC0 assembly.
+  DataRoot / "terrain/lvd_buildings/portraits" / (BuildingProps[kind] & ".png")
+
+proc factionTexturePath*(faction: Faction): string =
+  ## Returns the CC0 trim atlas matching a faction's color and architecture.
+  FactionTextureRoot / (FactionFiles[faction] & ".png")
+
+proc buildingPortraitPath*(faction: Faction, kind: BuildingKind): string =
+  ## Returns a portrait rendered with the owning faction's actual trim.
   if kind == GoldMineBuilding:
-    DarkPropPack.changeFileExt("mineral1.profile.png")
+    buildingPortraitPath(-1, kind)
   else:
-    buildingPack(player, kind).changeFileExt(
-      BuildingProps[player][kind] & ".profile.png"
-    )
+    DataRoot / "terrain/lvd_buildings/portraits" / FactionFiles[faction] /
+      (BuildingProps[kind] & ".png")
 
-proc lightProps*(): seq[string] =
-  ## Returns all village props used by either faction.
-  for player in 0'i32 ..< PlayerCount:
-    for kind in BuildingKind:
-      if kind != GoldMineBuilding and buildingPack(player, kind) == LightPropPack:
-        let name = BuildingProps[player][kind]
-        if name notin result:
-          result.add name
-
-proc darkProps*(): seq[string] =
-  ## Includes completed, construction, rubble, and mine tower-kit props.
-  result = @MineProps & @ConstructionProps & @RubbleProps
-  for player in 0'i32 ..< PlayerCount:
-    for kind in BuildingKind:
-      if kind != GoldMineBuilding and buildingPack(player, kind) == DarkPropPack:
-        let name = BuildingProps[player][kind]
-        if name notin result:
-          result.add name
+proc generatedCharacterAssets*(): seq[Asset] =
+  ## Packs approved parts and CC0 clips without the former unit models.
+  let
+    directory = DataRoot / "characters/chargen"
+    manifest = readManifest(directory)
+    roster = readCharacterRoster()
+  result.add fileAsset("characters/chargen/lvd.json")
+  for path in ["manifest.json", manifest.skinPalette, manifest.hairPalette,
+      manifest.pupilPalette, manifest.hatPalette]:
+    result.add fileAsset(directory / path)
+  for category in manifest.categories:
+    for path in walkFiles(directory / category.directory / "*.json"):
+      result.add fileAsset(path)
+  result.add modelAsset(directory / manifest.rig)
+  for units in roster.players:
+    for entry in units:
+      let inventory = manifest.presetManifest(entry.preset)
+      for category in inventory.categories:
+        for item in category.items:
+          for path in item.files:
+            result.add modelAsset(directory / path, textureSize = 512)
+          for path in [item.texture, item.pupilMask]:
+            if path.len > 0:
+              result.add imageAsset(directory / path, 512)
+  for name in CharacterClips:
+    var found = false
+    for clip in manifest.clips:
+      if clip.name == name:
+        if clip.kind != "universal":
+          raise newException(ChargenError, "Non-CC0 LvD clip: " & name)
+        result.add modelAsset(directory / clip.file)
+        found = true
+    if not found:
+      raise newException(ChargenError, "Missing LvD clip: " & name)
 
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by either faction.
   result = hudAssets(LogoPath)
+  for path in ["LICENSE", "licenses/lvd.md",
+      "terrain/lvd_buildings/license.md",
+      "fonts/OFL-Rubik.txt", "fonts/OFL-OverpassMono.txt",
+      "animations/quaternius/universal_standard/README.txt"]:
+    result.add fileAsset(path)
   result.add terrainAssets(
-    DenseTrees, GeneratedTerrain, PaintedRocks, WebTerrainAssets
+    NoTrees, GeneratedTerrain, NoRocks, LvdWebTerrainAssets, LvdTerrainTiles
   )
-  result.add propAssets(LightPropPack, lightProps())
-  result.add propAssets(DarkPropPack, darkProps())
-  for player in 0'i32 ..< PlayerCount:
-    for kind in UnitKind:
-      result.add modelAsset(UnitModels[player][kind])
-      result.add fileAsset(unitPortraitPath(player, kind))
-    for kind in BuildingKind:
-      result.add fileAsset(buildingPortraitPath(player, kind))
+  for path in TreegenTextures:
+    result.add imageAsset(path, GeneratorTextureSize)
+  result.add imageAsset(RockgenTexture, GeneratorTextureSize)
+  for path in buildingModelPaths():
+    result.add modelAsset(path, textureSize = 512)
+  result.add fileAsset(ConstructionManifestPath)
+  result.add fileAsset(FactionTextureRoot / "manifest.json")
+  for faction in Faction:
+    result.add imageAsset(factionTexturePath(faction), 512)
+    for kind in TownHallBuilding .. BuildableHigh:
+      result.add fileAsset(buildingPortraitPath(faction, kind))
+  result.add generatedCharacterAssets()
+  result.add fileAsset(UnitSymbolsPath)
+  for kind in BuildingKind:
+    result.add fileAsset(buildingPortraitPath(0, kind))

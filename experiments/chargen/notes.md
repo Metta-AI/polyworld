@@ -6,18 +6,18 @@ Run the utility from the Polyworld repository:
 nim r experiments/chargen/chargen.nim
 ```
 
-The default library is `../polyworld_data/characters/chargen`. Set
+The default library is `../polyworld_art/characters/chargen`. Set
 `CHARGEN_LIBRARY` to open another library or a game-specific export.
 
 The Python authoring toolkit lives with the assets in
-`../polyworld_data/characters/chargen/source/scripts`. This includes Blender
+`../polyworld_art/characters/chargen/source/scripts`. This includes Blender
 geometry builders, animation imports, texture cutters, packers, and checks.
 The viewer, runtime, and render utilities remain Nim code in Polyworld.
 
 For the authoring commands below, start in the Polyworld repository and set:
 
 ```sh
-export CHARGEN_SCRIPTS=../polyworld_data/characters/chargen/source/scripts
+export CHARGEN_SCRIPTS=../polyworld_art/characters/chargen/source/scripts
 ```
 
 The scripts resolve asset paths from their own location, so Blender and Python
@@ -268,14 +268,14 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$CHARGEN_SCRIPTS/pack.py" \
   --parts body/base heads/base noses/tiny hair/01_french_crop \
     eyes/02_focused eyes/04_calm mouths/01_relaxed_smile \
     eyebrows/01_soft_arch \
-  --clips Idle Walk
+  --clips Idle_Loop Walk_Loop
 CHARGEN_LIBRARY="$PWD/tmp/chargen/my_game" \
   nim r experiments/chargen/chargen.nim
 ```
 
 Choose a fresh output directory for each export. The packer copies only selected
 parts, palettes, the rig, and selected animation clips. Required transition
-clips are included automatically, such as JumpAir when choosing JumpStart.
+clips are included automatically, such as Jump_Loop when choosing Jump_Start.
 It builds separate eye, mouth, and eyebrow atlases from the selected images,
 including a matching eye mask atlas. `pack.json` records each rectangle. The
 same runtime loader reads individual images or packed atlases. `--no-atlas`
@@ -296,16 +296,16 @@ exported tint functions, as shown in `chargen.nim`.
 
 The default animation group is Quaternius Universal Standard, with 43 entries
 including its T-pose. The complete downloaded source pack lives in
-`polyworld_data/animations/quaternius/universal_standard`, together with its
+`polyworld_art/animations/quaternius/universal_standard`, together with its
 CC0 license, setup images, and both in-place and root-motion exports.
 Chargen uses the in-place GLB. Its retargeted clips are individually exported
-under `characters/chargen/animations/universal`. The existing RPG animations
-and Layer Lab poses remain in separate viewer groups.
+under `characters/chargen/animations/universal`. These are the only supported
+imported clips. The old RPG animations and Layer Lab poses have been removed.
 
 `universal.py` maps all 22 Chargen bones using the source's explicit T-pose,
 preserves fixed limb lengths, and bakes at 30 fps. No arm mirroring or runtime
-wrist correction is applied. Universal clips animate only the Chargen model.
-The optional original comparison stays in bind pose for those clips.
+wrist correction is applied. The old character comparison loader and UI have
+been removed; the viewer loads only CharGen assets.
 
 To update animations without rebuilding geometry, run Blender in background
 with `--python "$CHARGEN_SCRIPTS/import_animations.py"`. Set
@@ -313,6 +313,17 @@ with `--python "$CHARGEN_SCRIPTS/import_animations.py"`. Set
 Run Blender with `--python "$CHARGEN_SCRIPTS/verify_universal.py"` to check
 all exported bone rotations, hip movement, and limb lengths against the source.
 Full model builds also include the Universal library.
+
+The authoring sources no longer include legacy eye variants or imported poses.
+`clean_sources.py --check` verifies the saved Blender files without opening
+external assets. Runtime loading and game packing reject retired eye variants
+and unsupported animation sources. `verify_clean.py` audits the active files
+and checks that every preset uses retained parts and clips.
+
+The cleanup was verified with the runtime and pack tests, all 14 saved Blender
+files, and a fresh isolated build containing no legacy character kit. That
+build exported 177 meshes and 43 Quaternius clips and loaded successfully in
+the runtime. Existing approved runtime geometry was retained unchanged.
 
 `defaultAnimation` in the library manifest selects the initial clip.
 One-shots can use `next` to chain into a loop, or `hold: true` to keep their
@@ -419,9 +430,11 @@ Blue Creep uses Base body and face, 01 Bright eyes, and skin RGB 59, 147, 184.
 Purple Creep uses skin RGB 131, 16, 159, 02 Focused eyes, pure red pupils,
 Evil 13 Vampire smirk, and Elf ears. Both creeps have no clothing or hair and
 are omitted from the ten-hero lineup.
-Clicking a name loads the complete
-outfit, skin, eye and hair colors, and pose. Clicking the group button again
-closes its list. Enable `Ten Gota heroes` in the animation panel to view the
+Clicking a name loads the complete outfit, skin, eye and hair colors while
+keeping the current animation, playback position, and pause state. The list
+stays open until its group button is clicked again. Gnome, Gota, and god
+lineups also preserve playback; `Lineup T pose` sets the reference pose.
+Enable `Ten Gota heroes` in the animation panel to view the
 whole roster. Launch their 5 by 2 lineup with:
 
 ```sh

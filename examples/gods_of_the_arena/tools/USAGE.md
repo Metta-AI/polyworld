@@ -27,7 +27,7 @@ policy versions, game release, configuration, and seeded schedule. It schedules
 `tmp/gota/tournaments/comparison/`. Open `report.html` during the run; it becomes
 the final report. Refresh the page manually to see new results. The page works
 offline and can be moved to another folder.
-Assets come from the sibling `polyworld_data` checkout, or `POLYWORLD_DATA`.
+Assets come from the sibling `polyworld_art` checkout, or `POLYWORLD_ART`.
 
 The report uses the same header and stylesheet as the published GotA standings.
 When the sibling `polyworld-buff` checkout exists, every report update also writes

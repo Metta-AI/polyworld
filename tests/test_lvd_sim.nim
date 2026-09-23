@@ -64,6 +64,60 @@ block openingIsSane:
   doAssert w.exploredCount[LightPlayer] == w.exploredCount[DarkPlayer],
     "the two openings reveal different amounts of ground"
 
+echo "Testing rectangular construction reserves and releases its base"
+block rectangularConstruction:
+  var w = newWorld(map, MatchTicks)
+  w.players[LightPlayer].gold = 5000
+  w.players[LightPlayer].wood = 5000
+  var site = NoTile
+  for y in 5'i32 .. 28'i32:
+    for x in 5'i32 .. 28'i32:
+      if w.canPlace(TownHallBuilding, x, y):
+        site = tile2(x, y)
+        break
+    if inGrid(site):
+      break
+  doAssert inGrid(site)
+  let
+    size = BuildingTable[TownHallBuilding].footprint
+    x = int32(site.x)
+    y = int32(site.y)
+  doAssert size.width > size.depth
+  doAssert not w.canPlace(TownHallBuilding, GridSide - size.width + 1, y)
+  doAssert not w.canPlace(TownHallBuilding, x, GridSide - size.depth + 1)
+  doAssert w.applyBuild(
+    LightPlayer, w.units[0].id, TownHallBuilding.ord.int32, x, y
+  )
+  let id = w.buildings[^1].id
+  var occupied = 0
+  for blocker in w.blocker:
+    if blocker == id:
+      inc occupied
+  doAssert occupied == size.width * size.depth
+  doAssert w.blocker[tileIndex(x + size.width - 1, y + size.depth - 1)] == id
+  doAssert w.blocker[tileIndex(x, y + size.depth)] != id
+  doAssert not w.canPlace(FarmBuilding, x + size.width - 1, y)
+  doAssert w.applyCancel(LightPlayer, id)
+  doAssert w.canPlace(TownHallBuilding, x, y)
+  for blocker in w.blocker:
+    doAssert blocker != id
+
+echo "Testing starting building bases never overlap or block their approaches"
+block startingFootprints:
+  for seed in [1'i32, DefaultSeed, 42'i32, 73'i32]:
+    let
+      startingMap = generateMap(seed)
+      w = newWorld(startingMap, MatchTicks)
+    for structure in w.buildings:
+      for y in int32(structure.origin.y) ..<
+        int32(structure.origin.y) + structure.footprint.depth:
+          for x in int32(structure.origin.x) ..<
+            int32(structure.origin.x) + structure.footprint.width:
+              let tile = tileIndex(x, y)
+              doAssert startingMap.passable[tile] == 1
+              doAssert w.blocker[tile] == structure.id
+      doAssert inGrid(w.freeTileAround(structure.origin, structure.footprint))
+
 echo "Testing determinism across identical runs"
 block twoRunsAgree:
   var first = newWorld(map, MatchTicks)

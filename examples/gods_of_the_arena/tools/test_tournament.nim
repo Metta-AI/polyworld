@@ -4,7 +4,7 @@ import
   ../scores
 
 const
-  DataRoot = Root.parentDir / "polyworld_data"
+  DataRoot = Root.parentDir / "polyworld_art"
   TestRoot = Root / "tmp/gota/tournament-tests"
 
 proc fixture(count = 41, mode = "both", interval = 10): JsonNode =

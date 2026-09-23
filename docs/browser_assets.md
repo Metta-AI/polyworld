@@ -3,9 +3,11 @@
 Normal and replay WASM builds for GOTA, LVD, and CTA automatically run the game's
 own native `pack_assets.nim`. Each entry point imports only its game's asset
 declarations and uses the shared packing functions in `tools/assetpacks.nim`.
-Existing build commands and `POLYWORLD_DATA` continue to work.
-Native games still read the original assets at their original quality. Heartleaf
-keeps its existing packaging path.
+Native games read the cleared original assets from `../polyworld_art` at their
+original quality. Browser builds use that directory by default, or the directory
+selected by `POLYWORLD_ART`, and mount the result at `/polyworld_art`.
+Clone `Metta-AI/polyworld_art` with Git LFS first. It remains private until the
+owner approves publication. Heartleaf and AWM assets are excluded.
 
 ## GotA asset licenses
 
@@ -13,7 +15,7 @@ GotA no longer loads or packages the Toon Enchanted Meadow camp crate, barrel,
 or unused decorations. Its selected artwork uses the project-generated CC0
 assets, Quaternius CC0 animations, CC BY grass, OFL fonts, and MIT water maps.
 The bundle includes six license and attribution files, including the root
-`polyworld_data/LICENSE` and `polyworld_data/licenses/gota.md`.
+`polyworld_art/LICENSE` and `polyworld_art/licenses/gota.md`.
 Hero documentation and exported statistics
 use generated portraits; exported statistics also include Rubik's OFL notice.
 
@@ -21,8 +23,9 @@ Before consolidating the CC0 notices into the root license, the 2026-09-22
 local build contained 850 files totaling 30,771,349 bytes.
 Every packaged byte matched the staging files. The audit found no remaining
 Unity, Blizzard, or noncommercial artwork in this GotA bundle. This finding
-does not cover the other games or the entire data repository, which still
-contain separately licensed legacy assets.
+described that historical bundle only. The new `polyworld_art` repository has
+its own per-file license inventory and includes only cleared assets for all
+three mainline games, without importing the old repository's history.
 
 ## Asset declarations
 
@@ -32,7 +35,7 @@ in `src/polyworld/assets.nim`. Change these declarations when adding content.
 There is no source-code scanning or manually maintained `webdata.txt`.
 
 The packer maintains `tmp/webassets/<game>-ktx2/stage/` and preloads only that
-directory at `/polyworld_data`. Generated GLBs and textures never enter the source
+directory at `/polyworld_art`. Generated GLBs and textures never enter the source
 asset repository. A sorted `manifest.txt` and `report.json` sit beside the stage,
 outside the preload. The JSON report includes each file's bytes and the total.
 UI atlas directories include their PNGs, matching the renderer's directory loads.

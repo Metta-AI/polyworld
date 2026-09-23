@@ -17,10 +17,10 @@ See the [terrain tool reference](../tools/terrain/USAGE.md) for all CLI options.
 
 ## Asset layout and resolution
 
-Final assets live in the sibling `polyworld_data` repository:
+Final assets live in the sibling `polyworld_art` repository:
 
 ```text
-polyworld_data/terrain/
+polyworld_art/terrain/
   tiles/
     dirt-1.rgb.png
     dirt-1.height.png
@@ -54,7 +54,7 @@ Keep working files in `polyworld/tmp/terrain-work` and sample renders in
 `polyworld/tmp/terrain-samples`. Both are under the Git-ignored `tmp` directory.
 Preserve approved high-resolution masters, prompts, and provenance separately
 from disposable samples. The existing generation archives are under
-`../output/terrain-*-20260908`. Put only final asset pairs in `polyworld_data`.
+`../output/terrain-*-20260908`. Put only final asset pairs in `polyworld_art`.
 
 ## Set up a working directory
 
@@ -63,7 +63,7 @@ a new dirt, sand, and marsh set. Keep these variables in the same shell session:
 
 ```sh
 terrainWork=tmp/terrain-work/dirt-sand-marsh
-terrainData=../polyworld_data/terrain
+terrainData=../polyworld_art/terrain
 mkdir -p "$terrainWork/tiles" "$terrainWork/stamps"
 nim c -d:release --out:tmp/terrain tools/terrain/terrain.nim
 ```
@@ -410,7 +410,7 @@ The sample bake compares the same 2363 stamp placements with both blend modes.
 Its ground uses identical linear material weights in both versions to isolate
 the stamp-blending effect. It saves color, accumulated height, and a recipe with
 the seed and placements. The larger sample images are previews, not replacements
-for the 256x256 material assets. Never save sample renders in `polyworld_data`.
+for the 256x256 material assets. Never save sample renders in `polyworld_art`.
 
 ```sh
 nim check tools/terrain/terrain.nim

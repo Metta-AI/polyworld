@@ -32,7 +32,7 @@ Press Ctrl+C to pause. Repeat --run NAME to resume."""
     return 0
   let
     directory = OutputRoot / arguments["run"].getStr
-    dataRoot = getEnv("POLYWORLD_DATA", Root.parentDir / "polyworld_data")
+    dataRoot = getEnv("POLYWORLD_ART", Root.parentDir / "polyworld_art")
     path = directory / "run.json"
     siteRoot = if arguments["no_site"].getBool: ""
       elif arguments.hasKey("site"): absolutePath(arguments["site"].getStr)

@@ -32,11 +32,11 @@ proc main() =
     "Replay bundle output must not contain the repository: " & output)
   putEnv("POLYWORLD_DEPS",
     absolutePath(getEnv("POLYWORLD_DEPS", Root / "tmp/coworld/deps")))
-  putEnv("POLYWORLD_DATA",
-    absolutePath(getEnv("POLYWORLD_DATA", Root.parentDir / "polyworld_data")))
+  putEnv("POLYWORLD_ART",
+    absolutePath(getEnv("POLYWORLD_ART", Root.parentDir / "polyworld_art")))
   syncDependencies()
   let
-    data = getEnv("POLYWORLD_DATA")
+    data = getEnv("POLYWORLD_ART")
     assets = parseJson(readFile(Root / "coworld/assets.json"))
     revision = assets["revision"].getStr()
     actual = command(["git", "-C", data, "rev-parse", "HEAD"])

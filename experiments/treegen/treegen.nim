@@ -10,7 +10,7 @@ const
   PanelPosition = vec2(12, 12)
   RowWidth = 330
   UiAtlas = ExperimentDirectory / "../../tmp/treegen.atlas.png"
-  ThemeDirectory = ExperimentDirectory / "../../../polyworld_data/themes/main"
+  ThemeDirectory = ExperimentDirectory / "../../../polyworld_art/themes/main"
 
 type
   PanelTab = enum

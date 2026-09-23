@@ -202,6 +202,11 @@ proc rejectExtensions(node: JsonNode) =
               for field, value in extension:
                 supported = supported and
                   field in ["specularFactor", "specularColorFactor"]
+          of "KHR_materials_emissive_strength":
+            if supported:
+              for field, value in extension:
+                supported = supported and field == "emissiveStrength" and
+                  value.kind in {JInt, JFloat} and value.getFloat() >= 0
           else:
             supported = false
           if not supported:

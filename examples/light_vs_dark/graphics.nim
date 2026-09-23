@@ -10,11 +10,11 @@
 import
   std/[math, os, strformat, strutils, tables, times, unicode],
   chroma, fixxy, opengl, pixie, vmath, windy, silky,
-  polyworld/[actioncam, assets, characters, chrome, clickmarks, common,
-    inputs, particles, particleshaders, pathing, player, profiles,
+  polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
+    inputs, lighting, particles, particleshaders, pathing, player, profiles,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
     viewers, visions, worldbars, worldtexts],
-  assets, content,
+  appearances, assets, buildings, content, factions, groves, symbols,
   sim,
   game,
   replays,
@@ -82,45 +82,23 @@ var
 
 ## Presentation helpers
 
-proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
-  ## Returns a clip for one pose. Locomotion prefers Run, Move, then Walk.
-  const Names: array[AnimationSlot, seq[string]] = [
-    RunAnimation: @["Run", "Move", "Walk", "RunForward", "WalkForward"],
-    IdleAnimation: @["Idle", "IdleBattle", "IdleNormal"],
-    DeathAnimation: @["Death", "Die", "Die01"],
-    AttackAnimation: @[
-      "Attack01", "Attack01Start", "WorkRoutine", "WorkStart", "Idle"
-    ],
-    AttackAlternateAnimation: @[
-      "Attack02", "Attack02Start", "Attack01", "Attack01Start",
-      "WorkRoutine", "Idle"
-    ],
-    VictoryAnimation: @["Victory", "Idle", "IdleBattle", "Taunting"]
-  ]
-  for name in Names[slot]:
-    if name in model.clips:
-      return model.clips[name]
-  raise newException(GraphicsError, "missing clip for " & $slot)
-
-proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs portraits and the theme logo.
+proc addHudIcons(builder: AtlasBuilder, factions: openArray[Faction]) =
+  ## Packs grayscale unit symbols, building portraits, and the theme logo.
   builder.addThemeLogo(LogoPath)
+  let badges = loadUnitSymbols()
+  for kind in UnitKind:
+    if not builder.addImage(unitSymbolKey(kind), badges[kind]):
+      raise newException(
+        GraphicsError,
+        "The UI atlas is too small for unit symbols."
+      )
   for player in 0'i32 ..< PlayerCount:
-    for kind in UnitKind:
-      if not builder.addImage(
-          unitPortraitKey(player, kind),
-          readImage(unitPortraitPath(player, kind))
-        ):
-        raise newException(
-          GraphicsError,
-          "the UI atlas is too small for unit portraits"
-        )
     for kind in BuildingKind:
       if kind == GoldMineBuilding and player != LightPlayer:
         continue
       if not builder.addImage(
           buildingPortraitKey(player, kind),
-          readImage(buildingPortraitPath(player, kind))
+          readImage(buildingPortraitPath(factions[player], kind))
         ):
         raise newException(
           GraphicsError,
@@ -179,10 +157,10 @@ proc renderTime(ticks: int32): float32 =
 proc buildingCentre(structure: Building): Vec3 =
   ## Returns the world centre of a structure's footprint.
   let
-    x = float32(structure.origin.x) + float32(structure.side) * 0.5'f32 -
-      HalfGrid
-    z = float32(structure.origin.y) + float32(structure.side) * 0.5'f32 -
-      HalfGrid
+    x = structure.origin.x.float32 +
+      structure.footprint.width.float32 * 0.5'f - HalfGrid
+    z = structure.origin.y.float32 +
+      structure.footprint.depth.float32 * 0.5'f - HalfGrid
   vec3(x, surfaceHeight(x, z), z)
 
 proc isSelected*(id: int32): bool =
@@ -208,9 +186,17 @@ proc shownBuilding*(structure: Building): bool =
 proc runGraphics*() =
   ## Runs the native or Emscripten spectator.
   startGameProfile()
+  let
+    matchCreated =
+      if run.recorder != nil: run.recorder.data.header.createdUnixMs
+      else: run.replayData.header.createdUnixMs
+    order = factionOrder(matchCreated xor run.mapSeed.int64)
+  var playerFactions: array[PlayerCount, Faction]
+  for player in 0 ..< PlayerCount:
+    playerFactions[player] = order[Faction(player)]
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
-    addHudIcons(builder)
+    addHudIcons(builder, playerFactions)
     builder.addDefaultFonts()
     builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
@@ -233,29 +219,46 @@ proc runGraphics*() =
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
-    treeHeight = 6.0'f
-    treeWidth = 0.0'f
     initTerrain(
-      DenseTrees, GeneratedTerrain, PaintedRocks, settings = LvdTerrainAssets
+      NoTrees, GeneratedTerrain, NoRocks, LvdTerrainTiles,
+      settings = LvdTerrainAssets
     )
-    scatterGrass(800, run.mapSeed)
-    scatterRocks(80, run.mapSeed)
+    setTileMaterial(
+      RockTile.int,
+      LvdRockSurface,
+      LvdRockSurface,
+      vec3(1),
+      vec3(0.85),
+      4
+    )
+    setTileMaterial(
+      StoneTile.int,
+      LvdStoneSurface,
+      LvdRockSurface,
+      vec3(1),
+      vec3(0.85),
+      6
+    )
 
-  ## Characters. Locomotion clips are Run, Move, or Walk.
+  ## Both players share the approved CharGen equipment and CC0 animations.
   var
     unitModels: array[PlayerCount, array[UnitKind, CharacterModel]]
     unitClips: array[PlayerCount, array[UnitKind, array[AnimationSlot, int]]]
-    loaded: Table[string, CharacterModel]
+    teamColors: array[PlayerCount, ColorRGBX]
   profileBlock "models":
+    let
+      manifest = readManifest(ChargenLibrary)
+      roster = readCharacterRoster(playerFactions)
     for player in 0 ..< PlayerCount:
+      # The orange elemental's UI still identifies its owning faction.
+      teamColors[player] = FactionColors[roster.factions[player]]
       for kind in UnitKind:
-        let path = UnitModels[player][kind]
-        if path notin loaded:
-          loaded[path] = loadCharacterModel(path, UnitHeights[kind])
-        let model = loaded[path]
+        let model = loadUnitModel(
+          manifest, roster.players[player][kind.ord], kind
+        )
         unitModels[player][kind] = model
         for slot in AnimationSlot:
-          unitClips[player][kind][slot] = model.clipIndex(slot)
+          unitClips[player][kind][slot] = model.clipIndex(kind.unitClip(slot))
   drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
@@ -274,19 +277,15 @@ proc runGraphics*() =
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
 
-  ## Structures are terrain props rather than per-frame draws.
   var
-    villagePack: PropPack
-    towerPack: PropPack
+    grove: Grove
+    buildingArt: BuildingArt
+  let scenery = grovePlacements(
+    run.world.treeWood, run.mapSeed, run.world.map.forestRocks
+  )
   profileBlock "props":
-    villagePack = loadPropPack(propPaths(LightPropPack, lightProps()))
-    towerPack = loadPropPack(propPaths(DarkPropPack, darkProps()))
-
-  proc packFor(player: int32, name: string): PropPack =
-    ## Chooses the pack that actually carries a prop, so Dark can borrow the
-    ## village farm without a special case at every call site.
-    if player == LightPlayer or not towerPack.hasProp(name): villagePack
-    else: towerPack
+    grove = generateGrove(run.mapSeed, {LightTree, LightRock})
+    buildingArt = loadBuildingArt(grove, factions = playerFactions)
 
   proc buildingKey(): string =
     ## A cheap fingerprint of everything that changes the prop layout, so the
@@ -294,43 +293,32 @@ proc runGraphics*() =
     result = $run.world.terrainEdits.len
     for structure in run.world.buildings:
       result.add &"|{structure.id}:{structure.state.ord}"
+      if structure.state == BuildingUnderConstruction:
+        result.add &":{structure.constructionStage().ord}"
 
   proc placeSceneProps() =
     ## Rebuilds the whole prop list. `placeProp` has no removal, so the
     ## viewer owns the desired set and re-places all of it on any change.
     clearProps()
+    grove.plantGrove(scenery, run.world.treeWood)
     for structure in run.world.buildings:
-      let centre = buildingCentre(structure)
-      if structure.kind == GoldMineBuilding:
-        for index, name in MineProps:
-          towerPack.placeProp(
-            name,
-            centre + vec3(float32(index) * 0.7'f32 - 0.7'f32, 0,
-              float32(index mod 2) * 0.6'f32 - 0.3'f32),
-            float32(index) * 1.1'f32,
-            [1.8'f32, 1.4'f32, 1.2'f32][index]
-          )
-        continue
-      if structure.state == BuildingDying:
-        for index, name in RubbleProps:
-          towerPack.placeProp(name,
-            centre + vec3(float32(index) - 0.5'f32, 0, 0),
-            float32(index), 0.8'f32)
-        continue
-      if structure.state == BuildingUnderConstruction:
-        for index, name in ConstructionProps:
-          towerPack.placeProp(name,
-            centre + vec3(float32(index) - 1.0'f32, 0, float32(index mod 2)),
-            float32(index) * 0.9'f32, 0.8'f32)
-        continue
-      let name = BuildingProps[structure.owner][structure.kind]
-      packFor(structure.owner, name).placeProp(
-        name, centre, 0.0'f32, BuildingPropHeights[structure.kind])
+      for part in buildingArt.buildingParts(
+        structure, buildingCentre(structure)
+      ):
+        # Baked props use the opposite yaw to the standalone outline pass.
+        part.pack.placeProp(
+          part.name, part.position, -part.rotation, part.scale
+        )
 
   proc applyTerrainEdits() =
-    ## Mirrors felled trees into the render layer.
-    for edit in run.world.terrainEdits:
-      layers[0].tiles[edit.index].kind = GrassTile
+    ## Mirrors current wood state, including trees restored by replay seeks.
+    for placement in scenery:
+      if placement.kind == LightTree:
+        layers[0].tiles[placement.tile].kind =
+          if placement.visible(run.world.treeWood):
+            TreeTile
+          else:
+            GrassTile
 
   proc rebakeScene() =
     ## Refreshes terrain, props, and the displayed movement blockers.
@@ -551,7 +539,7 @@ proc runGraphics*() =
         not shownBuilding(structure):
           continue
       let anchor = buildingCentre(structure) +
-        vec3(0, BuildingPropHeights[TownHallBuilding] + 0.4'f, 0)
+        vec3(0, buildingArt.heights[TownHallBuilding] + 0.4'f, 0)
       worldBarRenderer.addText(
         playerLabels[structure.owner],
         anchor
@@ -574,14 +562,34 @@ proc runGraphics*() =
           (viewMode != 0 and not run.world.unitVisible(viewMode - 1, unit)):
         continue
       consider(unit.id, renderPoint(unit), UnitHeights[unit.kind] * 0.5'f32)
+    if result == NoEntity:
+      let (origin, direction) = mouseRay(
+        window.mousePos.vec2, window.size.vec2, viewProjection
+      )
+      var nearest = float32.high
+      for structure in run.world.buildings:
+        if structure.state == BuildingDying or not shownBuilding(structure):
+          continue
+        for part in buildingArt.buildingParts(
+          structure, buildingCentre(structure)
+        ):
+          let distance = part.pack.pickProp(
+            part.name, origin, direction, part.position,
+            part.rotation, part.scale
+          )
+          if distance > 0 and distance < nearest:
+            nearest = distance
+            result = structure.id
+      if result != NoEntity:
+        return
     for structure in run.world.buildings:
       if structure.state == BuildingDying or
           (viewMode != 0 and
             not run.world.buildingVisible(viewMode - 1, structure)):
         continue
       consider(structure.id, buildingCentre(structure), 1.4'f32)
-      for y in 0'i32 ..< structure.side:
-        for x in 0'i32 ..< structure.side:
+      for y in 0'i32 ..< structure.footprint.depth:
+        for x in 0'i32 ..< structure.footprint.width:
           let
             tileX = int32(structure.origin.x) + x
             tileY = int32(structure.origin.y) + y
@@ -601,7 +609,7 @@ proc runGraphics*() =
       if structure.state == BuildingDying or
           not shownBuilding(structure):
         continue
-      if covers(structure.origin, structure.side, x, y):
+      if covers(structure.origin, structure.footprint, x, y):
         return structure.id
 
   proc insideBox(point, origin, size: Vec2): bool =
@@ -676,7 +684,8 @@ proc runGraphics*() =
       subjects.add Subject(
         id: building.id, owner: building.owner,
         position: buildingCentre(building), height: 2,
-        radius: float32(building.side) * 0.7'f, visible: shownBuilding(building),
+        radius: float32(max(building.footprint.width,
+          building.footprint.depth)) * 0.7'f, visible: shownBuilding(building),
         alive: building.hp > 0 and building.state != BuildingDying,
         hp: building.hp, maxHp: building.maxHp,
         complete: building.state == BuildingComplete,
@@ -818,7 +827,7 @@ proc runGraphics*() =
     ## Snaps the pending footprint so the cursor sits on its centre tile.
     let
       kind = BuildingKind(pendingBuild)
-      side = BuildingTable[kind].footprint
+      size = BuildingTable[kind].footprint
       ground = pickGroundPoint(
         window.mousePos.vec2,
         window.size.vec2,
@@ -826,7 +835,7 @@ proc runGraphics*() =
         cameraTarget.y
       )
       tile = groundTile(ground, HalfGrid, GridSide)
-    (tile[0] - side div 2, tile[1] - side div 2)
+    (tile[0] - size.width div 2, tile[1] - size.depth div 2)
 
   proc queuePendingBuild(x, y: int32) =
     ## Sends the first selected peon to raise the pending structure.
@@ -953,36 +962,16 @@ proc runGraphics*() =
       viewProjection: Mat4
   ) =
     ## Draws one structure's props into the current selection mask.
-    let centre = buildingCentre(structure)
-    if structure.kind == GoldMineBuilding:
-      for index, name in MineProps:
-        towerPack.drawProp(
-          name,
-          centre + vec3(float32(index) * 0.7'f32 - 0.7'f32, 0,
-            float32(index mod 2) * 0.6'f32 - 0.3'f32),
-          float32(index) * 1.1'f32,
-          [1.8'f32, 1.4'f32, 1.2'f32][index],
-          viewProjection
-        )
-      return
-    if structure.state == BuildingUnderConstruction:
-      for index, name in ConstructionProps:
-        towerPack.drawProp(
-          name,
-          centre + vec3(float32(index) - 1.0'f32, 0, float32(index mod 2)),
-          float32(index) * 0.9'f32,
-          0.8'f32,
-          viewProjection
-        )
-      return
-    let name = BuildingProps[structure.owner][structure.kind]
-    packFor(structure.owner, name).drawProp(
-      name,
-      centre,
-      0.0'f32,
-      BuildingPropHeights[structure.kind],
-      viewProjection
-    )
+    for part in buildingArt.buildingParts(
+      structure, buildingCentre(structure)
+    ):
+      part.pack.drawProp(
+        part.name,
+        part.position,
+        part.rotation,
+        part.scale,
+        viewProjection
+      )
 
   proc drawSelectedOutline(
       view,
@@ -1046,25 +1035,24 @@ proc runGraphics*() =
     if not playerMode() or pendingBuild < 0:
       return
     let
-      player = options.playerSlot - 1
       kind = BuildingKind(pendingBuild)
-      side = BuildingTable[kind].footprint
+      size = BuildingTable[kind].footprint
       origin = buildGhostOrigin(viewProjection)
       valid = run.world.canPlace(kind, origin[0], origin[1])
-      x = float32(origin[0]) + float32(side) * 0.5'f32 - HalfGrid
-      z = float32(origin[1]) + float32(side) * 0.5'f32 - HalfGrid
+      x = float32(origin[0]) + float32(size.width) * 0.5'f32 - HalfGrid
+      z = float32(origin[1]) + float32(size.depth) * 0.5'f32 - HalfGrid
       centre = vec3(x, surfaceHeight(x, z), z)
-      name = BuildingProps[player][kind]
+      name = BuildingProps[kind]
       tint =
         if valid:
           vec4(0.55, 0.95, 0.65, 0.42)
         else:
           vec4(0.95, 0.28, 0.22, 0.42)
-    packFor(player, name).drawProp(
+    buildingArt.buildingPack(options.playerSlot - 1).drawProp(
       name,
       centre,
       0.0'f32,
-      BuildingPropHeights[kind],
+      BuildingScale,
       viewProjection,
       tint
     )
@@ -1096,7 +1084,7 @@ proc runGraphics*() =
       cameraUp: Vec3,
       dt: float32
   ) =
-    ## Draws damage-gated health billboards above visible mobile units.
+    ## Always draws owner-colored health bars above visible living units.
     damageTrails.beginFrame()
     worldBarRenderer.clear()
     for unit in run.world.units:
@@ -1111,20 +1099,18 @@ proc runGraphics*() =
           maximum,
           dt
         )
-      if unit.hp < UnitTable[unit.owner][unit.kind].hp:
-        let
-          anchor = renderPoint(unit) +
-            vec3(0, UnitHeights[unit.kind] + 0.32'f32, 0)
-          width = 0.82'f32 + UnitHeights[unit.kind] * 0.18'f32
-          bars = [WorldResourceBar(
-            value: health,
-            maximum: maximum,
-            delayedValue: delayed,
-            height: 0.1'f32,
-            color: healthColor(health, maximum),
-            showDamageTrail: true
-          )]
-        worldBarRenderer.addResourceBars(anchor, width, bars)
+        anchor = renderPoint(unit) +
+          vec3(0, UnitHeights[unit.kind] + 0.32'f32, 0)
+        width = 0.82'f32 + UnitHeights[unit.kind] * 0.18'f32
+        bars = [WorldResourceBar(
+          value: health,
+          maximum: maximum,
+          delayedValue: delayed,
+          height: 0.1'f32,
+          color: teamColors[unit.owner],
+          showDamageTrail: true
+        )]
+      worldBarRenderer.addResourceBars(anchor, width, bars)
     damageTrails.finishFrame()
     addPlayerNames()
     worldBarRenderer.draw(
@@ -1175,9 +1161,9 @@ proc runGraphics*() =
           continue
         var distance = int32.high
         for y in int32(structure.origin.y) ..<
-            int32(structure.origin.y) + structure.side:
+            int32(structure.origin.y) + structure.footprint.depth:
           for x in int32(structure.origin.x) ..<
-              int32(structure.origin.x) + structure.side:
+              int32(structure.origin.x) + structure.footprint.width:
             distance = min(
               distance,
               tileDistance(unit.tile, tile2(x, y))
@@ -1233,7 +1219,7 @@ proc runGraphics*() =
             0.5'f32
           )
         )
-      of CatapultUnit:
+      of CatapultUnit, SummonUnit:
         particles.emitParticleProjectile(
           Fireball,
           FireBurst,
@@ -1245,7 +1231,7 @@ proc runGraphics*() =
             0.52'f32
           )
         )
-      of PeonUnit, SoldierUnit, KnightUnit, SummonUnit:
+      of PeonUnit, SoldierUnit, KnightUnit:
         particles.emitParticleBurst(CombatSparks, target.position)
     for structure in run.world.buildings:
       if not shownBuilding(structure) or structure.id notin towerTargets:
@@ -1257,7 +1243,7 @@ proc runGraphics*() =
       if not target.found:
         continue
       let origin = buildingCentre(structure) +
-        vec3(0, BuildingPropHeights[structure.kind] * 0.7'f32, 0)
+        vec3(0, buildingArt.heights[structure.kind] * 0.7'f32, 0)
       particles.emitParticleProjectile(
         Fireball,
         FireBurst,
@@ -1399,11 +1385,8 @@ proc runGraphics*() =
       updateWorldSelection(viewProjection)
       updatePlayerOrder(viewProjection)
       profileBlock "drawWorld":
-        # One clock for the whole frame: the palette, the sun's position,
-        # and its shadow map all follow the in-game hour. The fractional
-        # tick keeps the sun gliding between simulation steps instead of
-        # visibly stepping shadow positions a few times a second.
-        scene.setToonHour(
+        # Match GotA's short palette fades and fixed light direction.
+        scene.toon.setArenaHour(
           clockHour(float32(run.world.tick) + frameAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
@@ -1442,7 +1425,12 @@ proc runGraphics*() =
         finishCharacters(scene)
         drawSelectedOutline(view, projection, viewProjection)
         drawBuildGhost(viewProjection)
-        drawWater(viewProjection, cameraEye)
+        drawWater(
+          viewProjection,
+          cameraEye,
+          opacity = 0.5'f,
+          highlightOpacity = 0.0'f
+        )
         particles.drawParticles(
           viewProjection,
           barCameraRight,
@@ -1457,11 +1445,7 @@ proc runGraphics*() =
               continue
             if unit.pathIndex >= int32(unit.path.len):
               continue
-            let color =
-              if unit.owner == LightPlayer:
-                rgbx(80, 140, 230, 255)
-              else:
-                rgbx(210, 80, 85, 255)
+            let color = teamColors[unit.owner]
             var points: seq[Vec3]
             let now = renderPoint(unit)
             points.add vec3(now.x, now.y + 0.2'f32, now.z)
@@ -1501,7 +1485,8 @@ proc runGraphics*() =
           primaryId,
           selectedIds,
           followSelection,
-          actionCam
+          actionCam,
+          teamColors
         )
         drawSelectionBox(
           sk,
@@ -1510,7 +1495,7 @@ proc runGraphics*() =
           selectionStarted
         )
         sk.endUi()
-        drawStatsOverlay(sk, window)
+        drawStatsOverlay(sk, window, teamColors)
       when defined(takeScreenshot):
         captureScreenshot(
           window,

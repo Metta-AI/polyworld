@@ -52,10 +52,10 @@ The 18 assets from the terrain experiment were cut with:
 ```sh
 tmp/terrain cut \
   ../output/terrain-stamps-20260908/terrain-stamps-rgba.png \
-  ../polyworld_data/terrain/stamps
+  ../polyworld_art/terrain/stamps
 tmp/terrain cut \
   ../output/terrain-tiles-20260908/05-terrain-tiles.png \
-  ../polyworld_data/terrain/tiles
+  ../polyworld_art/terrain/tiles
 ```
 
 Each exported image is 256x256 pixels, downsampled from its 418x418 master cell.
@@ -167,8 +167,8 @@ offsetting or independently inpainting only the height atlas after this point,
 because that would break alignment with the finished color texture.
 
 The generated library stores color and height together in
-`polyworld_data/terrain/tiles`, such as `dirt-1.rgb.png` and
-`dirt-1.height.png`. Stamps in `polyworld_data/terrain/stamps` use the same
+`polyworld_art/terrain/tiles`, such as `dirt-1.rgb.png` and
+`dirt-1.height.png`. Stamps in `polyworld_art/terrain/stamps` use the same
 paired suffixes. Every exported asset is 256x256.
 Sample height as linear data using the red channel with the same UVs as
 the color texture. Do not normalize each tile independently: flat sand should
@@ -254,7 +254,7 @@ nim r -d:release --out:tmp/gen_terrain_sample tools/terrain/gen_sample.nim
 
 This generates a 1024x1024 terrain texture from a 64x64 layout, with each terrain
 cell occupying 16x16 pixels. It loads grass, dirt road, cobblestone, and gravel
-tile/stamp pairs from the sibling `polyworld_data/terrain` directory. The
+tile/stamp pairs from the sibling `polyworld_art/terrain` directory. The
 three rocky slots reuse cobblestone and gravel. The stages are:
 
 1. Assign terrain weights for a winding path, grass, and rocky patches.

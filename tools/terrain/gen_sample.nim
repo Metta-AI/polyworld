@@ -9,7 +9,7 @@ const
   TileSize = TextureSize div GridSize
   DefaultSeed = 20260908
   DataRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir /
-    "polyworld_data/terrain"
+    "polyworld_art/terrain"
   DefaultOutput = SampleRoot / "path-64-stamp-height"
   Usage = "Usage: gen_sample [outputDirectory] [seed]"
   SampleNames = [

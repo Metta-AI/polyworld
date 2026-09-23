@@ -281,6 +281,25 @@ block:
     extensions = packedSpecular.doc["materials"][0]["extensions"]
     specular = extensions["KHR_materials_specular"]
   doAssert specular["specularFactor"].getFloat == 0.24
+  var emissive = parseGlb(original)
+  emissive.doc["extensionsUsed"] = %*["KHR_materials_emissive_strength"]
+  emissive.doc["materials"][0]["extensions"] =
+    %*{"KHR_materials_emissive_strength": {"emissiveStrength": 1.9}}
+  writeFile(source / "pack.glb", encodeGlb(emissive.doc, emissive.binary))
+  discard packAssets(@[declaration], source, output)
+  let
+    packedEmissive = parseGlb(readFile(output / "stage/pack.glb"))
+    packedExtensions = packedEmissive.doc["materials"][0]["extensions"]
+    strength = packedExtensions["KHR_materials_emissive_strength"]
+    emissiveExtensions = emissive.doc["materials"][0]["extensions"]
+  doAssert strength["emissiveStrength"].getFloat == 1.9
+  emissiveExtensions["KHR_materials_emissive_strength"]["emissiveTexture"] =
+    %*{"index": 0}
+  writeFile(source / "pack.glb", encodeGlb(emissive.doc, emissive.binary))
+  expectAssetError(proc() =
+    ## Rejects unknown reference fields inside an accepted scalar extension.
+    discard packAssets(@[declaration], source, output)
+  )
   let extension = unlit.doc["materials"][0]["extensions"]
   extension["KHR_materials_specular"]["specularTexture"] = %*{"index": 0}
   writeFile(source / "pack.glb", encodeGlb(unlit.doc, unlit.binary))

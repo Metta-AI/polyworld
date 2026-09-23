@@ -81,9 +81,9 @@ const
   FordRadius = [13, 17, 13]
   MinimumFordWidth = 3
 
-  HallFootprint = 3'i32
-  MineFootprint = 2'i32
-  LightHallOrigin = (21'i32, 21'i32)
+  HallFootprint = BuildingTable[TownHallBuilding].footprint
+  MineFootprint = BuildingTable[GoldMineBuilding].footprint
+  LightHallOrigin = (20'i32, 21'i32)
   LightMainMine = (25'i32, 18'i32)
   LightEastMine = (47'i32, 21'i32)
   LightSouthMine = (21'i32, 47'i32)
@@ -100,7 +100,7 @@ type
   MineSpot* = object
     id*: int32
     origin*: Tile2
-      ## North-west corner of the two-by-two footprint.
+      ## North-west corner of the mine footprint.
     gold*: int32
 
   MapData* = object
@@ -114,6 +114,8 @@ type
       ## Mean packed terrain height per tile for integer line of sight.
     treeWood*: seq[int16]
       ## Harvestable wood remaining on each tile, zero where there is no tree.
+    forestRocks*: seq[int32]
+      ## Permanent boulders replacing every tenth mirrored tree pair.
     mines*: seq[MineSpot]
     hallOrigin*: array[PlayerCount, Tile2]
     hash*: uint64
@@ -418,10 +420,9 @@ proc generateOnce(seed: int32): MapData {.measure.} =
       )
 
   ## Structures. Both halls and all six mines are placed as mirror pairs.
-  ## A footprint of side `f` at origin `a` covers `a ..< a + f`, so its mirror
-  ## covers `GridSide - f - a ..< GridSide - a`.
-  proc mirrorOrigin(x, y, footprint: int32): (int32, int32) =
-    (GridSide - footprint - x, GridSide - footprint - y)
+  ## Each footprint axis mirrors independently, preserving width and depth.
+  proc mirrorOrigin(x, y: int32, footprint: Footprint): (int32, int32) =
+    (GridSide - footprint.width - x, GridSide - footprint.depth - y)
 
   let
     (lightHallX, lightHallY) = LightHallOrigin
@@ -446,12 +447,12 @@ proc generateOnce(seed: int32): MapData {.measure.} =
 
   ## Forests. Every planted tile writes its mirror too, so the two players get
   ## identical wood no matter which half the sampler happened to land on.
-  proc covers(origin: Tile2, footprint, margin, x, y: int32): bool =
+  proc covers(origin: Tile2, footprint: Footprint, margin, x, y: int32): bool =
     ## Tests a structure footprint with an extra border of tiles.
     x >= int32(origin.x) - margin and
-      x < int32(origin.x) + footprint + margin and
+      x < int32(origin.x) + footprint.width + margin and
       y >= int32(origin.y) - margin and
-      y < int32(origin.y) + footprint + margin
+      y < int32(origin.y) + footprint.depth + margin
 
   proc inBattleClearing(x, y: int32): bool =
     ## Reserves the centre, diagonal approach, and all three river crossings.
@@ -586,6 +587,23 @@ proc generateOnce(seed: int32): MapData {.measure.} =
       y = mapRng.below(PadWall + 6)
     plateauPlanted += plantPatch(x, y, true, PlateauTrees - plateauPlanted)
 
+  # Replace every tenth tree pair so both players retain matching forests.
+  var treePairs = 0
+  for index in 0 ..< GridCells div 2:
+    if map.treeWood[index] == 0:
+      continue
+    inc treePairs
+    if treePairs mod 10 != 0:
+      continue
+    for rockIndex in [index, GridCells - 1 - index]:
+      map.forestRocks.add rockIndex
+      map.treeWood[rockIndex] = 0
+      map.passable[rockIndex] = 0
+      map.kinds[rockIndex] = uint8(RockTile)
+      layers[0].tiles[rockIndex].kind = RockTile
+      layers[0].tiles[rockIndex].impassable = true
+  computeWalkable()
+
   ## Fingerprint. Covers the packed terrain, the derived walkability, the
   ## trees, and every structure placement, so a generator change is caught at
   ## replay load rather than as a mysterious divergence later.
@@ -636,14 +654,14 @@ proc blockedForSetup(map: MapData, x, y: int32): bool =
     return true
   for player in 0 ..< PlayerCount:
     let hall = map.hallOrigin[player]
-    if x >= int32(hall.x) and x < int32(hall.x) + HallFootprint and
-        y >= int32(hall.y) and y < int32(hall.y) + HallFootprint:
+    if x >= int32(hall.x) and x < int32(hall.x) + HallFootprint.width and
+        y >= int32(hall.y) and y < int32(hall.y) + HallFootprint.depth:
       return true
   for mine in map.mines:
     if x >= int32(mine.origin.x) and
-        x < int32(mine.origin.x) + MineFootprint and
+        x < int32(mine.origin.x) + MineFootprint.width and
         y >= int32(mine.origin.y) and
-        y < int32(mine.origin.y) + MineFootprint:
+        y < int32(mine.origin.y) + MineFootprint.depth:
       return true
   false
 
@@ -675,18 +693,30 @@ proc floodFrom(map: MapData, start: Tile2): seq[uint8] =
       result[index] = 1
       frontier.add tile2(nextX, nextY)
 
-proc freeTilesAround(map: MapData, origin: Tile2, footprint, ring: int32): int =
-  ## Counts open tiles in the band around a square footprint.
-  for y in int32(origin.y) - ring ..< int32(origin.y) + footprint + ring:
-    for x in int32(origin.x) - ring ..< int32(origin.x) + footprint + ring:
+proc freeTilesAround(
+  map: MapData,
+  origin: Tile2,
+  footprint: Footprint,
+  ring: int32
+): int =
+  ## Counts open tiles in the band around a rectangular footprint.
+  let
+    endX = int32(origin.x) + footprint.width + ring
+    endY = int32(origin.y) + footprint.depth + ring
+  for y in int32(origin.y) - ring ..< endY:
+    for x in int32(origin.x) - ring ..< endX:
       if not map.blockedForSetup(x, y):
         inc result
 
-proc anyOpenNeighbour(map: MapData, origin: Tile2, footprint: int32): Tile2 =
+proc anyOpenNeighbour(
+  map: MapData,
+  origin: Tile2,
+  footprint: Footprint
+): Tile2 =
   ## Returns one open tile touching a footprint, or an off-map tile when the
   ## footprint is completely walled in.
-  for y in int32(origin.y) - 1 ..< int32(origin.y) + footprint + 1:
-    for x in int32(origin.x) - 1 ..< int32(origin.x) + footprint + 1:
+  for y in int32(origin.y) - 1 ..< int32(origin.y) + footprint.depth + 1:
+    for x in int32(origin.x) - 1 ..< int32(origin.x) + footprint.width + 1:
       if not map.blockedForSetup(x, y):
         return tile2(x, y)
   tile2(-1, -1)
@@ -741,6 +771,26 @@ proc mapProblem*(map: MapData): string =
     seenIds.add mine.id
     if mine.gold <= 0:
       return &"seed {seed}: mine {mine.id} holds no gold"
+
+  var occupied = newSeq[bool](GridCells)
+  proc validSite(origin: Tile2, size: Footprint): bool =
+    ## Reserves an unobstructed building base without overlapping another.
+    for y in int32(origin.y) ..< int32(origin.y) + size.depth:
+      for x in int32(origin.x) ..< int32(origin.x) + size.width:
+        if not inGrid(x, y):
+          return false
+        let index = tileIndex(x, y)
+        if occupied[index] or map.passable[index] == 0 or
+          map.treeWood[index] > 0:
+            return false
+        occupied[index] = true
+    true
+  for origin in map.hallOrigin:
+    if not validSite(origin, HallFootprint):
+      return &"seed {seed}: town hall overlaps blocked ground or a building"
+  for mine in map.mines:
+    if not validSite(mine.origin, MineFootprint):
+      return &"seed {seed}: mine {mine.id} overlaps blocked ground or a building"
 
   for player in 0 ..< PlayerCount:
     let

@@ -8,7 +8,7 @@ export brows, clothes, eyes, hairs, models, parts, presets
 
 const ChargenLibrary* =
   when defined(emscripten):
-    "/polyworld_data/characters/chargen"
+    "/polyworld_art/characters/chargen"
   else:
     currentSourcePath().parentDir.parentDir.parentDir.parentDir /
-      "polyworld_data/characters/chargen"
+      "polyworld_art/characters/chargen"

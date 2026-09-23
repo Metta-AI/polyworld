@@ -17,7 +17,7 @@ type
     views*: array[3, GameUiPanel]
 
   SelectionPanels* = object
-    portrait*, hp*, name*: GameUiPanel
+    portrait*, hp*, name*, details*: GameUiPanel
     units*: array[9, GameUiPanel]
 
   BuildPanels* = object
@@ -49,9 +49,8 @@ proc selectionPanels*(panel: GameUiPanel): SelectionPanels =
   portrait.indent = 4
   result.hp = portrait.take(vec2(128, 23), 3)
   result.name = portrait.take(vec2(128, 22))
-  stackGrid(
-    columns.takeRest(), vec2(56), 3, vec2(10, 8), result.units
-  )
+  result.details = columns.takeRest()
+  stackGrid(result.details, vec2(56), 3, vec2(10, 8), result.units)
 
 proc buildPanels*(panel: GameUiPanel): BuildPanels =
   ## Stacks command tabs over two rows of four build or train buttons.

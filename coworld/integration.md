@@ -28,7 +28,7 @@ coworld build --project coworld/cta --version 2026.9.9.3
 revisions plus optional Mummy. Run
 `nim r coworld/tools/sync_dependencies.nim --latest` to resolve upstream HEADs and
 update both locks. Ordinary builds never update revisions implicitly.
-The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_DATA`
+The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_ART`
 can point at a checkout of that revision. Each game's `assets.nim` declarations
 select its browser models, textures, and UI files. Emscripten builds automatically
 run that game's native packer and preload its clean staging directory. Generated

@@ -1,7 +1,7 @@
 import
   std/[os, random, sets, strutils, tables],
   chroma, gltf, jsony, vmath,
-  polyworld/[animblend, chargen], references, weights, lineups
+  polyworld/[animblend, chargen], weights, lineups
 
 const AssetDir = ChargenLibrary
 
@@ -189,15 +189,6 @@ proc testParts() =
   for (material, original) in untouched:
     doAssert material.baseColorFactor == original
   nodes.applySkin(manifest, manifest.defaultSkin)
-  for name in ["Neutral", "Happy", "Angry", "Original2"]:
-    let primitives = nodes["Eyes_" & name].mesh.primitives
-    doAssert primitives.len == 1
-    let material = primitives[0].material
-    doAssert material.alphaMode == MaskAlphaMode
-    doAssert material.unlit
-    doAssert not material.baseColorPlaceholder
-    doAssert material.baseColor.width == 1024
-    doAssert material.baseColor.height == 512
   for name, node in nodes:
     if name in ["Ears_Round_Left", "Ears_Round_Right",
                 "Ears_Elf_Left", "Ears_Elf_Right"]:
@@ -232,7 +223,7 @@ proc testParts() =
   except ChargenError:
     failed = true
   doAssert failed
-  player.play("Walk", 0)
+  player.play("Walk_Loop", 0)
   player.seek(0)
   var rotations: seq[Quat]
   for node in model.root.walkNodes:
@@ -243,18 +234,18 @@ proc testParts() =
     if node.rot != rotations[i]:
       moved = true
   doAssert moved, "The animation must move the skeleton."
-  player.play("Victory", 0.2)
+  player.play("Punch_Jab", 0.2)
   player.update(10)
-  doAssert model.root.animations[player.current].name == "Walk"
-  player.play("Attack04Start", 0)
+  doAssert model.root.animations[player.current].name == "Walk_Loop"
+  player.play("Spell_Simple_Enter", 0)
   player.update(10)
-  doAssert model.root.animations[player.current].name == "Attack04Spin"
-  player.play("Death", 0)
+  doAssert model.root.animations[player.current].name == "Spell_Simple_Idle_Loop"
+  player.play("Death01", 0)
   player.update(10)
-  doAssert model.root.animations[player.current].name == "DeathStay"
-  player.play("JumpStart", 0)
+  doAssert model.root.animations[player.current].name == "Death01"
+  player.play("Jump_Start", 0)
   player.update(10)
-  doAssert model.root.animations[player.current].name == "JumpAir"
+  doAssert model.root.animations[player.current].name == "Jump_Loop"
   for preset in manifest.presets:
     manifest.applyPreset(selection, preset)
     nodes.applySelection(manifest, selection)
@@ -790,7 +781,7 @@ proc testWeights() =
     originalWeights = hand.jointWeights
     originalPoints = hand.points
     originalColors = hand.colors
-    eye = nodes["Eyes_Neutral"].mesh.primitives[0]
+    eye = nodes["Eyes_Atlas02"].mesh.primitives[0]
     eyeTint = eye.material.baseColorFactor
   var preview = initWeightPreview(model.root, AssetDir)
   let left = preview.boneIndex("LeftHand")
@@ -845,6 +836,7 @@ proc testUniversal() =
       if clip.next.len > 0:
         doAssert player.clipIndex(clip.next) >= 0
   doAssert count == 43
+  doAssert manifest.clips.len == count
   var hand: Node
   for node in model.root.walkNodes:
     if node.mesh == nil and node.name == "LeftHand":
@@ -874,93 +866,30 @@ proc testUniversal() =
   player.update(10)
   doAssert model.root.animations[player.current].name == "Walk_Loop"
 
-proc testReference() =
-  ## Checks that comparison uses the real original rig and follows scrubbing.
-  let
-    manifest = readManifest(AssetDir)
-    model = readCharacter(AssetDir, manifest)
-    player = newClipPlayer(model.root)
-    reference = readReference(manifest.clips)
-    originals = partNodes(reference.root)
-  doAssert reference.root != model.root
-  doAssert "Body_White_1" in originals and "Body" notin originals
-  doAssert reference.root.animations.len == reference.manifest.clips.len
-  for clip in manifest.clips:
-    player.setRule(clip.name, ClipRule(
-      loop: clip.loop, next: clip.next, hold: clip.hold
-    ))
-  var wrist: Node
-  for node in reference.root.walkNodes:
-    if node.name == "QuickRigCharacter2_LeftHand":
-      wrist = node
-    if node.mesh != nil:
-      doAssert node.visible ==
-        (node.name in ["Body_White_1", "Body_White_Head_1", OriginalEyes])
-  doAssert wrist != nil
-  for clip in manifest.clips:
-    player.play(clip.name, 0)
-    player.seek(0.17)
-    reference.sync(player)
-    if clip.kind == "universal":
-      doAssert reference.player.current == -1
-      continue
-    let original = reference.root.animations[reference.player.current]
-    doAssert original.name == clip.name
-    let expected =
-      if clip.loop:
-        player.currentTime
-      else:
-        min(player.currentTime, original.duration)
-    doAssert reference.player.currentTime == expected
-  player.play("Walk", 0)
-  player.seek(0)
-  reference.sync(player)
-  let initial = wrist.mat
-  player.seek(0.2)
-  reference.sync(player)
-  doAssert wrist.mat != initial
-  let beforeOutfit = wrist.mat
-  reference.setOutfit(true)
-  reference.sync(player)
-  doAssert originals["Wield_Gear_Left_1"].visible
-  doAssert originals["Wield_Gear_Right_1"].visible
-  doAssert originals["Hand_1"].visible
-  doAssert wrist.mat == beforeOutfit
-  reference.setOutfit(false)
-  reference.sync(player)
-  doAssert not originals["Wield_Gear_Left_1"].visible
-  doAssert not originals["Hand_1"].visible
-  doAssert wrist.mat == beforeOutfit
-  player.play("", 0)
-  reference.sync(player)
-  doAssert reference.player.current == -1
-  for i, preset in reference.manifest.presets:
-    reference.loadPreset(i)
-    for j, category in reference.manifest.categories:
-      let selected = reference.selection[j]
-      if selected >= 0:
-        for name in category.items[selected].nodes:
-          doAssert originals[name].visible
-  for skin in 0 ..< reference.manifest.skins.len:
-    reference.clearParts()
-    reference.skin = skin
-    reference.applyParts()
-    let prefix = "Body_" & reference.manifest.skins[skin].name & "_"
-    doAssert originals[prefix & "1"].visible
-    doAssert originals[prefix & "Head_1"].visible
-  reference.clearParts()
-  player.play("Walk", 0)
-  reference.sync(player)
-  for name in ["Run", "Attack01", "Victory"]:
-    player.play(name, 0.2)
-    reference.player.play(name, 0.2)
-    for frame in 0 ..< 120:
-      player.update(1.0'f / 60)
-      reference.player.update(1.0'f / 60)
-      doAssert player.rootNode.animations[player.current].name ==
-        reference.root.animations[reference.player.current].name
-      doAssert abs(player.currentTime - reference.player.currentTime) < 0.0001
-      doAssert player.fading == reference.player.fading
+proc testSources() =
+  ## Rejects retired content before any rig, eye or clip asset is opened.
+  for identity in ["eyes/original2", "eyes/neutral", "eyes/happy", "eyes/angry"]:
+    let manifest = Manifest(
+      rig: "missing.glb",
+      categories: @[Category(items: @[PartItem(id: identity)])]
+    )
+    var rejected = false
+    try:
+      discard readCharacter("missing-library", manifest)
+    except ChargenError as error:
+      rejected = error.msg.startsWith("Retired character part:")
+    doAssert rejected
+  for kind in ["pose", "retargeted"]:
+    let manifest = Manifest(
+      rig: "missing.glb",
+      clips: @[ClipInfo(name: "Retired", kind: kind, file: "missing.glb")]
+    )
+    var rejected = false
+    try:
+      discard readCharacter("missing-library", manifest)
+    except ChargenError as error:
+      rejected = error.msg.startsWith("Unsupported animation source:")
+    doAssert rejected
 
 proc testGota() =
   ## Checks hero budgets, creep presets, skin restoration, and animation.
@@ -1258,6 +1187,7 @@ else:
   testGnomeRandom()
   testBeardChance()
   testUniversal()
+  testSources()
   testAssembly(AssetDir)
   testParts()
   testEyes()
@@ -1276,5 +1206,4 @@ else:
   testGods()
   testSwordSockets()
   testWeights()
-  testReference()
   echo "Chargen tests passed"

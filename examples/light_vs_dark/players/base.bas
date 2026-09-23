@@ -42,7 +42,10 @@
 '   unitCostGold(k) unitCostWood(k) unitFood(k) unitTrainTicks(k)
 '   unitRange(k) unitHp(k)
 '   buildCostGold(k) buildCostWood(k) buildTicks(k) buildFootprint(k)
+'   buildWidth(k) buildDepth(k)
 '   buildFood(k) canBuild(k) canTrain(buildingId, unitKind)
+' Building positions are the minimum x/y corner; width runs along x and
+' depth along y. buildFootprint returns the larger of the two dimensions.
 '
 ' COMMANDS, all return 1 when accepted and 0 when refused.
 '   moveUnit(id, x, y)          attackMove(id, x, y)
@@ -53,6 +56,34 @@
 ' harvest wants a mine id with isTree 0, or a tile index with isTree 1.
 ' attackMove marches to a tile but stops to fight whoever it sees.
 ' moveUnit ignores everyone and walks through.
+
+sub trySite(siteX, siteY)
+  if placed <> 0 or canPlace(wanted, siteX, siteY) = 0 then
+    exit sub
+  end if
+  ' Leave a walking lane around the full rectangular footprint.
+  edge = siteX - 1
+  while edge <= siteX + siteWidth
+    if tilePassable(edge, siteY - 1) = 0 then
+      exit sub
+    end if
+    if tilePassable(edge, siteY + siteDepth) = 0 then
+      exit sub
+    end if
+    edge = edge + 1
+  wend
+  edge = siteY
+  while edge < siteY + siteDepth
+    if tilePassable(siteX - 1, edge) = 0 then
+      exit sub
+    end if
+    if tilePassable(siteX + siteWidth, edge) = 0 then
+      exit sub
+    end if
+    edge = edge + 1
+  wend
+  placed = build(builderPeon, wanted, siteX, siteY)
+end sub
 
 decisions = decisions + 1
 
@@ -221,33 +252,31 @@ if builderPeon <> 0 and busySites = 0 then
   end if
 
   if wanted >= 0 then
-    ' Spiral outward from the hall looking for somewhere the footprint fits.
-    radius = 4
+    ' Search around the hall's edges using the new building's dimensions.
+    siteWidth = buildWidth(wanted)
+    siteDepth = buildDepth(wanted)
+    hallWidth = buildWidth(HallKind)
+    hallDepth = buildDepth(HallKind)
+    gap = 1
     placed = 0
-    while radius < 14 and placed = 0
-      offset = 0 - radius
-      while offset <= radius and placed = 0
-        if canPlace(wanted, homeX + offset, homeY - radius) <> 0 then
-          placed = build(builderPeon, wanted, homeX + offset, homeY - radius)
-        end if
-        if placed = 0 then
-          if canPlace(wanted, homeX + offset, homeY + radius) <> 0 then
-            placed = build(builderPeon, wanted, homeX + offset, homeY + radius)
-          end if
-        end if
-        if placed = 0 then
-          if canPlace(wanted, homeX - radius, homeY + offset) <> 0 then
-            placed = build(builderPeon, wanted, homeX - radius, homeY + offset)
-          end if
-        end if
-        if placed = 0 then
-          if canPlace(wanted, homeX + radius, homeY + offset) <> 0 then
-            placed = build(builderPeon, wanted, homeX + radius, homeY + offset)
-          end if
-        end if
-        offset = offset + 2
+    while gap < 14 and placed = 0
+      left = homeX - siteWidth - gap
+      right = homeX + hallWidth + gap
+      top = homeY - siteDepth - gap
+      bottom = homeY + hallDepth + gap
+      offset = left
+      while offset <= right and placed = 0
+        call trySite(offset, top)
+        call trySite(offset, bottom)
+        offset = offset + 1
       wend
-      radius = radius + 2
+      offset = top + 1
+      while offset < bottom and placed = 0
+        call trySite(left, offset)
+        call trySite(right, offset)
+        offset = offset + 1
+      wend
+      gap = gap + 1
     wend
   end if
 end if

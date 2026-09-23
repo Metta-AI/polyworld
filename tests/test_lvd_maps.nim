@@ -36,7 +36,9 @@ proc checkForest(map: MapData) =
           let
             tx = x + dx
             ty = y + dy
-          if inGrid(tx, ty) and map.treeWood[tileIndex(tx, ty)] > 0:
+          if inGrid(tx, ty) and
+            (map.treeWood[tileIndex(tx, ty)] > 0 or
+              tileIndex(tx, ty) in map.forestRocks):
             inc neighbours
       if neighbours >= 2:
         inc surrounded
@@ -51,6 +53,7 @@ block sameSeedSameMap:
   doAssert first.hash == second.hash, "the same seed produced two maps"
   doAssert first.passable == second.passable
   doAssert first.treeWood == second.treeWood
+  doAssert first.forestRocks == second.forestRocks
   doAssert first.kinds == second.kinds
   doAssert first.mines == second.mines
   doAssert first.hallOrigin == second.hallOrigin
@@ -93,6 +96,13 @@ block gridsAreWellFormed:
     &"only {walkable} of {GridCells} tiles are walkable"
   doAssert wooded >= 400, &"only {wooded} tree tiles were planted"
   doAssert wooded mod 2 == 0, "trees were not planted in mirror pairs"
+  doAssert map.forestRocks.len ==
+    ((wooded + map.forestRocks.len) div 2 div 10) * 2
+  for index in map.forestRocks:
+    doAssert map.treeWood[index] == 0
+    doAssert map.passable[index] == 0
+    doAssert map.kinds[index] == uint8(RockTile)
+    doAssert GridCells - 1 - index in map.forestRocks
 
 block minesAreDistinctAndMirrored:
   let map = generateMap(DefaultSeed)
@@ -116,7 +126,11 @@ block hallsAreMirroredAndFarApart:
   let
     light = map.hallOrigin[LightPlayer]
     dark = map.hallOrigin[DarkPlayer]
-    (mirrorX, mirrorY) = mirrorTile(int32(light.x) + 2, int32(light.y) + 2)
+    size = BuildingTable[TownHallBuilding].footprint
+    (mirrorX, mirrorY) = mirrorTile(
+      int32(light.x) + size.width - 1,
+      int32(light.y) + size.depth - 1
+    )
   doAssert int32(dark.x) == mirrorX and int32(dark.y) == mirrorY,
     "the two town halls are not mirror images"
   doAssert chebyshev(light, dark) > 60,

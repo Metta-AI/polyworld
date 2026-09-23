@@ -5,7 +5,7 @@ import
 
 const
   DataRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir /
-    "polyworld_data/terrain"
+    "polyworld_art/terrain"
   DefaultOutput = SampleRoot / "height-blend"
   PanelWidth = 512
   PanelHeight = 256

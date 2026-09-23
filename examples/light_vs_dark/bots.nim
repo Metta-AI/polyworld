@@ -418,9 +418,10 @@ proc buildOverlordHost*(playerId: int32): Host =
   let canPlaceProc: HostProc = proc(arguments: openArray[int32]): int32 =
     if arguments[0] < 0 or arguments[0] > int32(BuildableHigh.ord):
       return 0
-    let side = BuildingTable[BuildingKind(arguments[0])].footprint
+    let size = BuildingTable[BuildingKind(arguments[0])].footprint
     if not inGrid(arguments[1], arguments[2]) or
-        not inGrid(arguments[1] + side - 1, arguments[2] + side - 1):
+        not inGrid(arguments[1] + size.width - 1,
+          arguments[2] + size.depth - 1):
       return 0
     int32(game.canPlace(BuildingKind(arguments[0]), arguments[1],
       arguments[2]))
@@ -449,7 +450,22 @@ proc buildOverlordHost*(playerId: int32): Host =
   buildingStat("buildCostGold", gold)
   buildingStat("buildCostWood", wood)
   buildingStat("buildTicks", buildTicks)
-  buildingStat("buildFootprint", footprint)
+  let buildWidthProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    if arguments[0] < 0 or arguments[0] > int32(BuildingKind.high.ord):
+      return 0
+    BuildingTable[BuildingKind(arguments[0])].footprint.width
+  discard result.addFunction("buildWidth", 1, buildWidthProc, 2)
+  let buildDepthProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    if arguments[0] < 0 or arguments[0] > int32(BuildingKind.high.ord):
+      return 0
+    BuildingTable[BuildingKind(arguments[0])].footprint.depth
+  discard result.addFunction("buildDepth", 1, buildDepthProc, 2)
+  let buildFootprintProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    if arguments[0] < 0 or arguments[0] > int32(BuildingKind.high.ord):
+      return 0
+    let size = BuildingTable[BuildingKind(arguments[0])].footprint
+    max(size.width, size.depth)
+  discard result.addFunction("buildFootprint", 1, buildFootprintProc, 2)
   buildingStat("buildFood", foodProvided)
 
   let canBuildProc: HostProc = proc(arguments: openArray[int32]): int32 =

@@ -5,7 +5,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels],
-  content, sim, game, controls, layouts
+  assets, content, sim, game, controls, layouts, symbols
 
 const
   ResourceColors = [
@@ -28,7 +28,7 @@ const
   ViewButtonSize = 32.0'f32
   SelectionIcon = 48.0'f32
   GridBarH = 12.0'f32
-  HealthColor = rgbx(70, 190, 95, 255)
+  NeutralHealthColor = rgbx(180, 185, 192, 255)
   CostFill = rgbx(12, 14, 20, 200)
   CommandTabH = 28.0'f32
   CommandTabLift = 4.0'f32
@@ -45,22 +45,15 @@ type
     build: GameUiPanel
 
 var
-  unitPortraitKeys: array[PlayerCount, array[UnitKind, string]]
   buildingPortraitKeys: array[PlayerCount, array[BuildingKind, string]]
 
 for player in 0 ..< PlayerCount:
-  for kind in UnitKind:
-    unitPortraitKeys[player][kind] = "lvd_u" & $player & "_" & $kind.ord
   for kind in BuildingKind:
     if kind == GoldMineBuilding:
       buildingPortraitKeys[player][kind] = "lvd_b_mine"
     else:
       buildingPortraitKeys[player][kind] =
         "lvd_b" & $player & "_" & $kind.ord
-
-proc unitPortraitKey*(player: int32, kind: UnitKind): string =
-  ## Returns the atlas name packed from one unit's profile PNG.
-  unitPortraitKeys[player][kind]
 
 proc buildingPortraitKey*(player: int32, kind: BuildingKind): string =
   ## Returns the atlas name packed from one building's profile PNG.
@@ -100,12 +93,15 @@ proc canShowTrain(
       return true
   false
 
-proc commandPortraitColor(ready: bool): ColorRGBX =
+proc commandPortraitColor(
+  ready: bool,
+  tint = rgbx(255, 255, 255, 255)
+): ColorRGBX =
   ## Fades portraits that cannot be built or trained yet.
   if ready:
-    rgbx(255, 255, 255, 255)
+    tint
   else:
-    rgbx(255, 255, 255, 128)
+    rgbx(tint.r div 2, tint.g div 2, tint.b div 2, 128)
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
@@ -141,7 +137,9 @@ proc currentMetrics(slot: int, complete: bool): MetricRow =
       run.replayData.metrics, slot, run.world.tick, complete
     )
 
-proc currentStats(): StatsTable =
+proc currentStats(
+  teamColors = default(array[PlayerCount, ColorRGBX])
+): StatsTable =
   ## Adapts the actual roster and outcome to the shared table.
   run.sampleMetrics()
   result = StatsTable(kind: RtsStats, tick: run.world.tick,
@@ -151,7 +149,8 @@ proc currentStats(): StatsTable =
       slot: slot,
       name: run.config.players[slot].displayName(slot),
       subtitle: if slot == 0: "LIGHT COMMANDER" else: "DARK COMMANDER",
-      portrait: unitPortraitKey(int32(slot), PeonUnit),
+      portrait: unitSymbolKey(PeonUnit),
+      portraitTint: teamColors[slot],
       team: slot,
       selected: not run.replayMode and options.playerSlot == slot + 1,
       metrics: currentMetrics(slot, result.complete)
@@ -189,13 +188,6 @@ proc mouseOverUi*(window: Window, mouse: Vec2): bool =
     ]
   )
 
-proc playerColor(player: int32): ColorRGBX =
-  ## Returns a readable HUD color for one player.
-  if player == LightPlayer:
-    rgbx(80, 140, 230, 255)
-  else:
-    rgbx(210, 80, 85, 255)
-
 proc clockHour*(): float32 =
   ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction:
   ## the match starts at 8:00 and a day is five minutes long.
@@ -228,28 +220,9 @@ proc buildingName(kind: BuildingKind, owner = -1'i32): string =
   of BlacksmithBuilding: "Blacksmith"
   of GoldMineBuilding: "Gold Mine"
 
-proc unitName(kind: UnitKind, owner: int32): string =
-  ## Returns a spectator-facing name for one unit.
-  if owner == DarkPlayer:
-    case kind
-    of PeonUnit: "Peon"
-    of SoldierUnit: "Grunt"
-    of ArcherUnit: "Spearman"
-    of MageUnit: "Warlock"
-    of KnightUnit: "Raider"
-    of CatapultUnit: "Catapult"
-    of ClericUnit: "Necrolyte"
-    of SummonUnit: "Daemon"
-  else:
-    case kind
-    of PeonUnit: "Peasant"
-    of SoldierUnit: "Footman"
-    of ArcherUnit: "Archer"
-    of MageUnit: "Conjurer"
-    of KnightUnit: "Knight"
-    of CatapultUnit: "Catapult"
-    of ClericUnit: "Cleric"
-    of SummonUnit: "Elemental"
+proc unitName(kind: UnitKind): string =
+  ## Uses the shared roster name for both player appearances.
+  UnitNames[kind]
 
 proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
   ## Returns whether one entity belongs to the HUD selection set.
@@ -406,11 +379,11 @@ proc drawScoreRow(
     sk: Silky,
     panels: ScorePanels,
     player: int32,
-    row: int
+    row: int,
+    color: ColorRGBX
 ) =
   ## Draws one side's towers, kills, and deaths.
   let
-    color = playerColor(player)
     enemy = 1'i32 - player
     values = [
       towerCount(player),
@@ -475,10 +448,11 @@ proc drawUi*(
     primaryId: var int32,
     selectedIds: var seq[int32],
     followSelection: var bool,
-    actionCam: var ActionCam
+    actionCam: var ActionCam,
+    teamColors: array[PlayerCount, ColorRGBX]
 ) =
   ## Draws every Silky HUD panel for the current frame.
-  let table = currentStats()
+  let table = currentStats(teamColors)
   statsState.syncDirector(actionCam, table, window.tabHeld)
   let
     chrome = currentChrome(window)
@@ -506,15 +480,15 @@ proc drawUi*(
       rgbx(166, 174, 190, 255),
       "Hud"
     )
-  sk.drawScoreRow(scoreSlots, LightPlayer, 0)
-  sk.drawScoreRow(scoreSlots, DarkPlayer, 1)
+  sk.drawScoreRow(scoreSlots, LightPlayer, 0, teamColors[LightPlayer])
+  sk.drawScoreRow(scoreSlots, DarkPlayer, 1, teamColors[DarkPlayer])
   for owner in 0 ..< min(PlayerCount, run.config.players.len):
     let side = if owner == LightPlayer: "LIGHT: " else: "DARK: "
     sk.drawLabel(
       sk.fittedLabel(side & run.config.players[owner].displayName(owner), 262),
       scorePanel.origin + vec2(18, 100 + owner.float32 * 22),
       vec2(262, 22),
-      playerColor(int32(owner))
+      teamColors[owner]
     )
 
   let resourceRows = [
@@ -596,13 +570,16 @@ proc drawUi*(
   for structure in run.world.buildings:
     if structure.owner < 0 or not shownBuilding(structure, viewMode):
       continue
-    let point = minimapPoint(structure.origin, area)
+    let
+      point = minimapPoint(structure.origin, area)
+      size = vec2(structure.footprint.width.float32,
+        structure.footprint.depth.float32) * cell
     if isPicked(structure.id, selectedIds):
-      sk.drawRect(point - vec2(2), vec2(cell * 3 + 4), rgbx(238, 235, 205, 255))
+      sk.drawRect(point - vec2(2), size + vec2(4), rgbx(238, 235, 205, 255))
     sk.drawRect(
       point,
-      vec2(cell * 3, cell * 3),
-      playerColor(structure.owner)
+      size,
+      teamColors[structure.owner]
     )
   for unit in run.world.units:
     if unit.state == UnitDying or not shownUnit(unit, viewMode):
@@ -613,7 +590,7 @@ proc drawUi*(
     sk.drawRect(
       point,
       vec2(cell * 1.5, cell * 1.5),
-      playerColor(unit.owner)
+      teamColors[unit.owner]
     )
   sk.drawMinimapCamera(window, area, cameraTarget, cameraDistance)
   for index, button in minimap.views:
@@ -646,6 +623,7 @@ proc drawUi*(
       else: primaryId
     portraitName = "NO SELECTION"
     portraitOwner = -1'i32
+    portraitTint = rgbx(255, 255, 255, 255)
   if portraitId == NoEntity:
     for id in selectedIds:
       if (id.isUnitId and run.world.hasUnit(id)) or
@@ -654,10 +632,11 @@ proc drawUi*(
         break
   if portraitId.isUnitId and run.world.hasUnit(portraitId):
     let unit = run.world.units[run.world.unitIndex(portraitId)]
-    portraitKey = unitPortraitKey(unit.owner, unit.kind)
+    portraitKey = unitSymbolKey(unit.kind)
+    portraitTint = teamColors[unit.owner]
     portraitHp = unit.hp
     portraitMax = UnitTable[unit.owner][unit.kind].hp
-    portraitName = unit.kind.unitName(unit.owner)
+    portraitName = unit.kind.unitName()
     portraitOwner = unit.owner
   elif portraitId != NoEntity and run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
@@ -679,14 +658,19 @@ proc drawUi*(
     selectPortrait = selection.portrait
     selectBar = selection.hp
     selectName = selection.name
-  sk.drawPortrait(selectPortrait, portraitKey, IconLarge)
+    healthColor =
+      if portraitOwner >= 0 and portraitOwner < PlayerCount:
+        teamColors[portraitOwner]
+      else:
+        NeutralHealthColor
+  sk.drawPortrait(selectPortrait, portraitKey, IconLarge, portraitTint)
   writeRatio(hudScratch, portraitHp.int, portraitMax.int)
   sk.drawValueBar(
     selectBar.origin,
     selectBar.size,
     portraitHp.float32,
     portraitMax.float32,
-    HealthColor,
+    healthColor,
     hudScratch
   )
   sk.drawLabel(
@@ -709,15 +693,16 @@ proc drawUi*(
       slot = selection.units[shown]
     sk.drawPortrait(
       slot,
-      unitPortraitKey(unit.owner, unit.kind),
-      SelectionIcon
+      unitSymbolKey(unit.kind),
+      SelectionIcon,
+      teamColors[unit.owner]
     )
     sk.drawBar(
       slot.origin + vec2(WellPad, slot.size.y - GridBarH),
       vec2(SelectionIcon, GridBarH),
       unit.hp.float32,
       UnitTable[unit.owner][unit.kind].hp.float32,
-      HealthColor
+      teamColors[unit.owner]
     )
     if window.hudClicked(sk, slot):
       clickedId = id
@@ -736,23 +721,43 @@ proc drawUi*(
     let structure = run.world.buildings[
       run.world.buildingIndex(portraitId)
     ]
-    for slot in 0 ..< min(QueueSlots, selection.units.len):
-      let
-        well = selection.units[slot]
-        filled = slot < structure.queueLength
-      if filled:
-        let kind = UnitKind(structure.queue[slot] - 1)
-        sk.drawPortrait(
-          well,
-          unitPortraitKey(max(structure.owner, 0), kind),
-          SelectionIcon
-        )
-      if filled and slot == 0:
-        sk.drawRect(
-          well.origin,
-          vec2(well.size.x, 3),
-          rgbx(238, 216, 120, 255)
-        )
+    if structure.kind == GoldMineBuilding:
+      let details = selection.details
+      sk.drawSprite("gold", details.origin + vec2(0, 4), vec2(IconTiny))
+      sk.drawLabel(
+        "GOLD LEFT",
+        details.origin + vec2(IconTiny + 8, 0),
+        vec2(details.size.x - IconTiny - 8, 24),
+        rgbx(166, 174, 190, 255),
+        "Small"
+      )
+      writeAmount(hudScratch, structure.goldLeft.int)
+      sk.drawLabel(
+        hudScratch,
+        details.origin + vec2(0, 28),
+        vec2(details.size.x, 28),
+        ResourceColors[0],
+        "Hud"
+      )
+    else:
+      for slot in 0 ..< min(QueueSlots, selection.units.len):
+        let
+          well = selection.units[slot]
+          filled = slot < structure.queueLength
+        if filled:
+          let kind = UnitKind(structure.queue[slot] - 1)
+          sk.drawPortrait(
+            well,
+            unitSymbolKey(kind),
+            SelectionIcon,
+            teamColors[max(structure.owner, 0)]
+          )
+        if filled and slot == 0:
+          sk.drawRect(
+            well.origin,
+            vec2(well.size.x, 3),
+            rgbx(238, 216, 120, 255)
+          )
 
   for i, label in CommandTabs:
     let
@@ -794,7 +799,7 @@ proc drawUi*(
           player = commandPlayer(viewMode)
         sk.drawPortrait(
           slot,
-          buildingPortraitKey(LightPlayer, kind),
+          buildingPortraitKey(player, kind),
           IconSmall,
           commandPortraitColor(run.world.canBuild(player, kind))
         )
@@ -811,10 +816,11 @@ proc drawUi*(
         player = commandPlayer(viewMode)
       sk.drawPortrait(
         slot,
-        unitPortraitKey(LightPlayer, kind),
+        unitSymbolKey(kind),
         IconSmall,
         commandPortraitColor(
-          canShowTrain(player, primaryId, kind)
+          canShowTrain(player, primaryId, kind),
+          teamColors[player]
         )
       )
       sk.drawSlotCosts(slot, stats.gold, stats.wood)
@@ -863,8 +869,16 @@ proc drawUi*(
   sk.drawDebugMenu(window)
   statsState.syncDirector(actionCam, table, window.tabHeld)
 
-proc drawStatsOverlay*(sk: Silky, window: Window) =
+proc drawStatsOverlay*(
+  sk: Silky,
+  window: Window,
+  teamColors: array[PlayerCount, ColorRGBX]
+) =
   ## Presents readable statistics above the HUD at every window width.
   sk.drawStatsOverlay(
-    window, currentLayout(window), statsState, currentStats(), run.history
+    window,
+    currentLayout(window),
+    statsState,
+    currentStats(teamColors),
+    run.history
   )

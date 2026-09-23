@@ -42,7 +42,7 @@ let
 `generate` returns a standard glTF `Node` with meshes, tinted materials, and
 textures ready for the game's renderer. Add it to your scene or pass it to
 the toon renderer's `draw` procedure. GPU upload happens when it is rendered.
-The 512-pixel textures load from `polyworld_data/terrain/treegen` at runtime.
+The 512-pixel textures load from `polyworld_art/terrain/treegen` at runtime.
 Run native programs from the Polyworld repository. Browser builds package
 these shared textures in `.data`, outside `.wasm`.
 
@@ -59,7 +59,7 @@ Cut height in the Trunk tab ranges from 0.3 to 3 world units. Radius, taper,
 bend, polygon resolution, and the root controls also apply. The trunk keeps
 a broad top, and roots stay below the cut. Stumps have no branches or leaves.
 The cut surface shares the trunk's rim positions and maps the supplied
-`polyworld_data/terrain/treegen/stump-rings.png` texture once across the disk.
+`polyworld_art/terrain/treegen/stump-rings.png` texture once across the disk.
 Its UVs stay inside
 the painted wood so the texture's transparent border cannot create holes.
 Ring spacing stays constant in world units. Narrow cuts zoom into the
@@ -119,7 +119,7 @@ After replacing the foliage atlas, regenerate them with
 `python3 tools/gen_tree_trims.py` (requires Pillow).
 The source PNG is read unchanged.
 
-All three assets in `polyworld_data/terrain/treegen` are 512 by 512 pixels.
+All three assets in `polyworld_art/terrain/treegen` are 512 by 512 pixels.
 The supplied v8 foliage
 atlas and bark texture are downsampled with alpha-aware Lanczos filtering;
 the supplied 512-pixel stump texture is copied unchanged. Source images are
@@ -134,7 +134,7 @@ darkening at each branch attachment and the brighter leaf tips. Presets use
 zero Shade variation so whole leaf cards receive the same brightness factor.
 The Shade variation slider remains available for deliberate variation.
 
-Bark uses the supplied tileable `polyworld_data/terrain/treegen/bark.png`.
+Bark uses the supplied tileable `polyworld_art/terrain/treegen/bark.png`.
 Its luminance is neutralized in memory so the Bark RGB controls set its color.
 The Colors tab has Bark texture for contrast and Bark density for repeats
 per world unit. Higher density gives smaller details. UVs follow measured

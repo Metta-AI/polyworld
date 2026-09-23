@@ -75,7 +75,7 @@ proc checkModels(game: string, declarations: seq[Asset], source: string) =
   echo &"{game}: {models} models, {meshes} meshes, {poses} poses unchanged"
 
 block:
-  let source = getEnv("POLYWORLD_DATA", "../polyworld_data")
+  let source = getEnv("POLYWORLD_ART", "../polyworld_art")
   checkModels("cta", ctaAssets.browserAssets(), source)
   checkModels("gota", gotaAssets.browserAssets(), source)
   checkModels("lvd", lvdAssets.browserAssets(), source)

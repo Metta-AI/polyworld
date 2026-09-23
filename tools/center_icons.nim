@@ -1,7 +1,7 @@
 ## Centers visible PNG content without scaling or resampling it.
 ##
 ## Run it from the repository root with an optional directory argument.
-## The directory defaults to ../polyworld_data/icons. Pixels below AlphaThreshold are
+## The directory defaults to ../polyworld_art/icons. Pixels below AlphaThreshold are
 ## ignored when measuring, but are preserved when moved.
 
 import
@@ -10,7 +10,7 @@ import
 
 const
   AlphaThreshold = 8'u8
-  DefaultDirectory = "../polyworld_data/icons"
+  DefaultDirectory = "../polyworld_art/icons"
 
 type
   PixelBounds = object

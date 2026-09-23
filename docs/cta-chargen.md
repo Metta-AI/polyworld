@@ -2,7 +2,7 @@
 
 The approved existing-asset roster now runs in CtA. No geometry was modeled
 for this integration. Runtime recipes live in
-`../polyworld_data/characters/chargen/cta.json`.
+`../polyworld_art/characters/chargen/cta.json`.
 
 | Hero role | GotA preset | Equipment |
 | --- | --- | --- |

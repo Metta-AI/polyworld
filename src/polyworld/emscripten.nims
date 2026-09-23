@@ -8,7 +8,7 @@ proc setupEmscripten*(exampleDir: string, game = "") =
   when defined(emscripten):
     let
       repoDir = exampleDir / ".." / ".."
-      dataDir = getEnv("POLYWORLD_DATA", repoDir / ".." / "polyworld_data")
+      dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
       outputDir = exampleDir / "emscripten"
       shellTemplate = repoDir / "src" / "polyworld" /
         (if defined(replayViewer): "replay.html" else: "emscripten.html")
@@ -18,7 +18,7 @@ proc setupEmscripten*(exampleDir: string, game = "") =
         ""
       else:
         "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
-    var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_data")
+    var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_art")
     var logo = ""
     if not dirExists(outputDir):
       mkDir(outputDir)
@@ -44,7 +44,7 @@ proc setupEmscripten*(exampleDir: string, game = "") =
       logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
         "width=\"320\" height=\"240\" src=\"loading-logo.png\" " &
         "fetchpriority=\"high\">"
-      preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_data")
+      preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
     let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
     if not fileExists(shellFile) or readFile(shellFile) != shell:
       writeFile(shellFile, shell)
