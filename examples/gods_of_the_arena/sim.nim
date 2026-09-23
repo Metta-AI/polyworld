@@ -723,8 +723,9 @@ proc rebuildVision*(world: World) {.measure.} =
   if sameVisionKeys(visionSkipNow, world.visionSkipKeys):
     return
   visionBlockers.setLen(sightTerrain.blockerHeights.len)
-  for i, value in sightTerrain.blockerHeights:
-    visionBlockers[i] = value
+  if visionBlockers.len > 0:
+    copyMem(visionBlockers[0].addr, sightTerrain.blockerHeights[0].addr,
+      visionBlockers.len * sizeof(int16))
   for towerSlot in 0 ..< world.buildings.len:
     let tower {.cursor.} = world.buildings[towerSlot]
     if tower.hp > 0:
