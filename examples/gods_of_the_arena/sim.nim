@@ -305,10 +305,10 @@ type
     teamExplored*: array[2, seq[uint8]]
     visionCache: array[2, VisionCache]
     visionSkipKeys: seq[int32]
-    scriptObjects: seq[WorldObject]
-    scriptObjectCount: int
-    scriptObjectsHeroId: int32
-    scriptObjectsTick: int32
+    scriptObjects: array[Team, seq[WorldObject]]
+    scriptObjectCount: array[Team, int]
+    scriptObjectsHeroId: array[Team, int32]
+    scriptObjectsTick: array[Team, int32]
     observationsFrozen: bool
     observedObjects: seq[WorldObject]
     observedSpells: array[Team, seq[SpellCast]]
@@ -2220,7 +2220,7 @@ proc freezeObservations*(world: World): bool =
       cmp(world.spellObservationKey(first, team),
         world.spellObservationKey(second, team))
     )
-  world.scriptObjectsTick = -1
+  world.scriptObjectsTick = [-1'i32, -1]
   world.observationsFrozen = true
   true
 
@@ -2230,7 +2230,7 @@ proc thawObservations*(world: World) =
   world.observedObjects.setLen(0)
   for spells in world.observedSpells.mitems:
     spells.setLen(0)
-  world.scriptObjectsTick = -1
+  world.scriptObjectsTick = [-1'i32, -1]
 
 iterator observedCasts*(world: World, team: Team): SpellCast =
   ## Reads the common decision frame, or live casts outside that phase.
@@ -2259,44 +2259,50 @@ proc scriptObjectKey(value: WorldObject, observer: Team):
   (group, int(value.faction != observer.ord.int32), direction * value.position.z,
     direction * value.position.x, value.id)
 
-proc ensureScriptObjects(world: World, heroId: int32) =
-  ## Rebuilds the visible object list once per hero decision tick.
-  if world.scriptObjectsHeroId == heroId and
-      world.scriptObjectsTick == world.tick:
-    return
-  world.scriptObjectCount = 0
+proc ensureScriptObjects(world: World, heroId: int32): Team =
+  ## Rebuilds the visible object list once per team decision frame.
+  ## Every hero of a team sees the same list while observations are
+  ## frozen, so one sort serves the whole team.
   let observer = heroIndex(world, heroId)
-  if observer >= 0:
-    let team = world.heroes[observer].team
-    var value: WorldObject
-    let count =
-      if world.observationsFrozen: world.observedObjects.len
-      else: rawWorldObjectCount(world)
-    for i in 0 ..< count:
-      if world.observationsFrozen:
-        value = world.observedObjects[i]
-      elif not rawWorldObjectAt(world, i, value):
-        continue
-      if not objectVisibleTo(world, team, value) or
-          (value.kind in [TowerObjectKind, BarracksObjectKind] and value.hp <= 0):
-        continue
-      if world.scriptObjectCount == world.scriptObjects.len:
-        world.scriptObjects.add value
-      else:
-        world.scriptObjects[world.scriptObjectCount] = value
-      inc world.scriptObjectCount
-    world.scriptObjects.setLen(world.scriptObjectCount)
-    world.scriptObjects.sort(proc(first, second: WorldObject): int =
-      ## Orders observed identities in the querying team's coordinate frame.
-      cmp(first.scriptObjectKey(team), second.scriptObjectKey(team))
-    )
-  world.scriptObjectsHeroId = heroId
-  world.scriptObjectsTick = world.tick
+  if observer < 0:
+    return
+  let team = world.heroes[observer].team
+  result = team
+  if world.scriptObjectsTick[team] == world.tick and
+      (world.observationsFrozen or world.scriptObjectsHeroId[team] == heroId):
+    return
+  world.scriptObjectCount[team] = 0
+  var value: WorldObject
+  let count =
+    if world.observationsFrozen: world.observedObjects.len
+    else: rawWorldObjectCount(world)
+  for i in 0 ..< count:
+    if world.observationsFrozen:
+      value = world.observedObjects[i]
+    elif not rawWorldObjectAt(world, i, value):
+      continue
+    if not objectVisibleTo(world, team, value) or
+        (value.kind in [TowerObjectKind, BarracksObjectKind] and value.hp <= 0):
+      continue
+    if world.scriptObjectCount[team] == world.scriptObjects[team].len:
+      world.scriptObjects[team].add value
+    else:
+      world.scriptObjects[team][world.scriptObjectCount[team]] = value
+    inc world.scriptObjectCount[team]
+  world.scriptObjects[team].setLen(world.scriptObjectCount[team])
+  world.scriptObjects[team].sort(proc(first, second: WorldObject): int =
+    ## Orders observed identities in the querying team's coordinate frame.
+    cmp(first.scriptObjectKey(team), second.scriptObjectKey(team))
+  )
+  world.scriptObjectsHeroId[team] = heroId
+  world.scriptObjectsTick[team] = world.tick
 
 proc worldObjectCount*(world: World, heroId: int32): int =
   ## Returns the number of objects visible to one hero script.
-  world.ensureScriptObjects(heroId)
-  world.scriptObjectCount
+  if world.heroIndex(heroId) < 0:
+    return 0
+  let team = world.ensureScriptObjects(heroId)
+  world.scriptObjectCount[team]
 
 proc worldObjectAt*(
     world: World,
@@ -2305,10 +2311,12 @@ proc worldObjectAt*(
     value: var WorldObject
 ): bool =
   ## Reads one object from a hero's stable visibility-filtered enumeration.
-  world.ensureScriptObjects(heroId)
-  if index < 0 or index >= world.scriptObjectCount:
+  if world.heroIndex(heroId) < 0:
     return false
-  value = world.scriptObjects[index]
+  let team = world.ensureScriptObjects(heroId)
+  if index < 0 or index >= world.scriptObjectCount[team]:
+    return false
+  value = world.scriptObjects[team][index]
   true
 
 proc worldObjectById*(
@@ -3851,7 +3859,7 @@ proc applyDraft*(
   hero.maxMana = heroMaxMana(hero.class, hero.level)
   hero.mana = hero.maxMana
   hero.initHeroCharges()
-  world.scriptObjectsTick = -1
+  world.scriptObjectsTick = [-1'i32, -1]
   inc world.draftTurn
   world.draftTurnTicks = 0
   if world.draftTurn == world.draftOrder.len:
@@ -5763,8 +5771,9 @@ proc newGame*(
       forts: startingForts(map),
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
-      scriptObjects: newSeqOfCap[WorldObject](256),
-      scriptObjectsTick: -1
+      scriptObjects: [newSeqOfCap[WorldObject](256),
+        newSeqOfCap[WorldObject](256)],
+      scriptObjectsTick: [-1'i32, -1]
     ),
     map: map,
     replayMode: replayMode,
