@@ -1,0 +1,60 @@
+{
+  "date": "2026-09-23",
+  "version": "2026.9.23.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_32f7afc6-78f6-49d5-990b-5b3c3619662c",
+  "canonical": true,
+  "source_commit": "d6827a4bd3a55a46cf86f88e921f147137709c64",
+  "asset_commit": "2ec852fda0b414788ab2ae75ebf0a7b9b499502d",
+  "replay_version": 59,
+  "changes": [
+    "Ranger HP per level: 19 to 29, halfway rollback of the previous nerf.",
+    "Crossbowman base attack damage: 69 to 58, halfway rollback of the previous buff.",
+    "Death Knight Sanguine Chalice base healing: 36 to 45 (+25%).",
+    "Demon Hunter Gale Slash base damage: 52 to 65 (+25%)."
+  ],
+  "checks": [
+    "Nim check, full Nim suite, and deterministic replay generation and playback passed.",
+    "Ten local certification checks and ten hosted certification checks passed.",
+    "All five hosted smoke episodes completed with verified integer scores.",
+    "Browser bundle rendered and verified the full 24978-tick version-59 replay.",
+    "Served JS, WASM and data hashes match the built files.",
+    "Local Linux certification and hosted league replays reproduced natively.",
+    "GitHub Pages deployment and published guide, 984-game report, spell references and copied artwork verified."
+  ],
+  "league_settings_preserved": true,
+  "verification_round": {
+    "round_id": "round_69f3b43b-85da-4adb-b82e-08f9ed224bdf",
+    "round_number": 689,
+    "status": "completed",
+    "games": 24,
+    "coworld_id": "cow_32f7afc6-78f6-49d5-990b-5b3c3619662c",
+    "version": "2026.9.23.1",
+    "integer_scores_verified": 240,
+    "outcomes": {
+      "RedTeam": 12,
+      "BlueTeam": 10,
+      "time_limit": 2
+    },
+    "replay_version": 59,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=03610734-903a-4a1c-bf90-f55cd7ed8461",
+    "verified_at": "2026-09-23T15:28:13.240540+00:00"
+  },
+  "polyworld_buff": {
+    "commit": "8a7b83c1c297b1085378ab3bffa9a816222b441b",
+    "url": "https://metta-ai.github.io/polyworld-buff/GOTA/heros/",
+    "report_games": 984,
+    "report_rounds": [
+      645,
+      685
+    ],
+    "deployed": true
+  },
+  "manifest_hash": "sha256:33da5ac892720496248c0abc9d4350d1811fb5d9ea87fd5626d5c6f55fa65e8e",
+  "viewer_sha256": {
+    "wasm": "057a09d27fff0de05e92dcae2606936fe77eb24fe7a70dfcd122ba395d564737",
+    "data": "08414034150f6015f6e90c2ea64493b08d537dd8b276c41e8e9b9510a7c7ec6d",
+    "js": "d432a5dfdc4c94cc0ee05c2c4083875687060768d71f101de4283ae331103e55"
+  },
+  "verified_at": "2026-09-23T15:33:23.663840+00:00"
+}
