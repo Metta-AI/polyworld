@@ -136,7 +136,7 @@ sub readObject(index)
   end if
   if kind = 2 and distance <= 144 then
     enemyPower = enemyPower + objectLevel(index) + 2
-    if objectMana(index) >= 25 then
+    if objectMana(index) >= 25 and objectSilenceTicks(index) = 0 then
       enemyPower = enemyPower + 2
     end if
   end if
@@ -235,6 +235,12 @@ sub observe()
   ' Divide large integer world units before mixing them with Q16.16 values.
   velocityX = (side * objectVelX(bestIndex) \ 100) / (worldScale \ 100)
   velocityY = (side * objectVelY(bestIndex) \ 100) / (worldScale \ 100)
+  ' Do not lead a unit whose control lasts through the predicted impact.
+  targetHeld = objectStunTicks(bestIndex)
+  targetRoot = objectRootTicks(bestIndex)
+  if targetRoot > targetHeld then
+    targetHeld = targetRoot
+  end if
   facingX = (side * objectFacingX(bestIndex) \ 100) / (worldScale \ 100)
   facingY = (side * objectFacingY(bestIndex) \ 100) / (worldScale \ 100)
   aimedAtUs = facingX * (myX - bestX) + facingY * (myY - bestY)
@@ -474,6 +480,9 @@ sub moveTo(goalX, goalY, marching)
 end sub
 
 sub spells()
+  if selfSilenceTicks > 0 then
+    exit sub
+  end if
   for spellSlot = 0 to 3
     charges = abilityCharges(spellSlot)
     recharge = abilityRecharge(spellSlot)
@@ -512,6 +521,10 @@ sub spells()
             ' Area spells lead the observed movement, with a bounded lead.
             leadX = velocityX * castDelay(spellSlot)
             leadY = velocityY * castDelay(spellSlot)
+            if targetHeld >= castDelay(spellSlot) then
+              leadX = 0
+              leadY = 0
+            end if
             if leadX > 2 then
               leadX = 2
             elseif leadX < -2 then

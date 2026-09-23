@@ -123,7 +123,7 @@ replay payloads and state hashes, and never accumulates a match history.
 | `EntitySpawned`, `EntityRespawned`, `EntityRemoved` | Entity lifecycle; corpse expiration is distinct from death. |
 | `MatchEnded` | God destruction or configured time limit. `amount` is winning team (0 red, 1 blue), or -1 for timeout. A partial recording does not imply a match ended. |
 | `PortalStarted`, `PortalCompleted`, `PortalInterrupted` | Scroll channel lifecycle. Start/interruption reference the selected tower; completion references the hero at arrival. |
-| `Stunned`, `Rooted` | A control effect was applied to the target hero. These interrupt an active teleport. |
+| `Stunned`, `Silenced`, `Rooted` | Control applied to a living unit. `actor` is the caster, `detail` the ability ID, `requested`/`amount` the duration, and `before`/`after` the expiration ticks. Stun and root interrupt teleporting. |
 | `RecoveryStarted`, `RecoveryCompleted`, `RecoveryInterrupted` | Potion regeneration lifecycle. `detail` is the item ID; interruption identifies the damaging actor and affected hero. |
 
 `related` is a zero-based index within the same tick, or -1 when absent.
@@ -176,11 +176,22 @@ Named read-only BASIC constants match `ActionError` in `events.nim`:
 | 21 | `ActionStunned` |
 | 22 | `ActionRooted` |
 | 23 | `ActionOutsideKeep` |
+| 24 | `ActionAbilityLocked` |
+| 25 | `ActionNoAbilityPoints` |
+| 26 | `ActionAbilityMaxLevel` |
+| 27 | `ActionHeroLevelRequired` |
+| 28 | `ActionNotDead` |
+| 29 | `ActionMatchEnded` |
+| 30 | `ActionDrafting` |
+| 31 | `ActionNotDrafting` |
+| 32 | `ActionNotDraftTurn` |
+| 33 | `ActionUnknownHero` |
+| 34 | `ActionHeroTaken` |
+| 35 | `ActionSilenced` |
 
-Gameplay version 45 includes keep-only shopping, potion recovery and cooldowns,
-and fast spawn recovery. Potion effects, channels, shared cooldowns, and control
-effects are hashed. Playback regenerates the same events and diagnostic state.
-This client accepts only version 45; older recordings
-require their archived client.
+Gameplay version 61 adds ability stun, silence, and root effects. Control
+start and expiration ticks are hashed and restored through replay seeking.
+Playback regenerates the same events and diagnostic state. This client
+accepts only version 61; older recordings require their archived client.
 
 Rejected movement and ground casts include `offsetX` and `offsetY`, signed Q16.16 offsets from the named tile center. Multiply by 1/65536 to read the fractional tile component.

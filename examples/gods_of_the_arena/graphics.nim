@@ -616,6 +616,44 @@ proc runGraphics*() =
         anchor
       )
 
+  proc addControlIcons(
+      renderer: var WorldBarRenderer,
+      anchor: Vec3,
+      controls: array[ControlEffect, ControlTimer]
+  ) =
+    ## Shows simultaneous effects above visible units with remaining-time rings.
+    const
+      Size = 0.52'f
+      Spacing = 0.64'f
+      Colors = [rgbx(0, 0, 0, 0), rgbx(255, 206, 83, 255),
+        rgbx(194, 144, 255, 255), rgbx(136, 218, 111, 255)]
+    var count = 0
+    for effect in StunControl .. RootControl:
+      if controls[effect].ends > run.world.tick:
+        inc count
+    var index = 0
+    for effect in StunControl .. RootControl:
+      let timer = controls[effect]
+      if timer.ends <= run.world.tick:
+        continue
+      let
+        entry = sk.atlas.entries[ControlIconNames[effect]]
+        offset = vec2((index.float32 - (count - 1).float32 / 2) * Spacing, 0)
+        fraction = (timer.ends - run.world.tick).float32 /
+          max(1'i32, timer.ends - timer.started).float32
+      renderer.addBillboardQuad(
+        anchor, offset - vec2(Size / 2), vec2(Size),
+        rgbx(255, 255, 255, 255),
+        vec2(entry.x.float32, entry.y.float32) / sk.atlas.size.float32,
+        vec2(entry.width.float32, entry.height.float32) / sk.atlas.size.float32,
+        textureMode = ColorTexture
+      )
+      renderer.addBillboardRing(
+        anchor, offset, 0.31'f, 0.04'f, 1, rgbx(30, 32, 38, 255))
+      renderer.addBillboardRing(
+        anchor, offset, 0.31'f, 0.04'f, fraction, Colors[effect.ord])
+      inc index
+
   proc drawWorldUnitBars(
       renderer: var WorldBarRenderer,
       viewProjection: Mat4,
@@ -665,6 +703,7 @@ proc runGraphics*() =
         gap = DefaultGap * HeroWorldBarScale,
         border = DefaultBorder * HeroWorldBarScale
       )
+      renderer.addControlIcons(anchor + vec3(0, 0.85'f, 0), hero.controls)
       if hero.portalEnds > run.world.tick:
         renderer.addText(
           portalLabels[clamp((hero.portalEnds - run.world.tick - 1) div
@@ -734,6 +773,10 @@ proc runGraphics*() =
           maximumHealth,
           dt
         )
+      renderer.addControlIcons(
+        unitRenderPoint(footman.id, footman.position) + vec3(0, 2.15'f, 0),
+        footman.controls
+      )
       if footman.hp < FootmanHp:
         let
           anchor = unitRenderPoint(footman.id, footman.position) +

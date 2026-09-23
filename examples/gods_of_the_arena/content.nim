@@ -52,6 +52,10 @@ type
     RageCrucible, MoltenFist, WingedBoot, VolcanicEruption
   AbilityKind* = enum
     Strike, Heal, Restore
+  ControlEffect* = enum
+    NoControl, StunControl, SilenceControl, RootControl
+  ControlTimer* = object
+    started*, ends*: int32
   CastKind* = enum
     SelfCast, MeleeCast, ProjectileCast, AreaCast
   HeroSpec* = object
@@ -88,6 +92,8 @@ type
     damage*: int32
     heal*: int32
     restore*: int32
+    control*: ControlEffect
+    controlTicks*: int32
   Item* = enum
     NoItem,
     HealthPotion,
@@ -356,7 +362,8 @@ const
       slot: UltimateAbility,
       name: "Blazing Blade", icon: "blazing_blade",
       kind: Strike, cooldownTicks: 480, manaCost: 70,
-      range: 110_000, damage: 90
+      range: 110_000, damage: 72,
+      control: StunControl, controlTicks: TickRate
     ),
     DragonSight: AbilitySpec(
       slot: PassiveAbility,
@@ -424,7 +431,8 @@ const
       slot: UltimateAbility,
       name: "Golem Seed", icon: "golem_seed",
       kind: Strike, cooldownTicks: 528, manaCost: 75,
-      range: 200_000, damage: 85
+      range: 200_000, damage: 68,
+      control: RootControl, controlTicks: 2 * TickRate
     ),
     ShadowCloak: AbilitySpec(
       slot: PassiveAbility,
@@ -512,7 +520,8 @@ const
       slot: SecondaryAbility,
       name: "Bone Marionette", icon: "bone_marionette",
       kind: Strike, cooldownTicks: 216, manaCost: 48,
-      range: 300_000, damage: 66
+      range: 300_000, damage: 53,
+      control: RootControl, controlTicks: TickRate
     ),
     BoundVoid: AbilitySpec(
       slot: UltimateAbility,
@@ -535,7 +544,8 @@ const
       slot: SecondaryAbility,
       name: "Dread Totem", icon: "dread_totem",
       kind: Strike, cooldownTicks: 216, manaCost: 42,
-      range: 240_000, damage: 87
+      range: 240_000, damage: 70,
+      control: SilenceControl, controlTicks: 2 * TickRate
     ),
     VoidPortal: AbilitySpec(
       slot: UltimateAbility,
@@ -829,6 +839,7 @@ proc abilitySpec*(ability: Ability, rank: int32): AbilitySpec =
   result.restore = result.restore * scale div 2
   if level == 0:
     result.charges = 0
+    result.controlTicks = 0
 
 proc abilityIconKey*(ability: Ability): string =
   ## Returns the atlas name packed from one ability art file.

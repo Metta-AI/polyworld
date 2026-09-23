@@ -40,13 +40,15 @@ type
     DataSelfChannelTicks,
     DataSelfStunTicks,
     DataSelfRootTicks,
+    DataSelfSilenceTicks,
     DataSelfDeaths,
     DataSelfRespawnTicks,
     DataDrafting,
     DataDraftTurnId
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
-    ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY
+    ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY,
+    ObjectStunTicks, ObjectSilenceTicks, ObjectRootTicks
   SpellField = enum
     SpellAbility, SpellCasterId, SpellX, SpellY, SpellImpactTick
   AbilityField = enum
@@ -78,6 +80,7 @@ const
     "selfChannelTicks",
     "selfStunTicks",
     "selfRootTicks",
+    "selfSilenceTicks",
     "selfDeaths",
     "selfRespawnTicks",
     "drafting",
@@ -158,6 +161,9 @@ proc objectProc(heroId: int32, field: ObjectField): HostProc =
       value.level
     of ObjectMana:
       value.mana
+    of ObjectStunTicks: value.controlTicks[StunControl]
+    of ObjectSilenceTicks: value.controlTicks[SilenceControl]
+    of ObjectRootTicks: value.controlTicks[RootControl]
     of ObjectItemId, ObjectItemCount:
       let slot = int(arguments[1])
       if slot < 0 or slot >= InventorySlots:
@@ -686,6 +692,9 @@ proc initHeroHost(heroId: int32): Host =
   for (field, name) in [
     (ObjectLevel, "objectLevel"),
     (ObjectMana, "objectMana"),
+    (ObjectStunTicks, "objectStunTicks"),
+    (ObjectSilenceTicks, "objectSilenceTicks"),
+    (ObjectRootTicks, "objectRootTicks"),
     (ObjectItemId, "objectItemId"),
     (ObjectItemCount, "objectItemCount"),
     (ObjectFacingX, "objectFacingX"),
@@ -840,9 +849,11 @@ proc runHeroScript(game: Game, index: int) =
     vm.runtime.setData(heroDataIds[DataSelfChannelTicks],
       max(0'i32, hero.portalEnds - game.world.tick))
     vm.runtime.setData(heroDataIds[DataSelfStunTicks],
-      max(0'i32, hero.stunnedUntil - game.world.tick))
+      max(0'i32, hero.controls[StunControl].ends - game.world.tick))
+    vm.runtime.setData(heroDataIds[DataSelfSilenceTicks],
+      max(0'i32, hero.controls[SilenceControl].ends - game.world.tick))
     vm.runtime.setData(heroDataIds[DataSelfRootTicks],
-      max(0'i32, hero.rootedUntil - game.world.tick))
+      max(0'i32, hero.controls[RootControl].ends - game.world.tick))
     vm.runtime.setData(heroDataIds[DataSelfDeaths], hero.deaths)
     vm.runtime.setData(heroDataIds[DataSelfRespawnTicks], hero.respawnTicks())
     discard vm.runtime.run(vm.output)

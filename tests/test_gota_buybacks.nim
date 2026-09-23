@@ -134,8 +134,9 @@ block:
   hero.recharges[PrimaryAbility] = 100
   hero.portalCooldownEnds = world.tick + 100
   hero.potionCooldownEnds[HealthRecovery] = world.tick + 100
-  hero.stunnedUntil = world.tick + 100
-  hero.rootedUntil = world.tick + 100
+  hero.controls[StunControl].ends = world.tick + 100
+  hero.controls[RootControl].ends = world.tick + 100
+  hero.controls[SilenceControl].ends = world.tick + 100
   let cooldownEnds = world.tick + 100
   doAssert world.applyBuyback(hero.id)
   doAssert hero.lastActionError == NoActionError
@@ -153,7 +154,7 @@ block:
     heroAbility(hero.class, PrimaryAbility).abilitySpec.charges
   doAssert hero.abilityLevels == levels and hero.abilityPoints == 0
   doAssert hero.charges[UltimateAbility] == 0
-  doAssert hero.stunnedUntil == 0 and hero.rootedUntil == 0
+  doAssert hero.controls == default(typeof(hero.controls))
   doAssert hero.portalCooldownEnds == cooldownEnds
   doAssert hero.potionCooldownEnds[HealthRecovery] == cooldownEnds
   doAssert not world.applyBuyback(hero.id)

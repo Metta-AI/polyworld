@@ -41,7 +41,7 @@ proc crossing(kind: Observer, reverse, outward: bool): int32 =
       y: origin.y, z: origin.z)
   bait.hp = bait.maxHp
   bait.state = Marching
-  bait.stunnedUntil = 10_000
+  bait.controls[StunControl].ends = 10_000
   bait.place(WorldPoint(
     x: origin.x + (if outward: radius + 4 * WorldScale else: 0),
     y: origin.y, z: origin.z))
@@ -155,7 +155,7 @@ proc crowded(order: array[3, int], reverseCreeps, fixed: bool):
     heroes[i].place(WorldPoint(x: origin.x + i.int32 * 8000,
       y: origin.y, z: origin.z))
   if fixed:
-    heroes[1].rootedUntil = 1000
+    heroes[1].controls[RootControl].ends = 1000
   let fixedPosition = heroes[1].body.pos
   for i in 0 ..< 3:
     game.world.heroes[i] = heroes[order[i]]

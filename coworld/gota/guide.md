@@ -200,7 +200,7 @@ The existing `selfId`, `selfTeam`, `selfClass`, `selfX`, `selfY`, `selfHp`, `sel
 | `selfAttacksLanded` | Lifetime count of successful basic hits, preserved across respawns. Spells do not increment it. |
 | `selfPortalCooldown` | Ticks before another Portal Scroll can be used, shared across all inventory stacks and preserved through death. |
 | `selfChannelTicks` | Ticks remaining in the current teleport channel, or zero. |
-| `selfStunTicks`, `selfRootTicks` | Ticks remaining in these control effects, or zero. |
+| `selfStunTicks`, `selfRootTicks`, `selfSilenceTicks` | Ticks remaining in these control effects, or zero. |
 
 ### Shop, potions, and spawn recovery
 
@@ -244,8 +244,8 @@ The hero cannot move, attack, or cast while channeling, and still takes
 damage. Stuns, roots, death, or loss of the anchor interrupt the channel.
 The scroll is spent when the channel begins. Completion or interruption
 starts a **60-second** cooldown shared by every scroll the hero holds.
-Damage alone does not interrupt it. Current spells have no stun/root
-effects; the simulation's stun/root APIs support interruption when applied.
+Damage alone and silence do not interrupt it. Blazing Blade, Golem Seed,
+and Bone Marionette can interrupt the channel on impact.
 `useItem(slot)` rejects scrolls because they require a destination.
 
 For human play, click the inventory scroll (or press F/G for the first two
@@ -260,6 +260,7 @@ Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = god, 2 =
 | --- | --- |
 | `objectLevel(i)` | Hero level. |
 | `objectMana(i)` | Hero's current mana. |
+| `objectStunTicks(i)`, `objectSilenceTicks(i)`, `objectRootTicks(i)` | Remaining control ticks for a visible unit, or zero. Uses the same frozen, LOS-filtered object list. |
 | `objectItemId(i, slot)` | Hero's held item ID, using the same IDs as `itemId` and `buyItem`. Zero means no item. Slots are 0 through 5. |
 | `objectItemCount(i, slot)` | Stack count in that hero's inventory slot. |
 | `objectFacingX(i)`, `objectFacingY(i)` | Normalized horizontal facing, scaled by `worldScale`. A unit facing positive X reports `(60000, 0)`. |
@@ -316,6 +317,28 @@ if selfRespawnTicks > 0 then
 end if
 ```
 
+## Crowd control
+
+| Hero | Ability | Effect | Rank-one damage |
+| --- | --- | --- | --- |
+| Vanguard | R: Blazing Blade | Stun for 1 second | 72 |
+| Warlock | E: Dread Totem | Silence for 2 seconds | 70 |
+| Druid | R: Golem Seed | Root for 2 seconds | 68 |
+| Lich | E: Bone Marionette | Root for 1 second | 53 |
+
+These abilities trade about 20% of their damage for control. Durations stay
+fixed at every rank. Effects apply on impact to enemy heroes and creeps;
+buildings and gods are immune. A stun stops movement, basic attacks,
+abilities, and items, and cancels a pending basic swing. Silence prevents
+all four abilities but allows movement, basic attacks, and items. Root
+prevents movement and teleporting, while allowing in-range attacks,
+abilities, and other items. Stun and root interrupt teleport channels.
+Already released spells still resolve.
+
+Different effects coexist. Reapplying one keeps the later expiration,
+without adding durations. All effects clear on death and respawn. Visible
+affected units show icons with countdown rings above their health bars.
+
 ## Action feedback
 
 `lastActionError()` returns the reason for your hero's latest submitted
@@ -341,8 +364,8 @@ Read-only reason constants are `NoActionError`, `ActionNotAlive`,
 `ActionStunned`, `ActionRooted`, `ActionOutsideKeep`, `ActionAbilityLocked`,
 `ActionNoAbilityPoints`, `ActionAbilityMaxLevel`, `ActionHeroLevelRequired`,
 `ActionNotDead`, `ActionMatchEnded`, `ActionDrafting`, `ActionNotDrafting`,
-`ActionNotDraftTurn`, `ActionUnknownHero`, and `ActionHeroTaken`
-(values 0 through 34).
+`ActionNotDraftTurn`, `ActionUnknownHero`, `ActionHeroTaken`, and `ActionSilenced`
+(values 0 through 35).
 Unavailable targets share a generic error without exposing hidden state.
 This feedback is recorded deterministically through submitted replay actions.
 

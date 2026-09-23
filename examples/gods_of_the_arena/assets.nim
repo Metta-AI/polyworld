@@ -4,6 +4,9 @@ import
   content
 
 const
+  ControlIconNames*: array[ControlEffect, string] = [
+    "", "stunned", "silenced", "rooted"
+  ]
   LogoPath* = DataRoot & "/themes/gota/gota_logo.png"
   LicensePaths* = [
     "LICENSE", "licenses/gota.md",

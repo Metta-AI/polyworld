@@ -661,13 +661,14 @@
               </div>
               <h4>Blazing Blade</h4>
               <p class="cast-type">Area cast</p>
+              <p>Stuns enemy heroes and creeps for 1 second. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Blazing Blade spell levels">
                 <caption>Spell levels · 3 ranks</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
-                  <tr><th scope="row">1</th><td>6</td><td>90</td></tr>
-                  <tr><th scope="row">2</th><td>12</td><td>135</td></tr>
-                  <tr><th scope="row">3</th><td>18</td><td>180</td></tr>
+                  <tr><th scope="row">1</th><td>6</td><td>72</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>108</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>144</td></tr>
                 </tbody>
               </table>
               <dl class="ability-stats">
@@ -1154,13 +1155,14 @@
               </div>
               <h4>Golem Seed</h4>
               <p class="cast-type">Area cast</p>
+              <p>Roots enemy heroes and creeps for 2 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Golem Seed spell levels">
                 <caption>Spell levels · 3 ranks</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
-                  <tr><th scope="row">1</th><td>6</td><td>85</td></tr>
-                  <tr><th scope="row">2</th><td>12</td><td>127</td></tr>
-                  <tr><th scope="row">3</th><td>18</td><td>170</td></tr>
+                  <tr><th scope="row">1</th><td>6</td><td>68</td></tr>
+                  <tr><th scope="row">2</th><td>12</td><td>102</td></tr>
+                  <tr><th scope="row">3</th><td>18</td><td>136</td></tr>
                 </tbody>
               </table>
               <dl class="ability-stats">
@@ -1774,14 +1776,15 @@
               </div>
               <h4>Bone Marionette</h4>
               <p class="cast-type">Area cast</p>
+              <p>Roots enemy heroes and creeps for 1 second. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Bone Marionette spell levels">
                 <caption>Spell levels · 4 ranks</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
-                  <tr><th scope="row">1</th><td>1</td><td>66</td></tr>
-                  <tr><th scope="row">2</th><td>3</td><td>99</td></tr>
-                  <tr><th scope="row">3</th><td>5</td><td>132</td></tr>
-                  <tr><th scope="row">4</th><td>7</td><td>165</td></tr>
+                  <tr><th scope="row">1</th><td>1</td><td>53</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>79</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>106</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>132</td></tr>
                 </tbody>
               </table>
               <dl class="ability-stats">
@@ -1938,14 +1941,15 @@
               </div>
               <h4>Dread Totem</h4>
               <p class="cast-type">Area cast</p>
+              <p>Silences enemy heroes and creeps for 2 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Dread Totem spell levels">
                 <caption>Spell levels · 4 ranks</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
-                  <tr><th scope="row">1</th><td>1</td><td>87</td></tr>
-                  <tr><th scope="row">2</th><td>3</td><td>130</td></tr>
-                  <tr><th scope="row">3</th><td>5</td><td>174</td></tr>
-                  <tr><th scope="row">4</th><td>7</td><td>217</td></tr>
+                  <tr><th scope="row">1</th><td>1</td><td>70</td></tr>
+                  <tr><th scope="row">2</th><td>3</td><td>105</td></tr>
+                  <tr><th scope="row">3</th><td>5</td><td>140</td></tr>
+                  <tr><th scope="row">4</th><td>7</td><td>175</td></tr>
                 </tbody>
               </table>
               <dl class="ability-stats">
@@ -2231,8 +2235,9 @@
 
       <h3>Portal Scroll</h3>
       <p><img class="icon" src="../../../../polyworld_art/items/waystone_scroll.png" alt="Portal Scroll"> Item 21 costs 100 gold and stacks to eight. Click the scroll, then right-click the map or minimap. It consumes one scroll and channels for 3 seconds, teleporting to visible, walkable ground within a living allied tower's sight (7 tiles for outer/inner towers, 8 for gate/guard towers). Distant destinations are clamped into tower range. Barracks cannot anchor a teleport.</p>
-      <p>You cannot move, attack, or cast during the channel, but can still take damage and die. Stun, root, death, or destruction of the selected tower cancels it. Damage alone does not cancel it. Completion or interruption starts a shared 60-second cooldown, preserved through death. Existing spells do not currently stun or root; those simulation effects interrupt teleport when applied.</p>
-      <p>BASIC: <code>useItemAt(slot, x, y)</code> accepts fractional coordinates and returns 1 on success, 0 on rejection. <code>selfPortalCooldown</code>, <code>selfChannelTicks</code>, <code>selfStunTicks</code>, and <code>selfRootTicks</code> report remaining ticks. <code>useItem(slot)</code> rejects scrolls because they require a destination.</p>
+      <p>You cannot move, attack, or cast during the channel, but can still take damage and die. Stun, root, death, or destruction of the selected tower cancels it. Damage alone does not cancel it. Completion or interruption starts a shared 60-second cooldown, preserved through death. Blazing Blade, Golem Seed, and Bone Marionette can interrupt the channel on impact. Silence does not interrupt it.</p>
+      <p>Control effects: stun blocks movement, basic attacks, abilities, and items, cancelling a pending swing. Silence blocks all four abilities but allows moving, attacking, and items. Root blocks moving and teleporting but allows in-range attacks, abilities, and other items. Stun and root interrupt teleport channels. Already released spells still resolve. Effects apply to enemy heroes and creeps; buildings and gods are immune. Different effects coexist, with icons and countdown rings above visible units. Reapplying one keeps the later expiration instead of adding durations. Death clears all effects. Silenced casts return <code>ActionSilenced</code> (35).</p>
+      <p>BASIC: <code>useItemAt(slot, x, y)</code> accepts fractional coordinates and returns 1 on success, 0 on rejection. <code>selfPortalCooldown</code>, <code>selfChannelTicks</code>, <code>selfStunTicks</code>, <code>selfRootTicks</code>, and <code>selfSilenceTicks</code> report remaining ticks. <code>useItem(slot)</code> rejects scrolls because they require a destination.</p>
 
       <h3 style="margin: 22px 0 12px; color: var(--gold);">Equipment</h3>
       <div class="shop">
@@ -2519,6 +2524,7 @@ end if</code></pre>
         <tbody>
           <tr><td><code>objectLevel(i)</code></td><td>Hero level.</td></tr>
           <tr><td><code>objectMana(i)</code></td><td>Hero's current mana.</td></tr>
+          <tr><td><code>objectStunTicks(i)</code>, <code>objectSilenceTicks(i)</code>, <code>objectRootTicks(i)</code></td><td>Remaining control ticks for visible units. Zero when inactive or invalid. Uses the same frozen, LOS-filtered object list.</td></tr>
           <tr><td><code>objectItemId(i, slot)</code></td><td>Hero's held item ID, using the same IDs as <code>itemId</code> and <code>buyItem</code>. Zero means no item. Slots are 0 through 5.</td></tr>
           <tr><td><code>objectItemCount(i, slot)</code></td><td>Stack count in that hero's inventory slot.</td></tr>
           <tr><td><code>objectFacingX(i)</code>, <code>objectFacingY(i)</code></td><td>Normalized horizontal facing, scaled by <code>worldScale</code>. A unit facing positive X reports <code>(60000, 0)</code>.</td></tr>
@@ -2545,7 +2551,7 @@ end if</code></pre>
       <p><code>players/rusher.bas</code> pushes all five heroes down mid together. When any pair of living allies is more than 10 tiles apart, the team regroups toward its center until the gap is at most 8 tiles. Otherwise it attacks visible, vulnerable enemies within 20 tiles or attack-moves through the middle toward the enemy god. Dead allies are ignored until they respawn. This policy uses basic attacks only.</p>
       <h3>Action feedback</h3>
       <p><code>lastActionError()</code> reports your hero's latest submitted command error. Success clears it to <code>NoActionError</code> (0). Rejection preserves the command's 0 return value and records the first failed check. Read-only queries and automatic basic attacks do not overwrite it. Read the error immediately after the command; unlike sampled self data, it updates during a decision.</p>
-      <p>Read-only constants (values 0 through 34): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>, <code>ActionChanneling</code>, <code>ActionStunned</code>, <code>ActionRooted</code>, <code>ActionOutsideKeep</code>, <code>ActionAbilityLocked</code>, <code>ActionNoAbilityPoints</code>, <code>ActionAbilityMaxLevel</code>, <code>ActionHeroLevelRequired</code>, <code>ActionNotDead</code>, <code>ActionMatchEnded</code>, <code>ActionDrafting</code>, <code>ActionNotDrafting</code>, <code>ActionNotDraftTurn</code>, <code>ActionUnknownHero</code>, <code>ActionHeroTaken</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
+      <p>Read-only constants (values 0 through 35): <code>NoActionError</code>, <code>ActionNotAlive</code>, <code>ActionInvalidSlot</code>, <code>ActionUnknownItem</code>, <code>ActionInsufficientGold</code>, <code>ActionAlreadyEquipped</code>, <code>ActionStackFull</code>, <code>ActionInventoryFull</code>, <code>ActionEmptySlot</code>, <code>ActionNotConsumable</code>, <code>ActionFullHealth</code>, <code>ActionFullMana</code>, <code>ActionTargetUnavailable</code>, <code>ActionOutOfRange</code>, <code>ActionNoRoute</code>, <code>ActionInvalidPoint</code>, <code>ActionCooldown</code>, <code>ActionNoCharges</code>, <code>ActionInsufficientMana</code>, <code>ActionSpellLimit</code>, <code>ActionChanneling</code>, <code>ActionStunned</code>, <code>ActionRooted</code>, <code>ActionOutsideKeep</code>, <code>ActionAbilityLocked</code>, <code>ActionNoAbilityPoints</code>, <code>ActionAbilityMaxLevel</code>, <code>ActionHeroLevelRequired</code>, <code>ActionNotDead</code>, <code>ActionMatchEnded</code>, <code>ActionDrafting</code>, <code>ActionNotDrafting</code>, <code>ActionNotDraftTurn</code>, <code>ActionUnknownHero</code>, <code>ActionHeroTaken</code>, <code>ActionSilenced</code>. Unavailable targets share a generic reason without revealing hidden state.</p>
       <p>The <a href="../../../docs/stats.md#gota-replay-events">replay extractor</a> provides typed post-match events for both teams. Detailed capture is compiled in with <code>-d:replayEvents</code> and is unavailable to live BASIC policies.</p>
       <h3 id="terrain-api">Terrain API</h3>
       <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>

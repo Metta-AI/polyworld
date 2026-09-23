@@ -74,14 +74,14 @@ proc shot(reverse: bool): int32 =
   caster.place(origin)
   caster.hp = caster.maxHp
   caster.state = Marching
-  caster.stunnedUntil = 1000
+  caster.controls[StunControl].ends = 1000
   for i in 5 .. 6:
     let enemy = game.world.heroes[i]
     enemy.place(WorldPoint(x: origin.x + 3000, y: origin.y,
       z: origin.z + (if i == 5: 6000'i32 else: -6000'i32)))
     enemy.hp = enemy.maxHp
     enemy.state = Marching
-    enemy.stunnedUntil = 1000
+    enemy.controls[StunControl].ends = 1000
   if reverse:
     swap(game.world.heroes[5], game.world.heroes[6])
   game.world.casts.add SpellCast(ability: FrostLance, level: 1,

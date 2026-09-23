@@ -13,7 +13,7 @@ type
     ActionHeroLevelRequired,
     ActionNotDead, ActionMatchEnded,
     ActionDrafting, ActionNotDrafting, ActionNotDraftTurn,
-    ActionUnknownHero, ActionHeroTaken
+    ActionUnknownHero, ActionHeroTaken, ActionSilenced
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
@@ -22,7 +22,7 @@ type
     MatchEnded, PortalStarted, PortalCompleted, PortalInterrupted,
     Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted,
     AbilityLeveled,
-    HeroDrafted
+    HeroDrafted, Silenced
 
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
@@ -75,6 +75,7 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionChanneling: "Teleport channel in progress"
   of ActionStunned: "Stunned"
   of ActionRooted: "Rooted"
+  of ActionSilenced: "Silenced"
   of ActionOutsideKeep: "Return to your keep"
   of ActionAbilityLocked: "Ability is locked"
   of ActionNoAbilityPoints: "No ability points"

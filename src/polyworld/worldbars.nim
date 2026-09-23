@@ -1,6 +1,7 @@
 ## Shared world-space billboard bars for Polyworld graphical clients.
 
 import
+  std/math,
   chroma, opengl, shady, vmath
 
 const
@@ -244,6 +245,26 @@ proc addBillboardQuad*(
     (topLeft, uv)
   ]:
     renderer.addVertex(center, position, color, texcoord, textureMode)
+
+proc addBillboardRing*(
+    renderer: var WorldBarRenderer,
+    center: Vec3,
+    offset: Vec2,
+    radius, thickness, fraction: float32,
+    color: ColorRGBX
+) =
+  ## Adds a clockwise countdown arc starting at the top of a billboard.
+  const Segments = 48
+  let count = int(ceil(clamp(fraction, 0.0'f, 1.0'f) * Segments.float32))
+  for i in 0 ..< count:
+    let
+      first = min(i.float32 / Segments.float32, fraction) * 2 * PI.float32
+      last = min((i + 1).float32 / Segments.float32, fraction) * 2 * PI.float32
+      a = vec2(sin(first), cos(first))
+      b = vec2(sin(last), cos(last))
+    for point in [a * radius, b * radius, b * (radius - thickness),
+        a * radius, b * (radius - thickness), a * (radius - thickness)]:
+      renderer.addVertex(center, offset + point, color, vec2(-1), MaskTexture)
 
 proc addResourceBars*(
     renderer: var WorldBarRenderer,

@@ -97,6 +97,7 @@ type
     deathTicks*: int32
     surfaceHint*: int32
     navLayer*: int32
+    controls*: array[ControlEffect, ControlTimer]
 
   Hero* = ref object
     id*: int32
@@ -159,7 +160,7 @@ type
     recoveryStarted*, recoveryApplied*: array[RecoveryKind, int32]
     portalEnds*, portalCooldownEnds*, portalTowerId*: int32
     portalDestination*: WorldPoint
-    stunnedUntil*, rootedUntil*: int32
+    controls*: array[ControlEffect, ControlTimer]
     lastActionError*: ActionError
 
   Fort* = object
@@ -200,6 +201,7 @@ type
     itemCounts*: array[InventorySlots, int32]
     facing*, velocity*: Heading
     targetId*: int32
+    controlTicks*: array[ControlEffect, int32]
 
   NavTile* = object
     layer*: int
@@ -2029,6 +2031,10 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
         if hero.hp > 0 and hero.state != Dying: hero.attackObjectId
         else: 0
     )
+    if value.alive:
+      for effect in ControlEffect:
+        value.controlTicks[effect] =
+          max(0'i32, hero.controls[effect].ends - world.tick)
     return true
   let footmanIndex = heroIndex - world.heroes.len
   if footmanIndex < world.footmen.len:
@@ -2052,6 +2058,10 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
         elif footman.attackingFort: world.forts[enemyFort(footman.team)].id
         else: 0
     )
+    if value.alive:
+      for effect in ControlEffect:
+        value.controlTicks[effect] =
+          max(0'i32, footman.controls[effect].ends - world.tick)
     return true
   false
 
@@ -2307,6 +2317,8 @@ proc movementPath(tiles: seq[PathTile], start: WorldPoint,
 
 proc followCreepPath(world: World, footman: var Footman, goal: WorldPoint) =
   ## Follows a cached route and throttles changed chase goals and failed searches.
+  if footman.controls[RootControl].ends > world.tick:
+    return
   let
     changed = floorWorldTile(goal.x, footman.team) !=
       floorWorldTile(footman.moveGoal.x, footman.team) or
@@ -2443,7 +2455,7 @@ proc stopHeroPath(hero: Hero) =
 
 proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
-  if hero.rootedUntil > navigationWorld.tick:
+  if hero.controls[RootControl].ends > navigationWorld.tick:
     return false
   if hero.hasMoveTarget and hero.moveRevision != navigationWorld.navigationRevision:
     if not hero.setHeroDestination(
@@ -2502,26 +2514,49 @@ proc interruptPortal(world: World, hero: Hero) =
       ItemEffect)
   hero.portalTowerId = 0
 
-proc applyStun*(world: World, heroId, duration: int32) =
-  ## Stops actions and interrupts a portal when a stun is applied.
-  let hero = world.heroById(heroId)
-  if hero.id == 0 or hero.hp <= 0 or duration <= 0:
+proc applyControl*(
+    world: World,
+    targetId: int32,
+    effect: ControlEffect,
+    duration: int32,
+    source = 0'i32,
+    ability = -1'i32
+) =
+  ## Applies control to living units, keeping the later expiration on refresh.
+  if effect == NoControl or duration <= 0:
     return
-  hero.stunnedUntil = max(hero.stunnedUntil, world.tick + duration)
-  hero.swingTicks = -1
-  world.interruptPortal(hero)
-  when defined(replayEvents):
-    world.lifecycleEvent(Stunned, 0, hero.id, AbilityEffect)
-
-proc applyRoot*(world: World, heroId, duration: int32) =
-  ## Stops movement and interrupts a portal when a root is applied.
-  let hero = world.heroById(heroId)
-  if hero.id == 0 or hero.hp <= 0 or duration <= 0:
+  template affect(unit: untyped) =
+    ## Applies the same timer and event rules to either unit representation.
+    if unit.hp <= 0 or unit.state == Dying:
+      return
+    let before = unit.controls[effect].ends
+    if world.tick + duration <= before:
+      return
+    unit.controls[effect] = ControlTimer(
+      started: world.tick, ends: world.tick + duration)
+    if effect == StunControl:
+      unit.swingTicks = -1
+    when defined(replayEvents):
+      let kind = case effect
+        of StunControl: Stunned
+        of SilenceControl: Silenced
+        of RootControl: Rooted
+        of NoControl: Stunned
+      world.emit GameEvent(
+        kind: kind, actor: world.eventEntity(source),
+        target: world.eventEntity(targetId), cause: AbilityEffect,
+        detail: ability, requested: duration, amount: duration,
+        before: before, after: unit.controls[effect].ends, related: -1
+      )
+  let hero = world.heroById(targetId)
+  if hero.id != 0:
+    affect(hero)
+    if effect in {StunControl, RootControl}:
+      world.interruptPortal(hero)
     return
-  hero.rootedUntil = max(hero.rootedUntil, world.tick + duration)
-  world.interruptPortal(hero)
-  when defined(replayEvents):
-    world.lifecycleEvent(Rooted, 0, hero.id, AbilityEffect)
+  let creep = world.footmanIndex(targetId)
+  if creep >= 0:
+    affect(world.footmen[creep])
 
 proc heroActionError(world: World, hero: Hero, movement = false): ActionError =
   ## Rejects commands that a channel or active control effect prevents.
@@ -2529,9 +2564,9 @@ proc heroActionError(world: World, hero: Hero, movement = false): ActionError =
     return ActionNotAlive
   if hero.portalEnds > 0:
     return ActionChanneling
-  if hero.stunnedUntil > world.tick:
+  if hero.controls[StunControl].ends > world.tick:
     return ActionStunned
-  if movement and hero.rootedUntil > world.tick:
+  if movement and hero.controls[RootControl].ends > world.tick:
     return ActionRooted
 
 proc portalLanding*(
@@ -2997,10 +3032,15 @@ proc updateFootman(world: World, footman: var Footman) =
 
   if footman.hp <= 0:
     footman.state = Dying
+    footman.controls = default(typeof(footman.controls))
     footman.deathTicks = 0
     return
 
   footman.advanceWaypoints()
+  if footman.controls[StunControl].ends > world.tick:
+    footman.animClip = idleClip
+    inc footman.animTicks
+    return
   let start = footman.position
   defer:
     footman.velocity = heading(
@@ -3201,8 +3241,7 @@ proc respawn(world: World, hero: Hero) =
   hero.surfaceHint = hero.spawnPosition.y
   hero.portalEnds = 0
   hero.portalTowerId = 0
-  hero.stunnedUntil = 0
-  hero.rootedUntil = 0
+  hero.controls = default(typeof(hero.controls))
   hero.recoveryItems = default(typeof(hero.recoveryItems))
   hero.recoveryStarted = default(typeof(hero.recoveryStarted))
   hero.recoveryApplied = default(typeof(hero.recoveryApplied))
@@ -3477,12 +3516,19 @@ proc hitTarget(
     if creep >= 0:
       if world.footmen[creep].hp > 0:
         world.applyDamage(world.footmen[creep], damage, source, cause, detail)
+        if cause == AbilityEffect:
+          let spec = BaseAbilitySpecs[Ability(detail)]
+          world.applyControl(target, spec.control, spec.controlTicks,
+            source, detail)
       return
     let victim = world.heroIndex(target)
     if victim < 0 or world.heroes[victim].hp <= 0:
       return
     let killer = world.heroIndex(source)
     world.applyDamage(world.heroes[victim], damage, source, cause, detail)
+    if cause == AbilityEffect:
+      let spec = BaseAbilitySpecs[Ability(detail)]
+      world.applyControl(target, spec.control, spec.controlTicks, source, detail)
     let killed = world.heroes[victim].hp <= 0
     world.stats.hitHero(killer, victim, world.tick, TickRate, killed)
     if killed:
@@ -3528,6 +3574,7 @@ proc die(world: World, hero: Hero) =
   ## Starts a hero's death once after every attack has been collected.
   world.interruptPortal(hero)
   hero.state = Dying
+  hero.controls = default(typeof(hero.controls))
   inc hero.deaths
   hero.deathTicks = 0
   hero.targetFootmanId = 0
@@ -3568,6 +3615,7 @@ proc resolveCombat(world: World) =
   for creep in world.footmen.mitems:
     if creep.hp <= 0 and creep.state != Dying:
       creep.state = Dying
+      creep.controls = default(typeof(creep.controls))
       creep.deathTicks = 0
   for hero in world.heroes:
     if hero.hp <= 0 and hero.state != Dying:
@@ -4089,6 +4137,8 @@ proc castAbility(
   let error = world.heroActionError(hero)
   if error != NoActionError:
     return error
+  if hero.controls[SilenceControl].ends > world.tick:
+    return ActionSilenced
   if hero.abilityLevels[slot] == 0:
     return ActionAbilityLocked
   if world.casts.len >= 512:
@@ -4397,8 +4447,9 @@ proc updateHero(world: World, hero: Hero) =
     hero.animClip = heroIdleClip
     inc hero.animTicks
     world.regenHeroMana(hero, world.tick)
-    if hero.stunnedUntil > world.tick or hero.rootedUntil > world.tick:
-      world.interruptPortal(hero)
+    if hero.controls[StunControl].ends > world.tick or
+      hero.controls[RootControl].ends > world.tick:
+        world.interruptPortal(hero)
     elif world.tick >= hero.portalEnds:
       var
         destination: WorldPoint
@@ -4414,7 +4465,7 @@ proc updateHero(world: World, hero: Hero) =
       else:
         world.interruptPortal(hero)
     return
-  if hero.stunnedUntil > world.tick:
+  if hero.controls[StunControl].ends > world.tick:
     hero.animClip = heroIdleClip
     inc hero.animTicks
     world.regenHeroMana(hero, world.tick)
@@ -4600,8 +4651,8 @@ proc updateHero(world: World, hero: Hero) =
 
 proc immobile(world: World, hero: Hero): bool =
   ## Keeps channeling or controlled heroes in place during separation.
-  hero.portalEnds > 0 or hero.stunnedUntil > world.tick or
-    hero.rootedUntil > world.tick
+  hero.portalEnds > 0 or hero.controls[StunControl].ends > world.tick or
+    hero.controls[RootControl].ends > world.tick
 
 proc separateUnits(game: Game) =
   ## Accumulates collision corrections before moving any participant.
@@ -4611,7 +4662,9 @@ proc separateUnits(game: Game) =
   for i, footman in world.footmen:
     if footman.state != Dying:
       game.collisionUnits.add CollisionUnit(body: footman.body, index: i,
-        layer: footman.navLayer, team: footman.team)
+        layer: footman.navLayer, team: footman.team,
+        fixed: footman.controls[StunControl].ends > world.tick or
+          footman.controls[RootControl].ends > world.tick)
       maximumRadius = max(maximumRadius, footman.body.radius)
   for i, hero in world.heroes:
     if hero.state != Dying:
@@ -4815,8 +4868,9 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.portalCooldownEnds)
     hash.addHashy(hero.portalTowerId)
     hash.addHashy(hero.portalDestination)
-    hash.addHashy(hero.stunnedUntil)
-    hash.addHashy(hero.rootedUntil)
+    for timer in hero.controls:
+      hash.addHashy(timer.started)
+      hash.addHashy(timer.ends)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
@@ -4848,6 +4902,9 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(footman.deathTicks)
     hash.addHashy(footman.surfaceHint)
     hash.addHashy(footman.navLayer)
+    for timer in footman.controls:
+      hash.addHashy(timer.started)
+      hash.addHashy(timer.ends)
   hash.addHashy(world.casts.len)
   for spell in world.casts:
     hash.addHashy(spell.ability.ord)

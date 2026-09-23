@@ -322,8 +322,9 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
         status:
           if hero.state == Dying: "Respawning"
           elif hero.portalEnds > run.world.tick: "Teleporting"
-          elif hero.stunnedUntil > run.world.tick: "Stunned"
-          elif hero.rootedUntil > run.world.tick: "Rooted"
+          elif hero.controls[StunControl].ends > run.world.tick: "Stunned"
+          elif hero.controls[RootControl].ends > run.world.tick: "Rooted"
+          elif hero.controls[SilenceControl].ends > run.world.tick: "Silenced"
           elif hero.inOwnSpawn: "Spawn recovery"
           elif hero.recoveryItems != default(typeof(hero.recoveryItems)):
             "Regenerating"

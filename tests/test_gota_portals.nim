@@ -126,9 +126,9 @@ for stun in [true, false]:
   doAssert world.applyUseItemAt(hero.id, 0, 0, 0)
   game.step(10)
   if stun:
-    world.applyStun(hero.id, 4 * TickRate)
+    world.applyControl(hero.id, StunControl, 4 * TickRate)
   else:
-    world.applyRoot(hero.id, 4 * TickRate)
+    world.applyControl(hero.id, RootControl, 4 * TickRate)
   doAssert hero.portalEnds == 0
   doAssert hero.portalCooldownEnds == world.tick + PortalCooldownTicks
   doAssert hero.itemCounts[0] == 1

@@ -24,6 +24,7 @@ jobs:
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
       - run: nim r tests/test_gota_events.nim
+      - run: nim r -d:replayEvents tests/test_gota_controls.nim
       - run: nim r tests/test_gota_phases.nim
       - run: nim r -d:replayEvents tests/test_gota_portals.nim
       - run: nim r -d:replayEvents tests/test_gota_potions.nim

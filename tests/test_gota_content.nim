@@ -51,7 +51,7 @@ block:
   doAssert FirebrandSword.abilitySpec(4).damage == 100
   doAssert FirebrandSword.abilitySpec(int32.high) ==
     FirebrandSword.abilitySpec(4)
-  doAssert BlazingBlade.abilitySpec(3).damage == 180
+  doAssert BlazingBlade.abilitySpec(3).damage == 144
   doAssert BlazingBlade.abilitySpec(4) == BlazingBlade.abilitySpec(3)
   doAssert BlazingBlade.abilitySpec(int32.high) == BlazingBlade.abilitySpec(3)
 
