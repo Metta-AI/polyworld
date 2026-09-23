@@ -1,4 +1,4 @@
-## Runs the headless Polyworld tests.
+## Runs headless code and simulation tests without the optional art checkout.
 
 {.warning[UnusedImport]: off.}
 import
@@ -61,7 +61,6 @@ import
   test_hlf_scorecard,
   test_hudlayouts,
   test_inputs,
-  test_lvd_buildings,
   test_lvd_content,
   test_lvd_groves,
   test_lvd_maps,
@@ -87,10 +86,5 @@ import
   test_viewers,
   test_visions,
   test_worldtexts
-
-when defined(gotaAssets):
-  import test_gota_characters, test_gota_faces
-else:
-  echo "Skipping private character asset checks; run with -d:gotaAssets."
 
 echo "All tests passed"

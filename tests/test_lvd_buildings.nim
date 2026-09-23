@@ -107,16 +107,3 @@ for owner in 0'i32 ..< PlayerCount:
     doAssert parts[0].pack != art.pack
 doAssert art.buildingPack(-1) == art.pack
 doAssert art.buildingPack(0) != art.buildingPack(1)
-
-echo "Checking distinct and repeatable faction assignments"
-var seen: set[Faction]
-for seed in 1'i64 .. 100:
-  let order = factionOrder(seed)
-  doAssert order == factionOrder(seed)
-  var assigned: set[Faction]
-  for faction in order:
-    doAssert faction notin assigned
-    assigned.incl faction
-  doAssert assigned == {Faction.low .. Faction.high}
-  seen.incl order[PeterRiver]
-doAssert seen == {Faction.low .. Faction.high}

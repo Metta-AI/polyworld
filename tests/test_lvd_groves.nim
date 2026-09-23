@@ -1,6 +1,6 @@
 import
-  std/[os, sets, strutils],
-  polyworld/[assets, pathing, terrainsurfaces],
+  std/sets,
+  polyworld/pathing,
   ../examples/light_vs_dark/[assets, groves, maps]
 
 echo "Checking generated scenery placement, harvesting, and restoration"
@@ -46,37 +46,8 @@ for seed in [2026, 42, 73]:
   doAssert wood == map.treeWood
   echo seed, ": ", treeTiles.len, " trees, ", rockTiles.len, " rocks"
 
-echo "Checking generated textures replace imported tree and rock assets"
-var sources: HashSet[string]
-for asset in browserAssets():
-  sources.incl asset.source
-  doAssert "handpainted_trees" notin asset.source
-  doAssert "toon_enchanted_meadow" notin asset.source
-  doAssert "cartoon_textures" notin asset.source
-  doAssert "low_poly_grass" notin asset.source
-  doAssert "water_normals" notin asset.source
-  doAssert "low_poly_village" notin asset.source
-  doAssert "tower_defense_kit" notin asset.source
-for path in @TreegenTextures & @[RockgenTexture]:
-  doAssert path.assetName in sources
-  doAssert fileExists(path)
-for path in buildingModelPaths():
-  doAssert path.assetName in sources
-  doAssert fileExists(path)
-
 echo "Checking the native and browser ground use only generated assets"
 doAssert not LvdTerrainAssets.grass and not LvdTerrainAssets.water
 doAssert not LvdWebTerrainAssets.grass and not LvdWebTerrainAssets.water
-for settings in [LvdTerrainAssets, LvdWebTerrainAssets]:
-  for asset in terrainAssets(
-    NoTrees, GeneratedTerrain, NoRocks, settings, LvdTerrainTiles
-  ):
-    doAssert asset.kind == FileAsset
-    doAssert asset.source.startsWith("terrain/tiles/") or
-      asset.source.startsWith("terrain/stamps/")
-    doAssert asset.source in sources
-for name in @SurfaceNames & @LvdTerrainTiles:
-  for channel in ["rgb", "height"]:
-    doAssert "terrain/tiles/" & name & "." & channel & ".png" in sources
 
 echo "LvD generated scenery passed"

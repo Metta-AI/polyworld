@@ -3,7 +3,7 @@
 import
   std/[sets, strformat, strutils],
   polyworld/hashes,
-  ../examples/light_vs_dark/content
+  ../examples/light_vs_dark/[content, factions]
 
 ## Every stat that would break the simulation if it were zero or negative.
 
@@ -202,6 +202,20 @@ block addHashyDistinguishesValues:
   swapped.addHashy(2'i32)
   swapped.addHashy(1'i32)
   doAssert ordered != swapped, "addHashy ignores ordering"
+
+block factionAssignments:
+  echo "Checking distinct and repeatable faction assignments"
+  var seen: set[Faction]
+  for seed in 1'i64 .. 100:
+    let order = factionOrder(seed)
+    doAssert order == factionOrder(seed)
+    var assigned: set[Faction]
+    for faction in order:
+      doAssert faction notin assigned
+      assigned.incl faction
+    doAssert assigned == {Faction.low .. Faction.high}
+    seen.incl order[PeterRiver]
+  doAssert seen == {Faction.low .. Faction.high}
 
 echo "test_lvd_content: all checks passed"
 echo "  contentHash = ", toHex(contentHash())
