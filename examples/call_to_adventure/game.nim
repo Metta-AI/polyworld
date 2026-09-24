@@ -6,7 +6,7 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, metrics, profiles, tapes],
+  polyworld/[cli, controllers, metrics, profiles, tapes, timings],
   content,
   maps,
   sim,
@@ -31,6 +31,8 @@ proc usage() =
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
   echo "  --minutes NUMBER        Duration in minutes (default 20)."
   echo "  --ticks NUMBER          Duration in ticks (default 28800)."
+  echo "  --headless-tick-rate N   Wall-clock ticks per second, 0 is unlimited."
+  echo "  --llm-mode:async|barrier Wait for all requests between headless ticks."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
   echo "  --play=false            Start the graphical transport paused."
   echo "  --windowSize WxH        Graphical window, such as 800x400."
@@ -158,7 +160,7 @@ proc summarize*(game: Game) =
   echo "  party alive ", alive
 
 proc runHeadless*() =
-  ## Runs one live expedition or replay with no frame-rate waiting.
+  ## Runs fixed simulation ticks with optional pacing and request barriers.
   echo "Call to Adventure, seed ", run.world.setup.seed
   echo "dungeon: ", LevelCount, " levels, ", run.dungeon.ramps.len, " ramps"
   var monsters = 0
@@ -171,10 +173,19 @@ proc runHeadless*() =
   defer:
     finishGameProfile()
   let started = epochTime()
-  var reported = 0
+  var
+    reported = 0
+    pacer = initTickPacer(options.headlessTickRate)
+    pollers: seq[RequestPoll]
+  if options.waitForLlm and not run.replayMode:
+    for vm in run.heroVms:
+      if vm != nil:
+        pollers.add vm.pollRequests
   while run.world.tick < options.maximumTicks and
       run.world.phase notin {EscapedPhase, WipedPhase}:
     advanceGame()
+    waitForRequests(pollers)
+    pacer.pace()
     if profileShouldDump(run.world.tick):
       finishGameProfile()
     if options.verbose:

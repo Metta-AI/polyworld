@@ -102,6 +102,7 @@ proc episode(
     scripts: seq[string],
     failure = false,
     ticks = 240,
+    waitForLlm = false,
     expectedOutput = ""
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
@@ -115,7 +116,8 @@ proc episode(
   listener.close()
   let
     config = %*{
-      "tokens": [], "players": [], "seed": 2026, "max_ticks": ticks
+      "tokens": [], "players": [], "seed": 2026, "max_ticks": ticks,
+      "wait_for_llm": waitForLlm
     }
     seats = newJArray()
     env = newStringTable(modeCaseSensitive)
@@ -267,7 +269,7 @@ for (game, count) in Games:
 sendChat(-2, "CHAT")
 print pullMailbox$(), mailboxId()
 """
-  episode(game, count, scripts, ticks = 3,
+  episode(game, count, scripts, ticks = 3, waitForLlm = true,
     expectedOutput = "CHAT")
   echo game, ": hosted mailbox integration passed"
 
