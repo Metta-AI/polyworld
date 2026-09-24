@@ -56,7 +56,7 @@ block:
   doAssert game.mailboxes.send(0, TeamMailboxId, "team") == teamCount
   for slot in 0 ..< game.mailboxes.players:
     let message = game.mailboxes.pull(slot)
-    doAssert (message.text == "team") ==
+    doAssert (message.matches("team")) ==
       (game.mailboxes.teams[slot] == game.mailboxes.teams[0])
   for tick in 1 .. 2:
     game.world.tick = int32(tick)

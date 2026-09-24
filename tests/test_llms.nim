@@ -4,6 +4,10 @@ import
   polyworld/[advisors, cli, llms, mailboxes, oracles, requests, timings],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim]
 
+const
+  JevRequest = staticRead("fixtures/jev_request.bas")
+  JevResponse = staticRead("fixtures/jev_response.json")
+
 var
   ports: Channel[int]
   received: Channel[string]
@@ -53,7 +57,9 @@ proc serve() {.thread.} =
         paired = nil
         socket.sendReply("{}")
       elif first.contains("/systemone"):
-        if body.contains("\"strategy\""):
+        if body.contains("Gods of the Arena, a team lane battle"):
+          socket.sendReply(JevResponse)
+        elif body.contains("\"strategy\""):
           inc strategyRequests
           if strategyRequests <= 5:
             let
@@ -187,7 +193,7 @@ block:
   responder.beginTick(1)
   discard responderRuntime.run()
   let answer = mail.pull(0)
-  doAssert answer.id == 1 and answer.text == "hello"
+  doAssert answer.id == 1 and answer.matches("hello")
   doAssert mail.count(1) == 0
 
   echo "Testing raw streaming replies, HTTP failures, and response bounds"
@@ -252,6 +258,27 @@ end if
   doAssert runtime.getGlobal("mode") == 0
   doAssert runtime.getGlobal("risk") == 1500
   doAssert runtime.getGlobal("probability") == 300
+
+  echo "Testing BASIC readback of the captured live OpenRouter JEV response"
+  block:
+    let advisor = newAdvisor(0, config)
+    var host = initHost()
+    advisor.addFunctions(host)
+    let program = compile(JevRequest, host)
+    var runtime = initRuntime(program, host)
+    advisor.bindRuntime(runtime)
+    advisor.beginTick(0)
+    discard runtime.run()
+    doAssert runtime.getGlobal("request") > 0
+    waitForRequests([advisor.requestPoller()])
+    discard received.recv()
+    advisor.beginTick(1)
+    discard runtime.run()
+    doAssert runtime.getGlobal("answers") == 2
+    doAssert runtime.getGlobal("strategy") == 0
+    doAssert runtime.getGlobal("lane") == 1
+    doAssert runtime.getString(runtime.getGlobalValue("model$")) ==
+      "typesafe/jev-1.13-20260917"
 
   echo "Testing GotA's JEV bot follows strategy and lane advice periodically"
   block:

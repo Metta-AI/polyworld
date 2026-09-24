@@ -148,6 +148,24 @@ The inspected local Metta sidecar registers Chat Completions and Anthropic
 routes, but no SystemOne route. JEV and other API paths need corresponding
 sidecar routing before they work in that deployment.
 
+## Manual live JEV test
+
+With `OPENROUTER_API_KEY` set in your shell, run:
+
+```sh
+nim r tests/manual_jev.nim
+```
+
+This submits exactly one paid request from BASIC directly to OpenRouter's
+`/v1/systemone` endpoint, using `typesafe/jev-1.13`. It bypasses sidecar
+configuration, asks for a GotA strategy and lane, and checks BASIC's readback
+of both choices and the returned model. It prints the original response,
+including the request ID, provider, token usage, and reported cost.
+There are no retries or fallback answers. This test is never run by CI.
+
+The ordinary test suite uses a local mock, including a captured live JEV
+response to verify the same BASIC script without additional paid requests.
+
 ## GotA strategy bot
 
 `examples/gods_of_the_arena/players/jev.bas` is a playable strategy example.

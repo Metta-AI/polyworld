@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[scripts, advisors, mailboxes, bodies, metrics, profiles],
+  polyworld/[advisors, mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -598,10 +598,11 @@ proc runDecision(game: Game, player: int32) =
       home = structure.origin
       break
 
-  game.brains[player].runtime.restartScript()
   try:
     if game.brains[player].prepareDecision != nil:
       game.brains[player].prepareDecision(game.world.tick)
+    else:
+      game.brains[player].runtime.restart()
     let
       economy = addr game.world.players[player]
       ids = overlordDataIds

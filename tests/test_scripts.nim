@@ -17,8 +17,9 @@ message$ = "turn " + str$(turns) + incoming$
 saved$(2) = message$
 """, host)
   var runtime = initRuntime(program, host)
+  let scratch = newScriptScratch(runtime)
   for i in 1 .. 1000:
-    runtime.restartScript()
+    runtime.restartScript(scratch)
     discard runtime.run()
     doAssert runtime.getGlobal("turns") == i
     doAssert runtime.getStringArray("saved$", 0) == "persistent text"

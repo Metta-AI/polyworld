@@ -6,7 +6,7 @@
 
 import
   bassy,
-  polyworld/[scripts, advisors, mailboxes, bodies, metrics, cli, controllers,
+  polyworld/[advisors, mailboxes, bodies, metrics, cli, controllers,
     pathing, profiles],
   content,
   sim,
@@ -273,10 +273,11 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   activeGame = game
   activeHeroSlot = slot
   let objective = game.objectiveTile(slot)
-  game.heroVms[slot].runtime.restartScript()
   try:
     if game.heroVms[slot].prepareDecision != nil:
       game.heroVms[slot].prepareDecision(game.world.tick)
+    else:
+      game.heroVms[slot].runtime.restart()
     game.heroVms[slot].runtime.setData(heroDataIds[DataSelfId], actor.id)
     game.heroVms[slot].runtime.setData(
       heroDataIds[DataSelfClass],

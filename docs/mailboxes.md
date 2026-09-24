@@ -28,10 +28,10 @@ After each successful pull, `mailboxId()` identifies that message:
 | Nonnegative | A DM from this player ID, not the recipient ID. |
 
 `mailboxSender()` also provides the actual sender for broadcasts.
-`mailboxTick()` gives the send tick, `mailboxCount()` counts unread messages,
-and `mailboxChannel$()` optionally returns `dm`, `team`, or `global`.
+`mailboxTick()` gives the send tick and `mailboxCount()` counts unread messages.
+Channel metadata uses numeric IDs exclusively.
 An empty pull clears the last envelope, making `mailboxId()` return -3,
-`mailboxSender()` return -1, and `mailboxChannel$()` return an empty string.
+`mailboxSender()` return -1, and `mailboxTick()` return zero.
 
 ```basic
 sendChat(-2, "Hello everyone.")
@@ -65,10 +65,12 @@ to reject that copy. The game can consult its current world for proximity,
 hearing range, visibility, alive state, or other rules. This runs after the
 normal destination routing, so a range rule can narrow a global broadcast
 or refuse a distant DM without granting access to another player's queue.
-Changing `mailboxes.teams` updates team routing for future sends. Rules must
-not mutate or recursively send through the router while checking delivery.
+Changing entries in the fixed `mailboxes.teams` array updates future team
+routing. Rules must not mutate, retain, or recursively send through the router
+while checking delivery. The rule's message reference is reused on the next
+send. A custom rule must also avoid allocations to keep routing allocation-free.
 
-Each queue holds at most 64 unread messages of up to 1024 UTF-8 bytes each.
+Each queue holds at most 128 unread messages of up to 1024 UTF-8 bytes each.
 Empty, invalid UTF-8, oversized, and invalid-destination messages are refused.
 A full queue rejects new copies while retaining unread messages; other
 recipients can still accept a broadcast. Messages persist until pulled and
@@ -77,3 +79,17 @@ live agent session. Replay actions preserve resulting gameplay, but this port
 does not store chat text in replays or add a graphical chat panel.
 Temporary BASIC strings are reclaimed between decisions while global variables
 and arrays retain their values.
+
+All queue storage is allocated when the roster is created. Each mailbox is a
+reference object with a fixed array of 128 preallocated message references,
+plus one reusable last-read envelope. Message text uses fixed 1024-byte arrays,
+not Nim strings. Pulling swaps references, and clearing only resets counters.
+Send, pull, overflow, and same-roster reset do not allocate or free heap memory.
+Creating a different roster allocates new storage outside the tick loop.
+
+Nim callers receive a borrowed `MailMessage` reference, valid until that
+player's next pull or a reset. `message.withText(bytes)` borrows the occupied
+bytes within its block; `message.matches(text)` compares without allocating.
+The BASIC bridge copies these bytes directly between the mailbox and the VM's
+preallocated string arena. String compaction also uses scratch space reserved
+when binding the VM. Allocation-counter tests cover these paths.
