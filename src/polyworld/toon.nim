@@ -57,10 +57,16 @@ var
     ## in the sun's own shadow. 1.0 = no visible darkening.
   toonSmoothShaded: Uniform[bool]
     ## terrain-lighting (convoy/terrain-lighting): opts a node out of the
-    ## 2-3 band toon ramp into a continuous N.L*shadow diffuse. False by
-    ## construction for every node until a game opts one in, so the OFF
-    ## path (nobody sets this) is byte-identical to before this uniform
-    ## existed.
+    ## 2-3 band toon ramp into a continuous ambient N.L diffuse, and turns
+    ## on the explicit cast-shadow multiply below (`toonSmoothShadowDark`).
+    ## False by construction for every node until a game opts one in, so
+    ## the OFF path (nobody sets this) is byte-identical to before this
+    ## uniform existed.
+  toonSmoothShadowDark: Uniform[float32]
+    ## terrain-lighting: multiply floor a `toonSmoothShaded` fragment's
+    ## OWN lit colour reaches in full cast shadow (a darker, slightly
+    ## cooler version of the same colour -- never a flat grey blend, the
+    ## owner's ruling). 1.0 = no visible darkening.
   toonTint: Uniform[Vec4]
   # Sun shadow map sampling, fed from polyworld/shadows each frame. Two
   # maps at neighbouring quantized sun steps, cross-faded by toonShadowStep
@@ -189,16 +195,22 @@ proc toonFrag(
       lightIntensity * sunFactor * toonShadingStrength
   var band = texture(toonRamp, vec2(intensity, 0.5'f)).r
   if toonSmoothShaded:
-    # terrain-lighting: a continuous N.L diffuse term (the sun shadow map
-    # and day/night shading-strength floor already folded into `intensity`
-    # above), bypassing the 2-3 band toon ramp entirely -- that ramp is
-    # what banded the ridge slopes in bible rounds 44/46, the reason the
-    # terrain was made `unlit` in the first place. Owner ruling 2026-09-23
-    # overrides that: the ground must be lit, so this gives it a smooth
-    # gradient instead of the character ramp, upstream-able as its own
-    # per-node mode. Never both `toonUnlit` and `toonSmoothShaded` on the
-    # same node in practice (unlit wins below if it ever happens).
-    band = intensity
+    # terrain-lighting: a continuous AMBIENT N.L diffuse term, bypassing
+    # the 2-3 band toon ramp entirely -- that ramp is what banded the
+    # ridge slopes in bible rounds 44/46, the reason the terrain was made
+    # `unlit` in the first place. Owner ruling 2026-09-23 overrides that:
+    # the ground must be lit, so this gives it a smooth gradient instead
+    # of the character ramp. Deliberately NOT `intensity` above -- that
+    # already folds in `sunFactor`, and MEASURED (t850, lone Outrider):
+    # the shared `toonShadowColor`/`toonHighlightColor` pair is close
+    # enough in VALUE (an "Afternoon" palette tuned for a subtle vehicle
+    # cel-shade, not a dramatic cast shadow) that routing the cast shadow
+    # through this same blend only ever reached ~6-11% pixel darkening --
+    # nowhere near "the ground is hit by the sun." The cast shadow gets
+    # its OWN, stronger, explicit multiply below instead
+    # (`toonSmoothShadowDark`); this term stays shadow-map-free so the two
+    # never compound into a double-dark reading on the same pixel.
+    band = 1.0'f - toonShadingStrength + lightIntensity * toonShadingStrength
   if toonUnlit:
     band = 1.0'f
     if toonUnlitReceivesShadow:
@@ -212,6 +224,27 @@ proc toonFrag(
       band = mix(1.0'f, toonUnlitShadowDark, shadowTerm)
   # Step 3: two hand-picked colours, then the albedo on top.
   var lit: Vec3 = mix(toonShadowColor.rgb, toonHighlightColor.rgb, band)
+  if toonSmoothShaded:
+    # THE GROUND IS HIT BY THE SUN, cast-shadow multiply. Owner ruling
+    # 2026-09-23, verbatim: "a shadow is the ground's own colour made
+    # darker... never a grey layer painted on top." This darkens the
+    # ground's OWN already-computed `lit` colour (which still carries the
+    # ambient ridge/basin shading and, two lines below, the surface's own
+    # albedo) toward `toonSmoothShadowDark` (~0.5-0.6: roughly HALF as
+    # bright, never fully black) with a slight per-channel cool skew (a
+    # touch more blue, a touch less red -- the sky-fill idea, applied as a
+    # multiply so it can never grey out a saturated hue the way a flat
+    # blend toward grey would). `shadowTerm` mirrors `toonUnlitReceivesShadow`'s
+    # own normalization: `sunFactor` is PCF-softened already, divided by
+    # `toonShadowStrength` so `toonSmoothShadowDark` is the exact floor at
+    # full shadow regardless of the day/night strength curve.
+    let
+      shadowTerm = clamp(
+        (1.0'f - sunFactor) / max(toonShadowStrength, 0.0001'f), 0.0'f, 1.0'f)
+      coolDark = vec3(
+        toonSmoothShadowDark * 0.94'f, toonSmoothShadowDark * 0.99'f,
+        toonSmoothShadowDark * 1.07'f)
+    lit = lit * mix(vec3(1.0'f, 1.0'f, 1.0'f), coolDark, shadowTerm)
   var n: Vec3 = normalize(normal)
   if not gl_FrontFacing:
     n = -n
@@ -392,6 +425,7 @@ type
     highlightColor, shadowColor, rimColor, unlit, tint: GLint
     unlitReceivesShadow, unlitShadowDark: GLint
     smoothShaded: GLint
+    smoothShadowDark: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength: GLint
@@ -431,11 +465,16 @@ type
       ## Multiply floor for unlitReceivesShadow nodes in full shadow. 1.0
       ## (the default) reproduces today's unlit behaviour exactly.
     smoothShadedNodes*: HashSet[string]
-      ## convoy/terrain-lighting: nodes shaded with a continuous N.L*shadow
-      ## diffuse instead of the toon ramp (see `toonSmoothShaded`'s own
-      ## header). Empty by default -- membership here is the only way this
-      ## mode ever engages, so an empty set reproduces pre-existing pixels
-      ## exactly.
+      ## convoy/terrain-lighting: nodes shaded with a continuous ambient
+      ## N.L diffuse instead of the toon ramp, plus the explicit
+      ## `smoothShadowDark` cast-shadow multiply (see `toonSmoothShaded`'s
+      ## own header). Empty by default -- membership here is the only way
+      ## this mode ever engages, so an empty set reproduces pre-existing
+      ## pixels exactly.
+    smoothShadowDark*: float32
+      ## Multiply floor a smoothShadedNodes fragment's own colour reaches
+      ## in full cast shadow. 1.0 (the default) reproduces the ambient-
+      ## only look (no visible cast shadow) even with a node opted in.
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
 
@@ -475,6 +514,7 @@ proc newToonContext*(): ToonContext =
     tint: color(1, 1, 1, 1),
     rimColor: color(1, 1, 1, 0),
     unlitShadowDark: 0.6'f32,
+    smoothShadowDark: 1.0'f32,
   )
   result.setPalette(ToonPalettes[0])
   result.shader = compileShaderFiles(ToonVertSrc, ToonFragSrc)
@@ -501,6 +541,7 @@ proc newToonContext*(): ToonContext =
   loc(unlitReceivesShadow, "toonUnlitReceivesShadow")
   loc(unlitShadowDark, "toonUnlitShadowDark")
   loc(smoothShaded, "toonSmoothShaded")
+  loc(smoothShadowDark, "toonSmoothShadowDark")
   loc(tint, "toonTint")
   loc(shadowMvp0, "toonShadowMvp0")
   loc(shadowMvp1, "toonShadowMvp1")
@@ -676,6 +717,7 @@ proc draw*(ctx: ToonContext, root: Node) =
     ctx.rimColor.a)
   glUniform4f(u.tint, ctx.tint.r, ctx.tint.g, ctx.tint.b, ctx.tint.a)
   glUniform1f(u.unlitShadowDark, ctx.unlitShadowDark)
+  glUniform1f(u.smoothShadowDark, ctx.smoothShadowDark)
 
   # Sun shadow map state (polyworld/shadows): characters darken where the
   # sun cannot see them and flatten with the shared shading strength.
