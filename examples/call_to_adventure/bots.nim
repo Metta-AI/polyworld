@@ -6,7 +6,7 @@
 
 import
   bassy,
-  polyworld/[advisors, mailboxes, bodies, metrics, cli, controllers,
+  polyworld/[llms, mailboxes, bodies, metrics, cli, controllers,
     pathing, profiles],
   content,
   sim,
@@ -127,10 +127,10 @@ proc sendChat*(
     if distance in 0 .. 16 and game.inboxes[recipient].push(-2, text):
       inc result
 
-proc buildHeroHost(heroId: int32, advisor: Advisor = nil): Host =
+proc buildHeroHost(heroId: int32, llm: LlmClient = nil): Host =
   ## Builds the world-query and high-level action API for one hero.
   result = initHost()
-  let services = if advisor == nil: newAdvisor(0, LlmConfig()) else: advisor
+  let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
   services.addFunctions(result)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends script text through the game's routing rules.
@@ -283,7 +283,7 @@ proc loadBots*(
   for slot in 0 ..< PartySize:
     if kinds[slot] == PlayerController:
       continue
-    let advisor = newAdvisor(slot)
+    let llm = newLlmClient(slot)
     let source = sources[slot]
     let program =
       when defined(coworld):
@@ -296,14 +296,14 @@ proc loadBots*(
     game.heroVms[slot] = HeroVm(
       runtime: initRuntime(
         program,
-        buildHeroHost(int32(100 + slot), advisor),
+        buildHeroHost(int32(100 + slot), llm),
         limits
       ),
       ready: true,
-      prepareDecision: advisor.decisionCallback(),
-      pollRequests: advisor.requestPoller()
+      prepareDecision: llm.decisionCallback(),
+      pollRequests: llm.requestPoller()
     )
-    advisor.bindRuntime(game.heroVms[slot].runtime)
+    llm.bindRuntime(game.heroVms[slot].runtime)
     when defined(coworld):
       game.heroVms[slot].output = playerPrinter(int(slot))
 

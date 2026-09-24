@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[advisors, mailboxes, bodies, metrics, profiles],
+  polyworld/[llms, mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -288,7 +288,7 @@ proc sendChat*(
     if game.inboxes[recipient].push(id, text):
       inc result
 
-proc buildOverlordHost*(playerId: int32, advisor: Advisor = nil): Host =
+proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil): Host =
   ## Builds the complete world-query and command interface for one player.
   ##
   ## The same builder makes both the compile-time schema and each player's
@@ -301,7 +301,7 @@ proc buildOverlordHost*(playerId: int32, advisor: Advisor = nil): Host =
   ## cost far more than their own cycles, so a script's budget prices its
   ## demand on the simulation rather than only its own arithmetic.
   result = initHost()
-  let services = if advisor == nil: newAdvisor(0, LlmConfig()) else: advisor
+  let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
   services.addFunctions(result)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends script text through the game's routing rules.
@@ -611,7 +611,7 @@ proc loadBots*(
     when not defined(coworld):
       if sources[player].len == 0:
         continue
-    let advisor = newAdvisor(int(player))
+    let llm = newLlmClient(int(player))
     let source = sources[player]
     let program =
       when defined(coworld):
@@ -619,12 +619,12 @@ proc loadBots*(
       else:
         compile(source, schema, limits)
     game.brains[player] = OverlordVm(
-      runtime: initRuntime(program, buildOverlordHost(player, advisor), limits),
+      runtime: initRuntime(program, buildOverlordHost(player, llm), limits),
       ready: true,
-      prepareDecision: advisor.decisionCallback(),
-      pollRequests: advisor.requestPoller()
+      prepareDecision: llm.decisionCallback(),
+      pollRequests: llm.requestPoller()
     )
-    advisor.bindRuntime(game.brains[player].runtime)
+    llm.bindRuntime(game.brains[player].runtime)
     if not bound:
       bindOverlordData(program)
       bound = true

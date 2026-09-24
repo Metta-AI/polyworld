@@ -1,13 +1,13 @@
 import
-  std/[json, monotimes, options, os, strutils, times, uri],
-  jsony
+  std/[json, monotimes, options, os, strutils, tables, times, uri],
+  bassy, jsony,
+  oracles, timings
 
 const
   NativeRequests* = not defined(emscripten) and not defined(js)
   MaxRequestBytes* = 64 * 1024
   MaxResponseBytes* = 256 * 1024
   MaxHeaderBytes = 16 * 1024
-  MaxReplies* = 4
   DefaultOracleModel* = "typesafe/jev-1.13"
 
 when NativeRequests:
@@ -37,10 +37,9 @@ type
     sidecar*: bool
     interval*: int32
     timeoutMs*: int
-  LlmReply* = object
-    id*, status*: int32
-    body*, error*: string
   LlmClient* = ref object
+    runtime {.cursor.}: Runtime
+    oracle*: Oracle
     config*: LlmConfig
     slot*: int
     tick, lastAsk, nextId, pending: int32
@@ -48,7 +47,8 @@ type
     when NativeRequests:
       connection: LlmConnection
     started: MonoTime
-    replies: seq[LlmReply]
+    completed, httpStatus: int32
+    body, failure: string
 
 proc parseDocument*(body: string): JsonNode {.raises: [LlmError].} =
   ## Parses bounded LLM JSON with jsony and reports LlmError on failure.
@@ -123,7 +123,12 @@ proc newLlmClient*(slot: int, config: LlmConfig): LlmClient =
   ## Creates one isolated seat without opening a network connection.
   if slot < 0 or config.interval < 0 or config.timeoutMs < 0:
     raise newException(LlmError, "Invalid LLM client configuration")
-  LlmClient(config: config, slot: slot, tick: -1)
+  LlmClient(config: config, slot: slot, tick: -1, oracle: newOracle())
+
+proc newLlmClient*(slot: int): LlmClient =
+  ## Reads host settings once when constructing a player's LLM client.
+  result = newLlmClient(slot, llmConfig())
+  result.oracle.enabled = getEnv("COGAME_ORACLE").toLowerAscii != "off"
 
 proc close*(client: LlmClient) {.raises: [].} =
   ## Waits for outstanding HTTP work, releases Curly, and forgets answers.
@@ -132,7 +137,10 @@ proc close*(client: LlmClient) {.raises: [].} =
   when NativeRequests:
     client.connection.close()
   client.pending = 0
-  client.replies.setLen(0)
+  client.completed = 0
+  client.body.setLen(0)
+  client.failure.setLen(0)
+  client.oracle.reset()
 
 proc available*(client: LlmClient): bool {.raises: [].} =
   ## Reports whether the host configured a native inference endpoint.
@@ -157,44 +165,57 @@ proc beginTick*(client: LlmClient, tick: int32) =
   ## Polls ready network work at the decision boundary and detects resets.
   if tick < client.tick:
     client.pending = 0
-    client.replies.setLen(0)
+    client.completed = 0
+    client.body.setLen(0)
+    client.failure.setLen(0)
     client.asked = false
   client.tick = tick
+  client.oracle.beginTick(tick)
   when NativeRequests:
     if not client.connection.inFlight:
       return
     var
       completed = client.connection.curl.pollForResponse()
-      reply = LlmReply(id: client.pending)
+      status: int32
+      body, failure: string
     if completed.isSome:
       client.connection.inFlight = false
       if client.pending == 0:
         return
       var received = move(completed.get())
-      reply.status = int32(received.response.code)
-      reply.error = move(received.error)
+      status = int32(received.response.code)
+      failure = move(received.error)
       var headerBytes = 0
       for (name, value) in received.response.headers:
         headerBytes += name.len + value.len + 4
       if received.response.body.len > MaxResponseBytes:
-        reply.error = "LLM response exceeds the byte limit"
+        failure = "LLM response exceeds the byte limit"
       elif headerBytes > MaxHeaderBytes:
-        reply.error = "LLM response headers exceed the byte limit"
+        failure = "LLM response headers exceed the byte limit"
       else:
-        reply.body = move(received.response.body)
+        body = move(received.response.body)
       if (getMonoTime() - client.started).inMilliseconds >=
         client.config.timeoutMs:
-          reply.error = "LLM request timed out"
-      if reply.error.len == 0 and reply.status notin 200 .. 299:
-        reply.error = "LLM HTTP " & $reply.status
+          failure = "LLM request timed out"
+      if failure.len == 0 and status notin 200 .. 299:
+        failure = "LLM HTTP " & $status
     elif client.pending != 0 and
       (getMonoTime() - client.started).inMilliseconds >= client.config.timeoutMs:
-        reply.error = "LLM request timed out"
+        failure = "LLM request timed out"
     else:
       return
-    if client.replies.len == MaxReplies:
-      client.replies.delete(0)
-    client.replies.add move(reply)
+    if client.pending == client.oracle.pending:
+      var document: JsonNode
+      if failure.len == 0:
+        try:
+          document = parseDocument(body)
+        except LlmError:
+          discard # Malformed JEV responses settle as failed requests.
+      client.oracle.complete(client.pending, document)
+    client.completed = client.pending
+    client.httpStatus = status
+    client.body = move(body)
+    client.failure = move(failure)
     client.pending = 0
 
 proc ask*(client: LlmClient, verb, path, body: string): int32 =
@@ -245,22 +266,34 @@ proc chat*(client: LlmClient, model, prompt: string): int32 =
     "model": selected, "messages": [{"role": "user", "content": prompt}]
   }))
 
-proc reply*(client: LlmClient, id: int32): LlmReply =
-  ## Reads a retained response, including HTTP error bodies.
-  for reply in client.replies:
-    if reply.id == id:
-      return reply
-  LlmReply(id: id, error: "Unknown or expired LLM request")
-
 proc poll*(client: LlmClient, id: int32): int32 =
   ## Returns zero while pending, one on success, or minus one on failure.
   if id > 0 and id == client.pending:
     return 0
-  if client.reply(id).error.len > 0: -1 else: 1
+  if id > 0 and id == client.completed and client.failure.len == 0:
+    return 1
+  -1
+
+proc status*(client: LlmClient, id: int32): int32 =
+  ## Returns the latest response's HTTP status, or zero for another ID.
+  if id > 0 and id == client.completed:
+    client.httpStatus
+  else:
+    0
+
+proc error*(client: LlmClient, id: int32): string =
+  ## Returns the latest request error, or reports an unavailable result.
+  if id > 0 and id == client.completed:
+    client.failure
+  else:
+    "Unknown or expired LLM request"
 
 proc response*(client: LlmClient, id: int32): string =
-  ## Returns the completed JSON or SSE response body.
-  client.reply(id).body
+  ## Returns the latest completed JSON or SSE response body.
+  if id > 0 and id == client.completed:
+    client.body
+  else:
+    ""
 
 proc contentText(content: JsonNode): string =
   ## Reads text content while leaving non-text data in the raw response.
@@ -305,3 +338,141 @@ proc text*(client: LlmClient, id: int32): string =
         result.add documentText(parseDocument(data))
       except LlmError:
         discard # Ignore malformed SSE data events.
+
+proc askOracle(client: LlmClient): int32 =
+  ## Sends a JEV draft through this player's shared LLM client.
+  defer:
+    client.oracle.submit(result)
+  if not client.oracle.enabled or client.ready != 0:
+    return 0
+  let body = client.oracle.requestBody(client.config.oracleModel)
+  if body.len > 0:
+    result = client.ask("POST", "/v1/systemone", body)
+
+proc bindRuntime*(client: LlmClient, runtime: Runtime) =
+  ## Borrows the runtime that owns these callbacks, avoiding a ref cycle.
+  client.runtime = runtime
+
+proc requestPoller*(client: LlmClient): RequestPoll =
+  ## Polls this seat during the shared barrier without rerunning BASIC.
+  result = proc(): bool =
+    ## Delivers completed replies while keeping the simulation tick fixed.
+    client.beginTick(client.tick)
+    client.hasPending()
+
+proc decisionCallback*(client: LlmClient): proc(tick: int32) =
+  ## Keeps inference state outside the deterministic simulation modules.
+  result = proc(tick: int32) =
+    ## Advances the state belonging to this VM only.
+    client.beginTick(tick)
+
+proc jsonGet(document: JsonNode, path: string): string =
+  ## Reads an RFC 6901 pointer as text or serialized JSON for non-strings.
+  var current = document
+  if path.len > 0:
+    if path[0] != '/':
+      raise newException(LlmError, "JSON pointer must start with a slash")
+    for part in path[1 .. ^1].split('/'):
+      if current == nil:
+        return ""
+      let key = part.replace("~1", "/").replace("~0", "~")
+      case current.kind
+      of JObject:
+        current = current{key}
+      of JArray:
+        var index: int
+        try:
+          index = parseInt(key)
+        except ValueError:
+          return ""
+        if index < 0 or index >= current.len:
+          return ""
+        current = current[index]
+      else:
+        return ""
+  if current == nil:
+    return ""
+  if current.kind == JString: current.getStr() else: $current
+
+proc addFunctions*(client: LlmClient, host: var Host) =
+  ## Registers the BASIC calls directly on this player's LLM client.
+  template register(name: string, arity: int, operation: untyped) =
+    ## Shares BASIC value conversion and error handling between callbacks.
+    block:
+      let binding: NumericHostProc = proc(arguments: openArray[Value]): Value =
+        ## Runs one LLM operation with values from this BASIC runtime.
+        template text(index: int): string {.inject.} =
+          ## Reads a BASIC string argument.
+          client.runtime.getString(arguments[index])
+        template integer(index: int): int32 {.inject.} =
+          ## Reads an integer argument, rejecting fractional values.
+          arguments[index].asInt()
+        template output(text: string): Value {.inject.} =
+          ## Copies a string result into BASIC storage.
+          client.runtime.putString(text)
+        var value {.inject.}: Value
+        try:
+          operation
+        except LlmError, OracleError:
+          raise newException(BasicError, getCurrentExceptionMsg())
+        value
+      discard host.addFunction(name, arity, binding, 256)
+  register("llmAvailable", 0):
+    value = int32(client.available)
+  register("llmReady", 0):
+    value = client.ready
+  register("llmAsk", 2):
+    value = client.chat(text(0), text(1))
+  register("llmRequest", 3):
+    value = client.ask(text(0), text(1), text(2))
+  register("llmPoll", 1):
+    value = client.poll(integer(0))
+  register("llmStatus", 1):
+    value = client.status(integer(0))
+  register("llmResponse$", 1):
+    value = output(client.response(integer(0)))
+  register("llmRead$", 3):
+    let
+      body = client.response(integer(0))
+      offset = integer(1)
+      count = integer(2)
+    if offset < 0 or count < 0:
+      raise newException(LlmError, "LLM slice must be nonnegative")
+    let start = min(int(offset), body.len)
+    value = output(body[start ..< start + min(int(count), body.len - start)])
+  register("llmText$", 1):
+    value = output(client.text(integer(0)))
+  register("llmError$", 1):
+    value = output(client.error(integer(0)))
+  register("jsonQuote$", 1):
+    value = output(text(0).toJson())
+  register("jsonGet$", 2):
+    value = output(jsonGet(parseDocument(text(0)), text(1)))
+  register("oracleAvailable", 0):
+    value = int32(client.oracle.enabled and client.available)
+  register("oracleReady", 0):
+    value = if client.oracle.enabled: client.ready else: -1
+  register("oracleState", 2):
+    value = client.oracle.state(text(0), %integer(1))
+  register("oracleStateText", 2):
+    value = client.oracle.state(text(0), %text(1))
+  register("oracleNote", 1):
+    value = client.oracle.note(text(0))
+  register("oracleQuestion", 3):
+    value = client.oracle.question(text(0), integer(1), text(2))
+  register("oracleCriterion", 3):
+    value = client.oracle.criterion(text(0), text(1), text(2))
+  register("oracleCriterionField", 4):
+    value = client.oracle.criterionField(text(0), text(1), text(2), text(3))
+  register("oracleAsk", 0):
+    value = client.askOracle()
+  register("oraclePoll", 1):
+    value = client.oracle.poll(integer(0))
+  register("oracleAnswer", 2):
+    value = client.oracle.answer(integer(0), text(1)).value
+  register("oracleConfidence", 2):
+    value = client.oracle.answer(integer(0), text(1)).confidence
+  register("oracleProbability", 3):
+    value = client.oracle.answer(integer(0), text(1)).probabilities.getOrDefault(
+      text(2), -1'i32
+    )

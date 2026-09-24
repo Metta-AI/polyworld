@@ -1,6 +1,4 @@
-import
-  std/[json, math, tables],
-  llms
+import std/[json, math, tables]
 
 const
   MaxStateFields* = 256
@@ -30,29 +28,27 @@ type
     key*: string
     value*, confidence*: int32
     probabilities*: Table[string, int32]
-  OracleReply = object
-    id: int32
-    answers: seq[OracleAnswer]
   Oracle* = ref object
-    client*: LlmClient
     enabled*: bool
     draft: OracleDraft
-    pending: int32
+    pending*: int32
     tick: int32
     questions: seq[Question]
-    replies: seq[OracleReply]
+    completed: int32
+    answers: seq[OracleAnswer]
 
-proc newOracle*(client: LlmClient, enabled = true): Oracle =
-  ## Creates a typed Jev advisor on the seat's shared HTTP client.
-  Oracle(client: client, enabled: enabled, tick: -1)
+proc newOracle*(enabled = true): Oracle =
+  ## Creates structured JEV state without an HTTP client or BASIC runtime.
+  Oracle(enabled: enabled, tick: -1)
 
-proc available*(oracle: Oracle): bool =
-  ## Reports whether this advisor may submit questions.
-  oracle.enabled and oracle.client.available
-
-proc ready*(oracle: Oracle): int32 =
-  ## Returns the shared request spacing or minus one when disabled.
-  if oracle.available: oracle.client.ready else: -1
+proc reset*(oracle: Oracle) =
+  ## Clears drafts, pending questions, and retained answers.
+  oracle.draft = OracleDraft()
+  oracle.pending = 0
+  oracle.questions.setLen(0)
+  oracle.completed = 0
+  oracle.answers.setLen(0)
+  oracle.tick = -1
 
 proc validKey(key: string): bool =
   ## Bounds names before storing or expanding them into JSON paths.
@@ -199,8 +195,10 @@ proc criterionField*(
         criterion.fields.add (field, text)
         return 1
 
-proc draftBody(oracle: Oracle): string =
+proc requestBody*(oracle: Oracle, model: string): string =
   ## Encodes Jev's state and typed questions without a chat prompt wrapper.
+  if oracle.draft.questions.len == 0:
+    return
   var questions = newJObject()
   for item in oracle.draft.questions:
     var
@@ -227,26 +225,21 @@ proc draftBody(oracle: Oracle): string =
         criteria[criterion.label] = value
     question["criteria"] = criteria
     questions[item.key] = question
-  $(%*{
-    "model": oracle.client.config.oracleModel,
+  result = $(%*{
+    "model": model,
     "state": (if oracle.draft.state == nil: newJObject()
       else: oracle.draft.state),
     "questions": questions
   })
+  if result.len > MaxOracleBytes:
+    result.setLen(0)
 
-proc ask*(oracle: Oracle): int32 =
-  ## Queues one draft and clears it even when a request is refused.
-  defer:
-    oracle.draft = OracleDraft()
-  if oracle.ready != 0 or oracle.draft.questions.len == 0:
-    return 0
-  let body = oracle.draftBody()
-  if body.len > MaxOracleBytes:
-    return 0
-  result = oracle.client.ask("POST", "/v1/systemone", body)
-  if result > 0:
-    oracle.pending = result
+proc submit*(oracle: Oracle, id: int32) =
+  ## Saves accepted question definitions and clears the submitted draft.
+  if id > 0:
+    oracle.pending = id
     oracle.questions = oracle.draft.questions
+  oracle.draft = OracleDraft()
 
 proc thousandths(node: JsonNode): int32 =
   ## Converts finite API numbers to BASIC's integer thousandths.
@@ -257,9 +250,9 @@ proc thousandths(node: JsonNode): int32 =
     return -1
   int32(clamp(round(value), -1_000_000_000.0, 1_000_000_000.0))
 
-proc flatten(oracle: Oracle, body: string): seq[OracleAnswer] =
+proc flatten(oracle: Oracle, document: JsonNode): seq[OracleAnswer] =
   ## Converts only answers matching the submitted question definitions.
-  let answers = parseDocument(body){"answers"}
+  let answers = document{"answers"}
   if answers == nil or answers.kind != JObject:
     return
   for question in oracle.questions:
@@ -287,24 +280,20 @@ proc flatten(oracle: Oracle, body: string): seq[OracleAnswer] =
       result.add answer
 
 proc beginTick*(oracle: Oracle, tick: int32) =
-  ## Delivers completed advice before a new BASIC decision begins.
+  ## Clears the draft for this decision and resets answers when rewinding.
   if tick < oracle.tick:
-    oracle.pending = 0
-    oracle.replies.setLen(0)
-  oracle.client.beginTick(tick)
+    oracle.reset()
   oracle.tick = tick
   oracle.draft = OracleDraft()
-  if oracle.pending == 0 or oracle.client.poll(oracle.pending) == 0:
+
+proc complete*(oracle: Oracle, id: int32, document: JsonNode) =
+  ## Stores structured answers, using nil for failed or malformed responses.
+  if id <= 0 or id != oracle.pending:
     return
-  var reply = OracleReply(id: oracle.pending)
-  if oracle.client.poll(oracle.pending) > 0:
-    try:
-      reply.answers = oracle.flatten(oracle.client.response(oracle.pending))
-    except LlmError:
-      discard # Malformed replies settle as failed requests.
-  if oracle.replies.len == MaxReplies:
-    oracle.replies.delete(0)
-  oracle.replies.add move(reply)
+  oracle.completed = id
+  oracle.answers.setLen(0)
+  if document != nil:
+    oracle.answers = oracle.flatten(document)
   oracle.pending = 0
   oracle.questions.setLen(0)
 
@@ -312,16 +301,14 @@ proc poll*(oracle: Oracle, id: int32): int32 =
   ## Returns the answer count, zero while pending, or minus one on failure.
   if id > 0 and id == oracle.pending:
     return 0
-  for reply in oracle.replies:
-    if reply.id == id and reply.answers.len > 0:
-      return int32(reply.answers.len)
+  if id > 0 and id == oracle.completed and oracle.answers.len > 0:
+    return int32(oracle.answers.len)
   -1
 
 proc answer*(oracle: Oracle, id: int32, key: string): OracleAnswer =
   ## Reads a named judgment, returning missing values as minus one.
-  for reply in oracle.replies:
-    if reply.id == id:
-      for answer in reply.answers:
-        if answer.key == key:
-          return answer
+  if id > 0 and id == oracle.completed:
+    for answer in oracle.answers:
+      if answer.key == key:
+        return answer
   OracleAnswer(value: -1, confidence: -1)

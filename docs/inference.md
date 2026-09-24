@@ -1,8 +1,13 @@
 # OpenRouter, JEV, and headless time
 
 Gods of the Arena, Light vs Dark, and Call to Adventure share the OpenRouter
-host in `src/polyworld/advisors.nim`. The game runtime is Nim.
+host in `src/polyworld/llms.nim`. The game runtime is Nim.
 No Python program or subprocess is used for LLM calls.
+
+Each player has one `LlmClient` that owns HTTP requests, BASIC bindings, and
+structured oracle state. `oracles.nim` builds JEV payloads and interprets
+answers; it has no HTTP client or BASIC runtime dependency. Normal text and
+JEV requests use the same client and pending-request limit.
 
 ## Time controls
 
@@ -103,7 +108,9 @@ larger responses. JSON extraction allows up to 64 nesting levels. Oversized
 responses fail with an error instead of silently truncating successful results.
 
 Each seat has one pending request shared by normal LLM and JEV calls, and
-retains its four most recent raw replies. Request functions return 0 when busy,
+retains only its latest completed response. Older request IDs expire when a
+new response replaces it. JEV likewise retains only its latest answer set.
+Request functions return 0 when busy,
 rate-limited, or the body exceeds the request limit. A host deadline settles
 the BASIC request and barrier; the seat stays busy until Curly's outstanding
 transfer finishes, and its late reply is discarded. Curly's transport timeout

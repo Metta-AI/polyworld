@@ -3,7 +3,7 @@
 
 import
   bassy, fixxy,
-  polyworld/[advisors, mailboxes, metrics, bodies, cli, controllers,
+  polyworld/[llms, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
   content,
   maps,
@@ -284,10 +284,10 @@ proc sendChat*(
     if game.inboxes[recipient].push(id, text):
       inc result
 
-proc initHeroHost(heroId: int32, advisor: Advisor = nil): Host =
+proc initHeroHost(heroId: int32, llm: LlmClient = nil): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
-  let services = if advisor == nil: newAdvisor(0, LlmConfig()) else: advisor
+  let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
   services.addFunctions(result)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends script text through the game's routing rules.
@@ -866,7 +866,7 @@ proc loadBots*(
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
       continue
-    let advisor = newAdvisor(i)
+    let llm = newLlmClient(i)
     let source = sources[i]
     let program =
       when defined(coworld):
@@ -879,15 +879,15 @@ proc loadBots*(
     game.heroVms[i] = HeroVm(
       runtime: initRuntime(
         program,
-        initHeroHost(game.world.heroes[i].id, advisor),
+        initHeroHost(game.world.heroes[i].id, llm),
         limits
       ),
       limits: limits,
-      prepareDecision: advisor.decisionCallback(),
-      pollRequests: advisor.requestPoller(),
+      prepareDecision: llm.decisionCallback(),
+      pollRequests: llm.requestPoller(),
       ready: true
     )
-    advisor.bindRuntime(game.heroVms[i].runtime)
+    llm.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
 

@@ -1,7 +1,7 @@
 import
   std/[json, monotimes, net, os, strutils, tempfiles, times],
   bassy, fixxy,
-  polyworld/[advisors, cli, llms, mailboxes, oracles, timings],
+  polyworld/[cli, llms, mailboxes, oracles, timings],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim]
 
 const
@@ -152,20 +152,20 @@ block:
   doAssert client.ready == 1
 
   echo "Testing normal strings through the published BASIC chat example"
-  let chatAdvisor = newAdvisor(4, config)
+  let chatClient = newLlmClient(4, config)
   var chatHost = initHost()
-  chatAdvisor.addFunctions(chatHost)
+  chatClient.addFunctions(chatHost)
   let chatSource = readFile(
     currentSourcePath().parentDir / "../examples/inference/chat.bas"
   )
   var chatRuntime = initRuntime(compile(chatSource, chatHost), chatHost)
-  chatAdvisor.bindRuntime(chatRuntime)
-  chatAdvisor.beginTick(0)
+  chatClient.bindRuntime(chatRuntime)
+  chatClient.beginTick(0)
   discard chatRuntime.run()
-  waitForRequests([chatAdvisor.requestPoller()])
+  waitForRequests([chatClient.requestPoller()])
   doAssert received.recv().contains("test/model")
   chatRuntime.restart()
-  chatAdvisor.beginTick(1)
+  chatClient.beginTick(1)
   discard chatRuntime.run()
   doAssert chatRuntime.getString(chatRuntime.getGlobalValue("answer$")) ==
     "hello"
@@ -220,7 +220,12 @@ block:
   echo "Testing raw streaming replies, HTTP failures, and response bounds"
   client.beginTick(2)
   let stream = client.ask("POST", "/v1/stream", "{\"stream\":true}")
+  doAssert client.response(id).contains("tool_calls")
   client.settle(stream, 3)
+  doAssert client.poll(id) == -1
+  doAssert client.status(id) == 0
+  doAssert client.response(id) == ""
+  doAssert client.error(id).contains("expired")
   doAssert client.text(stream) == "hello"
   doAssert client.response(stream).endsWith("data: [DONE]\n\n")
   discard received.recv()
@@ -228,7 +233,7 @@ block:
   let failed = client.ask("POST", "/v1/failure", "{}")
   client.settle(failed, 5)
   doAssert client.poll(failed) == -1
-  doAssert client.reply(failed).status == 429
+  doAssert client.status(failed) == 429
   doAssert client.response(failed).contains("spend limit")
   discard received.recv()
   client.beginTick(6)
@@ -239,9 +244,9 @@ block:
   discard received.recv()
 
   echo "Testing native Jev flattening and structured BASIC strings"
-  let advisor = newAdvisor(5, config)
+  let scriptClient = newLlmClient(5, config)
   var host = initHost()
-  advisor.addFunctions(host)
+  scriptClient.addFunctions(host)
   let program = compile("""
 if request = 0 then
   oracleState("candidates[0].hp", 3)
@@ -264,37 +269,55 @@ else
 end if
 """, host)
   var runtime = initRuntime(program, host)
-  advisor.bindRuntime(runtime)
-  advisor.beginTick(0)
+  scriptClient.bindRuntime(runtime)
+  scriptClient.beginTick(0)
   discard runtime.run()
-  waitForRequests([advisor.requestPoller()])
+  waitForRequests([scriptClient.requestPoller()])
   let sent = received.recv()
   doAssert sent.contains("\"candidates\":[{\"hp\":3}]")
   doAssert sent.contains(DefaultOracleModel)
   runtime.restart()
-  advisor.beginTick(1)
+  scriptClient.beginTick(1)
   discard runtime.run()
   doAssert runtime.getGlobal("status") == 3
   doAssert runtime.getGlobal("guard") == 800
   doAssert runtime.getGlobal("mode") == 0
   doAssert runtime.getGlobal("risk") == 1500
   doAssert runtime.getGlobal("probability") == 300
+  let answered = runtime.getGlobal("request")
+  doAssert scriptClient.oracle.poll(answered) == 3
+  runtime.restart()
+  runtime.setGlobal("request", 0)
+  scriptClient.beginTick(2)
+  discard runtime.run()
+  let replacement = runtime.getGlobal("request")
+  doAssert replacement > answered
+  doAssert scriptClient.oracle.poll(answered) == 3
+  waitForRequests([scriptClient.requestPoller()])
+  discard received.recv()
+  doAssert scriptClient.oracle.poll(replacement) == 3
+  doAssert scriptClient.oracle.poll(answered) == -1
+  doAssert scriptClient.oracle.answer(answered, "guard").value == -1
+  doAssert scriptClient.response(answered) == ""
+  scriptClient.close()
+  doAssert scriptClient.oracle.poll(replacement) == -1
+  doAssert scriptClient.response(replacement) == ""
 
   echo "Testing BASIC readback of the captured live OpenRouter JEV response"
   block:
-    let advisor = newAdvisor(0, config)
+    let scriptClient = newLlmClient(0, config)
     var host = initHost()
-    advisor.addFunctions(host)
+    scriptClient.addFunctions(host)
     let program = compile(JevRequest, host)
     var runtime = initRuntime(program, host)
-    advisor.bindRuntime(runtime)
-    advisor.beginTick(0)
+    scriptClient.bindRuntime(runtime)
+    scriptClient.beginTick(0)
     discard runtime.run()
     doAssert runtime.getGlobal("request") > 0
-    waitForRequests([advisor.requestPoller()])
+    waitForRequests([scriptClient.requestPoller()])
     discard received.recv()
     runtime.restart()
-    advisor.beginTick(1)
+    scriptClient.beginTick(1)
     discard runtime.run()
     doAssert runtime.getGlobal("answers") == 2
     doAssert runtime.getGlobal("strategy") == 0
@@ -387,44 +410,44 @@ end if
 
   echo "Testing the barrier submits all seats before waiting for any seat"
   let
-    first = newAdvisor(0, config)
-    second = newAdvisor(1, config)
+    first = newLlmClient(0, config)
+    second = newLlmClient(1, config)
   first.beginTick(10)
   second.beginTick(10)
   let
-    firstId = first.oracle.client.ask("POST", "/v1/pair", "{}")
-    secondId = second.oracle.client.ask("POST", "/v1/pair", "{}")
+    firstId = first.ask("POST", "/v1/pair", "{}")
+    secondId = second.ask("POST", "/v1/pair", "{}")
   waitForRequests([first.requestPoller(), second.requestPoller()])
-  doAssert first.oracle.client.poll(firstId) == 1
-  doAssert second.oracle.client.poll(secondId) == 1
+  doAssert first.poll(firstId) == 1
+  doAssert second.poll(secondId) == 1
   discard received.recv()
   discard received.recv()
 
   echo "Testing timeouts settle a barrier instead of advancing forever"
   var short = config
   short.timeoutMs = 40
-  let slow = newAdvisor(2, short)
+  let slow = newLlmClient(2, short)
   slow.beginTick(10)
-  let slowId = slow.oracle.client.ask("POST", "/v1/slow", "{}")
+  let slowId = slow.ask("POST", "/v1/slow", "{}")
   waitForRequests([slow.requestPoller()])
-  doAssert slow.oracle.client.poll(slowId) == -1
-  doAssert slow.oracle.client.reply(slowId).error.contains("timed out")
+  doAssert slow.poll(slowId) == -1
+  doAssert slow.error(slowId).contains("timed out")
   discard received.recv()
-  doAssert slow.oracle.client.ready == -1
-  doAssert slow.oracle.client.ask("POST", "/v1/chat/completions", "{}") == 0
+  doAssert slow.ready == -1
+  doAssert slow.ask("POST", "/v1/chat/completions", "{}") == 0
   let deadline = getMonoTime() + initDuration(seconds = 3)
-  while slow.oracle.client.ready < 0:
+  while slow.ready < 0:
     doAssert getMonoTime() < deadline, "late response was not drained"
     slow.beginTick(12)
     sleep(1)
-  doAssert slow.oracle.client.poll(slowId) == -1
-  doAssert slow.oracle.client.response(slowId) == ""
-  let retry = slow.oracle.client.chat("", "after timeout")
+  doAssert slow.poll(slowId) == -1
+  doAssert slow.response(slowId) == ""
+  let retry = slow.chat("", "after timeout")
   doAssert retry > slowId
-  slow.oracle.client.settle(retry, 12)
-  doAssert slow.oracle.client.text(retry) == "hello"
+  slow.settle(retry, 12)
+  doAssert slow.text(retry) == "hello"
   discard received.recv()
-  slow.oracle.client.close()
+  slow.close()
   client.close()
 
   echo "Testing resets discard old replies and closed clients can reopen"
@@ -466,9 +489,9 @@ block:
     except LlmError:
       rejected = true
     doAssert rejected
-  let advisor = newAdvisor(0, LlmConfig())
+  let scriptClient = newLlmClient(0, LlmConfig())
   var host = initHost()
-  advisor.addFunctions(host)
+  scriptClient.addFunctions(host)
   for name in ["chat", "jev", "request"]:
     let source = readFile(currentSourcePath().parentDir /
       "../examples/inference" / (name & ".bas"))

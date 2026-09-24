@@ -71,7 +71,7 @@ import
   test_llms,
   test_mailboxes,
   test_chats,
-  test_advisors,
+  test_llm_hosts,
   test_metrics,
   test_stats,
   test_nav,

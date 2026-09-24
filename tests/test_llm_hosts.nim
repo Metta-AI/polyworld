@@ -3,9 +3,9 @@ import
   bassy,
   polyworld/cli
 
-when defined(advisorCta):
+when defined(llmCta):
   import ../examples/call_to_adventure/[bots, content, sim]
-elif defined(advisorLvd):
+elif defined(llmLvd):
   import ../examples/light_vs_dark/[bots, content, maps, sim]
 else:
   import ../examples/gods_of_the_arena/[bots, maps, replays, sim]
@@ -25,7 +25,7 @@ wend
 echo "Testing LLM and mailbox functions through the game's actual BASIC hosts and loaders"
 block:
   let
-    directory = createTempDir("polyworld-advisors-", "")
+    directory = createTempDir("polyworld-llm-hosts-", "")
     path = directory / "player.bas"
     hadSetting = existsEnv("COGAME_LLM")
     setting = getEnv("COGAME_LLM")
@@ -37,28 +37,28 @@ block:
     else:
       delEnv("COGAME_LLM")
   writeFile(path, Program)
-  when defined(advisorCta):
+  when defined(llmCta):
     let game = newGame(2026)
-  elif defined(advisorLvd):
+  elif defined(llmLvd):
     let game = newGame(generateMap(DefaultSeed), 240)
   else:
     let game = newGame(generateMap(54), 240, 10, false, ReplayData(),
       drafting = false)
 
-  when defined(advisorLvd):
+  when defined(llmLvd):
     game.loadBots([Program, Program])
-  elif defined(advisorCta):
+  elif defined(llmCta):
     game.loadBots([BotGroup(path: path, count: PartySize)])
   else:
     game.loadBots([BotGroup(path: path, count: 10)])
   for tick in 1 .. 2:
     game.world.tick = int32(tick)
-    when defined(advisorCta):
+    when defined(llmCta):
       for slot in 0'i32 ..< PartySize:
         game.runBotDecisions(slot)
     else:
       game.runBotDecisions()
-    when defined(advisorLvd):
+    when defined(llmLvd):
       let vms = game.brains
     else:
       let vms = game.heroVms
