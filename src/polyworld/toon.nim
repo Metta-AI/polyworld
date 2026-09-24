@@ -72,6 +72,24 @@ var
   toonLightingMode: Uniform[int32]
   toonPerPixelLighting: Uniform[bool]
   toonNeutralMaterial: Uniform[bool]
+  toonFogColor: Uniform[Vec4]
+    ## terrain-lighting (convoy/terrain-lighting): distance fog blends
+    ## geometry into the horizon rather than letting the terrain mesh's
+    ## own silhouette meet the sky as a hard edge. Set to the SAME colour
+    ## as the background gradient's own `toonHorizonColor` uniform
+    ## (`toonBackgroundFrag`, a separate shader) -- never a flat grey --
+    ## so a fogged fragment blends toward exactly what the sky already
+    ## looks like at the horizon, not an invented haze colour.
+  toonFogNear: Uniform[float32]
+  toonFogFar: Uniform[float32]
+    ## World-unit distance from the camera where the fog blend starts/
+    ## reaches full strength. `toonFogFar > toonFogNear` is the caller's
+    ## job to guarantee; this shader only ever divides by their
+    ## difference guarded by `max(..., 0.001)` (see `toonFrag` below).
+  toonFogOn: Uniform[bool]
+    ## False by construction until a game opts in (`ctx.fogOn`,
+    ## `newToonContext`'s own default) -- the OFF path never evaluates
+    ## the blend below, reproducing pre-fog pixels exactly.
   # Sun shadow map sampling, fed from polyworld/shadows each frame. Two
   # maps at neighbouring quantized sun steps, cross-faded by toonShadowStep
   # so shadows dissolve toward the next sun position instead of shimmering.
@@ -179,6 +197,19 @@ proc toonVert(
   lightIntensity = max(dot(normal, toLight), 0.0'f)
   gl_Position = toonProj * toonView * vec4(worldPos, 1.0'f)
 
+proc applyFog(surfaceColor: Vec3, worldPos: Vec3): Vec3 =
+  # convoy/terrain-lighting: distance fog toward toonFogColor (the sky's own
+  # horizon colour), blended BEFORE toonTint so fog is graded too. Shared by
+  # every toonFrag exit (lit, unlit, unlit+shadow) so unlit terrain fogs.
+  result = surfaceColor
+  if toonFogOn:
+    let
+      dist = length(worldPos - toonCameraPosition)
+      fogT = clamp(
+        (dist - toonFogNear) / max(toonFogFar - toonFogNear, 0.001'f), 0.0'f, 1.0'f)
+      fogSmooth = fogT * fogT * (3.0'f - 2.0'f * fogT)
+    result = mix(surfaceColor, toonFogColor.rgb, fogSmooth)
+
 proc toonFrag(
   worldPos: Vec3,
   color: Vec4,
@@ -208,10 +239,10 @@ proc toonFrag(
       shadowTerm = clamp(
         (1.0'f - sunShadow) / max(toonShadowStrength, 0.0001'f), 0.0'f, 1.0'f)
       unlitBand = mix(1.0'f, toonUnlitShadowDark, shadowTerm)
-    fragColor = vec4(albedo.rgb * unlitBand, albedo.a) * toonTint
+    fragColor = vec4(applyFog(albedo.rgb * unlitBand, worldPos), albedo.a) * toonTint
     return
   if toonUnlit or toonLightingMode == 2:
-    fragColor = albedo * toonTint
+    fragColor = vec4(applyFog(albedo.rgb, worldPos), albedo.a) * toonTint
     return
   var lambert = lightIntensity
   if toonPerPixelLighting or toonLightingMode == 1:
@@ -254,7 +285,7 @@ proc toonFrag(
   var emissive: Vec3 = texture(toonEmissiveTexture, uv).rgb * toonEmissiveFactor
   if toonNeutralMaterial:
     emissive = vec3(0.0'f)
-  fragColor = vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint
+  fragColor = vec4(applyFog(lit * albedo.rgb + emissive, worldPos), albedo.a) * toonTint
 
 ## Sun depth pass: the same skinned vertex path projected by the sun's
 ## light matrix instead of the camera, with the base color's alpha cutout
@@ -429,6 +460,9 @@ type
     unlitReceivesShadow, unlitShadowDark: GLint
     smoothShaded: GLint
     smoothShadowDark: GLint
+    fogColor: GLint
+    fogNear, fogFar: GLint
+    fogOn: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength, lightLevel: GLint
@@ -492,6 +526,17 @@ type
       ## only look (no visible cast shadow) even with a node opted in.
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
+    fogColor*: Color
+      ## terrain-lighting: distance fog target colour -- a caller should
+      ## set this to the SAME value as `horizonColor` above (see
+      ## `toonFrag`'s own header) so fogged geometry blends into exactly
+      ## what the sky already looks like at the horizon.
+    fogNear*, fogFar*: float32
+      ## World-unit camera distance where the fog blend starts/reaches
+      ## full strength.
+    fogOn*: bool
+      ## False (the default) is an exact no-op -- `toonFrag` skips the
+      ## whole blend, reproducing pre-fog pixels exactly.
 
 var blackTexture: GLuint
 
@@ -547,6 +592,13 @@ proc newToonContext*(): ToonContext =
     rimColor: color(1, 1, 1, 0),
     unlitShadowDark: 0.6'f32,
     smoothShadowDark: 1.0'f32,
+    fogOn: false,
+    # Non-zero, non-degenerate placeholders (never divide-by-zero in
+    # toonFrag's guard even if a caller sets fogColor without
+    # fogNear/fogFar) -- irrelevant either way while fogOn is false,
+    # its own default just above.
+    fogNear: 1.0'f32,
+    fogFar: 2.0'f32,
   )
   result.setPalette(ToonPalettes[0])
   result.shader = compileShaderFiles(ToonVertSrc, ToonFragSrc)
@@ -578,6 +630,10 @@ proc newToonContext*(): ToonContext =
   loc(lightingMode, "toonLightingMode")
   loc(perPixelLighting, "toonPerPixelLighting")
   loc(neutralMaterial, "toonNeutralMaterial")
+  loc(fogColor, "toonFogColor")
+  loc(fogNear, "toonFogNear")
+  loc(fogFar, "toonFogFar")
+  loc(fogOn, "toonFogOn")
   loc(shadowMvp0, "toonShadowMvp0")
   loc(shadowMvp1, "toonShadowMvp1")
   loc(shadowMap0, "toonShadowMap0")
@@ -803,6 +859,11 @@ proc draw*(
   glUniform1i(u.neutralMaterial, ctx.neutralMaterial.ord.GLint)
   glUniform1f(u.unlitShadowDark, ctx.unlitShadowDark)
   glUniform1f(u.smoothShadowDark, ctx.smoothShadowDark)
+  glUniform4f(
+    u.fogColor, ctx.fogColor.r, ctx.fogColor.g, ctx.fogColor.b, ctx.fogColor.a)
+  glUniform1f(u.fogNear, ctx.fogNear)
+  glUniform1f(u.fogFar, ctx.fogFar)
+  glUniform1i(u.fogOn, ctx.fogOn.ord.GLint)
 
   # Sun shadow map state (polyworld/shadows): characters darken where the
   # sun cannot see them and flatten with the shared shading strength.
