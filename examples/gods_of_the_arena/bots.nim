@@ -2,6 +2,7 @@
 ## on the simulation.
 
 import
+  polyworld/neural,
   bassy, fixxy,
   polyworld/[metrics, bodies, cli, controllers, pathing, profiles, tapes],
   content,
@@ -262,6 +263,7 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
 proc initHeroHost(heroId: int32): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
+  result.addNeuralFunctions()
   for error in ActionError:
     discard result.addData($error, error.ord.int32)
   for class in HeroClass:
