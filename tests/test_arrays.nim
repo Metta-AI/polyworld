@@ -25,10 +25,10 @@ for representation in ["int32", "fixed32"]:
       if representation == "int32":
         "2147483647, -25000, 13, -2147483648, 7654, -99"
       else:
-        "0.220766, -0.498641, 0.306957, 1.125, -0.000031, 0.75"
+        "0.15625, -0.46875, 0.3125, 1.125, -0.000031, 0.75"
     biases =
-      if representation == "int32": "387878561, 10897366"
-      else: "-0.252276, 0.714471"
+      if representation == "int32": "400000001, 12000007"
+      else: "-0.375, 0.625"
     source = "data weights as " & representation & " = " & weights &
       "\ndata biases as " & representation & " = " & biases & "\n" & """
 dim features(2)

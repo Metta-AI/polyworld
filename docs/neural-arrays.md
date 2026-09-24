@@ -87,7 +87,7 @@ Source bytes and compiled instruction counts retain their separate limits.
 
 GotA's existing limits remain 64 KiB of source, 32 arrays, 4,096 total array
 elements, 2 MiB of logical runtime memory, 20,000 instructions and 50,000 work
-units per decision. This policy fits without raising any of them.
+units per decision.
 
 ## Implementation and dependency
 
@@ -107,5 +107,4 @@ nim check tests/tests.nim
 nim r tests/tests.nim
 ```
 
-See the [converted policy](../examples/gods_of_the_arena/players/neural.bas) and
-[recorded comparison](../experiments/neural-policy/results.md).
+The examples and test fixtures use hand-written synthetic values.
