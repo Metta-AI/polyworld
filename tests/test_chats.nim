@@ -20,8 +20,19 @@ message$ = pullMailbox$()
 from = mailboxId()
 """
 
-proc checkMailboxes[T](game: T, teamCount: int) =
-  ## Checks default chat routing and repeated reads through a game's hosts.
+const CtaProgram = """
+rejectedTeam = sendChat(-1, "team")
+rejectedDm = sendChat(mailboxSelf(), "direct")
+sent = sendChat(-2, "nearby hello")
+message$ = pullMailbox$()
+from = mailboxId()
+while mailboxCount() > 0
+  ignored$ = pullMailbox$()
+wend
+"""
+
+proc checkMailboxes[T](game: T) =
+  ## Checks each game's chat routing and repeated reads through BASIC.
   template send(sender, target, text: untyped): untyped =
     ## Uses the game's own routing implementation.
     when T is ctaSim.Game:
@@ -30,30 +41,39 @@ proc checkMailboxes[T](game: T, teamCount: int) =
       gotaBots.sendChat(game, sender, target, text)
     else:
       lvdBots.sendChat(game, sender, target, text)
-  doAssert send(0, -1, "team") == teamCount
-  var received = 0
-  for slot, inbox in game.inboxes:
-    when T is ctaSim.Game:
-      let teammate = true
-    elif T is gotaSim.Game:
+  when T is gotaSim.Game:
+    doAssert send(0, -1, "team") == 5
+    for slot, inbox in game.inboxes:
       let teammate = game.world.heroes[slot].team == game.world.heroes[0].team
-    else:
-      let teammate = slot == 0
-    doAssert inbox.count == int(teammate)
-    if inbox.count > 0:
-      inc received
-      doAssert inbox.messages[inbox.first] == "team"
-      doAssert inbox.pop() == -1
-  doAssert received == teamCount
+      doAssert inbox.count == int(teammate)
+      if teammate:
+        doAssert inbox.messages[inbox.first] == "team"
+        doAssert inbox.pop() == -1
+  else:
+    doAssert send(0, -1, "team") == 0
+    for inbox in game.inboxes:
+      doAssert inbox.count == 0
   doAssert send(0, -2, "global") == game.inboxes.len
   for inbox in game.inboxes:
+    doAssert inbox.messages[inbox.first] == "global"
     doAssert inbox.pop() == -2
-  doAssert send(0, 1, "direct") == 1
-  doAssert game.inboxes[1].messages[game.inboxes[1].first] == "direct"
-  doAssert game.inboxes[1].pop() == 0
+  when T is ctaSim.Game:
+    for target in 0 ..< game.inboxes.len:
+      doAssert send(0, target, "direct") == 0
+    for inbox in game.inboxes:
+      doAssert inbox.count == 0
+  else:
+    doAssert send(0, 1, "direct") == 1
+    for slot, inbox in game.inboxes:
+      doAssert inbox.count == int(slot == 1)
+    doAssert game.inboxes[1].messages[game.inboxes[1].first] == "direct"
+    doAssert game.inboxes[1].pop() == 0
+  doAssert send(-1, -2, "invalid") == 0
+  doAssert send(game.inboxes.len, -2, "invalid") == 0
+  doAssert send(0, -3, "invalid") == 0
   doAssert send(0, game.inboxes.len, "invalid") == 0
   for i in 0 ..< MaxMailboxMessages:
-    doAssert send(0, 0, "full") == 1
+    doAssert game.inboxes[0].push(-2, "full")
   doAssert send(0, -2, "partial") == game.inboxes.len - 1
   doAssert game.inboxes[0].count == MaxMailboxMessages
   for inbox in game.inboxes:
@@ -74,10 +94,18 @@ proc checkMailboxes[T](game: T, teamCount: int) =
       let vms = game.heroVms
     for index, vm in vms:
       doAssert vm != nil and not vm.failed, vm.lastError
-      doAssert vm.runtime.getGlobal("sent") == 1
-      doAssert vm.runtime.getGlobal("from") == index
-      doAssert vm.runtime.getString(vm.runtime.getGlobalValue("message$")) ==
-        "private hello"
+      when T is ctaSim.Game:
+        doAssert vm.runtime.getGlobal("rejectedTeam") == 0
+        doAssert vm.runtime.getGlobal("rejectedDm") == 0
+        doAssert vm.runtime.getGlobal("sent") == ctaContent.PartySize
+        doAssert vm.runtime.getGlobal("from") == -2
+        doAssert vm.runtime.getString(vm.runtime.getGlobalValue("message$")) ==
+          "nearby hello"
+      else:
+        doAssert vm.runtime.getGlobal("sent") == 1
+        doAssert vm.runtime.getGlobal("from") == index
+        doAssert vm.runtime.getString(vm.runtime.getGlobalValue("message$")) ==
+          "private hello"
       let large = vm.runtime.putString(repeat('x', 1024))
       doAssert vm.runtime.getString(large).len == 1024
   when defined(nimAllocStats) and T is gotaSim.Game:
@@ -90,6 +118,38 @@ proc checkMailboxes[T](game: T, teamCount: int) =
         discard vm.runtime.run()
     let after = getAllocStats()
     doAssert after == before, $(after - before)
+
+proc checkRange(game: ctaSim.Game) =
+  ## Checks inclusive tile range, level isolation, and routing at send time.
+  for inbox in game.inboxes:
+    while inbox.count > 0:
+      discard inbox.pop()
+  for slot in 0 ..< ctaContent.PartySize:
+    game.world.actors[slot].home.level = 0
+    game.world.actors[slot].home.x = 20
+    game.world.actors[slot].home.z = 20
+  game.world.actors[1].home.x = 36
+  game.world.actors[2].home.x = 37
+  game.world.actors[3].home.level = 1
+  doAssert ctaBots.sendChat(game, 0, -2, "boundary") == 2
+  doAssert game.inboxes[0].pop() == -2
+  doAssert game.inboxes[2].count == 0
+  doAssert game.inboxes[3].count == 0
+  game.world.actors[1].home.level = 1
+  doAssert game.inboxes[1].messages[game.inboxes[1].first] == "boundary"
+  doAssert game.inboxes[1].pop() == -2
+  doAssert ctaBots.sendChat(game, 0, -2, "different level") == 1
+  doAssert game.inboxes[0].pop() == -2
+  doAssert game.inboxes[1].count == 0
+  game.world.actors[1].home.level = 0
+  game.world.actors[1].home.z = 36
+  doAssert ctaBots.sendChat(game, 0, -2, "diagonal") == 2
+  doAssert game.inboxes[0].pop() == -2
+  doAssert game.inboxes[1].pop() == -2
+  game.world.actors[1].home.z = 37
+  doAssert ctaBots.sendChat(game, 0, -2, "outside") == 1
+  doAssert game.inboxes[0].pop() == -2
+  doAssert game.inboxes[1].count == 0
 
 echo "Testing default mailboxes through all three games' BASIC hosts"
 block:
@@ -110,17 +170,19 @@ block:
   )
   gotaBots.loadBots(gota, [BotGroup(path: path, count: 10)])
   echo "Checking GotA"
-  gota.checkMailboxes(5)
+  gota.checkMailboxes()
   echo "GotA passed"
 
   let cta = ctaSim.newGame(2026)
+  writeFile(path, CtaProgram)
   ctaBots.loadBots(cta, [BotGroup(path: path, count: ctaContent.PartySize)])
   echo "Checking CTA"
-  cta.checkMailboxes(ctaContent.PartySize)
+  cta.checkMailboxes()
+  cta.checkRange()
   echo "CTA passed"
 
   let lvd = lvdSim.newGame(lvdMaps.generateMap(lvdContent.DefaultSeed), 240)
   lvdBots.loadBots(lvd, [Program, Program])
   echo "Checking LVD"
-  lvd.checkMailboxes(1)
+  lvd.checkMailboxes()
   echo "LVD passed"

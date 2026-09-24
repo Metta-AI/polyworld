@@ -264,7 +264,7 @@ for (game, count) in Games:
 
   for slot in 0 ..< scripts.len:
     scripts[slot] = """
-sendChat(mailboxSelf(), "CHAT")
+sendChat(-2, "CHAT")
 print pullMailbox$(), mailboxId()
 """
   episode(game, count, scripts, ticks = 3,
