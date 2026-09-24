@@ -3,8 +3,8 @@
 
 import
   bassy, fixxy,
-  polyworld/[chats, mailboxes, metrics, bodies, cli, controllers, pathing,
-    profiles, tapes],
+  polyworld/[scripts, chats, mailboxes, metrics, bodies, cli, controllers,
+    pathing, profiles, tapes],
   content,
   maps,
   motions,
@@ -843,7 +843,7 @@ proc runHeroScript(game: Game, index: int) =
     vm = game.heroVms[index]
   if vm == nil or vm.failed:
     return
-  vm.runtime.restart()
+  vm.runtime.restartScript()
   try:
     if vm.prepareDecision != nil:
       vm.prepareDecision(game.world.tick)

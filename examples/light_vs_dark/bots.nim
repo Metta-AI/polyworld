@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[chats, mailboxes, bodies, metrics, profiles],
+  polyworld/[scripts, chats, mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -595,7 +595,7 @@ proc runDecision(game: Game, player: int32) =
       home = structure.origin
       break
 
-  game.brains[player].runtime.restart()
+  game.brains[player].runtime.restartScript()
   try:
     if game.brains[player].prepareDecision != nil:
       game.brains[player].prepareDecision(game.world.tick)

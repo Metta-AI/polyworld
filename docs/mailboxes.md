@@ -72,3 +72,5 @@ recipients can still accept a broadcast. Messages persist until pulled and
 are cleared on policy reload or a backward tick reset. Chat belongs to the
 live agent session. Replay actions preserve resulting gameplay, but this port
 does not store chat text in replays or add a graphical chat panel.
+Temporary BASIC strings are reclaimed between decisions while global variables
+and arrays retain their values.

@@ -70,6 +70,7 @@ import
   test_lvd_sim,
   test_mailboxes,
   test_chats,
+  test_scripts,
   test_metrics,
   test_stats,
   test_nav,

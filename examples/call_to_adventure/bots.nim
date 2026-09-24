@@ -6,8 +6,8 @@
 
 import
   bassy,
-  polyworld/[chats, mailboxes, bodies, metrics, cli, controllers, pathing,
-    profiles],
+  polyworld/[scripts, chats, mailboxes, bodies, metrics, cli, controllers,
+    pathing, profiles],
   content,
   sim,
   replays
@@ -270,7 +270,7 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   activeGame = game
   activeHeroSlot = slot
   let objective = game.objectiveTile(slot)
-  game.heroVms[slot].runtime.restart()
+  game.heroVms[slot].runtime.restartScript()
   try:
     if game.heroVms[slot].prepareDecision != nil:
       game.heroVms[slot].prepareDecision(game.world.tick)

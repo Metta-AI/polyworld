@@ -48,7 +48,7 @@ block:
     let message = game.mailboxes.pull(slot)
     doAssert (message.text == "team") ==
       (game.mailboxes.teams[slot] == game.mailboxes.teams[0])
-  for tick in 1 .. 2:
+  for tick in 1 .. 300:
     game.world.tick = int32(tick)
     when defined(mailboxCta):
       for slot in 0'i32 ..< PartySize:
