@@ -1,6 +1,7 @@
 import
   std/[json, os, strutils, uri],
-  jsons, requests
+  jsony,
+  requests
 
 const
   MaxRequestBytes* = 64 * 1024
@@ -26,10 +27,35 @@ type
     replies: seq[LlmReply]
 
 proc parseDocument*(body: string): JsonNode {.raises: [LlmError].} =
-  ## Maps malformed API JSON into the library's error type.
+  ## Parses bounded LLM JSON with jsony and reports LlmError on failure.
+  if body.len > MaxResponseBytes:
+    raise newException(LlmError, "LLM JSON exceeds the byte limit")
+  var
+    depth = 0
+    quoted, escaped: bool
+  for character in body:
+    if quoted:
+      if escaped:
+        escaped = false
+      elif character == '\\':
+        escaped = true
+      elif character == '"':
+        quoted = false
+    else:
+      case character
+      of '"':
+        quoted = true
+      of '{', '[':
+        inc depth
+        if depth > 64:
+          raise newException(LlmError, "LLM JSON nesting exceeds 64 levels")
+      of '}', ']':
+        dec depth
+      else:
+        discard
   try:
-    result = readJson(body, MaxResponseBytes)
-  except JsonsError:
+    result = body.fromJson(JsonNode)
+  except ValueError:
     raise newException(LlmError, "Invalid LLM JSON: " & getCurrentExceptionMsg())
 
 proc environmentInt(name: string, fallback, maximum: int): int =
