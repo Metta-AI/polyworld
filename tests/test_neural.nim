@@ -1,12 +1,12 @@
 import
   std/strutils,
   bassy,
-  polyworld/arrays
+  polyworld/neural
 
 proc host(): Host =
   ## Creates the same native array function set used by game hosts.
   result = initHost()
-  result.addArrayFunctions()
+  result.addNeuralFunctions()
 
 proc rejects(action: proc() {.closure.}, message: string) =
   ## Requires an explicit BASIC error instead of a defect or silent failure.
@@ -163,4 +163,4 @@ linear(x, weights, biases, output, 2, 2)
     discard full.run()
     doAssert full.memoryBytes == bytes
 
-echo "test_arrays: all checks passed"
+echo "test_neural: all checks passed"

@@ -9,7 +9,7 @@
 ## commands only queue orders.
 
 import
-  polyworld/arrays,
+  polyworld/neural,
   bassy,
   polyworld/[bodies, profiles],
   content,
@@ -138,7 +138,7 @@ proc buildVillagerHost*(slot: int32): Host =
   ## live instance, because `initRuntime` validates every binding's arity
   ## and work cost against what the program was compiled with.
   result = initHost()
-  result.addArrayFunctions()
+  result.addNeuralFunctions()
   for name in VillagerDataNames:
     discard result.addData(name)
 

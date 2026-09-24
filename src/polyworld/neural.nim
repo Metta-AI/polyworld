@@ -1,4 +1,4 @@
-## Deterministic native array arithmetic for every Polyworld BASIC host.
+## Deterministic native neural operations for every Polyworld BASIC host.
 
 import bassy
 
@@ -153,7 +153,7 @@ proc dataDot(runtime: Runtime, arguments: openArray[Value]): Value =
     total = total + left[i] * right[i]
   total
 
-proc addArrayFunctions*(host: var Host) =
+proc addNeuralFunctions*(host: var Host) =
   ## Registers generic numeric operations without prescribing a network.
   discard host.addFunction("linear", 6, linear)
   discard host.addFunction("relu", 2, relu)

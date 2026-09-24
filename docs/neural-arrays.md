@@ -92,7 +92,7 @@ units per decision.
 ## Implementation and dependency
 
 Bassy implements DATA parsing, initialization, checked array views, and
-`ContextHostProc` callbacks. Polyworld's `src/polyworld/arrays.nim` implements
+`ContextHostProc` callbacks. Polyworld's `src/polyworld/neural.nim` implements
 the arithmetic and registers it in all five BASIC game hosts. Game observations
 and commands keep their existing APIs.
 
