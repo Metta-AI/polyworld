@@ -2,10 +2,6 @@
 
 import bassy
 
-type
-  ArrayOperation = enum
-    Add, Multiply, Copy, Fill, Dot
-
 proc count(value: Value): int =
   ## Accepts a positive, exact element count without narrowing first.
   let size = value.asInt
@@ -56,80 +52,115 @@ proc relu(runtime: Runtime, arguments: openArray[Value]): Value =
       values[i] = toValue(0)
   toValue(0)
 
-proc maximum(masked: bool): ContextHostProc =
-  ## Creates a first-index argmax with optional nonzero eligibility masks.
-  result = proc(runtime: Runtime, arguments: openArray[Value]): Value =
-    ## Validates and meters a maximum search before reading its elements.
-    let
-      values = runtime.arrayView(arguments[0])
-      size = count(arguments[if masked: 2 else: 1])
-      mask =
-        if masked:
-          runtime.arrayView(arguments[1])
-        else:
-          values
-    values.requireLength(size)
-    if masked:
-      mask.requireLength(size)
-    runtime.chargeOperations(int64(size) * (if masked: 2 else: 1))
-    var best = -1
-    for i in 0 ..< size:
-      if masked and not mask[i].asBool:
-        continue
-      if best < 0 or values[best] < values[i]:
-        best = i
-    toValue(best)
+proc argmax(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Returns the first index with the greatest value in a numeric prefix.
+  let
+    values = runtime.arrayView(arguments[0])
+    size = count(arguments[1])
+  values.requireLength(size)
+  runtime.chargeOperations(int64(size))
+  var best = 0
+  for i in 1 ..< size:
+    if values[best] < values[i]:
+      best = i
+  toValue(best)
 
-proc arithmetic(operation: ArrayOperation): ContextHostProc =
-  ## Creates a bounded elementwise kernel or ordered dot product.
-  result = proc(runtime: Runtime, arguments: openArray[Value]): Value =
-    ## Reserves all work before touching the destination array.
-    let
-      binary = operation in {Add, Multiply}
-      size = count(arguments[if binary: 3 else: 2])
-      left = runtime.arrayView(arguments[0], operation == Fill)
-      right =
-        if operation in {Add, Multiply, Dot}:
-          runtime.arrayView(arguments[1])
-        else:
-          left
-      outputs =
-        case operation
-        of Add, Multiply:
-          runtime.arrayView(arguments[2], writable = true)
-        of Copy:
-          runtime.arrayView(arguments[1], writable = true)
-        of Fill, Dot:
-          left
-    left.requireLength(size)
-    right.requireLength(size)
-    outputs.requireLength(size)
-    if operation == Fill and arguments[1].kind == StringValue:
-      raise newException(BasicError, "dataFill requires a number")
-    runtime.chargeOperations(int64(size) * (if operation == Dot: 2 else: 1))
-    var total = toValue(0)
-    for i in 0 ..< size:
-      case operation
-      of Add:
-        outputs[i] = left[i] + right[i]
-      of Multiply:
-        outputs[i] = left[i] * right[i]
-      of Copy:
-        outputs[i] = left[i]
-      of Fill:
-        outputs[i] = arguments[1]
-      of Dot:
-        total = total + left[i] * right[i]
-    total
+proc argmaxMasked(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Returns the first greatest eligible index, or -1 for an empty mask.
+  let
+    values = runtime.arrayView(arguments[0])
+    mask = runtime.arrayView(arguments[1])
+    size = count(arguments[2])
+  values.requireLength(size)
+  mask.requireLength(size)
+  runtime.chargeOperations(2 * int64(size))
+  var best = -1
+  for i in 0 ..< size:
+    if not mask[i].asBool:
+      continue
+    if best < 0 or values[best] < values[i]:
+      best = i
+  toValue(best)
+
+proc dataAdd(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Adds two numeric prefixes after reserving their work.
+  let
+    size = count(arguments[3])
+    left = runtime.arrayView(arguments[0])
+    right = runtime.arrayView(arguments[1])
+    outputs = runtime.arrayView(arguments[2], writable = true)
+  left.requireLength(size)
+  right.requireLength(size)
+  outputs.requireLength(size)
+  runtime.chargeOperations(int64(size))
+  for i in 0 ..< size:
+    outputs[i] = left[i] + right[i]
+  toValue(0)
+
+proc dataMultiply(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Multiplies two numeric prefixes after reserving their work.
+  let
+    size = count(arguments[3])
+    left = runtime.arrayView(arguments[0])
+    right = runtime.arrayView(arguments[1])
+    outputs = runtime.arrayView(arguments[2], writable = true)
+  left.requireLength(size)
+  right.requireLength(size)
+  outputs.requireLength(size)
+  runtime.chargeOperations(int64(size))
+  for i in 0 ..< size:
+    outputs[i] = left[i] * right[i]
+  toValue(0)
+
+proc dataCopy(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Copies a numeric prefix after reserving its work.
+  let
+    size = count(arguments[2])
+    source = runtime.arrayView(arguments[0])
+    outputs = runtime.arrayView(arguments[1], writable = true)
+  source.requireLength(size)
+  outputs.requireLength(size)
+  runtime.chargeOperations(int64(size))
+  for i in 0 ..< size:
+    outputs[i] = source[i]
+  toValue(0)
+
+proc dataFill(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Fills a mutable numeric prefix after reserving its work.
+  let
+    size = count(arguments[2])
+    outputs = runtime.arrayView(arguments[0], writable = true)
+    value = arguments[1]
+  outputs.requireLength(size)
+  if value.kind == StringValue:
+    raise newException(BasicError, "dataFill requires a number")
+  runtime.chargeOperations(int64(size))
+  for i in 0 ..< size:
+    outputs[i] = value
+  toValue(0)
+
+proc dataDot(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Computes an ordered dot product after reserving its work.
+  let
+    size = count(arguments[2])
+    left = runtime.arrayView(arguments[0])
+    right = runtime.arrayView(arguments[1])
+  left.requireLength(size)
+  right.requireLength(size)
+  runtime.chargeOperations(2 * int64(size))
+  var total = toValue(0)
+  for i in 0 ..< size:
+    total = total + left[i] * right[i]
+  total
 
 proc addArrayFunctions*(host: var Host) =
   ## Registers generic numeric operations without prescribing a network.
   discard host.addFunction("linear", 6, linear)
   discard host.addFunction("relu", 2, relu)
-  discard host.addFunction("argmax", 2, maximum(false))
-  discard host.addFunction("argmaxMasked", 3, maximum(true))
-  discard host.addFunction("dataAdd", 4, arithmetic(Add))
-  discard host.addFunction("dataMultiply", 4, arithmetic(Multiply))
-  discard host.addFunction("dataCopy", 3, arithmetic(Copy))
-  discard host.addFunction("dataFill", 3, arithmetic(Fill))
-  discard host.addFunction("dataDot", 3, arithmetic(Dot))
+  discard host.addFunction("argmax", 2, argmax)
+  discard host.addFunction("argmaxMasked", 3, argmaxMasked)
+  discard host.addFunction("dataAdd", 4, dataAdd)
+  discard host.addFunction("dataMultiply", 4, dataMultiply)
+  discard host.addFunction("dataCopy", 3, dataCopy)
+  discard host.addFunction("dataFill", 3, dataFill)
+  discard host.addFunction("dataDot", 3, dataDot)
