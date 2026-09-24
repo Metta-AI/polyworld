@@ -16,6 +16,7 @@ proc attackGame(class: HeroClass): Game =
     ReplayData(),
     drafting = false
   )
+  result.world.camps.setLen(0)
   result.world.spawnTimerTicks = 100_000
   result.world.heroTurnTicks = 100_000
   for hero in result.world.heroes:

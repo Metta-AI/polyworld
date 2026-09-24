@@ -198,6 +198,9 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   var
+    neutralModels: array[6, CharacterModel]
+    neutralClips: array[6, array[6, int]]
+    neutralEyes: array[6, DeathEyes]
     footmanModels: array[Team, array[CreepKind, CharacterModel]]
     footmanRenderClips: array[Team, array[CreepKind, array[6, int]]]
     godModels: array[Team, CharacterModel]
@@ -232,6 +235,18 @@ proc runGraphics*() =
             result.unlitParts.add item.nodes
       eyes = initDeathEyes(result, ChargenLibrary, inventory, deadEyes)
 
+    for i, recipe in neutralRecipes():
+      let
+        model = loadPresetModel(
+          recipe.preset, CreepClips, NeutralTargetHeight, neutralEyes[i])
+        rgb = recipe.skinRgb
+      model.fitCharacterHeight(NeutralTargetHeight, model.clipIndex("Sword_Idle"))
+      partNodes(model.file.root).applySkin(
+        characterLibrary.presetManifest(recipe.preset),
+        color(rgb[0], rgb[1], rgb[2], 1))
+      neutralModels[i] = model
+      for clip, name in MeleeCreep.creepAnimationNames():
+        neutralClips[i][clip] = model.clipIndex(name)
     for team in Team:
       for kind in CreepKind:
         let model = loadPresetModel(
@@ -539,11 +554,39 @@ proc runGraphics*() =
     else:
       result.time = unitRenderTime(hero.animTicks)
 
+  proc creepModel(unit: Footman): CharacterModel =
+    ## Uses one shared chargen model per camp appearance or team creep.
+    if unit.camp > 0:
+      neutralModels[unit.appearance]
+    else:
+      footmanModels[unit.team][unit.kind]
+
+  proc creepClip(unit: Footman): int =
+    ## Maps the shared simulation animation slots to the correct model.
+    if unit.camp > 0:
+      neutralClips[unit.appearance][unit.animClip]
+    else:
+      footmanRenderClips[unit.team][unit.kind][unit.animClip]
+
+  proc creepSize(unit: Footman): float32 =
+    ## Makes the leader visibly larger without duplicating model assets.
+    if unit.leader:
+      1.35'f
+    else:
+      1'f
+
+  proc creepEyes(unit: Footman, dead: bool) =
+    ## Switches every mob's face for living and corpse draws.
+    if unit.camp > 0:
+      neutralEyes[unit.appearance].setDead(dead)
+    else:
+      footmanEyes[unit.team][unit.kind].setDead(dead)
+
   proc creepRenderTime(footman: Footman): float32 =
     ## Fits authored attack impacts and death poses to simulation timing.
     let
-      model = footmanModels[footman.team][footman.kind]
-      clip = footmanRenderClips[footman.team][footman.kind][footman.animClip]
+      model = creepModel(footman)
+      clip = creepClip(footman)
       duration = model.clipDuration(clip)
     if footman.state == Dying:
       return min(footman.deathTicks.float32 / FootmanDeathTicks.float32, 1) *
@@ -566,6 +609,12 @@ proc runGraphics*() =
       return true
     let viewingTeam = Team(viewMode - 1)
     team == viewingTeam or visible(run.world, viewingTeam, position)
+
+  proc visibleInView(unit: Footman): bool =
+    ## Neutral units are only visible through the selected team's actual LOS.
+    if unit.camp == 0:
+      return visibleInView(unit.team, unit.position)
+    viewMode == 0 or visible(run.world, Team(viewMode - 1), unit.position)
 
   proc updateTerrainVision() =
     ## Uploads softened terrain vision for the selected spectator team.
@@ -762,11 +811,11 @@ proc runGraphics*() =
       renderer.addResourceBars(anchor, TowerWorldBarWidth, bars)
     for footman in run.world.footmen:
       if footman.state == Dying or footman.hp <= 0 or
-          not visibleInView(footman.team, footman.position):
+          not visibleInView(footman):
         continue
       let
         health = footman.hp.float32
-        maximumHealth = FootmanHp.float32
+        maximumHealth = footman.unitMaxHp.float32
         delayedHealth = damageTrails.delayedValue(
           footman.id,
           health,
@@ -774,19 +823,25 @@ proc runGraphics*() =
           dt
         )
       renderer.addControlIcons(
-        unitRenderPoint(footman.id, footman.position) + vec3(0, 2.15'f, 0),
+        unitRenderPoint(footman.id, footman.position) +
+          vec3(0, (if footman.camp > 0:
+            NeutralTargetHeight * creepSize(footman) + 0.8'f
+            else: 2.15'f), 0),
         footman.controls
       )
-      if footman.hp < FootmanHp:
+      if footman.camp > 0 or footman.hp < footman.unitMaxHp:
         let
           anchor = unitRenderPoint(footman.id, footman.position) +
-            vec3(0, 1.38'f32, 0)
+            vec3(0, (if footman.camp > 0:
+              NeutralTargetHeight * creepSize(footman) + 0.2'f
+              else: 1.38'f), 0)
           bars = [WorldResourceBar(
             value: health,
             maximum: maximumHealth,
             delayedValue: delayedHealth,
             height: 0.1'f32,
-            color: teamHudColor(footman.team),
+            color: (if footman.camp > 0: rgbx(180, 180, 180, 255)
+              else: teamHudColor(footman.team)),
             showDamageTrail: true
           )]
         renderer.addResourceBars(anchor, FootmanWorldBarWidth, bars)
@@ -834,12 +889,12 @@ proc runGraphics*() =
       )
     for footman in run.world.footmen:
       if footman.state == Dying or
-          not visibleInView(footman.team, footman.position):
+          not visibleInView(footman):
         continue
       let
-        model = footmanModels[footman.team][footman.kind]
-        clip = footmanRenderClips[footman.team][footman.kind][footman.animClip]
-      footmanEyes[footman.team][footman.kind].setDead(false)
+        model = creepModel(footman)
+        clip = creepClip(footman)
+      creepEyes(footman, false)
       consider(
         footman.id,
         pickCharacter(
@@ -849,7 +904,8 @@ proc runGraphics*() =
           unitRenderPoint(footman.id, footman.position),
           unitRenderFacing(footman.id, footman.facing),
           clip,
-          creepRenderTime(footman)
+          creepRenderTime(footman),
+          sizeFactor = creepSize(footman)
         )
       )
     for tower in run.world.buildings:
@@ -975,13 +1031,13 @@ proc runGraphics*() =
       )
 
   proc objectTeam(id: int32): int32 =
-    ## Returns 1 for red, 2 for blue, or 0 when the id is unknown.
+    ## Returns red, blue, or neutral ownership, or zero for an unknown ID.
     let hero = heroById(run.world, id)
     if hero.id != 0:
       return int32(hero.team.ord + 1)
     let footman = footmanById(run.world, id)
     if footman.id != 0:
-      return int32(footman.team.ord + 1)
+      return footman.faction + 1
     for tower in run.world.buildings:
       if tower.id == id:
         return int32(tower.team.ord + 1)
@@ -995,7 +1051,7 @@ proc runGraphics*() =
     if not showCreepWaypoints:
       return
     let creep = footmanById(run.world, primaryId)
-    if creep.id == 0 or not visibleInView(creep.team, creep.position):
+    if creep.id == 0 or creep.camp > 0 or not visibleInView(creep):
       return
     let goals = creep.creepWaypoints()
     while waypointLabels.len < goals.len:
@@ -1059,7 +1115,7 @@ proc runGraphics*() =
     var mode = 0'i32
     for id in selectedIds:
       let team = objectTeam(id)
-      if team == 0:
+      if team notin [1'i32, 2'i32]:
         continue
       if mode == 0:
         mode = team
@@ -1084,7 +1140,7 @@ proc runGraphics*() =
         focusHeight: 0.9'f32
       )
     let footman = footmanById(run.world, id)
-    if footman.id != 0 and visibleInView(footman.team, footman.position):
+    if footman.id != 0 and visibleInView(footman):
       return SelectionTarget(
         found: true,
         position: unitRenderPoint(footman.id, footman.position),
@@ -1218,17 +1274,18 @@ proc runGraphics*() =
     for footman in run.world.footmen:
       if footman.id != id:
         continue
-      footmanEyes[footman.team][footman.kind].setDead(
+      creepEyes(footman,
         footman.hp <= 0 or footman.state == Dying
       )
       beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
-        footmanModels[footman.team][footman.kind],
+        creepModel(footman),
         unitRenderPoint(footman.id, footman.position),
         unitRenderFacing(footman.id, footman.facing),
-        footmanRenderClips[footman.team][footman.kind][footman.animClip],
-        creepRenderTime(footman)
+        creepClip(footman),
+        creepRenderTime(footman),
+        sizeFactor = creepSize(footman)
       )
       finishCharacters(scene)
       return
@@ -1324,11 +1381,11 @@ proc runGraphics*() =
     let livingHeroes = prioritizeHeroes(run.world, subjects)
     for footman in run.world.footmen:
       subjects.add Subject(
-        id: footman.id, owner: int32(footman.team),
+        id: footman.id, owner: footman.faction,
         position: unitRenderPoint(footman.id, footman.position),
-        height: 0.8, radius: 1, visible: visibleInView(footman.team, footman.position),
+        height: 0.8, radius: 1, visible: visibleInView(footman),
         alive: footman.hp > 0 and footman.state != Dying,
-        hp: footman.hp, maxHp: FootmanHp, complete: true,
+        hp: footman.hp, maxHp: footman.unitMaxHp, complete: true,
         participant: max(footman.targetHeroId, footman.targetBuildingId),
         fighting: footman.state == Fighting, activity: footman.swingTicks,
         idleScore: (if footman.state == Marching: 22.0'f else: 8.0'f),
@@ -2065,22 +2122,23 @@ proc runGraphics*() =
         proc drawWorldCharacters(livingOnly = false) =
           ## Uses identical poses for shadows, occlusion masks, and the camera.
           for footman in run.world.footmen:
-            if not visibleInView(footman.team, footman.position):
+            if not visibleInView(footman):
               continue
             if livingOnly and (footman.hp <= 0 or footman.state == Dying):
               continue
             let
-              model = footmanModels[footman.team][footman.kind]
+              model = creepModel(footman)
               clip =
-                footmanRenderClips[footman.team][footman.kind][footman.animClip]
-            footmanEyes[footman.team][footman.kind].setDead(
+                creepClip(footman)
+            creepEyes(footman,
               footman.hp <= 0 or footman.state == Dying
             )
             drawCharacter(
               scene, model, unitRenderPoint(footman.id, footman.position),
               unitRenderFacing(footman.id, footman.facing),
               clip,
-              creepRenderTime(footman)
+              creepRenderTime(footman),
+              sizeFactor = creepSize(footman)
             )
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):

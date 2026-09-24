@@ -1,5 +1,6 @@
 import
   std/os,
+  jsony,
   polyworld/[assets, chargen, common],
   content
 
@@ -35,6 +36,12 @@ const
     when defined(emscripten): GotaWebTerrainAssets
     else: TerrainAssets(water: true, size: 1024)
   GotaTreeStyle* = NoTrees
+  NeutralNames* = [
+    "Dustling", "Bog Runt", "Tusk Raider", "Velvet Stalker",
+    "Ironhide Chief", "Infernal Duke"
+  ]
+  NeutralTargetHeight* = 0.816'f
+  NeutralRosterPath* = DataRoot & "/characters/chargen/cta.json"
   CreepPresets* = ["Purple Creep", "Blue Creep"]
   CreepClips* = [
     "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack",
@@ -79,6 +86,34 @@ const
     HeroPortraitRoot & "warlock.profile.png",
     HeroPortraitRoot & "berserker.profile.png"
   ]
+
+type
+  NeutralRecipe* = object
+    preset*: Preset
+    skinRgb*: array[3, float32]
+  NeutralRoster = object
+    mobs: seq[NeutralRecipe]
+
+proc neutralRecipes*(): array[6, NeutralRecipe] =
+  ## Selects six approved melee recipes without loading the full CTA cast.
+  var roster: NeutralRoster
+  try:
+    roster = readFile(NeutralRosterPath).fromJson(NeutralRoster)
+  except IOError, JsonError:
+    raise newException(ChargenError,
+      "Cannot read neutral roster: " & getCurrentExceptionMsg())
+  for i, name in NeutralNames:
+    var found = false
+    for recipe in roster.mobs:
+      if recipe.preset.name == name:
+        for channel in recipe.skinRgb:
+          if not (channel >= 0 and channel <= 1):
+            raise newException(ChargenError, "Invalid neutral skin color.")
+        result[i] = recipe
+        found = true
+        break
+    if not found:
+      raise newException(ChargenError, "Missing neutral recipe: " & name)
 
 proc draftedPortraitKey*(class: HeroClass): string {.raises: [].} =
   ## Names the desaturated portrait used for unavailable draft choices.
@@ -164,7 +199,10 @@ proc generatedCharacterAssets*(): seq[Asset] =
   result.add modelAsset(directory / manifest.rig)
   for path in manifest.deathEyesPart().files:
     result.add modelAsset(directory / path, textureSize = 512)
+  result.add fileAsset(NeutralRosterPath)
   var presets: seq[Preset]
+  for recipe in neutralRecipes():
+    presets.add recipe.preset
   for team in 0 ..< CreepPresets.len:
     for kind in CreepKind:
       presets.add manifest.creepPreset(team, kind)

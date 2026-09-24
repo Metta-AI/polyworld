@@ -48,7 +48,9 @@ type
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY,
-    ObjectStunTicks, ObjectSilenceTicks, ObjectRootTicks
+    ObjectStunTicks, ObjectSilenceTicks, ObjectRootTicks,
+    ObjectCamp, ObjectLeader, ObjectReturning
+  CampField = enum CampX, CampY, CampTier
   SpellField = enum
     SpellAbility, SpellCasterId, SpellX, SpellY, SpellImpactTick
   AbilityField = enum
@@ -148,6 +150,21 @@ proc terrainProc(
       int(arguments[1]) + mapOrigin() - floor.originZ
     ))
 
+proc campProc(heroId: int32, field: CampField): HostProc =
+  ## Exposes only static camp geometry, never hidden life or respawn state.
+  result = proc(arguments: openArray[int32]): int32 =
+    let world = activeGame.world
+    let index = int(arguments[0])
+    if index < 0 or index >= world.camps.len:
+      return 0
+    let camp = world.camps[index]
+    case field
+    of CampTier: int32(camp.tier)
+    of CampX:
+      mapCoordinate(camp.center.x, world.heroById(heroId).team)
+    of CampY:
+      mapCoordinate(camp.center.z, world.heroById(heroId).team)
+
 proc objectProc(heroId: int32, field: ObjectField): HostProc =
   ## Binds one field to the hero's visibility-filtered object snapshot.
   result = proc(arguments: openArray[int32]): int32 =
@@ -155,8 +172,11 @@ proc objectProc(heroId: int32, field: ObjectField): HostProc =
     let world = activeGame.world
     var value: WorldObject
     if not world.worldObjectAt(heroId, int(arguments[0]), value):
-      return 0
+      return (if field == ObjectCamp: -1 else: 0)
     case field
+    of ObjectCamp: int32(value.camp - 1)
+    of ObjectLeader: int32(value.leader)
+    of ObjectReturning: int32(value.returning)
     of ObjectLevel:
       value.level
     of ObjectMana:
@@ -342,7 +362,7 @@ proc initHeroHost(heroId: int32): Host =
   ): int32 =
     var value: WorldObject
     if worldObjectAt(activeGame.world, heroId, int(arguments[0]), value):
-      int32(value.team.ord)
+      value.faction
     else:
       0
   let objectClassProc: HostProc = proc(
@@ -690,6 +710,9 @@ proc initHeroHost(heroId: int32): Host =
   discard result.addFunction("abilityRecharge", 1, abilityRechargeProc, 4)
 
   for (field, name) in [
+    (ObjectCamp, "objectCamp"),
+    (ObjectLeader, "objectLeader"),
+    (ObjectReturning, "objectReturning"),
     (ObjectLevel, "objectLevel"),
     (ObjectMana, "objectMana"),
     (ObjectStunTicks, "objectStunTicks"),
@@ -721,6 +744,13 @@ proc initHeroHost(heroId: int32): Host =
 
   discard result.addFunction("objectCount", 0, objectCountProc, 2)
   discard result.addFunction("objectId", 1, objectIdProc, 4)
+  let campCountProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Counts generated camp clearings regardless of fog or spawn state.
+    int32(activeGame.world.camps.len)
+  discard result.addFunction("campCount", 0, campCountProc, 4)
+  for (field, name) in [(CampX, "campX"), (CampY, "campY"),
+    (CampTier, "campTier")]:
+      discard result.addFunction(name, 1, campProc(heroId, field), 4)
   discard result.addFunction("objectKind", 1, objectKindProc, 4)
   discard result.addFunction("objectTeam", 1, objectTeamProc, 4)
   discard result.addFunction("objectClass", 1, objectClassProc, 4)

@@ -51,12 +51,20 @@ type
   Team* = enum RedTeam, BlueTeam
   MatchPhase* = enum Playing, Drafting
   FootmanState* = enum Marching, Fighting, Dying
+  CampState* = enum RestingCamp, FightingCamp, ReturningCamp, EmptyCamp
   TowerTier* = enum OuterTower, InnerTower, GateTower
   BuildingKind* = enum TowerBuilding, BarracksBuilding
   WorldPoint* = object
     x*, y*, z*: int32
   Heading* = object
     x*, z*: int32
+  Camp* = object
+    center*: WorldPoint
+    tier*, count*, appearance*: int
+    state*: CampState
+    targetId*, respawnTick*, lastSeenTick*: int32
+    started*: bool
+
   HeroVm* = ref object
     output*: PrintProc
     runtime*: Runtime
@@ -70,7 +78,13 @@ type
   Footman* = object
     id*: int32
     kind*: CreepKind
+    camp*: int
+      ## Zero for lane creeps, otherwise the one-based camp index.
+    campTier*, appearance*: int
+    leader*: bool
+    home*: WorldPoint
     team*: Team
+      ## For neutrals this is only the mirrored navigation orientation.
     lane*: int
     position*: WorldPoint
     facing*: Heading
@@ -202,6 +216,8 @@ type
     facing*, velocity*: Heading
     targetId*: int32
     controlTicks*: array[ControlEffect, int32]
+    camp*: int
+    leader*, returning*: bool
 
   NavTile* = object
     layer*: int
@@ -248,6 +264,7 @@ type
     stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
     footmen*: seq[Footman]
+    camps*: seq[Camp]
     heroes*: seq[Hero]
     forts*: array[2, Fort]
     buildings*: seq[Building]
@@ -491,6 +508,15 @@ const
   FootmanObjectKind = 3'i32
   TowerObjectKind = 4'i32
   BarracksObjectKind = 5'i32
+  NeutralObjectKind* = 6'i32
+  NeutralAggroTiles* = 2'i32
+  NeutralLeash* = 12 * WorldScale
+  CampRespawnRadius* = 10 * WorldScale
+  CampRespawnTicks* = 60 * TickRate
+  NeutralHealth* = [100'i32, 180, 300]
+  NeutralDamage* = [8'i32, 14, 20]
+  NeutralXp* = [20, 35, 50]
+  NeutralGold* = [10, 20, 30]
   RedFortId = 1'i32
   BlueFortId = 2'i32
   FirstHeroId* = 100'i32
@@ -500,6 +526,46 @@ const
   FootmanDeathTicks* = 24'i32
   HeroDeathTicks* = 24'i32
   FortHp* = 400'i32
+
+proc faction*(unit: Footman): int32 =
+  ## Returns a playable team or the independent neutral faction, two.
+  if unit.camp > 0:
+    2
+  else:
+    unit.team.ord.int32
+
+proc faction*(value: WorldObject): int32 =
+  ## Keeps neutral observations separate from their navigation orientation.
+  if value.kind == NeutralObjectKind:
+    2
+  else:
+    value.team.ord.int32
+
+proc unitMaxHp*(unit: Footman): int32 =
+  ## Returns a lane creep's health or the camp tier and leader health.
+  if unit.camp == 0:
+    return FootmanHp
+  NeutralHealth[unit.campTier - 1] * (if unit.leader: 2 else: 1)
+
+proc unitDamage*(unit: Footman): int32 =
+  ## Returns the melee damage for a lane creep or neutral camp member.
+  if unit.camp == 0:
+    return FootmanDamage
+  NeutralDamage[unit.campTier - 1] * (if unit.leader: 3 else: 2) div 2
+
+proc returning*(world: World, unit: Footman): bool =
+  ## Returning camp members cannot be damaged or interrupted.
+  unit.camp > 0 and world.camps[unit.camp - 1].state == ReturningCamp
+
+proc hostile*(world: World, unit: Footman, team: Team,
+    engageResting = false): bool =
+  ## Allows deliberate camp attacks but keeps resting camps out of idle scans.
+  if unit.hp <= 0 or unit.state == Dying:
+    return false
+  if unit.camp == 0:
+    return unit.team != team
+  let state = world.camps[unit.camp - 1].state
+  state == FightingCamp or (engageResting and state == RestingCamp)
 
 proc startingForts(map: MapData): array[2, Fort] =
   ## Places both gods at the selected layout's fort centers.
@@ -624,6 +690,8 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
     dest.add sightBounds(hero.position)
   dest.add int32(world.footmen.len)
   for footman in world.footmen:
+    if footman.camp > 0:
+      continue
     dest.add footman.id
     dest.add int32(footman.team.ord)
     dest.add int32(footman.state != Dying and footman.hp > 0)
@@ -662,7 +730,8 @@ proc rebuildVision*(world: World) {.measure.} =
       if hero.team == team and hero.state != Dying and hero.hp > 0:
         addVisionSource(hero.position, 10, 14)
     for footman in world.footmen:
-      if footman.team == team and footman.state != Dying and footman.hp > 0:
+      if footman.camp == 0 and footman.team == team and
+        footman.state != Dying and footman.hp > 0:
         addVisionSource(footman.position, FootmanSightRadius div WorldScale, 12)
     for tower in world.buildings:
       if tower.team == team and tower.hp > 0:
@@ -741,9 +810,9 @@ when defined(replayEvents):
       let building = world.buildingIndex(id)
       if creep >= 0:
         let value = world.footmen[creep]
-        result.kind = FootmanObjectKind
-        result.class = value.kind.ord.int32
-        result.team = value.team.ord.int32
+        result.kind = if value.camp > 0: NeutralObjectKind else: FootmanObjectKind
+        result.class = if value.camp > 0: value.campTier.int32 else: value.kind.ord.int32
+        result.team = value.faction
         position = value.position
       elif building >= 0:
         let value = world.buildings[building]
@@ -872,8 +941,8 @@ proc hitKey(world: World, id: int32): HitKey =
     let creep = world.footmanIndex(id)
     if creep >= 0:
       let actor = world.footmen[creep]
-      result.kind = FootmanObjectKind
-      result.class = actor.kind.ord.int32
+      result.kind = if actor.camp > 0: NeutralObjectKind else: FootmanObjectKind
+      result.class = if actor.camp > 0: actor.campTier.int32 else: actor.kind.ord.int32
       position = actor.position
       spawn = position
       team = actor.team
@@ -1242,13 +1311,34 @@ proc gainCreepRewards(world: World, creep: Footman, source: int32) =
   var
     nearby: seq[int]
     lastHit = false
+    killerTeam = -1'i32
+  let killerHero = world.heroIndex(source)
+  if killerHero >= 0:
+    killerTeam = world.heroes[killerHero].team.ord.int32
+  else:
+    let killerCreep = world.footmanIndex(source)
+    if killerCreep >= 0:
+      killerTeam = world.footmen[killerCreep].faction
+    else:
+      let killerBuilding = world.buildingIndex(source)
+      if killerBuilding >= 0:
+        killerTeam = world.buildings[killerBuilding].team.ord.int32
+  let
+    xpReward = if creep.camp > 0:
+      NeutralXp[creep.campTier - 1] * (if creep.leader: 2 else: 1)
+      else: CreepNearbyXp
+    goldReward = if creep.camp > 0:
+      NeutralGold[creep.campTier - 1] * (if creep.leader: 2 else: 1)
+      else: FootmanGoldReward
   for i, hero in world.heroes:
     let alive =
       if world.rewardAlive.len == world.heroes.len:
         world.rewardAlive[i]
       else:
         hero.hp > 0 and hero.state != Dying
-    if hero.team != creep.team and alive and
+    let eligible = if creep.camp > 0: hero.team.ord.int32 == killerTeam
+      else: hero.team != creep.team
+    if eligible and alive and
       hero.navLayer == creep.navLayer and
       within(hero.position, creep.position, CreepXpRange):
         nearby.add(i)
@@ -1256,7 +1346,7 @@ proc gainCreepRewards(world: World, creep: Footman, source: int32) =
           lastHit = true
   if nearby.len > 0:
     let
-      pool = CreepNearbyXp * CreepXpScale
+      pool = xpReward * CreepXpScale
       bonus =
         if lastHit:
           pool * CreepLastHitPercent div 100
@@ -1274,11 +1364,11 @@ proc gainCreepRewards(world: World, creep: Footman, source: int32) =
       hero.creepXpRemainder = hero.creepXpRemainder mod CreepXpScale
       world.gainRewards(hero, xp, 0, creep.id, cause)
   let killer = world.heroIndex(source)
-  if killer >= 0 and world.heroes[killer].team != creep.team:
+  if killer >= 0 and (creep.camp > 0 or world.heroes[killer].team != creep.team):
     world.gainRewards(
-      world.heroes[killer], 0, FootmanGoldReward, creep.id
+      world.heroes[killer], 0, goldReward, creep.id
     )
-    world.stats.add(killer, GoldMetric, FootmanGoldReward)
+    world.stats.add(killer, GoldMetric, goldReward)
 
 proc layerFixedHeight(
     layerIndex: int,
@@ -1866,7 +1956,10 @@ proc spawnWave(world: World) {.measure.} =
   for building in world.buildings:
     if building.kind == BarracksBuilding and building.hp > 0:
       count += CreepsPerBarracks
-  if world.footmen.len + count > UnitCap:
+  for unit in world.footmen:
+    if unit.camp == 0:
+      inc count
+  if count > UnitCap:
     return
   var occupied: seq[PathTile]
   for footman in world.footmen:
@@ -2041,12 +2134,14 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
     let footman = world.footmen[footmanIndex]
     value = WorldObject(
       id: footman.id,
-      kind: FootmanObjectKind,
-      class: footman.kind.ord.int32,
+      kind: (if footman.camp > 0: NeutralObjectKind else: FootmanObjectKind),
+      class: (if footman.camp > 0: footman.campTier.int32 else: footman.kind.ord.int32),
+      camp: footman.camp, leader: footman.leader,
+      returning: world.returning(footman),
       team: footman.team,
       position: footman.position,
       hp: footman.hp,
-      maxHp: FootmanHp,
+      maxHp: footman.unitMaxHp,
       alive: footman.state != Dying and footman.hp > 0,
       facing: footman.facing,
       velocity: footman.velocity,
@@ -2114,7 +2209,7 @@ iterator observedCasts*(world: World, team: Team): SpellCast =
 
 proc objectVisibleTo(world: World, team: Team, value: WorldObject): bool =
   ## Returns whether one object is visible to a querying hero's team.
-  value.team == team or visible(world, team, value.position)
+  value.faction == team.ord.int32 or visible(world, team, value.position)
 
 proc scriptObjectKey(value: WorldObject, observer: Team):
     tuple[group, enemy: int, z, x, id: int32] =
@@ -2127,7 +2222,7 @@ proc scriptObjectKey(value: WorldObject, observer: Team):
       of HeroObjectKind: 2
       else: 3
     direction = if observer == RedTeam: 1'i32 else: -1'i32
-  (group, int(value.team != observer), direction * value.position.z,
+  (group, int(value.faction != observer.ord.int32), direction * value.position.z,
     direction * value.position.x, value.id)
 
 proc ensureScriptObjects(world: World, heroId: int32) =
@@ -2555,7 +2650,7 @@ proc applyControl*(
       world.interruptPortal(hero)
     return
   let creep = world.footmanIndex(targetId)
-  if creep >= 0:
+  if creep >= 0 and not world.returning(world.footmen[creep]):
     affect(world.footmen[creep])
 
 proc heroActionError(world: World, hero: Hero, movement = false): ActionError =
@@ -2727,15 +2822,11 @@ proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
   let footman = footmanIndex(world, targetId)
   if footman >= 0:
     let other = world.footmen[footman]
-    return other.team != hero.team and
-      other.state != Dying and
-      other.hp > 0
+    return world.hostile(other, hero.team, engageResting = true)
   let otherHero = heroIndex(world, targetId)
   if otherHero >= 0:
     let other = world.heroes[otherHero]
-    return other.team != hero.team and
-      other.state != Dying and
-      other.hp > 0
+    return other.team != hero.team and other.hp > 0 and other.state != Dying
   let tower = buildingIndex(world, targetId)
   if tower >= 0:
     let other = world.buildings[tower]
@@ -2954,7 +3045,7 @@ proc updateTower*(world: World, tower: var Building) =
     targetHero = heroIndex(world, tower.targetId)
   if targetFootman >= 0:
     let footman = world.footmen[targetFootman]
-    if footman.team == tower.team or
+    if not world.hostile(footman, tower.team) or
         footman.state == Dying or footman.hp <= 0 or
         not within(tower.position, footman.position, attackRange) or
         not visible(world, tower.team, footman.position):
@@ -2972,7 +3063,7 @@ proc updateTower*(world: World, tower: var Building) =
       bestId = 0'i32
       bestPosition: WorldPoint
     for i, footman in world.footmen:
-      if footman.team == tower.team or footman.state == Dying or
+      if not world.hostile(footman, tower.team) or footman.state == Dying or
           footman.hp <= 0 or
           not visible(world, tower.team, footman.position):
         continue
@@ -3021,6 +3112,294 @@ proc updateTower*(world: World, tower: var Building) =
   else:
     world.hitTarget(UnitHit, world.heroes[targetHero].id, damage, tower.id)
 
+proc spellTarget*(world: World, id: int32, value: var WorldObject): bool
+  ## Resolves one live unit or structure for spells and camp leashes.
+
+proc initCamps(world: World, map: MapData) =
+  ## Assigns three low, two medium, and two high pairs from the map seed.
+  var
+    pairs: seq[tuple[distance: int64, index: int]]
+    rng = initRng(map.preset.seed.int32)
+  world.camps.setLen(map.layout.camps.len)
+  for i, point in map.layout.camps:
+    world.camps[i].center = worldPoint(point)
+    if i mod 2 == 0:
+      let center = world.camps[i].center
+      pairs.add (min(distanceSquared(center, world.forts[0].center),
+        distanceSquared(center, world.forts[1].center)), i)
+  pairs.sort()
+  for rank, pair in pairs:
+    let
+      tier = if rank < 3: 1 elif rank < 5: 2 else: 3
+      count = tier + rng.below(if tier == 3: 3 else: 2)
+      appearance = (tier - 1) * 2 + rng.below(2)
+    for index in pair.index .. min(pair.index + 1, world.camps.high):
+      world.camps[index].tier = tier
+      world.camps[index].count = count
+      world.camps[index].appearance = appearance
+
+proc spawnCamp(world: World, index: int) =
+  ## Places a mirrored group on open camp tiles with fresh lifetime IDs.
+  let
+    camp = world.camps[index]
+    team =
+      if camp.center.x < 0 or (camp.center.x == 0 and camp.center.z < 0):
+        BlueTeam
+      else:
+        RedTeam
+    direction = if team == BlueTeam: 1'i32 else: -1'i32
+    offsets = [(0'i32, 0'i32), (1'i32, 0'i32), (-1'i32, 0'i32),
+      (0'i32, 1'i32), (0'i32, -1'i32)]
+  var
+    occupied: seq[PathTile]
+    group: seq[Footman]
+  for unit in world.footmen:
+    if unit.hp > 0:
+      var tile: NavTile
+      if navTileAt(unit.position, tile, unit.team):
+        occupied.add PathTile(layer: tile.layer.int32,
+          x: tile.x.int32, z: tile.z.int32)
+  for slot in 0 ..< camp.count:
+    let desired = camp.center + WorldPoint(
+      x: offsets[slot][0] * WorldScale * direction,
+      z: offsets[slot][1] * WorldScale * direction)
+    var tile: NavTile
+    if not nearestNavTile(
+      floorWorldTile(desired.x, team) + mapTiles() div 2,
+      floorWorldTile(desired.z, team) + mapTiles() div 2,
+      camp.center.y, tile, occupied, reverseSearch = team == RedTeam
+    ):
+      return
+    let point = worldPoint(pathPoint(tile.layer, tile.x, tile.z))
+    if not within(point, camp.center, 3 * WorldScale):
+      return
+    occupied.add PathTile(layer: tile.layer.int32,
+      x: tile.x.int32, z: tile.z.int32)
+    let leader = slot == 0 and camp.count > 1
+    var unit = Footman(
+      id: world.nextFootmanId + slot.int32,
+      camp: index + 1, campTier: camp.tier, appearance: camp.appearance,
+      leader: leader, team: team, kind: MeleeCreep,
+      position: point, home: point, navLayer: tile.layer.int32,
+      surfaceHint: point.y, state: Marching, animClip: idleClip,
+      swingTicks: -1, moveRevision: -1,
+      facing: heading(0, direction * WorldScale),
+      body: bindBody(point, heading(0, direction * WorldScale),
+        if leader: 0.3'fx else: FootmanBodyRadius))
+    unit.hp = unit.unitMaxHp
+    group.add unit
+  world.nextFootmanId += camp.count.int32
+  world.footmen.add group
+  world.camps[index].started = true
+  world.camps[index].state = RestingCamp
+  world.camps[index].targetId = 0
+  world.camps[index].respawnTick = 0
+  when defined(replayEvents):
+    for unit in group:
+      world.lifecycleEvent(EntitySpawned, 0, unit.id,
+        if camp.started: Respawn else: Initialization)
+
+proc campCanSee(unit: Footman, point: WorldPoint, radius: int32): bool =
+  ## Tests the mob's own terrain-occluded sight without granting team vision.
+  # Exact world range is checked before allowing for rounded tile centers.
+  within(unit.position, point, radius * WorldScale) and lineVisible(
+    mapTiles().int32, mapTiles().int32,
+    sightTerrain.terrainHeights, visionBlockers,
+    mapCoordinate(unit.position.x, unit.team),
+    mapCoordinate(unit.position.z, unit.team),
+    mapCoordinate(point.x, unit.team), mapCoordinate(point.z, unit.team),
+    radius + 2, 12
+  )
+
+proc returnCamp(world: World, index: int) =
+  ## Clears combat and control effects before the survivors walk home.
+  world.camps[index].state = ReturningCamp
+  world.camps[index].targetId = 0
+  for unit in world.footmen.mitems:
+    if unit.camp == index + 1 and unit.hp > 0:
+      unit.targetId = 0
+      unit.targetHeroId = 0
+      unit.swingTicks = -1
+      unit.damageLanded = false
+      unit.controls = default(typeof(unit.controls))
+      unit.moveRevision = -1
+  when defined(replayEvents):
+    world.emit GameEvent(kind: CampReturning, detail: index.int32,
+      cause: CampReset, related: -1)
+
+proc provokeCamp(world: World, index: int) =
+  ## Starts group combat when a visible hero or lane creep gets too close.
+  let camp = world.camps[index]
+  var
+    targetId, memberId: int32
+    targetPoint, memberPoint: WorldPoint
+    best = int64.high
+  template consider(candidateId: int32, point: WorldPoint) =
+    ## Finds the closest visible intruder to any living camp member.
+    if within(point, camp.center, NeutralLeash):
+      for unit in world.footmen:
+        if unit.camp != index + 1 or unit.hp <= 0 or unit.state == Dying:
+          continue
+        let distance = distanceSquared(unit.position, point)
+        if distance > best or
+          not unit.campCanSee(point, NeutralAggroTiles):
+            continue
+        if distance < best or
+          targetBefore(point, candidateId, targetPoint, targetId, unit.team) or
+          (candidateId == targetId and targetBefore(unit.position, unit.id,
+            memberPoint, memberId, unit.team)):
+              best = distance
+              targetId = candidateId
+              targetPoint = point
+              memberId = unit.id
+              memberPoint = unit.position
+  for hero in world.heroes:
+    if hero.hp > 0 and hero.state != Dying:
+      consider(hero.id, hero.position)
+  for unit in world.footmen:
+    if unit.camp == 0 and unit.hp > 0 and unit.state != Dying:
+      consider(unit.id, unit.position)
+  if targetId != 0:
+    world.camps[index].state = FightingCamp
+    world.camps[index].targetId = targetId
+    world.camps[index].lastSeenTick = world.tick
+    when defined(replayEvents):
+      world.emit GameEvent(kind: CampEngaged,
+        actor: world.eventEntity(targetId),
+        target: world.eventEntity(memberId), detail: index.int32,
+        cause: Proximity, related: -1)
+
+proc updateCamps(world: World) =
+  ## Handles whole-group leashes, full resets, and delayed full-camp respawns.
+  var activity = newSeq[tuple[alive: int, away, outside: bool]](
+    world.camps.len)
+  for unit in world.footmen:
+    if unit.camp == 0 or unit.hp <= 0:
+      continue
+    let index = unit.camp - 1
+    inc activity[index].alive
+    activity[index].away = activity[index].away or
+      not within(unit.position, unit.home, WorldScale div 2)
+    activity[index].outside = activity[index].outside or
+      not within(unit.position, world.camps[index].center, NeutralLeash)
+  for index in 0 ..< world.camps.len:
+    let camp = world.camps[index]
+    if not camp.started:
+      if world.tick >= camp.respawnTick:
+        world.camps[index].respawnTick = world.tick + TickRate
+        world.spawnCamp(index)
+      continue
+    let
+      alive = activity[index].alive
+      home = not activity[index].away
+      outside = activity[index].outside
+    if alive == 0:
+      if camp.state != EmptyCamp:
+        world.camps[index].state = EmptyCamp
+        world.camps[index].targetId = 0
+        world.camps[index].respawnTick = world.tick + CampRespawnTicks
+      elif world.tick >= camp.respawnTick:
+        var blocked = false
+        for hero in world.heroes:
+          if hero.hp > 0 and hero.state != Dying and
+            within(hero.position, camp.center, CampRespawnRadius):
+              blocked = true
+              break
+        if not blocked:
+          world.camps[index].respawnTick = world.tick + TickRate
+          world.spawnCamp(index)
+    elif camp.state == ReturningCamp and home:
+      for unit in world.footmen.mitems:
+        if unit.camp == index + 1 and unit.hp > 0:
+          when defined(replayEvents):
+            world.valueEvent(Healing, unit.id, unit.id, CampReset, 0,
+              unit.hp, unit.unitMaxHp, unit.unitMaxHp - unit.hp)
+          unit.hp = unit.unitMaxHp
+          unit.movePath.setLen(0)
+          unit.state = Marching
+          unit.animClip = idleClip
+      world.camps[index].state = RestingCamp
+    elif camp.state == FightingCamp:
+      var target: WorldObject
+      if outside or not world.spellTarget(camp.targetId, target) or
+        not target.alive or target.faction == 2 or
+        not within(target.position, camp.center, NeutralLeash):
+          world.returnCamp(index)
+      else:
+        var seen = false
+        for unit in world.footmen:
+          if unit.camp == index + 1 and unit.hp > 0 and
+            unit.campCanSee(target.position, 12):
+              seen = true
+              break
+        if seen:
+          world.camps[index].lastSeenTick = world.tick
+        elif world.tick - camp.lastSeenTick >= 3 * TickRate:
+          world.returnCamp(index)
+    elif camp.state == RestingCamp:
+      world.provokeCamp(index)
+
+proc updateNeutral(world: World, unit: var Footman) =
+  ## Runs camp melee combat or the ordinary cached path back home.
+  let camp = world.camps[unit.camp - 1]
+  unit.targetId = 0
+  unit.targetHeroId = 0
+  unit.animClip = idleClip
+  inc unit.animTicks
+  if camp.state == ReturningCamp:
+    unit.state = Marching
+    if not within(unit.position, unit.home, WorldScale div 2):
+      unit.animClip = runClip
+      world.followCreepPath(unit, unit.home)
+    return
+  if camp.state != FightingCamp:
+    unit.state = Marching
+    unit.swingTicks = -1
+    return
+  var
+    targetId = 0'i32
+    point: WorldPoint
+    best = int64.high
+  template consider(id: int32, at: WorldPoint) =
+    ## Chooses the nearest visible hero or lane creep while defending a camp.
+    let radius = if id == camp.targetId: 12'i32 else: 5'i32
+    if within(at, camp.center, NeutralLeash) and unit.campCanSee(at, radius):
+      let distance = distanceSquared(unit.position, at)
+      if distance < best or (distance == best and
+        targetBefore(at, id, point, targetId, unit.team)):
+          targetId = id
+          point = at
+          best = distance
+  for hero in world.heroes:
+    if hero.hp > 0 and hero.state != Dying:
+      consider(hero.id, hero.position)
+  for other in world.footmen:
+    if other.camp == 0 and other.hp > 0 and other.state != Dying:
+      consider(other.id, other.position)
+  if targetId == 0:
+    return
+  unit.state = Fighting
+  if world.heroIndex(targetId) >= 0:
+    unit.targetHeroId = targetId
+  else:
+    unit.targetId = targetId
+  if not within(unit.position, point, FootmanMeleeRange):
+    unit.swingTicks = -1
+    unit.animClip = runClip
+    world.followCreepPath(unit, point)
+    return
+  snapFacing(unit.body, unit.facing, point - unit.position)
+  if unit.swingTicks < 0:
+    world.startSwing(unit)
+  inc unit.swingTicks
+  if not unit.damageLanded and unit.swingTicks >= footmanHitTicks(unit.swingClip):
+    unit.damageLanded = true
+    world.hitTarget(UnitHit, targetId, unit.unitDamage, unit.id)
+  if unit.swingTicks >= footmanAttackTicks(unit.swingClip):
+    world.startSwing(unit)
+  unit.animClip = unit.swingClip
+  unit.animTicks = max(unit.swingTicks, 0)
+
 proc updateFootman(world: World, footman: var Footman) =
   ## Advances one footman's movement, target selection, combat, and animation.
   footman.velocity = Heading()
@@ -3036,7 +3415,8 @@ proc updateFootman(world: World, footman: var Footman) =
     footman.deathTicks = 0
     return
 
-  footman.advanceWaypoints()
+  if footman.camp == 0:
+    footman.advanceWaypoints()
   if footman.controls[StunControl].ends > world.tick:
     footman.animClip = idleClip
     inc footman.animTicks
@@ -3048,6 +3428,10 @@ proc updateFootman(world: World, footman: var Footman) =
       footman.position.z - start.z
     )
 
+  if footman.camp > 0:
+    world.updateNeutral(footman)
+    return
+
   # Acquire: keep a live target while it stays in extended range, otherwise
   # take the nearest visible enemy; with none, batter the fort when close.
   var
@@ -3056,7 +3440,7 @@ proc updateFootman(world: World, footman: var Footman) =
     targetBuilding = buildingIndex(world, footman.targetBuildingId)
   if targetFootman >= 0:
     let other = world.footmen[targetFootman]
-    if other.state == Dying or other.hp <= 0 or
+    if not world.hostile(other, footman.team) or
         not visible(world, footman.team, other.position) or
         not within(
           footman.position,
@@ -3090,7 +3474,7 @@ proc updateFootman(world: World, footman: var Footman) =
       bestId = 0'i32
       bestPosition: WorldPoint
     for i, other in world.footmen:
-      if other.team == footman.team or other.state == Dying or other.hp <= 0:
+      if not world.hostile(other, footman.team):
         continue
       if not visible(world, footman.team, other.position):
         continue
@@ -3514,7 +3898,18 @@ proc hitTarget(
   of UnitHit:
     let creep = world.footmanIndex(target)
     if creep >= 0:
-      if world.footmen[creep].hp > 0:
+      if world.footmen[creep].hp > 0 and not world.returning(world.footmen[creep]):
+        let camp = world.footmen[creep].camp
+        if camp > 0:
+          if world.camps[camp - 1].state == RestingCamp:
+            when defined(replayEvents):
+              world.emit GameEvent(kind: CampEngaged,
+                actor: world.eventEntity(source),
+                target: world.eventEntity(target),
+                detail: (camp - 1).int32, cause: cause, related: -1)
+          world.camps[camp - 1].state = FightingCamp
+          world.camps[camp - 1].targetId = source
+          world.camps[camp - 1].lastSeenTick = world.tick
         world.applyDamage(world.footmen[creep], damage, source, cause, detail)
         if cause == AbilityEffect:
           let spec = BaseAbilitySpecs[Ability(detail)]
@@ -3534,7 +3929,11 @@ proc hitTarget(
     if killed:
       # Every accepted hit is hostile, including tower and creep hits.
       let victimTeam = world.heroes[victim].team
-      world.recordHeroKill(Team(1 - victimTeam.ord), victimTeam)
+      let sourceCreep = world.footmanIndex(source)
+      if sourceCreep >= 0 and world.footmen[sourceCreep].camp > 0:
+        inc world.teamHeroDeaths[victimTeam.ord]
+      else:
+        world.recordHeroKill(Team(1 - victimTeam.ord), victimTeam)
       if killer >= 0:
         world.rewardDeath(target, source)
   of StructureHit:
@@ -3658,7 +4057,7 @@ proc canHitTarget(
   var position: WorldPoint
   if targetFootman >= 0:
     let target = world.footmen[targetFootman]
-    if target.team == hero.team or target.hp <= 0 or target.state == Dying:
+    if not world.hostile(target, hero.team, engageResting = true):
       return false
     position = target.position
   elif targetHero >= 0:
@@ -3932,8 +4331,11 @@ proc spellTarget*(world: World, id: int32, value: var WorldObject): bool =
   let footman = footmanIndex(world, id)
   if footman >= 0:
     let target = world.footmen[footman]
-    value = WorldObject(id: id, team: target.team, position: target.position,
-      hp: target.hp, alive: target.hp > 0 and target.state != Dying)
+    value = WorldObject(id: id,
+      kind: (if target.camp > 0: NeutralObjectKind else: FootmanObjectKind),
+      team: target.team, position: target.position, hp: target.hp,
+      alive: target.hp > 0 and target.state != Dying and
+        not world.returning(target))
     return true
   let tower = buildingIndex(world, id)
   if tower >= 0:
@@ -3958,7 +4360,7 @@ proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
     return
   let hero = world.heroes[caster]
   if spec.kind == Strike:
-    if target.team == hero.team:
+    if target.faction == hero.team.ord.int32:
       return
     var fortIndex = -1
     for i, fort in world.forts:
@@ -3968,7 +4370,7 @@ proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
       hero, spec.damage, world.footmanIndex(id), world.heroIndex(id),
       world.buildingIndex(id), fortIndex, AbilityEffect, spell.ability.ord.int32
     )
-  elif target.team == hero.team:
+  elif target.faction == hero.team.ord.int32:
     let index = world.heroIndex(id)
     if index >= 0:
       let ally = world.heroes[index]
@@ -4018,7 +4420,7 @@ proc resolveSpell(world: World, spell: var SpellCast) =
         var target: WorldObject
         let caster = world.heroIndex(spell.heroId)
         if caster >= 0 and world.spellTarget(id, target) and target.alive and
-          target.team != world.heroes[caster].team:
+          target.faction != world.heroes[caster].team.ord.int32:
             let distance = distanceSquared(spell.origin, position)
             if distance < nearest or (distance == nearest and
               targetBefore(position, id, nearestPosition, nearestId,
@@ -4085,7 +4487,7 @@ proc advanceGroundShot(world: World, spell: var SpellCast) =
     if frame.spellContains(footprint, position):
       var target: WorldObject
       if world.spellTarget(id, target) and target.alive and
-        target.team != world.heroes[caster].team:
+        target.faction != world.heroes[caster].team.ord.int32:
           let distance = distanceSquared(first, position)
           if distance < nearest or (distance == nearest and
             targetBefore(position, id, nearestPosition, nearestId,
@@ -4170,8 +4572,8 @@ proc castAbility(
       if not world.spellTarget(selected, target) or not target.alive or
         not world.visible(hero.team, target.position):
           return ActionTargetUnavailable
-      if (spec.kind == Strike and target.team == hero.team) or
-        (spec.kind != Strike and target.team != hero.team):
+      if (spec.kind == Strike and target.faction == hero.team.ord.int32) or
+        (spec.kind != Strike and target.faction != hero.team.ord.int32):
           return ActionTargetUnavailable
       point = target.position
       if not within(hero.position, point, spec.range):
@@ -4365,7 +4767,7 @@ proc nearestEnemy(
     bestSquared = int64(radius) * int64(radius)
     bestPosition: WorldPoint
   for footman in world.footmen:
-    if footman.team == hero.team or
+    if not world.hostile(footman, hero.team, engageResting = hero.attackMoving) or
         footman.state == Dying or
         footman.hp <= 0 or
         not visible(world, hero.team, footman.position):
@@ -4491,8 +4893,8 @@ proc updateHero(world: World, hero: Hero) =
     targetFootman = footmanIndex(world, hero.attackObjectId)
     if targetFootman >= 0:
       let footman = world.footmen[targetFootman]
-      if footman.team == hero.team or footman.state == Dying or
-          footman.hp <= 0 or not visible(world, hero.team, footman.position):
+      if not world.hostile(footman, hero.team, engageResting = true) or
+          not visible(world, hero.team, footman.position):
         targetFootman = -1
     if targetFootman < 0:
       targetHero = heroIndex(world, hero.attackObjectId)
@@ -4530,8 +4932,7 @@ proc updateHero(world: World, hero: Hero) =
         targetFootman = footmanIndex(world, hero.attackObjectId)
         if targetFootman >= 0:
           let footman = world.footmen[targetFootman]
-          if footman.team == hero.team or footman.state == Dying or
-              footman.hp <= 0:
+          if not world.hostile(footman, hero.team, engageResting = true):
             targetFootman = -1
         if targetFootman < 0:
           targetHero = heroIndex(world, hero.attackObjectId)
@@ -4871,10 +5272,26 @@ proc stateHash*(game: Game): uint64 =
     for timer in hero.controls:
       hash.addHashy(timer.started)
       hash.addHashy(timer.ends)
+  hash.addHashy(world.camps.len)
+  for camp in world.camps:
+    hash.addHashy(camp.center)
+    hash.addHashy(camp.tier)
+    hash.addHashy(camp.count)
+    hash.addHashy(camp.appearance)
+    hash.addHashy(camp.state.ord)
+    hash.addHashy(camp.targetId)
+    hash.addHashy(camp.respawnTick)
+    hash.addHashy(camp.lastSeenTick)
+    hash.addHashy(camp.started)
   hash.addHashy(world.footmen.len)
   for footman in world.footmen:
     hash.addHashy(footman.id)
     hash.addHashy(footman.kind.ord)
+    hash.addHashy(footman.camp)
+    hash.addHashy(footman.campTier)
+    hash.addHashy(footman.appearance)
+    hash.addHashy(footman.leader)
+    hash.addHashy(footman.home)
     hash.addHashy(footman.team.ord)
     hash.addHashy(footman.lane)
     hash.addHashy(footman.position)
@@ -5021,6 +5438,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           if onHeroTurn != nil:
             onHeroTurn()
 
+  world.updateCamps()
+
   # Plan every unit against the same actor state, then publish together.
   game.nextFootmen.setLen(world.footmen.len)
   for i, footman in world.footmen:
@@ -5049,6 +5468,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 
   world.advanceSpells()
   world.resolveCombat()
+  world.updateCamps()
 
   var write = 0
   for read in 0 ..< world.footmen.len:
@@ -5093,7 +5513,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       if footman.state == Dying:
         continue
       footman.animClip =
-        if not world.draw and footman.team == world.winner:
+        if footman.camp == 0 and not world.draw and footman.team == world.winner:
           victoryClip
         else:
           idleClip
@@ -5293,6 +5713,7 @@ proc newGame*(
         maxHp: TowerHitPoints[GateTower]
       )
   world.initOccupancy()
+  world.initCamps(map)
   sightTerrain = buildSightTerrain()
   let visionCells = mapTiles() * mapTiles()
   for team in Team:

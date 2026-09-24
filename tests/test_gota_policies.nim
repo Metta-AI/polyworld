@@ -10,10 +10,11 @@ const Policies = currentSourcePath().parentDir.parentDir /
 type
   Scenario = enum
     Farming, Converging, Regrouping, Retreating, Dodging, Fighting,
-    Kiting, Casting, EqualTargets
+    Kiting, Casting, EqualTargets, Pulling, Luring, PullHandoff
   Decision = object
     actions: seq[ReplayAction]
     instructions, work: int64
+    pullStage: int32
 
 proc oriented(point: WorldPoint, team: Team): WorldPoint =
   ## Maps the canonical red-side scenario to either team's world coordinates.
@@ -91,6 +92,30 @@ proc decision(policy: string, team: Team, class: HeroClass,
       other.state = Marching
       other.place(WorldPoint(x: origin.x,
         z: origin.z + WorldScale).oriented(team))
+  of Pulling, Luring, PullHandoff:
+    let campPoint = WorldPoint(x: origin.x + 3 * WorldScale,
+      z: origin.z).oriented(team)
+    game.world.camps[0].center = campPoint
+    game.world.camps[0].tier = 1
+    game.world.footmen = @[
+      Footman(id: 1000, team: team, camp: 1, campTier: 1, hp: 100,
+        position: campPoint, state: Marching, swingTicks: -1),
+      Footman(id: 1001, team: team, hp: FootmanHp, state: Marching,
+        position: WorldPoint(x: origin.x - 3 * WorldScale,
+          z: origin.z).oriented(team), swingTicks: -1)
+    ]
+    if policy == "puller.bas" and scenario != Pulling:
+      let vm = game.heroVms[0]
+      vm.runtime.setGlobal("pullStage", 1)
+      vm.runtime.setGlobal("pullCamp", 0)
+      vm.runtime.setGlobal("pullUntil", 1000)
+      vm.runtime.setGlobal("pullSeenTick", 6)
+      game.world.camps[0].state = FightingCamp
+      game.world.footmen[0].targetHeroId = hero.id
+      if scenario == PullHandoff:
+        game.world.footmen[0].targetHeroId = 0
+        game.world.footmen[0].targetId = 1001
+        game.world.footmen[1].targetId = 1000
   if reverseEnemies:
     swap(game.world.heroes[5], game.world.heroes[6])
   game.world.syncBuildings()
@@ -103,6 +128,17 @@ proc decision(policy: string, team: Team, class: HeroClass,
   doAssert not vm.failed, vm.lastError
   result.instructions = vm.lastInstructions
   result.work = vm.lastWork
+  if policy == "puller.bas":
+    result.pullStage = vm.runtime.getGlobal("pullStage")
+    case scenario
+    of Pulling:
+      doAssert result.pullStage == 1
+    of Luring:
+      doAssert result.pullStage == 2
+    of PullHandoff:
+      doAssert result.pullStage == 0
+    else:
+      discard
   for action in game.recorder.data.actions:
     var canonical = action
     if team == BlueTeam and action.kind in [ActionWalkTo, ActionAttackMove,
@@ -119,7 +155,7 @@ proc decision(policy: string, team: Team, class: HeroClass,
 echo "Testing mirrored reference-policy actions and VM budgets"
 block:
   var checked = 0
-  for policy in ["base.bas", "rusher.bas"]:
+  for policy in ["base.bas", "rusher.bas", "puller.bas"]:
     for class in HeroClass:
       for scenario in Scenario:
         for boundary in [false, true]:
@@ -134,6 +170,18 @@ block:
           doAssert red.work == blue.work, label
           inc checked
   echo "Mirrored policy scenarios checked: ", checked
+
+echo "Testing pullers walk into camp aggro without casting or attacking"
+for team in Team:
+  for scenario in [Pulling, Luring]:
+    let result = decision("puller.bas", team, Ranger, scenario)
+    var walked = false
+    for action in result.actions:
+      doAssert action.kind notin [ActionAttackTarget, ActionAttackMove,
+        ActionCastTarget, ActionCastPoint, ActionUseItem]
+      if action.kind == ActionWalkTo:
+        walked = true
+    doAssert walked
 
 echo "Testing script cell boundaries reflect exactly"
 for tile in -mapTiles() .. mapTiles():

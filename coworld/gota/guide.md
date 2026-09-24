@@ -20,7 +20,7 @@ Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upl
 
 Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/gods_of_the_arena/bots.nim` and `content.nim`.
 
-The baseline is a playable reference for all 68 GotA host functions. It drafts
+The baseline is a playable reference for all GotA host functions. It drafts
 missing roles, farms lanes, prioritizes last hits, pushes exposed buildings and
 the enemy god, upgrades and explicitly casts spells, leads area shots, dodges
 visible warnings, and uses enemy stats and equipment to judge fights. It also
@@ -254,7 +254,7 @@ channel bar shows the time remaining. Esc cancels destination selection.
 
 ### Visible objects
 
-Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged creep per wave, giving six melee creeps and two ranged creeps per lane for each team. Ranged creeps carry a staff and cast magic bolts from up to four tiles away. Destroying a barracks stops its four creeps from spawning. For creeps, `objectClass(i)` is 0 for melee and 1 for ranged. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:
+Loop over indices `0` through `objectCount() - 1`. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, 5 = barracks, and 6 = neutral mob. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged creep per wave, giving six melee creeps and two ranged creeps per lane for each team. Ranged creeps carry a staff and cast magic bolts from up to four tiles away. Destroying a barracks stops its four creeps from spawning. For creeps, `objectClass(i)` is 0 for melee and 1 for ranged. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:
 
 | Function | Meaning |
 | --- | --- |
@@ -407,3 +407,69 @@ BASIC uses [Bassy](https://github.com/treeform/bassy) with [Fixxy](https://githu
 `and`, `or`, `xor`, and `not` are bitwise. Comparisons produce -1 for true and 0 for false; conditions accept any nonzero number. Host flags and action results remain 1 or 0, so use `flag = 0` instead of `not flag` to negate a host flag.
 
 `walkTo(x, y)`, `attackMove(x, y)`, and `castPoint(slot, x, y)` accept fractional tile coordinates. For example, `walkTo(selfX + 0.25, selfY - 0.25)` selects a point a quarter tile from the current tile center. Integers continue to name tile centers. IDs, slots, indices, and terrain queries require exact integers. Passing a fractional value to an integer argument raises a BASIC error instead of truncating it. Accepted fractional destinations are preserved in action replays.
+
+### Neutral camps
+
+The 14 jungle clearings contain seven mirrored pairs. Each half has three
+low, two medium, and two high camps. The map preset seed fixes each group's
+appearance and size. Members share one chargen appearance, with one larger
+leader whenever a group has at least two mobs. All neutrals use melee attacks.
+
+| Tier | Mobs | Normal HP | Damage | XP | Last-hit gold |
+| --- | --- | --- | --- | --- | --- |
+| Low | 1–2 | 100 | 8 | 20 | 10 |
+| Medium | 2–3 | 180 | 14 | 35 | 20 |
+| High | 3–5 | 300 | 20 | 50 | 30 |
+
+Leaders are 35% larger, have twice the health, deal 50% more damage, and give
+twice the XP and gold. Camps attack when a hero or lane creep from either team
+comes within two tiles of a living mob and is in its line of sight. Damaging a
+mob also engages the whole group. Idle auto-attacks ignore resting camps,
+while explicit attacks, attack-move, and damaging spells can engage them.
+Lane creeps can pull camps by approaching, and fight back once the camp engages.
+Pulled neutrals can also be attacked by towers.
+
+The group returns home if a member or the aggressor goes beyond 12 tiles from
+the camp center, or the aggressor dies or remains out of sight for three seconds.
+Returning survivors cannot be damaged or controlled. They heal fully when all
+survivors reach home. Dead members stay dead until the whole camp is cleared.
+The full group respawns 60 seconds after the final death, waiting longer if any
+living hero from either team is within ten tiles, including the boundary.
+Creeps and dead heroes do not block respawns. Respawns receive fresh object IDs.
+
+Only the last-hitting unit's team receives neutral XP. Eligible living heroes
+within six tiles on the same navigation floor split the pool. An eligible hero
+last hitter receives 15% first; the other 85% is shared among all eligible
+heroes, including that hero. Otherwise the full pool is shared. Only a hero
+last hitter receives gold. XP contributes to the existing lifetime-XP score.
+
+Neutral objects use `objectKind(i) = 6`, `objectTeam(i) = 2`, and
+`objectClass(i) = 1`, `2`, or `3` for difficulty. Existing health, facing,
+velocity, target, control observations and attack/cast commands apply. Units
+are LOS-filtered through terrain and brush and grant neither team vision.
+
+| Function | Result |
+| --- | --- |
+| `campCount()` | Number of public, static camp clearings. |
+| `campX(i)`, `campY(i)` | Camp center in the usual team-relative map coordinates. |
+| `campTier(i)` | Difficulty 1–3, or 0 for an invalid camp index. |
+| `objectCamp(i)` | Zero-based camp index for a visible neutral, otherwise -1. |
+| `objectLeader(i)` | 1 for a visible camp leader, otherwise 0. |
+| `objectReturning(i)` | 1 for a visible neutral returning home, otherwise 0. |
+
+Static camp queries never expose hidden living counts or respawn timers.
+The reference policy farms nearby visible camps between lane fights, beginning
+low camps at level 1, medium at level 4, and high at level 7. It starts with at
+least 70% health, withdraws below 40%, and prioritizes enemy heroes and lanes.
+
+`players/puller.bas` copies the reference policy and adds camp pulling. When
+healthy and a nearby allied wave is available, it walks into neutral aggro,
+then leads the camp through the wave without using offensive spells or items.
+It resumes normal play when creeps take over, danger appears, or the attempt
+times out. Attempts last at most 15 seconds, with 20 seconds between attempts.
+
+To test five base bots against five pullers from the repository root:
+
+```sh
+nim r examples/gods_of_the_arena/gota.nim --bot examples/gods_of_the_arena/players/base.bas:5 --bot examples/gods_of_the_arena/players/puller.bas:5
+```

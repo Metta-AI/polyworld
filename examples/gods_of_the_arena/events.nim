@@ -22,12 +22,12 @@ type
     MatchEnded, PortalStarted, PortalCompleted, PortalInterrupted,
     Stunned, Rooted, RecoveryStarted, RecoveryInterrupted, RecoveryCompleted,
     AbilityLeveled,
-    HeroDrafted, Silenced
+    HeroDrafted, Silenced, CampReturning, CampEngaged
 
   EventCause* {.size: sizeof(int32).} = enum
     Initialization, Wave, BasicAttack, AbilityEffect, ItemEffect, KillReward,
     EquipmentChange, LevelUp, Regeneration, Respawn, Command, GodDestroyed,
-    TimeLimit, CorpseExpired, Buyback, NearbyKill
+    TimeLimit, CorpseExpired, Buyback, NearbyKill, CampReset, Proximity
 
   EventEntity* = object
     id*, kind*, team*, class*, player*: int32

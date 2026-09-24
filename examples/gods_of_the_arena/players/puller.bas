@@ -1,4 +1,4 @@
-' GotA reference policy: draft, farm, push, heal, resupply, and finish the god.
+' GotA puller: the reference policy plus neutral camp pulls into allied waves.
 ' Every GotA host function has a gameplay use here; calls remain conditional.
 ' Object indices last only for this decision. IDs may be remembered.
 ' Read the bot guide for units, LOS restrictions, and action error constants.
@@ -12,6 +12,11 @@ dim castRange(3)
 dim castDelay(3)
 dim castGround(3)
 dim castMinimum(3)
+dim waveIds(95)
+dim waveIndices(95)
+dim waveX(95)
+dim waveY(95)
+dim waveTargets(95)
 
 sub chooseHero()
   if draftTurnId <> selfId then
@@ -100,6 +105,22 @@ sub readObject(index)
       exit sub
     end if
     camp = objectCamp(index)
+    if pullStage > 0 and camp = pullCamp then
+      pullSeenTick = worldTick
+      target = objectTarget(index)
+      if target = selfId then
+        pullOnUs = 1
+      elseif target <> 0 then
+        pullVictim = target
+      end if
+      if distance < pullMobDistance then
+        pullMobDistance = distance
+        pullMobId = id
+        pullMobIndex = index
+        pullMobX = x
+        pullMobY = y
+      end if
+    end if
     tier = campTier(camp)
     campDx = originX + side * campX(camp) - myX
     campDy = originY + side * campY(camp) - myY
@@ -127,6 +148,7 @@ sub readObject(index)
           campXpos = x
           campYpos = y
           campDistance = distance
+          campNumber = camp
         end if
       end if
     end if
@@ -163,8 +185,18 @@ sub readObject(index)
         healMissing = missing
         healId = id
       end if
-    elseif kind = 3 and distance <= 64 then
-      tanks = tanks + 1
+    elseif kind = 3 then
+      if distance <= 64 then
+        tanks = tanks + 1
+      end if
+      if distance <= 324 and waves < 96 then
+        waveIds(waves) = id
+        waveIndices(waves) = index
+        waveX(waves) = x
+        waveY(waves) = y
+        waveTargets(waves) = objectTarget(index)
+        waves = waves + 1
+      end if
     end if
     exit sub
   end if
@@ -228,6 +260,10 @@ sub readObject(index)
 end sub
 
 sub observe()
+  waves = 0
+  pullOnUs = 0
+  pullVictim = 0
+  pullMobDistance = 1000000
   campScore = -10000
   campId = 0
   bestScore = -10000
@@ -261,6 +297,23 @@ sub observe()
     if targetIndex < 48 + scanOffset or targetIndex >= 96 + scanOffset then
       if objectId(targetIndex) = selfTarget then
         readObject(targetIndex)
+      end if
+    end if
+  end if
+  ' Keep the current pull visible across the rotating observation window.
+  if pullStage > 0 then
+    if pullMobIndex >= 48 and pullMobIndex < objects then
+      if pullMobIndex < 48 + scanOffset or pullMobIndex >= 96 + scanOffset then
+        if objectId(pullMobIndex) = pullMobId then
+          readObject(pullMobIndex)
+        end if
+      end if
+    end if
+    if pullWaveIndex >= 48 and pullWaveIndex < objects then
+      if pullWaveIndex < 48 + scanOffset or pullWaveIndex >= 96 + scanOffset then
+        if objectId(pullWaveIndex) = pullWaveId then
+          readObject(pullWaveIndex)
+        end if
       end if
     end if
   end if
@@ -306,6 +359,107 @@ sub observe()
         end if
       end if
     next inspectSlot
+  end if
+end sub
+
+sub stopPull()
+  pullStage = 0
+  pullReady = worldTick + tickRate * 20
+end sub
+
+sub pullCamps()
+  ' Walk into aggro, then lead the group through a nearby allied wave.
+  if retreating or enemyPower > 0 or towerAggro then
+    if pullStage > 0 then
+      stopPull()
+    end if
+    exit sub
+  end if
+  if selfHp * 2 < selfMaxHp then
+    if pullStage > 0 then
+      stopPull()
+    end if
+    exit sub
+  end if
+  if pullStage = 0 then
+    if worldTick < pullReady or bestKind <> 6 or campId = 0 then
+      exit sub
+    end if
+    if selfHp * 10 < selfMaxHp * 7 or objectTarget(campIndex) <> 0 then
+      exit sub
+    end if
+    pullCamp = campNumber
+    pullMobId = campId
+    pullMobIndex = campIndex
+    pullMobX = campXpos
+    pullMobY = campYpos
+  elseif worldTick >= pullUntil or worldTick - pullSeenTick > tickRate * 2 then
+    stopPull()
+    exit sub
+  end if
+  pullCenterX = originX + side * campX(pullCamp)
+  pullCenterY = originY + side * campY(pullCamp)
+  chosenWave = -1
+  waveDistance = 1000000
+  for wave = 0 to waves - 1
+    if pullStage > 0 then
+      if waveTargets(wave) = pullMobId or waveIds(wave) = pullVictim then
+        ' The wave has taken over. Resume ordinary combat and farming.
+        stopPull()
+        exit sub
+      end if
+    end if
+    dx = waveX(wave) - pullCenterX
+    dy = waveY(wave) - pullCenterY
+    distance = dx * dx + dy * dy
+    if distance >= 16 and distance <= 81 and waveTargets(wave) = 0 then
+      if distance < waveDistance then
+        waveDistance = distance
+        chosenWave = wave
+      end if
+    end if
+  next wave
+  if chosenWave < 0 then
+    if pullStage > 0 then
+      stopPull()
+    end if
+    exit sub
+  end if
+  pullWaveId = waveIds(chosenWave)
+  pullWaveIndex = waveIndices(chosenWave)
+  if pullStage = 0 then
+    pullStage = 1
+    pullUntil = worldTick + tickRate * 15
+    pullSeenTick = worldTick
+  end if
+  if pullVictim <> 0 and pullOnUs = 0 then
+    stopPull()
+    exit sub
+  end if
+  if pullOnUs then
+    pullStage = 2
+  end if
+  pullGoalX = pullMobX
+  pullGoalY = pullMobY
+  if pullStage = 2 then
+    pullGoalX = waveX(chosenWave)
+    pullGoalY = waveY(chosenWave)
+    ' Step beyond the wave, staying inside the camp's twelve-tile leash.
+    dx = pullGoalX - pullCenterX
+    dy = pullGoalY - pullCenterY
+    if dx * dx >= dy * dy then
+      if dx >= 0 then
+        pullGoalX = pullGoalX + 2
+      else
+        pullGoalX = pullGoalX - 2
+      end if
+    else
+      if dy >= 0 then
+        pullGoalY = pullGoalY + 2
+      else
+        pullGoalY = pullGoalY - 2
+      end if
+    end if
   end if
 end sub
 
@@ -355,7 +509,7 @@ sub inventory()
           consume = threatDistance > 100 and worldTick - hurtTick > tickRate
         elseif id = 3 and selfMana * 3 < selfMaxMana then
           consume = bestId <> 0
-        elseif id = 4 and selfTarget = bestId and bestId <> 0 then
+        elseif id = 4 and selfTarget = bestId and bestId <> 0 and pullStage = 0 then
           consume = bestDistance <= attackRange * attackRange
         end if
         if consume then
@@ -553,7 +707,7 @@ sub spells()
           end if
         elseif restore > 0 and selfMaxMana - selfMana >= restore then
           castId = selfId
-        elseif damage > 0 and bestId <> 0 then
+        elseif damage > 0 and bestId <> 0 and pullStage = 0 then
           if bestDistance <= castRange(spellSlot) * castRange(spellSlot) then
             if bestDistance >= castMinimum(spellSlot) * castMinimum(spellSlot) then
               ' Save the last recharging charge for valuable targets.
@@ -623,6 +777,7 @@ if selfHp <= 0 then
     actionError = lastActionError()
   end if
   initialized = 0
+  pullStage = 0
   end
 end if
 if selfChannelTicks > 0 or selfStunTicks > 0 then
@@ -744,6 +899,7 @@ end if
 
 learnAbilities()
 observe()
+pullCamps()
 inventory()
 spells()
 dodgeWarnings()
@@ -792,6 +948,11 @@ if enemyPower > friendlyPower + 6 and threatDistance < 64 then
     moveTo(homeX, homeY, 0)
     end
   end if
+end if
+
+if pullStage > 0 then
+  moveTo(pullGoalX, pullGoalY, 0)
+  end
 end if
 
 if bestId <> 0 then

@@ -77,3 +77,13 @@ for team in 0 ..< CreepPresets.len:
     "Equipping a caster must not change the shared melee preset."
 
 echo "GotA generated character integration passed: ", directory
+
+for recipe in neutralRecipes():
+  let
+    file = readPresetCharacter(directory, manifest, recipe.preset, CreepClips)
+    model = loadCharacterModel(file, NeutralTargetHeight)
+  model.fitCharacterHeight(NeutralTargetHeight, model.clipIndex("Sword_Idle"))
+  for animation in MeleeCreep.creepAnimationNames():
+    let clip = model.clipIndex(animation)
+    doAssert model.clipDuration(clip) > 0
+  echo recipe.preset.name, ": neutral outfit and melee animations verified."

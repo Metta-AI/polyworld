@@ -2460,7 +2460,7 @@
       <p class="kicker">BASIC HOST</p>
       <h2>BASIC observations</h2>
       <p>The <a href="../players/base.bas">base policy</a> is a playable reference
-        for all 68 GotA host functions: drafting, ability upgrades and casting,
+        for all GotA host functions: drafting, ability upgrades and casting,
         last hits, objective pushing, enemy assessment, warning dodges, shopping,
         recovery, portals, and buyback. Calls are made when useful, so not every
         mechanic must occur in each match. Main decisions run every six ticks
@@ -2518,7 +2518,7 @@
   end if
 end if</code></pre>
       <h3>Visible objects</h3>
-      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, and 5 = barracks. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged caster per wave, giving six melee and two ranged creeps per lane for each team. Destroying a barracks stops its four creeps from spawning. For creeps, <code>objectClass(i)</code> is 0 for melee and 1 for ranged. Casters attack from up to four tiles away. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
+      <p>Loop over indices <code>0</code> through <code>objectCount() - 1</code>. Object kinds are 1 = god, 2 = hero, 3 = creep, 4 = tower, 5 = barracks, and 6 = neutral mob. Barracks have 950 HP and become exposed after their lane towers fall. Each barracks spawns three melee creeps and one ranged caster per wave, giving six melee and two ranged creeps per lane for each team. Destroying a barracks stops its four creeps from spawning. For creeps, <code>objectClass(i)</code> is 0 for melee and 1 for ranged. Casters attack from up to four tiles away. Destroyed buildings leave the object list and release their occupied tiles. New queries respect the same visibility filter:</p>
       <table class="spell-table api-table">
         <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -2533,6 +2533,13 @@ end if</code></pre>
         </tbody>
       </table>
       <p>These new object queries return zero for invalid indices or fields that do not apply to that object. Invalid inventory slots also return zero. Hero level, mana, and inventory queries return zero for non-heroes. An object's ID is not a valid substitute for its list index.</p>
+      <h3>Neutral camps</h3>
+      <p>Fourteen clearings form seven mirrored camp pairs. Each half has three low camps (1–2 mobs), two medium camps (2–3), and two high camps (3–5). The map preset seed fixes each group's appearance and count. Groups share one chargen appearance; groups of two or more have a leader 35% larger, with double health, XP, and gold and 50% more damage.</p>
+      <p>Normal low/medium/high mobs have 100/180/300 HP, deal 8/14/20 melee damage, and award 20/35/50 XP and 10/20/30 last-hit gold. Camps attack heroes or lane creeps from either team within two tiles and line of sight of a living mob. Damaging a mob also engages its whole group. Idle attacks ignore resting camps; deliberate attacks, attack-move, and spells can engage them. Lane creeps can pull camps by approaching and fight back once the camp engages. A 12-tile leash returns survivors home, immune to damage and control until they arrive and fully heal. Dead members stay dead. Losing their aggressor also resets the camp, after three seconds if hidden.</p>
+      <p>After a full clear, the entire camp respawns after 60 seconds, waiting if any living hero is within ten tiles. Each respawn uses new object IDs. Neutral XP goes only to the last-hitting unit's team: nearby living heroes within six tiles on the same floor share it, reserving 15% for an eligible hero last hitter before sharing the other 85%. Only a hero last hitter receives gold.</p>
+      <p>Visible neutrals use <code>objectKind(i) = 6</code>, <code>objectTeam(i) = 2</code>, and tier 1–3 in <code>objectClass(i)</code>. <code>objectCamp(i)</code> returns their zero-based camp index (-1 otherwise), <code>objectLeader(i)</code> identifies leaders, and <code>objectReturning(i)</code> identifies immune returning mobs. Existing health, target, movement, control, attack, and spell APIs apply. All dynamic information obeys terrain and brush LOS.</p>
+      <p><code>campCount()</code>, <code>campX(i)</code>, <code>campY(i)</code>, and <code>campTier(i)</code> expose public static clearings in team-relative map coordinates. They never reveal hidden mob counts or respawn timers.</p>
+      <p>The <a href="../players/puller.bas">puller policy</a> copies the base policy and adds camp pulling. Healthy heroes approach a camp when a nearby allied wave is available, walk into aggro, then lead the neutrals through the wave. Offensive spells and items wait until the pull ends. Normal play resumes when creeps take over, danger appears, or the 15-second attempt expires. Attempts have a 20-second cooldown.</p>
       <p>Each enemy creep death provides a shared pool of 15 XP to living heroes within six tiles on the same navigation floor, regardless of starting lane. A nearby hero who lands the last hit receives 15% of that pool first; the remaining 85% is split equally among all nearby heroes, including the last hitter. With three heroes, the last hitter earns 6.5 XP and each teammate earns 4.25 XP. Fractional XP carries forward between kills. Without an eligible hero last hitter, the full pool is shared equally. Hero last hits also award 15 gold; tower and creep last hits grant no gold to heroes.</p>
       <h3>Pending spells and warnings</h3>
       <p>Loop over <code>0</code> through <code>spellCount() - 1</code>. This list contains unresolved casts from their start through impact, including projectiles and area warnings. Allied casts are observable; enemy casts require their aim position to be visible, matching the viewer's warning visibility. Completed effects are omitted.</p>

@@ -8,6 +8,7 @@ proc arena(): Game =
   result = newGame(generateMap(2026), 100000, 10, false,
     ReplayData(), drafting = false)
   result.world.spawnTimerTicks = 100000
+  result.world.camps.setLen(0)
   for building in result.world.buildings.mitems:
     building.hp = 0
   result.world.syncBuildings()

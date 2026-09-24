@@ -94,6 +94,44 @@ sub readObject(index)
   dx = x - myX
   dy = y - myY
   distance = dx * dx + dy * dy
+  if kind = 6 then
+    ' Camps never distract from lane combat or count as enemy heroes.
+    if objectReturning(index) or objectAlive(index) = 0 then
+      exit sub
+    end if
+    camp = objectCamp(index)
+    tier = campTier(camp)
+    campDx = originX + side * campX(camp) - myX
+    campDy = originY + side * campY(camp) - myY
+    if campDx * campDx + campDy * campDy > 100 then
+      exit sub
+    end if
+    enoughHealth = selfHp * 10 >= selfMaxHp * 7
+    if selfTarget = id then
+      enoughHealth = selfHp * 10 >= selfMaxHp * 4
+    end if
+    if camp >= 0 and camp < campCount() and enoughHealth then
+      if selfLevel >= 1 + (tier - 1) * 3 and distance <= 64 then
+        score = 100 - distance
+        if objectLeader(index) then
+          score = score - 10
+        end if
+        if selfTarget = id then
+          score = score + 100
+        end if
+        if score > campScore then
+          campScore = score
+          campIndex = index
+          campId = id
+          campHp = hp
+          campXpos = x
+          campYpos = y
+          campDistance = distance
+        end if
+      end if
+    end if
+    exit sub
+  end if
   if team = selfTeam then
     if kind = 1 then
       homeX = x
@@ -190,6 +228,8 @@ sub readObject(index)
 end sub
 
 sub observe()
+  campScore = -10000
+  campId = 0
   bestScore = -10000
   bestId = 0
   bestDistance = 1000000
@@ -227,6 +267,15 @@ sub observe()
   scanOffset = scanOffset + 48
   if scanOffset >= objects - 48 then
     scanOffset = 0
+  end if
+  if bestId = 0 and campId <> 0 and towerAggro = 0 and enemyPower = 0 then
+    bestId = campId
+    bestIndex = campIndex
+    bestKind = 6
+    bestHp = campHp
+    bestX = campXpos
+    bestY = campYpos
+    bestDistance = campDistance
   end if
   if bestId = 0 then
     exit sub
@@ -699,7 +748,7 @@ inventory()
 spells()
 dodgeWarnings()
 
-if selfHp * 4 < selfMaxHp then
+if selfHp * 4 < selfMaxHp or (bestKind = 6 and selfHp * 10 < selfMaxHp * 4) then
   retreating = 1
 end if
 if selfMana * 8 < selfMaxMana and bestId = 0 then

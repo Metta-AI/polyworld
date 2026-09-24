@@ -41,6 +41,7 @@ type
     id: int32
     kind: SelectedKind
     team: Team
+    neutral: bool
     portraitKey: string
     callsign: string
     classLabel: string
@@ -293,6 +294,17 @@ proc visibleInView(
   let viewingTeam = Team(viewMode - 1)
   team == viewingTeam or visible(run.world, viewingTeam, position)
 
+proc visibleInView(viewMode: int32, unit: Footman): bool =
+  ## Neutral mobs never inherit allied visibility from navigation orientation.
+  if unit.camp == 0:
+    return visibleInView(viewMode, unit.team, unit.position)
+  viewMode == 0 or visible(run.world, Team(viewMode - 1), unit.position)
+
+proc unitHudColor(unit: Footman): ColorRGBX =
+  ## Distinguishes neutral mobs from the two playable factions.
+  if unit.camp > 0: rgbx(242, 184, 61, 255)
+  else: teamHudColor(unit.team)
+
 proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
   ## Returns whether an object belongs to the current selection set.
   for selectedId in selectedIds:
@@ -360,7 +372,7 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
       )
   for footman in run.world.footmen:
     if footman.id == id:
-      if not visibleInView(viewMode, footman.team, footman.position):
+      if not visibleInView(viewMode, footman):
         return nil
       let
         moveSpeed = FootmanMovePerTick.float32 *
@@ -370,18 +382,27 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit =
       return SelectedUnit(
         id: footman.id,
         kind: SelectedMob,
-        team: footman.team,
-        callsign: if footman.kind == RangedCreep: "CASTER" else: "FOOTMAN",
-        classLabel: if footman.kind == RangedCreep: "RANGED" else: "MELEE",
+        team: footman.team, neutral: footman.camp > 0,
+        callsign: if footman.camp > 0: NeutralNames[footman.appearance]
+          elif footman.kind == RangedCreep: "CASTER" else: "FOOTMAN",
+        classLabel: if footman.camp > 0:
+          ["LOW", "MEDIUM", "HIGH"][footman.campTier - 1] &
+            (if footman.leader: " LEADER" else: " CAMP")
+          elif footman.kind == RangedCreep: "RANGED" else: "MELEE",
         status:
-          case footman.state
-          of Dying: "Dying"
-          of Fighting: "Fighting"
-          of Marching: "Marching",
+          if footman.state == Dying: "Dying"
+          elif footman.camp > 0:
+            case run.world.camps[footman.camp - 1].state
+            of RestingCamp: "Resting"
+            of FightingCamp: "Defending camp"
+            of ReturningCamp: "Returning home"
+            of EmptyCamp: "Cleared"
+          elif footman.state == Fighting: "Fighting"
+          else: "Marching",
         hp: max(footman.hp, 0'i32).float32,
-        maxHp: FootmanHp.float32,
+        maxHp: footman.unitMaxHp.float32,
         level: 1,
-        damage: FootmanDamage,
+        damage: footman.unitDamage,
         moveSpeed: moveSpeed,
         attackSpeed: TickRate.float32 / footmanAttackTicks(attackClips[0]).float32,
         attackRange: attackRange
@@ -952,12 +973,12 @@ proc drawUi*(
       )
   for footman in run.world.footmen:
     if footman.state != Dying and footman.hp > 0 and
-        visibleInView(viewMode, footman.team, footman.position):
+        visibleInView(viewMode, footman):
       sk.drawMinimapIcon(
         "contact",
         minimapPosition(renderPoint(footman.position), minimapPanel),
         8.0'f,
-        teamHudColor(footman.team),
+        unitHudColor(footman),
         isPicked(footman.id, selectedIds)
       )
   for hero in run.world.heroes:
@@ -977,7 +998,8 @@ proc drawUi*(
 
   if selection != nil:
     let
-      teamColor = teamHudColor(selection.team)
+      teamColor = if selection.neutral: rgbx(242, 184, 61, 255)
+        else: teamHudColor(selection.team)
       portrait = details.portrait
     if selection.kind == SelectedHero:
       sk.drawWellImage(
@@ -1124,7 +1146,8 @@ proc drawUi*(
 
   if selection != nil:
     let
-      teamColor = teamHudColor(selection.team)
+      teamColor = if selection.neutral: rgbx(242, 184, 61, 255)
+        else: teamHudColor(selection.team)
       badge = GameUiPanel(
         origin: details.portrait.origin + vec2(-18, 91),
         size: vec2(BadgeLarge)
@@ -1132,6 +1155,8 @@ proc drawUi*(
       namePos = details.name.origin
       classPos = details.class.origin
       hpBar = details.hp
+      healthColor = if selection.neutral: rgbx(180, 180, 180, 255)
+        else: teamColor
       manaBar = details.mana
       xpBar = details.xp
     if selection.kind == SelectedHero and selection.abilityPoints > 0:
@@ -1173,14 +1198,14 @@ proc drawUi*(
       hpBar.size,
       selection.hp,
       selection.maxHp,
-      teamColor,
+      healthColor,
       hudScratch
     )
     sk.drawSprite(
       "health",
       hpBar.origin + vec2(4, 4),
       vec2(20),
-      teamColor
+      healthColor
     )
     if selection.maxMana > 0:
       sk.drawValueBar(

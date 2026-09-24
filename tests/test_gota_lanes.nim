@@ -15,6 +15,7 @@ proc quietGame(size = 116, heroes = 0): Game =
     ReplayData(),
     drafting = false
   )
+  result.world.camps.setLen(0)
   result.world.heroTurnTicks = 100_000
   result.world.spawnTimerTicks = 100_000
 

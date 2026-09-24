@@ -153,7 +153,11 @@ for hero in game.world.heroes:
   ]
   doAssert tile.terrain == editorTiles.SpawnGround
 game.tickWorld(nil)
-doAssert game.world.footmen.len == 12 * CreepsPerBarracks
+var laneCreeps = 0
+for unit in game.world.footmen:
+  if unit.camp == 0:
+    inc laneCreeps
+doAssert laneCreeps == 12 * CreepsPerBarracks
 for team in sim.Team:
   for lane in 0 .. 2:
     var sites: seq[WorldPoint]

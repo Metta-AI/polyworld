@@ -63,7 +63,9 @@ proc rotated(creep: Footman): Footman =
   ## Reflects every spatial component of one creep's state.
   result = creep
   result.team = Team(1 - creep.team.ord)
-  result.lane = 2 - creep.lane
+  if creep.camp == 0:
+    result.lane = 2 - creep.lane
+  result.home = creep.home.rotated
   result.position = creep.position.rotated
   result.facing = creep.facing.rotated
   result.velocity = creep.velocity.rotated
@@ -75,6 +77,8 @@ proc rotated(creep: Footman): Footman =
 
 proc rotate(world: World) =
   ## Rotates the initial world while retaining storage order and random draws.
+  for camp in world.camps.mitems:
+    camp.center = camp.center.rotated
   for hero in world.heroes:
     hero.rotate()
   for fort in world.forts.mitems:
@@ -110,6 +114,11 @@ proc check(first, second: Game) =
   doAssert a.heroTurnTicks == b.heroTurnTicks and
     a.heroTurnStart == b.heroTurnStart, label & " bot schedule"
   doAssert a.footmen.len == b.footmen.len, label & " creeps"
+  doAssert a.camps.len == b.camps.len
+  for i, camp in a.camps:
+    var other = b.camps[i]
+    other.center = other.center.rotated
+    doAssert camp == other, label & " camp " & $i
   for i, hero in a.heroes:
     doAssert first.heroVms[i].lastInstructions ==
       second.heroVms[i].lastInstructions, label & " VM instructions " & $i
