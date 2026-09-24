@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[scripts, chats, mailboxes, bodies, metrics, profiles],
+  polyworld/[chats, mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -243,7 +243,7 @@ proc overlordLimits*(): Limits =
   ## unit will exceed it and fail the script, which is the pressure that
   ## pushes authors onto `nearestEnemy` and friends.
   result = defaultLimits()
-  result.maxStringBytes = 128 * 1024
+  result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 256 * 1024
   result.maxCodeInstructions = 100_000
   result.maxArrays = 64
@@ -595,10 +595,11 @@ proc runDecision(game: Game, player: int32) =
       home = structure.origin
       break
 
-  game.brains[player].runtime.restartScript()
   try:
     if game.brains[player].prepareDecision != nil:
       game.brains[player].prepareDecision(game.world.tick)
+    else:
+      game.brains[player].runtime.restart()
     let
       economy = addr game.world.players[player]
       ids = overlordDataIds

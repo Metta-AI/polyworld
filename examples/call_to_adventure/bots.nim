@@ -6,7 +6,7 @@
 
 import
   bassy,
-  polyworld/[scripts, chats, mailboxes, bodies, metrics, cli, controllers,
+  polyworld/[chats, mailboxes, bodies, metrics, cli, controllers,
     pathing, profiles],
   content,
   sim,
@@ -94,7 +94,7 @@ proc issueHeroAction(action: ReplayAction): int32 =
 proc heroLimits(): Limits =
   ## Defines one isolated hero VM's source, memory, and decision budgets.
   result = defaultLimits()
-  result.maxStringBytes = 128 * 1024
+  result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 128 * 1024
   result.maxCodeInstructions = 50_000
   result.maxArrays = 32
@@ -270,10 +270,11 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   activeGame = game
   activeHeroSlot = slot
   let objective = game.objectiveTile(slot)
-  game.heroVms[slot].runtime.restartScript()
   try:
     if game.heroVms[slot].prepareDecision != nil:
       game.heroVms[slot].prepareDecision(game.world.tick)
+    else:
+      game.heroVms[slot].runtime.restart()
     game.heroVms[slot].runtime.setData(heroDataIds[DataSelfId], actor.id)
     game.heroVms[slot].runtime.setData(
       heroDataIds[DataSelfClass],

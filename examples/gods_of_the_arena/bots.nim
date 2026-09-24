@@ -3,7 +3,7 @@
 
 import
   bassy, fixxy,
-  polyworld/[scripts, chats, mailboxes, metrics, bodies, cli, controllers,
+  polyworld/[chats, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
   content,
   maps,
@@ -103,7 +103,7 @@ proc bindHeroData(program: Program) =
 proc heroVmLimits(): Limits =
   ## Returns independent structural and per-decision limits for a hero VM.
   result = defaultLimits()
-  result.maxStringBytes = 128 * 1024
+  result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 64 * 1024
   result.maxCodeInstructions = 20_000
   result.maxArrays = 32
@@ -843,10 +843,11 @@ proc runHeroScript(game: Game, index: int) =
     vm = game.heroVms[index]
   if vm == nil or vm.failed:
     return
-  vm.runtime.restartScript()
   try:
     if vm.prepareDecision != nil:
       vm.prepareDecision(game.world.tick)
+    else:
+      vm.runtime.restart()
     discard game.world.worldObjectCount(hero.id)
     vm.runtime.setData(heroDataIds[DataSelfId], hero.id)
     vm.runtime.setData(heroDataIds[DataSelfTeam], int32(hero.team.ord))
