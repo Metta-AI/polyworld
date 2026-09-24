@@ -6,7 +6,7 @@ import
 const Directory = currentSourcePath().parentDir
 
 let
-  original = readFile(Directory / "original.bas")
+  original = readFile(Directory / "../../tmp/neural-parity/original.bas")
   converted = readFile(
     Directory / "../../examples/gods_of_the_arena/players/neural.bas"
   )

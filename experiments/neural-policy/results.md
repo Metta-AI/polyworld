@@ -12,7 +12,7 @@ No actions or state hashes are normalized, and neither recording is modified.
 
 ## Policy and environment
 
-- [Original BASIC](original.bas): 1,147 lines, 46,457 bytes, unchanged.
+- Original BASIC in local, ignored `tmp/neural-parity/original.bas`: 1,147 lines, 46,457 bytes, unchanged.
 - [Converted BASIC](../../examples/gods_of_the_arena/players/neural.bas): 828 lines, 24,944 bytes.
 - Source: [co-gas at 131b8fde](https://github.com/Metta-AI/co-gas/blob/131b8fde058561cf369449ee2854579f02c64676/players/users/relh/co-gas/polyworld-basic/gods_of_the_arena_neural_v63_arcanist_elixir_stock.bas).
 - Original source SHA-256: `d5514435f27c400a53bf026b338e7786114f5a4948e9a99d5dd1c3dea9fd1f3a`.
@@ -81,17 +81,21 @@ Checks passed:
 
 ## Reproduce
 
-From the repository root, after installing the dependencies in `nimby.lock`:
+From the repository root, after installing the dependencies in `nimby.lock`.
+The original policy is a temporary local artifact and is not included in the
+repository. Conversion, baseline replay generation, and the benchmark require
+`tmp/neural-parity/original.bas`; restore it from the source link above if the
+temporary directory has been cleared.
 
 ```sh
 mkdir -p tmp/neural-parity
 python3 experiments/neural-policy/convert.py \
-  experiments/neural-policy/original.bas \
+  tmp/neural-parity/original.bas \
   examples/gods_of_the_arena/players/neural.bas
 nim c -d:headless -o:tmp/neural-parity/gota-native \
   examples/gods_of_the_arena/gota.nim
 tmp/neural-parity/gota-native \
-  --bot experiments/neural-policy/original.bas:5 \
+  --bot tmp/neural-parity/original.bas:5 \
   --bot examples/gods_of_the_arena/players/base.bas:5 \
   --seed 20260924 --ticks 28800 \
   --record tmp/neural-parity/original.replay
@@ -107,7 +111,7 @@ nim r experiments/neural-policy/bench_neural.nim
 
 The commands above compare both policies on the new runtime. To rerun the
 historical baseline, use the preserved `gota-original` binary
-with `--bot experiments/neural-policy/original.bas:5`, the same opponent,
+with `--bot tmp/neural-parity/original.bas:5`, the same opponent,
 seed, and tick limit. To rebuild that binary, use the baseline commits above
 without the Bassy override. Names in metadata follow the supplied BAS filename.
 
