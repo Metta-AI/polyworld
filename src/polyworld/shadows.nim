@@ -326,8 +326,29 @@ template sunDepthPasses*(windowSize: IVec2, body: untyped) =
   ## Runs the caster draws in `body` once per shadow step, so both maps of
   ## the cross-fade see the same frame. `sunPassIndex` is 0 for the first
   ## pass and 1 for the second, for loops that must mutate state only once.
+  ##
+  ## perf-r2 (convoy/terrain-lighting, 2026-09-24): every receiver samples
+  ## both maps through `mix(fraction0, fraction1, sunShadowBlend)`
+  ## (`toon.nim`/`quadterrain.nim`, uniform `toonShadowStep`/`shadowStep` =
+  ## `sunShadowBlend`) -- a GLSL `mix(a, b, t)` at t=0 returns `a` with
+  ## ZERO contribution from `b` (`a*(1-0) + b*0`, exact in IEEE754 for any
+  ## finite `b`), and at t=1 returns `b` with zero contribution from `a`.
+  ## So whichever pass's own map carries a provably-zero blend weight this
+  ## frame is pure waste: rendering it cannot change one sampled pixel,
+  ## because its own result is multiplied by exactly 0 before it ever
+  ## reaches a receiver. Skipping that pass only (never both -- the other
+  ## still carries full weight and must still render) is therefore a
+  ## no-op on every consumer's output, not merely a fast approximation of
+  ## one. `sunShadowBlend` is a plain module `var`, so no caller-side
+  ## change is needed for callers who never hit an exact 0/1 boundary
+  ## (a real day/night cycle spends nearly all its time mid-blend) --
+  ## this only elides work on frames where one pass was always discarded
+  ## downstream anyway.
   if sunShadowsActive():
     for sunPassIndex {.inject.} in 0 .. 1:
+      if (sunPassIndex == 0 and sunShadowBlend >= 1.0'f32) or
+         (sunPassIndex == 1 and sunShadowBlend <= 0.0'f32):
+        continue
       beginSunDepthPass(sunPassIndex)
       body
     endSunDepthPass(windowSize)
