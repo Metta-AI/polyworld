@@ -55,6 +55,12 @@ var
   toonUnlitShadowDark: Uniform[float32]
     ## Darkest multiply an unlit+shadow-receiving fragment can reach, fully
     ## in the sun's own shadow. 1.0 = no visible darkening.
+  toonSmoothShaded: Uniform[bool]
+    ## terrain-lighting (convoy/terrain-lighting): opts a node out of the
+    ## 2-3 band toon ramp into a continuous N.L*shadow diffuse. False by
+    ## construction for every node until a game opts one in, so the OFF
+    ## path (nobody sets this) is byte-identical to before this uniform
+    ## existed.
   toonTint: Uniform[Vec4]
   # Sun shadow map sampling, fed from polyworld/shadows each frame. Two
   # maps at neighbouring quantized sun steps, cross-faded by toonShadowStep
@@ -182,6 +188,17 @@ proc toonFrag(
     intensity = 1.0'f - toonShadingStrength +
       lightIntensity * sunFactor * toonShadingStrength
   var band = texture(toonRamp, vec2(intensity, 0.5'f)).r
+  if toonSmoothShaded:
+    # terrain-lighting: a continuous N.L diffuse term (the sun shadow map
+    # and day/night shading-strength floor already folded into `intensity`
+    # above), bypassing the 2-3 band toon ramp entirely -- that ramp is
+    # what banded the ridge slopes in bible rounds 44/46, the reason the
+    # terrain was made `unlit` in the first place. Owner ruling 2026-09-23
+    # overrides that: the ground must be lit, so this gives it a smooth
+    # gradient instead of the character ramp, upstream-able as its own
+    # per-node mode. Never both `toonUnlit` and `toonSmoothShaded` on the
+    # same node in practice (unlit wins below if it ever happens).
+    band = intensity
   if toonUnlit:
     band = 1.0'f
     if toonUnlitReceivesShadow:
@@ -374,6 +391,7 @@ type
     alphaCutoff, ramp: GLint
     highlightColor, shadowColor, rimColor, unlit, tint: GLint
     unlitReceivesShadow, unlitShadowDark: GLint
+    smoothShaded: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength: GLint
@@ -412,6 +430,12 @@ type
     unlitShadowDark*: float32
       ## Multiply floor for unlitReceivesShadow nodes in full shadow. 1.0
       ## (the default) reproduces today's unlit behaviour exactly.
+    smoothShadedNodes*: HashSet[string]
+      ## convoy/terrain-lighting: nodes shaded with a continuous N.L*shadow
+      ## diffuse instead of the toon ramp (see `toonSmoothShaded`'s own
+      ## header). Empty by default -- membership here is the only way this
+      ## mode ever engages, so an empty set reproduces pre-existing pixels
+      ## exactly.
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
 
@@ -476,6 +500,7 @@ proc newToonContext*(): ToonContext =
   loc(unlit, "toonUnlit")
   loc(unlitReceivesShadow, "toonUnlitReceivesShadow")
   loc(unlitShadowDark, "toonUnlitShadowDark")
+  loc(smoothShaded, "toonSmoothShaded")
   loc(tint, "toonTint")
   loc(shadowMvp0, "toonShadowMvp0")
   loc(shadowMvp1, "toonShadowMvp1")
@@ -566,6 +591,8 @@ proc drawPrimitive(
   glUniform1i(u.unlit, (owner.name in ctx.unlitNodes).ord.GLint)
   glUniform1i(
     u.unlitReceivesShadow, (owner.name in ctx.unlitReceivesShadow).ord.GLint)
+  glUniform1i(
+    u.smoothShaded, (owner.name in ctx.smoothShadedNodes).ord.GLint)
   if useSkinning:
     glUniformMatrix4fv(
       u.jointMatrices, ctx.jointMatrices.len.GLsizei, GL_FALSE,
