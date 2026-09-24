@@ -12,7 +12,7 @@ import
   std/algorithm,
   bassy, fixxy,
   polyworld/[bodies, hashes, metrics, noises, pathing, profiles, rngs, tapes,
-    visions],
+    visions, mailboxes],
   content, events, motions,
   maps,
   replays
@@ -320,6 +320,7 @@ type
     replayMode*: bool
     recordingError*: string
     heroVms*: seq[HeroVm]
+    inboxes*: seq[Mailbox]
     nextFootmen: seq[Footman]
     nextHeroes: seq[Hero]
     collisionUnits: seq[CollisionUnit]

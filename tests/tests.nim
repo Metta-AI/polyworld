@@ -68,6 +68,8 @@ import
   test_lvd_maps,
   test_lvd_replays,
   test_lvd_sim,
+  test_mailboxes,
+  test_chats,
   test_metrics,
   test_stats,
   test_nav,
