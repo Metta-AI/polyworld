@@ -1,0 +1,151 @@
+{
+  "date": "2026-09-23",
+  "version": "2026.9.23.4",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_a472c872-2b97-4b81-9961-e171304e5d63",
+  "canonical": true,
+  "source_commit": "2c8db6ebe1dc785ce1eea87496505d1244ee4c44",
+  "asset_commit": "32946b35b92e2b33f38945e96b293eb6e2c98ac9",
+  "replay_version": 62,
+  "changes": [
+    "Add fourteen mirrored neutral camps with three tiers, one to five generated mobs, larger leaders, rewards, and full-camp respawns.",
+    "Nearby heroes and lane creeps provoke camps within two tiles and line of sight. Groups can be pulled up to their twelve-tile leash, then return home and heal.",
+    "Render generated mobs with gray health bars, support neutral selection and LOS-filtered BASIC observations, and include their assets in the web player.",
+    "Add puller.bas alongside the base policy, with approach, lure, and allied-creep handoff behavior. Update the reference policy and hosted guide for camps.",
+    "Support only gameplay replay version 62."
+  ],
+  "checks": [
+    "Nim checks, the full suite, neutral regressions on 64/116/256 maps, replay-event checks, and 720 mirrored policy scenarios passed.",
+    "Fresh repeated native recordings were byte-identical; native and WASM playback and three backward seeks had zero mismatches.",
+    "All ten local and ten hosted certification checks passed.",
+    "All five hosted smoke matches completed with verified integer scores.",
+    "Served JavaScript, WASM, and data SHA-256 hashes match the production build.",
+    "The Linux certification replay and a new league replay reproduced exactly on the native client."
+  ],
+  "league_settings_preserved": true,
+  "known_issues": [
+    "One existing submitted policy failed BASIC compilation at line 1106, column 11: host function call requires parentheses. Match failures and the offending policy version are recorded below."
+  ],
+  "native_league_replay": {
+    "round_number": 706,
+    "id": "ereq_2c3636bf-7945-4f17-85c4-39663e50d7d5",
+    "episode_id": "cdcf9264-33be-4392-a707-b94f69e98d9a",
+    "replay_version": 62,
+    "sha256": "9625d93635c271285bcc2be7d6bae4fa074c3e01c500928a5373e51b31ad03c2",
+    "ticks": 11132,
+    "outcome": "RedTeam"
+  },
+  "verification_round": {
+    "round_id": "round_571bdfb5-d3a2-417f-8f2f-449c994f5663",
+    "round_number": 706,
+    "status": "completed",
+    "games": 24,
+    "completed_games": 12,
+    "failed_games": 12,
+    "failures": [
+      {
+        "id": "ereq_86b33b55-2c03-4987-9a4d-aff5d42a3aeb",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 5",
+        "failed_policy_index": 5,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_943c815c-e23b-47ef-9abb-604cea39a884",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 4",
+        "failed_policy_index": 4,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_1aacdee8-6e28-48cf-8228-b1b349e75199",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 0",
+        "failed_policy_index": 0,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_35ab10b9-0c04-450d-b8a8-bd848cb0a8b5",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 1",
+        "failed_policy_index": 1,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_dfb148f5-4e8e-4eea-9d05-6a388d6b7862",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 8",
+        "failed_policy_index": 8,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_29911128-54cf-4731-85f8-f3f71a29c682",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 5",
+        "failed_policy_index": 5,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_5801ef1c-faf6-4c8f-8d45-2e5d45bab218",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 3",
+        "failed_policy_index": 3,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_5bb5ed48-c926-4b9a-a010-2e38eab4fa8f",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 2",
+        "failed_policy_index": 2,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_955c1bdc-5632-481e-af5f-3d8afbc1581f",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 6",
+        "failed_policy_index": 6,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_ff902d3b-9204-4445-8386-fe10d7e5a6d0",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 3",
+        "failed_policy_index": 3,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_01ec0744-777c-49ac-b14c-26593108b0b1",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 0",
+        "failed_policy_index": 0,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      },
+      {
+        "id": "ereq_ebd96aef-4bc1-4297-ad13-20871b80e142",
+        "error_type": "player_error",
+        "error": "BASIC compilation failed for player slot 4",
+        "failed_policy_index": 4,
+        "failed_policy_version_id": "a15665be-4edf-4857-b23b-2888b4b49868"
+      }
+    ],
+    "coworld_id": "cow_a472c872-2b97-4b81-9961-e171304e5d63",
+    "version": "2026.9.23.4",
+    "integer_scores_verified": 120,
+    "outcomes": {
+      "BlueTeam": 5,
+      "RedTeam": 5,
+      "time_limit": 2
+    },
+    "replay_version": 62,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=7ef385e4-0ff5-4569-8dc2-a5a83cf3cf06",
+    "verified_at": "2026-09-24T00:28:25.935604+00:00"
+  },
+  "manifest_hash": "sha256:1dbf8b4e01b92574d778caba2a4649103d4d59445f3d773314ab3b192e70bfd7",
+  "viewer_sha256": {
+    "wasm": "42c81cf6cb920a03addc7273b87618727cc31de5031558b7dda1bde17d1be347",
+    "data": "6a1d07f38179cd0ce3498dbaefb725c634d74a7705426ded9a119a83dd98e3f0",
+    "js": "38708e82856deeccc5981c02dd33163d1abc02bca85164daec4512407f3422d4"
+  },
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/35937599920",
+  "verified_at": "2026-09-24T00:28:35.183047+00:00"
+}
