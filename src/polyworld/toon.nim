@@ -48,6 +48,13 @@ var
   toonShadowColor: Uniform[Vec4]
   toonRimColor: Uniform[Vec4]
   toonUnlit: Uniform[bool]           # always in the highlight band
+  toonUnlitReceivesShadow: Uniform[bool]
+    ## convoy/unlit-shadow-receive: when an unlit node also opts into this,
+    ## the unlit branch below multiplies by the sun shadow term instead of
+    ## discarding it -- no ramp, no N.L, so ramp-banding cannot return.
+  toonUnlitShadowDark: Uniform[float32]
+    ## Darkest multiply an unlit+shadow-receiving fragment can reach, fully
+    ## in the sun's own shadow. 1.0 = no visible darkening.
   toonTint: Uniform[Vec4]
   # Sun shadow map sampling, fed from polyworld/shadows each frame. Two
   # maps at neighbouring quantized sun steps, cross-faded by toonShadowStep
@@ -177,6 +184,15 @@ proc toonFrag(
   var band = texture(toonRamp, vec2(intensity, 0.5'f)).r
   if toonUnlit:
     band = 1.0'f
+    if toonUnlitReceivesShadow:
+      # Shadow-only multiply: no ramp, no N.L term, so the ridge-slope
+      # banding the unlit branch exists to avoid cannot return. sunFactor
+      # is already PCF-softened by sunShadowFactor above; renormalize by
+      # toonShadowStrength so toonUnlitShadowDark is the exact floor at
+      # full shadow regardless of that global strength setting.
+      let shadowTerm = clamp(
+        (1.0'f - sunFactor) / max(toonShadowStrength, 0.0001'f), 0.0'f, 1.0'f)
+      band = mix(1.0'f, toonUnlitShadowDark, shadowTerm)
   # Step 3: two hand-picked colours, then the albedo on top.
   var lit: Vec3 = mix(toonShadowColor.rgb, toonHighlightColor.rgb, band)
   var n: Vec3 = normalize(normal)
@@ -357,6 +373,7 @@ type
     emissiveTexture, emissiveFactor: GLint
     alphaCutoff, ramp: GLint
     highlightColor, shadowColor, rimColor, unlit, tint: GLint
+    unlitReceivesShadow, unlitShadowDark: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength: GLint
@@ -387,6 +404,14 @@ type
     shadowColor*: Color
     rimColor*: Color             ## alpha is the rim strength
     unlitNodes*: HashSet[string] ## mesh nodes drawn always full-bright
+    unlitReceivesShadow*: HashSet[string]
+      ## convoy/unlit-shadow-receive: subset of unlitNodes that still darken
+      ## under the sun's own shadow map (shadow-only multiply, no ramp).
+      ## Empty by default; membership here does nothing unless the node is
+      ## also in unlitNodes.
+    unlitShadowDark*: float32
+      ## Multiply floor for unlitReceivesShadow nodes in full shadow. 1.0
+      ## (the default) reproduces today's unlit behaviour exactly.
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
 
@@ -425,6 +450,7 @@ proc newToonContext*(): ToonContext =
     lightDirection: ToonLightDirection,
     tint: color(1, 1, 1, 1),
     rimColor: color(1, 1, 1, 0),
+    unlitShadowDark: 0.6'f32,
   )
   result.setPalette(ToonPalettes[0])
   result.shader = compileShaderFiles(ToonVertSrc, ToonFragSrc)
@@ -448,6 +474,8 @@ proc newToonContext*(): ToonContext =
   loc(shadowColor, "toonShadowColor")
   loc(rimColor, "toonRimColor")
   loc(unlit, "toonUnlit")
+  loc(unlitReceivesShadow, "toonUnlitReceivesShadow")
+  loc(unlitShadowDark, "toonUnlitShadowDark")
   loc(tint, "toonTint")
   loc(shadowMvp0, "toonShadowMvp0")
   loc(shadowMvp1, "toonShadowMvp1")
@@ -536,6 +564,8 @@ proc drawPrimitive(
   let useSkinning = ctx.jointMatrices.len > 0
   glUniform1i(u.useSkinning, useSkinning.ord.GLint)
   glUniform1i(u.unlit, (owner.name in ctx.unlitNodes).ord.GLint)
+  glUniform1i(
+    u.unlitReceivesShadow, (owner.name in ctx.unlitReceivesShadow).ord.GLint)
   if useSkinning:
     glUniformMatrix4fv(
       u.jointMatrices, ctx.jointMatrices.len.GLsizei, GL_FALSE,
@@ -618,6 +648,7 @@ proc draw*(ctx: ToonContext, root: Node) =
     u.rimColor, ctx.rimColor.r, ctx.rimColor.g, ctx.rimColor.b,
     ctx.rimColor.a)
   glUniform4f(u.tint, ctx.tint.r, ctx.tint.g, ctx.tint.b, ctx.tint.a)
+  glUniform1f(u.unlitShadowDark, ctx.unlitShadowDark)
 
   # Sun shadow map state (polyworld/shadows): characters darken where the
   # sun cannot see them and flatten with the shared shading strength.
