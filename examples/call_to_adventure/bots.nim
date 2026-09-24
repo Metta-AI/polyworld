@@ -6,7 +6,7 @@
 
 import
   bassy,
-  polyworld/[scripts, chats, mailboxes, bodies, metrics, cli, controllers,
+  polyworld/[scripts, advisors, mailboxes, bodies, metrics, cli, controllers,
     pathing, profiles],
   content,
   sim,
@@ -94,7 +94,9 @@ proc issueHeroAction(action: ReplayAction): int32 =
 proc heroLimits(): Limits =
   ## Defines one isolated hero VM's source, memory, and decision budgets.
   result = defaultLimits()
-  result.maxStringBytes = 128 * 1024
+  result.maxStrings = 1024
+  result.maxStringLength = 64 * 1024
+  result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 128 * 1024
   result.maxCodeInstructions = 50_000
   result.maxArrays = 32
@@ -113,10 +115,10 @@ proc heroLimits(): Limits =
   result.maxPrintBytes = 4 * 1024
   result.maxPrintEvents = 256
 
-proc buildHeroHost(heroId: int32, chat: ChatHost = nil): Host =
+proc buildHeroHost(heroId: int32, advisor: Advisor = nil): Host =
   ## Builds the world-query and high-level action API for one hero.
   result = initHost()
-  let services = if chat == nil: newChatHost(0) else: chat
+  let services = if advisor == nil: newAdvisor(0, LlmConfig()) else: advisor
   services.addFunctions(result)
   for name in HeroDataNames:
     discard result.addData(name)
@@ -234,8 +236,8 @@ proc loadBots*(
   for slot in 0 ..< PartySize:
     if kinds[slot] == PlayerController:
       continue
-    let chat = newChatHost(slot)
-    chat.mailboxes = game.mailboxes
+    let advisor = newAdvisor(slot)
+    advisor.chat.mailboxes = game.mailboxes
     let source = sources[slot]
     let program =
       when defined(coworld):
@@ -248,13 +250,14 @@ proc loadBots*(
     game.heroVms[slot] = HeroVm(
       runtime: initRuntime(
         program,
-        buildHeroHost(int32(100 + slot), chat),
+        buildHeroHost(int32(100 + slot), advisor),
         limits
       ),
       ready: true,
-      prepareDecision: chat.decisionCallback(),
+      prepareDecision: advisor.decisionCallback(),
+      pollRequests: advisor.requestPoller()
     )
-    chat.bindRuntime(game.heroVms[slot].runtime)
+    advisor.bindRuntime(game.heroVms[slot].runtime)
     when defined(coworld):
       game.heroVms[slot].output = playerPrinter(int(slot))
 

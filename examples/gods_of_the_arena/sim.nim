@@ -68,6 +68,7 @@ type
   HeroVm* = ref object
     output*: PrintProc
     prepareDecision*: proc(tick: int32) {.closure.}
+    pollRequests*: proc(): bool {.closure.}
     runtime*: Runtime
     limits*: Limits
     ready*: bool

@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[scripts, chats, mailboxes, bodies, metrics, profiles],
+  polyworld/[scripts, advisors, mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -243,7 +243,9 @@ proc overlordLimits*(): Limits =
   ## unit will exceed it and fail the script, which is the pressure that
   ## pushes authors onto `nearestEnemy` and friends.
   result = defaultLimits()
-  result.maxStringBytes = 128 * 1024
+  result.maxStrings = 1024
+  result.maxStringLength = 64 * 1024
+  result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 256 * 1024
   result.maxCodeInstructions = 100_000
   result.maxArrays = 64
@@ -268,7 +270,7 @@ proc observedAt(index: int32): Observed =
     return Observed(owner: -1)
   snapshot[index]
 
-proc buildOverlordHost*(playerId: int32, chat: ChatHost = nil): Host =
+proc buildOverlordHost*(playerId: int32, advisor: Advisor = nil): Host =
   ## Builds the complete world-query and command interface for one player.
   ##
   ## The same builder makes both the compile-time schema and each player's
@@ -281,7 +283,7 @@ proc buildOverlordHost*(playerId: int32, chat: ChatHost = nil): Host =
   ## cost far more than their own cycles, so a script's budget prices its
   ## demand on the simulation rather than only its own arithmetic.
   result = initHost()
-  let services = if chat == nil: newChatHost(0) else: chat
+  let services = if advisor == nil: newAdvisor(0, LlmConfig()) else: advisor
   services.addFunctions(result)
   for name in OverlordDataNames:
     discard result.addData(name)
@@ -558,8 +560,8 @@ proc loadBots*(
     when not defined(coworld):
       if sources[player].len == 0:
         continue
-    let chat = newChatHost(int(player))
-    chat.mailboxes = game.mailboxes
+    let advisor = newAdvisor(int(player))
+    advisor.chat.mailboxes = game.mailboxes
     let source = sources[player]
     let program =
       when defined(coworld):
@@ -567,11 +569,12 @@ proc loadBots*(
       else:
         compile(source, schema, limits)
     game.brains[player] = OverlordVm(
-      runtime: initRuntime(program, buildOverlordHost(player, chat), limits),
+      runtime: initRuntime(program, buildOverlordHost(player, advisor), limits),
       ready: true,
-      prepareDecision: chat.decisionCallback(),
+      prepareDecision: advisor.decisionCallback(),
+      pollRequests: advisor.requestPoller()
     )
-    chat.bindRuntime(game.brains[player].runtime)
+    advisor.bindRuntime(game.brains[player].runtime)
     if not bound:
       bindOverlordData(program)
       bound = true

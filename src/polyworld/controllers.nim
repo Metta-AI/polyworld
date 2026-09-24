@@ -39,6 +39,8 @@ proc localGameConfig*(options: GameOptions, slotCount: int): GameConfig =
     maxTicks: options.maximumTicks,
     spawnIntervalTicks: options.spawnIntervalTicks,
     playerSlot: options.playerSlot,
+    headlessTickRate: options.headlessTickRate,
+    waitForLlm: options.waitForLlm,
     players: unnamedPlayers(slotCount)
   )
   var next = 0

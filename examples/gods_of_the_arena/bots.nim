@@ -3,7 +3,7 @@
 
 import
   bassy, fixxy,
-  polyworld/[scripts, chats, mailboxes, metrics, bodies, cli, controllers,
+  polyworld/[scripts, advisors, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
   content,
   maps,
@@ -103,7 +103,9 @@ proc bindHeroData(program: Program) =
 proc heroVmLimits(): Limits =
   ## Returns independent structural and per-decision limits for a hero VM.
   result = defaultLimits()
-  result.maxStringBytes = 128 * 1024
+  result.maxStrings = 1024
+  result.maxStringLength = 64 * 1024
+  result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 64 * 1024
   result.maxCodeInstructions = 20_000
   result.maxArrays = 32
@@ -261,10 +263,10 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityRestore: spec.restore
     of AbilityManaCost: spec.manaCost
 
-proc initHeroHost(heroId: int32, chat: ChatHost = nil): Host =
+proc initHeroHost(heroId: int32, advisor: Advisor = nil): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
-  let services = if chat == nil: newChatHost(0) else: chat
+  let services = if advisor == nil: newAdvisor(0, LlmConfig()) else: advisor
   services.addFunctions(result)
   for error in ActionError:
     discard result.addData($error, error.ord.int32)
@@ -809,8 +811,8 @@ proc loadBots*(
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
       continue
-    let chat = newChatHost(i)
-    chat.mailboxes = game.mailboxes
+    let advisor = newAdvisor(i)
+    advisor.chat.mailboxes = game.mailboxes
     let source = sources[i]
     let program =
       when defined(coworld):
@@ -823,14 +825,15 @@ proc loadBots*(
     game.heroVms[i] = HeroVm(
       runtime: initRuntime(
         program,
-        initHeroHost(game.world.heroes[i].id, chat),
+        initHeroHost(game.world.heroes[i].id, advisor),
         limits
       ),
       limits: limits,
-      prepareDecision: chat.decisionCallback(),
+      prepareDecision: advisor.decisionCallback(),
+      pollRequests: advisor.requestPoller(),
       ready: true
     )
-    chat.bindRuntime(game.heroVms[i].runtime)
+    advisor.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
 

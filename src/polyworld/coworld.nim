@@ -287,6 +287,8 @@ proc coworldOptions*(slotCount: int): GameOptions =
     maximumTicks: config.maxTicks,
     seconds: config.maxTicks div SharedTickRate,
     spawnIntervalTicks: config.spawnIntervalTicks,
+    headlessTickRate: config.headlessTickRate,
+    waitForLlm: config.waitForLlm,
     recordPath: replayPath,
     speed: 1,
     windowWidth: 1920,
