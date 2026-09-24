@@ -151,6 +151,6 @@ block:
   let
     world = itemWorld()
     hero = world.heroes[1]
-  doAssert world.heroAttackTicks(hero) == 24
+  doAssert world.heroAttackTicks(hero) == 27
 
 echo "test_gota_abilities: all checks passed"

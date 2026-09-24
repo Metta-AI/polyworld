@@ -95,6 +95,29 @@ block:
   doAssert not world.applyUseItem(hero.id, 0)
   doAssert world.count(Death) == 1
 
+echo "Testing doubled building XP for every structure kind and tower tier"
+for kind in BuildingKind:
+  for tier in TowerTier:
+    let
+      world = arena()
+      hero = world.heroes[0]
+      gold = hero.gold
+    world.buildings.setLen(1)
+    world.buildings[0].kind = kind
+    world.buildings[0].tier = tier
+    world.buildings[0].hp = 1
+    hero.attackObjectId = world.buildings[0].id
+    doAssert world.applyUseItem(hero.id, 0)
+    doAssert hero.totalXp == 200
+    doAssert hero.gold == gold + 75
+    doAssert world.heroes[1].totalXp == 0
+    doAssert world.heroes[2].totalXp == 0
+    doAssert world.count(XpGained) == 1
+    doAssert world.last(XpGained).amount == 200
+    doAssert world.last(XpGained).target.id == hero.id
+    doAssert not world.applyUseItem(hero.id, 0)
+    doAssert hero.totalXp == 200 and world.count(XpGained) == 1
+
 echo "Testing invulnerable structures, tower kills and corpse metadata"
 block:
   let world = arena()

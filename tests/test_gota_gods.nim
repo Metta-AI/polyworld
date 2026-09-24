@@ -179,13 +179,13 @@ for attacker in Team:
     doAssert world.forts[defender.ord].hp == 0
     let finalScores = scores(world.totalXp(), world.tick.int)
     for i, hero in world.heroes:
-      let reward = if hero.team == attacker: 500 else: 0
+      let reward = if hero.team == attacker: 1000 else: 0
       doAssert hero.totalXp == 2000 + reward
       doAssert finalScores[i] == 1000 + reward
       doAssert hero.gold == before.heroes[i].gold
       if before.heroes[i].state == Dying:
         doAssert hero.state == Dying and hero.hp == 0
-    doAssert capped.level == HeroMaxLevel and capped.xp == 500
+    doAssert capped.level == HeroMaxLevel and capped.xp == 1000
     when defined(replayEvents):
       var rewards = 0
       for event in world.events:
@@ -194,8 +194,8 @@ for attacker in Team:
           doAssert event.cause == GodDestroyed
           doAssert event.actor.id == fort.id
           doAssert event.target.team == attacker.ord
-          doAssert event.amount == 500
-          doAssert event.before == 2000 and event.after == 2500
+          doAssert event.amount == 1000
+          doAssert event.before == 2000 and event.after == 3000
           doAssert event.related >= 0
           doAssert world.events[event.related].kind == Death
           doAssert world.events[event.related].target.id == fort.id
@@ -222,6 +222,6 @@ for draw in [false, true]:
   doAssert game.finished()
   doAssert world.draw == draw
   for hero in world.heroes:
-    doAssert hero.totalXp == (if draw: 500 else: 0)
+    doAssert hero.totalXp == (if draw: 1000 else: 0)
 
 echo "God guards and rewards passed"

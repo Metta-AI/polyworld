@@ -91,8 +91,9 @@ proc shot(reverse: bool): int32 =
     impact: 10, ends: 22)
   game.tickWorld(nil)
   var hits = 0
-  for enemy in game.world.heroes:
-    if enemy.team == BlueTeam and enemy.hp > 0 and enemy.hp < enemy.maxHp:
+  for i in 5 .. 6:
+    let enemy = game.world.heroes[i]
+    if enemy.hp < enemy.maxHp:
       result = enemy.id
       inc hits
   doAssert hits == 1

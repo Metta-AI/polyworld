@@ -165,7 +165,7 @@ const
       role: "Frontline protector",
       attackStyle: MeleeAttack,
       baseHitPoints: 330,
-      hitPointsPerLevel: 60,
+      hitPointsPerLevel: 88,
       baseMana: 110,
       manaPerLevel: 8,
       baseDamage: 25,
@@ -173,7 +173,7 @@ const
       baseMovePerTick: 5_800,
       movePerLevel: 60,
       attackRange: 70_000,
-      attackTicks: 24,
+      attackTicks: 27,
       abilities: [
         LionGuard, FirebrandSword, InfernoAegis, BlazingBlade
       ]
@@ -182,11 +182,11 @@ const
       name: "Ranger",
       role: "Mobile ranged carry",
       attackStyle: RangedAttack,
-      baseHitPoints: 200,
-      hitPointsPerLevel: 29,
+      baseHitPoints: 25,
+      hitPointsPerLevel: 1,
       baseMana: 110,
       manaPerLevel: 8,
-      baseDamage: 25,
+      baseDamage: 31,
       damagePerLevel: 6,
       baseMovePerTick: 6_900,
       movePerLevel: 90,
@@ -201,7 +201,7 @@ const
       role: "Burst mage",
       attackStyle: MagicAttack,
       baseHitPoints: 190,
-      hitPointsPerLevel: 30,
+      hitPointsPerLevel: 25,
       baseMana: 180,
       manaPerLevel: 15,
       baseDamage: 38,
@@ -222,12 +222,12 @@ const
       hitPointsPerLevel: 48,
       baseMana: 170,
       manaPerLevel: 14,
-      baseDamage: 22,
+      baseDamage: 21,
       damagePerLevel: 4,
       baseMovePerTick: 6_400,
       movePerLevel: 70,
       attackRange: 240_000,
-      attackTicks: 26,
+      attackTicks: 30,
       abilities: [
         NatureTalisman, HealingBloom, KindredWisps, GolemSeed
       ]
@@ -242,10 +242,10 @@ const
       manaPerLevel: 7,
       baseDamage: 32,
       damagePerLevel: 7,
-      baseMovePerTick: 7_600,
+      baseMovePerTick: 10094,
       movePerLevel: 120,
       attackRange: 75_000,
-      attackTicks: 16,
+      attackTicks: 15,
       abilities: [
         ShadowCloak, VoidBlade, GaleSlash, ShadowComet
       ]
@@ -274,14 +274,14 @@ const
       attackStyle: RangedAttack,
       baseHitPoints: 230,
       hitPointsPerLevel: 42,
-      baseMana: 80,
+      baseMana: 60,
       manaPerLevel: 6,
       baseDamage: 58,
       damagePerLevel: 9,
       baseMovePerTick: 6_000,
       movePerLevel: 60,
       attackRange: 390_000,
-      attackTicks: 36,
+      attackTicks: 126,
       abilities: [
         FinalMeasure, SiegeScarab, LodestoneSurge, ClockworkCharge
       ]
@@ -291,7 +291,7 @@ const
       role: "Control mage",
       attackStyle: MagicAttack,
       baseHitPoints: 185,
-      hitPointsPerLevel: 28,
+      hitPointsPerLevel: 18,
       baseMana: 210,
       manaPerLevel: 17,
       baseDamage: 36,
@@ -312,7 +312,7 @@ const
       hitPointsPerLevel: 46,
       baseMana: 190,
       manaPerLevel: 16,
-      baseDamage: 26,
+      baseDamage: 21,
       damagePerLevel: 5,
       baseMovePerTick: 6_200,
       movePerLevel: 70,
@@ -330,9 +330,9 @@ const
       hitPointsPerLevel: 55,
       baseMana: 40,
       manaPerLevel: 4,
-      baseDamage: 38,
+      baseDamage: 53,
       damagePerLevel: 8,
-      baseMovePerTick: 6_800,
+      baseMovePerTick: 5976,
       movePerLevel: 90,
       attackRange: 80_000,
       attackTicks: 20,
@@ -410,7 +410,7 @@ const
       slot: UltimateAbility,
       name: "Arcane Meteor", icon: "arcane_meteor",
       kind: Strike, cooldownTicks: 600, manaCost: 100,
-      range: 420_000, damage: 120
+      range: 420_000, damage: 270
     ),
     NatureTalisman: AbilitySpec(
       slot: PassiveAbility,
@@ -420,7 +420,7 @@ const
     HealingBloom: AbilitySpec(
       slot: PrimaryAbility,
       name: "Healing Bloom", icon: "healing_bloom",
-      kind: Heal, cooldownTicks: 168, manaCost: 30, heal: 55
+      kind: Heal, cooldownTicks: 168, manaCost: 30, heal: 76
     ),
     KindredWisps: AbilitySpec(
       slot: SecondaryAbility,
@@ -460,7 +460,7 @@ const
     SanguineChalice: AbilitySpec(
       slot: PassiveAbility,
       name: "Sanguine Chalice", icon: "sanguine_chalice",
-      kind: Heal, cooldownTicks: 192, heal: 45
+      kind: Heal, cooldownTicks: 192, heal: 83
     ),
     AfterlightSickle: AbilitySpec(
       slot: PrimaryAbility,
@@ -521,7 +521,7 @@ const
       name: "Bone Marionette", icon: "bone_marionette",
       kind: Strike, cooldownTicks: 216, manaCost: 48,
       range: 300_000, damage: 53,
-      control: RootControl, controlTicks: TickRate
+      control: RootControl, controlTicks: 25
     ),
     BoundVoid: AbilitySpec(
       slot: UltimateAbility,
@@ -544,7 +544,7 @@ const
       slot: SecondaryAbility,
       name: "Dread Totem", icon: "dread_totem",
       kind: Strike, cooldownTicks: 216, manaCost: 42,
-      range: 240_000, damage: 70,
+      range: 240_000, damage: 86,
       control: SilenceControl, controlTicks: 2 * TickRate
     ),
     VoidPortal: AbilitySpec(
@@ -767,7 +767,11 @@ proc abilitySpec*(ability: Ability): AbilitySpec =
   of MeteorStrike, ArcaneMeteor, VolcanicEruption:
     result.casting = AreaCast
     result.area.radius = if ability == ArcaneMeteor: 180_000 else: 120_000
-    result.castTicks = if ability == ArcaneMeteor: 72 else: 48
+    result.castTicks =
+      case ability
+      of ArcaneMeteor: 54
+      of MeteorStrike: 36
+      else: 48
   of HealingBloom, KindredWisps:
     result.casting = AreaCast
     result.range = 240_000
@@ -799,6 +803,8 @@ proc abilitySpec*(ability: Ability): AbilitySpec =
       of DreadTotem:
         result.effect = BoxShape
         result.area.shape = LineFootprint
+        result.area.width = 75_000
+        result.castTicks = 18
       of VoidPortal:
         result.effect = HelixShape
         result.area.shape = RingFootprint

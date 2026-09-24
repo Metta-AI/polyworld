@@ -8,11 +8,12 @@ including drafting time. Losses and timeouts retain their time-adjusted XP,
 with each hero's score rounded down to whole points and clamped to zero before
 averaging. Victory is recorded separately in the outcome.
 
-Destroying the enemy god grants every hero on your team a flat 500 XP,
+Destroying the enemy god grants every hero on your team a flat 1,000 XP,
 including dead heroes and heroes elsewhere on the map, regardless of who lands
 the last hit. This is awarded once on the final tick and included in lifetime XP
-before calculating scores. It offsets 2.5 minutes of the 200-XP-per-minute time
+before calculating scores. It offsets 5 minutes of the 200-XP-per-minute time
 penalty. Timeouts grant no god reward.
+Destroying a tower or barracks grants its killer 200 XP and 75 gold.
 
 The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 3900 HP and 60 damage as level-3 lane towers.
 

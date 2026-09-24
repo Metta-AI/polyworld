@@ -503,7 +503,7 @@ for class in HeroClass:
       hero = game.world.heroes[0]
       spec = heroAbility(class, slot).abilitySpec
       other = game.target(5, 60_000, spec.kind != Strike)
-    hero.hp -= 50
+    hero.hp = max(1'i32, hero.hp - 50)
     hero.mana = 1000
     game.step()
     let mana = hero.mana

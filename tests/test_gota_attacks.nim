@@ -45,6 +45,7 @@ proc enemyHero(game: Game, offset: int32): Hero =
   result.state = Marching
   result.hp = 100_000
   result.maxHp = 100_000
+  result.controls[StunControl].ends = 100_000
   var point = game.world.heroes[0].position
   point.x += offset
   result.place(point)
@@ -215,7 +216,9 @@ for class in HeroClass:
     game.tickWorld(nil)
     let hits = if tick < windup: 0 elif tick < duration + windup: 1 else: 2
     doAssert hero.attacksLanded == hits, $class & " tick " & $tick
-    doAssert other.hp == 100_000 - hits * hero.heroAttackDamage
+    doAssert other.hp == 100_000 - hits * hero.heroAttackDamage,
+      $class & " tick " & $tick & " target HP " & $other.hp &
+      " attacker HP " & $hero.hp & " target hits " & $other.attacksLanded
     if tick == windup or tick == duration + windup:
       doAssert remaining == 1
       doAssert game.world.heroAttackCooldown(hero) == duration

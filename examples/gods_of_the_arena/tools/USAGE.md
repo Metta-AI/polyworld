@@ -93,7 +93,8 @@ The player statistics table combines both formats, with one appearance per
 policy per completed game. Mono games average all five heroes before being
 combined with mixed games. Wins, losses and timeouts are separate counts.
 XP is lifetime earned XP without the ladder's time penalty, including the
-500 XP per hero awarded when the enemy god dies. Gold is earned gold,
+1,000 XP per hero awarded when the enemy god dies. Towers and barracks grant
+200 XP to the hero landing the finishing blow. Gold is earned gold,
 excluding starting gold; unspent gold is the final balance. Levels, kills,
 deaths, assists, tower kills and footman last hits are per-appearance averages.
 KDA is the sum of hero-averaged kills and assists divided by

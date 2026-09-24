@@ -498,9 +498,9 @@ const
   FootmanGoldReward = 15
   HeroXpReward = 150
   HeroGoldReward = 100
-  TowerXpReward = 100
+  TowerXpReward = 200
   TowerGoldReward = 75
-  GodXpReward* = 500
+  GodXpReward* = 1000
   DecisionTicks = 1'i32
     ## Ticks between hero VM decisions. One decision per simulation tick.
   FortObjectKind = 1'i32
