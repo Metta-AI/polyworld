@@ -22,12 +22,43 @@ from = mailboxId()
 
 proc checkMailboxes[T](game: T, teamCount: int) =
   ## Checks default chat routing and repeated reads through a game's hosts.
-  doAssert game.mailboxes != nil
-  doAssert game.mailboxes.send(0, TeamMailboxId, "team") == teamCount
-  for slot in 0 ..< game.mailboxes.players:
-    let message = game.mailboxes.pull(slot)
-    doAssert (message.matches("team")) ==
-      (game.mailboxes.teams[slot] == game.mailboxes.teams[0])
+  template send(sender, target, text: untyped): untyped =
+    ## Uses the game's own routing implementation.
+    when T is ctaSim.Game:
+      ctaBots.sendChat(game, sender, target, text)
+    elif T is gotaSim.Game:
+      gotaBots.sendChat(game, sender, target, text)
+    else:
+      lvdBots.sendChat(game, sender, target, text)
+  doAssert send(0, -1, "team") == teamCount
+  var received = 0
+  for slot, inbox in game.inboxes:
+    when T is ctaSim.Game:
+      let teammate = true
+    elif T is gotaSim.Game:
+      let teammate = game.world.heroes[slot].team == game.world.heroes[0].team
+    else:
+      let teammate = slot == 0
+    doAssert inbox.count == int(teammate)
+    if inbox.count > 0:
+      inc received
+      doAssert inbox.messages[inbox.first] == "team"
+      doAssert inbox.pop() == -1
+  doAssert received == teamCount
+  doAssert send(0, -2, "global") == game.inboxes.len
+  for inbox in game.inboxes:
+    doAssert inbox.pop() == -2
+  doAssert send(0, 1, "direct") == 1
+  doAssert game.inboxes[1].messages[game.inboxes[1].first] == "direct"
+  doAssert game.inboxes[1].pop() == 0
+  doAssert send(0, game.inboxes.len, "invalid") == 0
+  for i in 0 ..< MaxMailboxMessages:
+    doAssert send(0, 0, "full") == 1
+  doAssert send(0, -2, "partial") == game.inboxes.len - 1
+  doAssert game.inboxes[0].count == MaxMailboxMessages
+  for inbox in game.inboxes:
+    while inbox.count > 0:
+      discard inbox.pop()
   for tick in 1 .. 300:
     game.world.tick = int32(tick)
     when T is ctaSim.Game:
@@ -49,6 +80,16 @@ proc checkMailboxes[T](game: T, teamCount: int) =
         "private hello"
       let large = vm.runtime.putString(repeat('x', 1024))
       doAssert vm.runtime.getString(large).len == 1024
+  when defined(nimAllocStats) and T is gotaSim.Game:
+    # The GotA decision runner leaves its active game bound for host calls.
+    # Isolate mailbox callbacks and restart from unrelated world preparation.
+    let before = getAllocStats()
+    for decision in 0 ..< 1000:
+      for vm in game.heroVms:
+        vm.runtime.restart()
+        discard vm.runtime.run()
+    let after = getAllocStats()
+    doAssert after == before, $(after - before)
 
 echo "Testing default mailboxes through all three games' BASIC hosts"
 block:
@@ -68,12 +109,18 @@ block:
     drafting = false
   )
   gotaBots.loadBots(gota, [BotGroup(path: path, count: 10)])
+  echo "Checking GotA"
   gota.checkMailboxes(5)
+  echo "GotA passed"
 
   let cta = ctaSim.newGame(2026)
   ctaBots.loadBots(cta, [BotGroup(path: path, count: ctaContent.PartySize)])
+  echo "Checking CTA"
   cta.checkMailboxes(ctaContent.PartySize)
+  echo "CTA passed"
 
   let lvd = lvdSim.newGame(lvdMaps.generateMap(lvdContent.DefaultSeed), 240)
   lvdBots.loadBots(lvd, [Program, Program])
+  echo "Checking LVD"
   lvd.checkMailboxes(1)
+  echo "LVD passed"

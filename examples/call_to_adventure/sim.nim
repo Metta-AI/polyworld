@@ -43,7 +43,7 @@ type
     historyPlayback*: bool
     replayMode*: bool
     heroVms*: array[PartySize, HeroVm]
-    mailboxes*: Mailboxes
+    inboxes*: array[PartySize, Mailbox]
 
 const
   AggroTiles* = 9'i32

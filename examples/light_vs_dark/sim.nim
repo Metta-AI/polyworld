@@ -155,7 +155,7 @@ type
     historyPlayback*: bool
     replayMode*: bool
     brains*: array[PlayerCount, OverlordVm]
-    mailboxes*: Mailboxes
+    inboxes*: array[PlayerCount, Mailbox]
     mapSeed*: int32
     maximumTicks*: int32
 

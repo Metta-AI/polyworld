@@ -322,7 +322,7 @@ type
     replayMode*: bool
     recordingError*: string
     heroVms*: seq[HeroVm]
-    mailboxes*: Mailboxes
+    inboxes*: seq[Mailbox]
     nextFootmen: seq[Footman]
     nextHeroes: seq[Hero]
     collisionUnits: seq[CollisionUnit]

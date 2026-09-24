@@ -1,5 +1,5 @@
 import
-  std/[json, monotimes, net, os, strutils, times],
+  std/[json, monotimes, net, os, strutils, tempfiles, times],
   bassy, fixxy,
   polyworld/[advisors, cli, llms, mailboxes, oracles, requests, timings],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim]
@@ -171,30 +171,51 @@ block:
     "hello"
 
   echo "Testing a mailbox DM becomes an LLM reply to the original sender"
-  let
-    mail = newMailboxes(2)
-    responder = newAdvisor(1, config)
-  responder.chat.mailboxes = mail
-  var responderHost = initHost()
-  responder.addFunctions(responderHost)
-  let responderSource = readFile(
-    currentSourcePath().parentDir / "../examples/inference/mailbox_llm.bas"
-  )
-  var responderRuntime = initRuntime(
-    compile(responderSource, responderHost), responderHost
-  )
-  responder.bindRuntime(responderRuntime)
-  responder.beginTick(0)
-  doAssert mail.send(0, 1, "What should we do?") == 1
-  discard responderRuntime.run()
-  waitForRequests([responder.requestPoller()])
-  doAssert received.recv().contains("What should we do?")
-  responderRuntime.restart()
-  responder.beginTick(1)
-  discard responderRuntime.run()
-  let answer = mail.pull(0)
-  doAssert answer.id == 1 and answer.matches("hello")
-  doAssert mail.count(1) == 0
+  block:
+    let
+      directory = createTempDir("polyworld-mailbox-llm-", "")
+      idle = directory / "idle.bas"
+      responder = currentSourcePath().parentDir /
+        "../examples/inference/mailbox_llm.bas"
+      settings = [
+        ("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", config.baseUrl),
+        ("COGAME_LLM", "on"),
+        ("COGAME_LLM_MODEL", "test/model")
+      ]
+    var saved: seq[(string, bool, string)]
+    for (name, value) in settings:
+      saved.add (name, existsEnv(name), getEnv(name))
+      putEnv(name, value)
+    defer:
+      removeDir(directory)
+      for (name, existed, value) in saved:
+        if existed:
+          putEnv(name, value)
+        else:
+          delEnv(name)
+    writeFile(idle, "idle = 0")
+    let game = newGame(generateMap(54), 240, 10, false, ReplayData(),
+      drafting = false)
+    game.loadBots([
+      BotGroup(path: idle, count: 1),
+      BotGroup(path: responder, count: 1),
+      BotGroup(path: idle, count: 8)
+    ])
+    doAssert game.sendChat(0, 1, "What should we do?") == 1
+    game.world.tick = 1
+    game.runBotDecisions()
+    let vm = game.heroVms[1]
+    doAssert not vm.failed, vm.lastError
+    waitForRequests([vm.pollRequests])
+    doAssert received.recv().contains("What should we do?")
+    game.world.tick = 2
+    game.runBotDecisions()
+    doAssert not vm.failed, vm.lastError
+    let inbox = game.inboxes[0]
+    doAssert inbox.count == 1
+    doAssert inbox.messages[inbox.first] == "hello"
+    doAssert inbox.pop() == 1
+    doAssert game.inboxes[1].count == 0
 
   echo "Testing raw streaming replies, HTTP failures, and response bounds"
   client.beginTick(2)
@@ -272,6 +293,7 @@ end if
     doAssert runtime.getGlobal("request") > 0
     waitForRequests([advisor.requestPoller()])
     discard received.recv()
+    runtime.restart()
     advisor.beginTick(1)
     discard runtime.run()
     doAssert runtime.getGlobal("answers") == 2
@@ -412,7 +434,7 @@ block:
   let advisor = newAdvisor(0, LlmConfig())
   var host = initHost()
   advisor.addFunctions(host)
-  for name in ["chat", "jev", "request", "mailbox_llm"]:
+  for name in ["chat", "jev", "request"]:
     let source = readFile(currentSourcePath().parentDir /
       "../examples/inference" / (name & ".bas"))
     discard compile(source, host)

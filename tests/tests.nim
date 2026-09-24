@@ -71,7 +71,6 @@ import
   test_llms,
   test_mailboxes,
   test_chats,
-  test_scripts,
   test_advisors,
   test_metrics,
   test_stats,

@@ -1,7 +1,7 @@
 import
   std/[os, strutils, tempfiles],
   bassy,
-  polyworld/[cli, mailboxes]
+  polyworld/cli
 
 when defined(advisorCta):
   import ../examples/call_to_adventure/[bots, content, sim]
@@ -48,16 +48,6 @@ block:
     game.loadBots([BotGroup(path: path, count: PartySize)])
   else:
     game.loadBots([BotGroup(path: path, count: 10)])
-  doAssert game.mailboxes != nil
-  let teamCount =
-    when defined(advisorCta): PartySize
-    elif defined(advisorLvd): 1
-    else: 5
-  doAssert game.mailboxes.send(0, TeamMailboxId, "team") == teamCount
-  for slot in 0 ..< game.mailboxes.players:
-    let message = game.mailboxes.pull(slot)
-    doAssert (message.matches("team")) ==
-      (game.mailboxes.teams[slot] == game.mailboxes.teams[0])
   for tick in 1 .. 2:
     game.world.tick = int32(tick)
     when defined(advisorCta):

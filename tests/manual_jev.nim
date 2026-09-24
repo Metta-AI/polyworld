@@ -32,6 +32,7 @@ block:
   echo "HTTP status: ", reply.status
   doAssert reply.status == 200, reply.error & " " & reply.body
   doAssert reply.error.len == 0, reply.error
+  runtime.restart()
   advisor.beginTick(1)
   discard runtime.run()
   let

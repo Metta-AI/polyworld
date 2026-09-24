@@ -1,7 +1,7 @@
 import
   std/[json, os, strutils, tables],
   bassy, jsony,
-  chats, llms, oracles, timings
+  llms, oracles, timings
 
 export llms.LlmConfig
 
@@ -9,7 +9,6 @@ type
   Advisor* = ref object
     runtime {.cursor.}: Runtime
     oracle*: Oracle
-    chat*: ChatHost
     tick: int32
   AdvisorFunction = enum
     LlmAvailable, LlmReady, LlmAsk, LlmRequest, LlmPoll, LlmStatus,
@@ -34,7 +33,7 @@ const
 
 proc newAdvisor*(slot: int, config: LlmConfig): Advisor =
   ## Creates a seat-local advisor without owning its BASIC runtime.
-  Advisor(oracle: newOracle(newLlmClient(slot, config)), chat: newChatHost(slot))
+  Advisor(oracle: newOracle(newLlmClient(slot, config)))
 
 proc newAdvisor*(slot: int): Advisor =
   ## Reads host configuration once when constructing a player's VM.
@@ -44,12 +43,10 @@ proc newAdvisor*(slot: int): Advisor =
 proc bindRuntime*(advisor: Advisor, runtime: Runtime) =
   ## Borrows the runtime that owns these callbacks, avoiding a ref cycle.
   advisor.runtime = runtime
-  advisor.chat.bindRuntime(runtime)
 
 proc beginTick*(advisor: Advisor, tick: int32) =
   ## Advances asynchronous replies at a deterministic decision boundary.
   advisor.oracle.beginTick(tick)
-  advisor.chat.beginTick(tick)
   advisor.tick = tick
 
 proc requestPoller*(advisor: Advisor): RequestPoll =
@@ -175,7 +172,6 @@ proc callback(advisor: Advisor, kind: AdvisorFunction): NumericHostProc =
 
 proc addFunctions*(advisor: Advisor, host: var Host) =
   ## Registers typed Jev helpers and lossless OpenRouter request access.
-  advisor.chat.addFunctions(host)
   for kind in AdvisorFunction:
     discard host.addFunction(
       FunctionNames[kind],
