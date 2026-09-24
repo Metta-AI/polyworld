@@ -13,6 +13,7 @@ type
     seed*: int64
     seedGiven*: bool  ## --seed was passed; otherwise games may pick their own.
     playerClass*, opponentClass*: HeroClass
+    playerCount*: int  ## Above two selects the multiplayer scene preview.
     human*: bool
     botPaths*: seq[string]
 
@@ -46,12 +47,13 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
   ## Accept both --key=value and --key value, including negative numeric seeds.
   ## --human is a flag: --human, --human=true, --human true all work.
   result = SessionOptions(seed: DefaultSessionSeed,
-    playerClass: Archer, opponentClass: Mage, human: false)
+    playerClass: Archer, opponentClass: Mage, playerCount: PlayerCount,
+    human: false)
   var index = 0
   while index < args.len:
     let separator = args[index].find('=')
     let key = if separator >= 0: args[index][0 ..< separator] else: args[index]
-    if key notin ["--seed", "--class", "--opponent", "--bot", "--human"]:
+    if key notin ["--seed", "--class", "--opponent", "--players", "--bot", "--human"]:
       raise newException(ValueError, "Unknown session option: " & key)
     if key == "--human":
       if separator >= 0:
@@ -83,6 +85,14 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
       result.seedGiven = true
     of "--class": result.playerClass = parseHeroClass(value)
     of "--opponent": result.opponentClass = parseHeroClass(value)
+    of "--players":
+      try:
+        result.playerCount = parseInt(value)
+      except ValueError:
+        raise newException(ValueError, "Invalid integer player count: " & value)
+      if result.playerCount < PlayerCount:
+        raise newException(ValueError, "Player count must be at least " &
+          $PlayerCount)
     of "--bot":
       if result.botPaths.len >= PlayerCount:
         raise newException(ValueError, "Too many --bot arguments (max " &

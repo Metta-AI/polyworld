@@ -12,7 +12,7 @@ when not defined(headless):
     chroma, opengl, pixie, shady, silky, vmath, windy,
     cardfaces, cardrenderer, vfxrenderer, awmsessions, awmweb, awmbots, awmpost,
     awmpostpanel,
-    awmcourtyard, awmheroes, paths,
+    awmcourtyard, awmheroes, awmmultiplayer, paths,
     polyworld/[assets, characters, chargen, chrome, common, viewers]
 
   const
@@ -71,6 +71,7 @@ when not defined(headless):
       yaw: float32
       pitch: float32
       roll: float32
+      frameYaw: float32 ## Optional balcony frame, applied after the local tilt.
 
     CardAnimation = object
       card: Card
@@ -293,15 +294,16 @@ when not defined(headless):
       value: Vec3
   ): Vec3 =
     ## Roll turns the card about its long axis, then yaw and pitch place it.
-    rotateAroundX(rotateAroundY(rotateAroundZ(value, pose.roll), pose.yaw),
-      pose.pitch)
+    rotateAroundY(
+      rotateAroundX(rotateAroundY(rotateAroundZ(value, pose.roll), pose.yaw),
+        pose.pitch), pose.frameYaw)
 
   proc inverseCardVector(
       pose: CardPose,
       value: Vec3
   ): Vec3 =
-    rotateAroundZ(rotateAroundY(rotateAroundX(value, -pose.pitch), -pose.yaw),
-      -pose.roll)
+    rotateAroundZ(rotateAroundY(rotateAroundX(
+      rotateAroundY(value, -pose.frameYaw), -pose.pitch), -pose.yaw), -pose.roll)
 
   proc cardNormal(pose: CardPose): Vec3 =
     pose.transformCardVector(vec3(0, 1, 0))
@@ -371,14 +373,15 @@ when not defined(headless):
       yaw = 0.0'f32,
       sideFactor = 0.62'f32,
       pitch = 0.0'f32,
-      roll = 0.0'f32
+      roll = 0.0'f32,
+      frameYaw = 0.0'f32
   ) =
     ## A box with rounded vertical edges: a rounded-rectangle outline
     ## extruded along the pose's up axis. Side normals follow the curve.
     let
       h = size * 0.5'f32
       r = clamp(radius, 0.0'f32, min(h.x, h.z))
-      pose = CardPose(yaw: yaw, pitch: pitch, roll: roll)
+      pose = CardPose(yaw: yaw, pitch: pitch, roll: roll, frameYaw: frameYaw)
       sideColor = topColor.darker(sideFactor)
       bottomColor = topColor.darker(sideFactor * 0.72'f32)
       up = pose.transformCardVector(vec3(0, 1, 0))
@@ -496,6 +499,31 @@ when not defined(headless):
       opponentHandHeight = OpponentHandCenterY
       opponentHandDistance = OpponentHandDistance
       handCardRoll = HandCardRoll
+    proc tuneLayout(window: Window, dt: float32,
+        opponentHandHeight, opponentHandDistance,
+        activeHandHeight, activeHandDistance, handCardRoll,
+        cameraHeight, cameraDistance, cameraPitch: var float32) =
+      ## The layout keys, shared by the duel and the multiplayer preview.
+      let
+        down = window.buttonDown
+        move = 3.0'f32 * dt
+        turn = 0.35'f32 * dt
+      if down[KeyQ]: opponentHandHeight += move
+      if down[KeyA]: opponentHandHeight -= move
+      if down[KeyS]: opponentHandDistance += move
+      if down[KeyW]: opponentHandDistance -= move
+      if down[KeyY]: activeHandHeight += move
+      if down[KeyH]: activeHandHeight -= move
+      if down[KeyU]: activeHandDistance -= move
+      if down[KeyJ]: activeHandDistance += move
+      if down[KeyI]: handCardRoll += turn
+      if down[KeyK]: handCardRoll -= turn
+      if down[KeyE]: cameraHeight += move
+      if down[KeyD]: cameraHeight -= move
+      if down[KeyR]: cameraDistance -= move
+      if down[KeyF]: cameraDistance += move
+      if down[KeyT]: cameraPitch += turn
+      if down[KeyG]: cameraPitch -= turn
   else:
     const
       cameraHeight = GameCameraHeight
@@ -664,7 +692,8 @@ when not defined(headless):
       pose.yaw,
       0.85,
       pose.pitch,
-      pose.roll
+      pose.roll,
+      pose.frameYaw
     )
     let
       halfWidth = CardWidth * 0.5'f32
@@ -1317,9 +1346,37 @@ when not defined(headless):
         sk.drawLabel((if discarded: "DISCARD " else: "DECK ") & $count,
           origin + vec2(5, 0), vec2(144, 44), HudIvory, "Small", CenterAlign)
 
+  static:
+    # Lists the compile-time (-d:) flags while this build compiles.
+    proc onOff(on: bool): string = (if on: "ON" else: "OFF")
+    const Rule = "-------------------------"
+    echo Rule
+    echo "Flags"
+    echo Rule
+    echo " awmPostPanel = ", onOff(PostPanelControls)
+    echo " awmPostLayers = ", onOff(PostLayerControls)
+    echo " awmLayoutTuning = ", onOff(defined(awmLayoutTuning))
+    echo " takeScreenshot = ", onOff(defined(takeScreenshot))
+    echo Rule
+
+  proc printHelp() =
+    echo "AWM — Archers Warriors Mages\n" &
+      "Options (--key value or --key=value):\n" &
+      "  --players N      Player count (2). 2 plays the usual game; above 2\n" &
+      "                   opens the multiplayer scene preview.\n" &
+      "  --seed INTEGER   Match seed (random when omitted)\n" &
+      "  --class CLASS    Your hero class: archer, warrior or mage (archer)\n" &
+      "  --opponent CLASS Opponent hero class: archer, warrior or mage (mage)\n" &
+      "  --bot PATH       Bot program (.bas), repeatable up to " & $PlayerCount &
+        " times. One bot plays\n" &
+      "                   both seats; with --human it plays the opponent.\n" &
+      "                   Defaults to players/base.bas.\n" &
+      "  --human          Play seat 0 yourself instead of watching bots\n" &
+      "  -h, --help       Show this help and exit"
+
   proc runAwm*() =
     if "--help" in commandLineParams() or "-h" in commandLineParams():
-      echo "AWM: --seed N --class archer|warrior|mage --opponent archer|warrior|mage --bot PATH --human"
+      printHelp()
       return
     let sessionOptions = parseSessionOptions(commandLineParams())
     when defined(emscripten):
@@ -1369,7 +1426,7 @@ when not defined(headless):
       cardSurfaces = initCardRenderer()
       vfx = initVfxRenderer(cardAssets.parentDir / "vfx" / "textures")
       post = initPostFx()
-    var courtyard = initCourtyardRenderer()
+    var courtyard = initCourtyardRenderer(sessionOptions.playerCount)
     let scene = newCharacterScene(window)
     # AWM lights heroes with the courtyard's own night rig, not the shared
     # toon ramp: see lightLikeCourtyard.
@@ -1386,6 +1443,169 @@ when not defined(headless):
           heroPresets[seat][heroClass], heroClass)
         idleClips[seat][heroClass] =
           models[seat][heroClass].clipIndex(HeroIdleClips[heroClass])
+
+    if sessionOptions.playerCount > PlayerCount:
+      # A separate presentation loop: no two-seat game state, bots, deals or
+      # gameplay input is initialized for the multiplayer scene harness.
+      let layout = buildMultiplayerLayout(sessionOptions.playerCount)
+      var
+        previewTime = 0.0'f32
+        previewLastFrame = epochTime()
+        previewDecks: array[HeroClass, seq[Card]]
+        previewBoards: array[HeroClass, seq[Card]]
+      for heroClass in HeroClass:
+        previewDecks[heroClass] = heroClass.baseDeck()
+      for heroClass, names in [
+        ["Sniper", "Sharpshooter", "Sniper", "Sharpshooter"],
+        ["Bear", "Tactician", "Footsoldier", "Commander"],
+        ["Bouncer", "Ooze", "Plan", "Primordial"]]:
+        for name in names:
+          previewBoards[HeroClass(heroClass)].add baseCardNamed(name)
+      when defined(takeScreenshot):
+        var previewScreenshotFrame = 0
+      when defined(awmLayoutTuning):
+        # The duel's layout keys: P1's hand is the near (active) one and
+        # every other balcony's is an opponent's. Enter prints a table row.
+        var previewView = layout.multiplayerView(
+          window.size.x.float32 / max(window.size.y.float32, 1))
+      window.onFrame = proc() =
+        let previewDt = frameDelta(previewLastFrame)
+        previewTime += previewDt
+        sk.uiScale = hudScale(window)
+        sk.mousePos = window.mousePos.vec2 / max(sk.uiScale, 0.01'f32)
+        let aspect = window.size.x.float32 / max(window.size.y.float32, 1)
+        when defined(awmLayoutTuning):
+          tuneLayout(window, previewDt,
+            previewView.farHandHeight, previewView.farHandDistance,
+            previewView.nearHandHeight, previewView.nearHandDistance,
+            previewView.handRoll, previewView.camera.height,
+            previewView.camera.distance, previewView.camera.pitch)
+          if window.buttonPressed[KeyEnter]:
+            echo previewView.tunedRow(layout.playerCount)
+        else:
+          let previewView = layout.multiplayerView(aspect)
+        let camera = previewView.camera
+        let
+          eye = camera.eye
+          view = lookAt(eye, camera.target, vec3(0, 1, 0))
+          farPlane = max(CameraFar, length(eye) * 3)
+          projection = perspective(42.0'f32, aspect, CameraNear, farPlane)
+          vp = projection * view
+          environmentTime =
+            when defined(takeScreenshot):
+              parseFloat(getEnv("AWM_SCENE_TIME", $previewTime)).float32
+            else: previewTime
+        solid.clear()
+        cardSurfaces.clear()
+        for balcony in layout.balconies:
+          let
+            heroClass = HeroClass(balcony.playerIndex mod 3)
+            deck = previewDecks[heroClass]
+            deckPose = CardPose(position: balcony.toWorld(
+              balcony.deckZone + vec3(0, CardHeight * 0.5'f32, 0)),
+              yaw: balcony.yaw)
+            discardPose = CardPose(position: balcony.toWorld(
+              balcony.discardZone + vec3(0, CardHeight * 0.5'f32, 0)),
+              yaw: balcony.yaw)
+          solid.addCardStack(cardSurfaces, sk, deckPose, 28, heroClass)
+          solid.addCardStack(cardSurfaces, sk, discardPose, 3, heroClass,
+            hidden = false, card = deck[^1])
+          # Four fully separated cards face their owner's seat. Anchors live
+          # on the balcony, so no zone needs world coordinates of its own.
+          for slot in 0 ..< 4:
+            let pose = CardPose(position: balcony.toWorld(balcony.boardZone +
+              vec3((slot.float32 - 1.5'f32) * 1.65'f32,
+                CardHeight * 0.5'f32, 0)), yaw: balcony.yaw)
+            solid.addCard(cardSurfaces, sk, pose, heroClass, false, true, false,
+              card = previewBoards[heroClass][slot])
+          let
+            near = balcony.playerIndex == 0
+            handZone = vec3(0,
+              if near: previewView.nearHandHeight
+              else: previewView.farHandHeight,
+              if near: previewView.nearHandDistance
+              else: previewView.farHandDistance)
+          for slot in 0 ..< 5:
+            let
+              offset = slot.float32 - 2.0'f32
+              pose = CardPose(position: balcony.toWorld(handZone +
+                vec3(offset * 0.59'f32, -abs(offset) * 0.035'f32,
+                  abs(offset) * 0.10'f32)),
+                yaw: -offset * 0.10'f32, pitch: MultiplayerHandPitch,
+                roll: previewView.handRoll, frameYaw: balcony.yaw)
+            solid.addCard(cardSurfaces, sk, pose, heroClass, true, true, false)
+
+        if window.buttonPressed[KeyF8]:
+          post.settings.enabled = not post.settings.enabled
+        when PostLayerControls:
+          for layer in PostLayer:
+            if window.buttonPressed[PostLayerKeys[layer]]:
+              post.layer = layer
+              post.settings.enabled = true
+        post.beginScene(window.size, CameraNear, farPlane)
+        glClearColor(0.035, 0.045, 0.065, 1)
+        glStencilMask(0xff)
+        glClearStencil(0)
+        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+        courtyard.draw(vp, eye, environmentTime, 1)
+        courtyard.drawSky(vp, eye, environmentTime)
+        solid.draw(vp)
+        cardSurfaces.draw(sk, vp)
+        beginCharacters(scene, window, view, projection, eye)
+        scene.lightLikeCourtyard(1)
+        for balcony in layout.balconies:
+          let
+            heroClass = HeroClass(balcony.playerIndex mod 3)
+            look = balcony.playerIndex mod HeroSeats
+          drawCharacter(scene, models[look][heroClass],
+            balcony.toWorld(balcony.heroZone), PI.float32 - balcony.yaw,
+            idleClips[look][heroClass], environmentTime)
+        finishCharacters(scene)
+        if post.beginMaterialNormals():
+          courtyard.draw(vp, eye, environmentTime, 1,
+            normalsOnly = true, normalView = view)
+          post.endMaterialNormals()
+        post.applyOcclusion(projection)
+        post.present(window.size)
+
+        glDisable(GL_DEPTH_TEST)
+        glDisable(GL_CULL_FACE)
+        glDisable(GL_BLEND)
+        when not defined(emscripten):
+          glDisable(GL_MULTISAMPLE)
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+        sk.beginUi(window, window.size)
+        sk.drawLabel("MULTIPLAYER BATTLEFIELD", vec2(0, 24),
+          vec2(hudSize(window).x, 70), HudIvory, "H1", CenterAlign)
+        sk.drawLabel(&"{layout.playerCount} PLAYERS  /  SCENE PREVIEW",
+          vec2(0, 92), vec2(hudSize(window).x, 38),
+          rgbx(190, 180, 155, 255), "Small", CenterAlign)
+        for balcony in layout.balconies:
+          let
+            heroClass = HeroClass(balcony.playerIndex mod 3)
+            labelPosition = screenPosition(window,
+              balcony.toWorld(balcony.heroZone + vec3(0, 2.6, 0)), vp) /
+              max(sk.uiScale, 0.01'f32)
+          sk.drawLabel(&"P{balcony.playerIndex + 1}  {heroClass.className()}",
+            labelPosition - vec2(120, 15), vec2(240, 30),
+            HudIvory, "Small", CenterAlign)
+        sk.drawLabel("Scene preview only  /  F8: screen effects",
+          vec2(0, hudSize(window).y - 54), vec2(hudSize(window).x, 32),
+          rgbx(190, 180, 155, 255), "Small", CenterAlign)
+        when defined(emscripten):
+          publishStatus((&"Multiplayer battlefield preview: {layout.playerCount} players. Gameplay is not implemented.").cstring)
+        when PostPanelControls:
+          drawPostPanel(sk, window, post, courtyard)
+        sk.endUi()
+        when defined(takeScreenshot):
+          captureScreenshot(window, previewScreenshotFrame,
+            max(1, parseInt(getEnv("AWM_CAPTURE_FRAME", "20"))),
+            appDir / &"awm_multiplayer_{layout.playerCount}.png")
+        window.swapBuffers()
+      while not window.closeRequested:
+        pollEvents()
+      return
 
     var
       phase = ChooseClasses
@@ -1788,7 +2008,7 @@ when not defined(headless):
           animations.setLen(0)
           let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
             class: some(Mage),
-            rules: rules(on(nextTurn(You), damage(1, target({Minion})))))
+            rules: rules(on(nextTurn(You), damage(1, target({TargetKind.Minion})))))
           game.players[0].board.add MinionState(id: 3, owner: 0, card: snare,
             enteredTurn: game.turnNumber - 2)
           game.nextMinionId = 4
@@ -1799,26 +2019,9 @@ when not defined(headless):
       let dt = frameDelta(lastFrameTime)
       when defined(awmLayoutTuning):
         # Provisional controls for dialing in the camera and opponent hand.
-        let
-          down = window.buttonDown
-          move = 3.0'f32 * dt
-          turn = 0.35'f32 * dt
-        if down[KeyQ]: opponentHandHeight += move
-        if down[KeyA]: opponentHandHeight -= move
-        if down[KeyS]: opponentHandDistance += move
-        if down[KeyW]: opponentHandDistance -= move
-        if down[KeyY]: activeHandHeight += move
-        if down[KeyH]: activeHandHeight -= move
-        if down[KeyU]: activeHandDistance -= move
-        if down[KeyJ]: activeHandDistance += move
-        if down[KeyI]: handCardRoll += turn
-        if down[KeyK]: handCardRoll -= turn
-        if down[KeyE]: cameraHeight += move
-        if down[KeyD]: cameraHeight -= move
-        if down[KeyR]: cameraDistance -= move
-        if down[KeyF]: cameraDistance += move
-        if down[KeyT]: cameraPitch += turn
-        if down[KeyG]: cameraPitch -= turn
+        tuneLayout(window, dt, opponentHandHeight, opponentHandDistance,
+          activeHandHeight, activeHandDistance, handCardRoll,
+          cameraHeight, cameraDistance, cameraPitch)
         if window.buttonPressed[KeyEnter]:
           echo &"""
     GameCameraHeight = {cameraHeight:.2f}'f32

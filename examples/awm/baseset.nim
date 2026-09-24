@@ -155,7 +155,7 @@ let mage = [
     class: some(Mage), kind: Trinket,
     rules: rules(
       on(attacked(You),
-        bounce(getAttacker()),
+        bounce(getAttacker(), vfx = BubbleVfx),
         destroy(self())
       )
     )
