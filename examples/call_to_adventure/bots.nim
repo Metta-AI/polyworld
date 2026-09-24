@@ -6,7 +6,7 @@
 
 import
   bassy,
-  polyworld/[chats, mailboxes, bodies, metrics, cli, controllers,
+  polyworld/[mailboxes, bodies, metrics, cli, controllers,
     pathing, profiles],
   content,
   sim,
@@ -113,11 +113,63 @@ proc heroLimits(): Limits =
   result.maxPrintBytes = 4 * 1024
   result.maxPrintEvents = 256
 
-proc buildHeroHost(heroId: int32, chat: ChatHost = nil): Host =
+proc sendChat*(
+  game: Game, sender, target: int, text: openArray[char]
+): int32 =
+  ## Routes chat according to this game's player and team rules.
+  if sender notin 0 ..< game.inboxes.len or
+    target < -2 or target >= game.inboxes.len:
+      return 0
+  let id = int32(if target < 0: target else: sender)
+  for recipient in 0 ..< game.inboxes.len:
+    case target
+    of -2:
+      discard
+    of -1:
+      discard
+    else:
+      if recipient != target:
+        continue
+    if game.inboxes[recipient].push(id, text):
+      inc result
+
+proc buildHeroHost(heroId: int32): Host =
   ## Builds the world-query and high-level action API for one hero.
   result = initHost()
-  let services = if chat == nil: newChatHost(0) else: chat
-  services.addFunctions(result)
+  let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Sends script text through the game's routing rules.
+    let player = int(heroId - 100)
+    activeGame.heroVms[player].runtime.withString(args[1], text):
+      result = activeGame.sendChat(player, int(args[0].asInt), text)
+  let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Copies the oldest message into BASIC and consumes it on success.
+    let
+      player = int(heroId - 100)
+      inbox = activeGame.inboxes[player]
+    var runtime = activeGame.heroVms[player].runtime
+    if inbox.count == 0:
+      result = runtime.putString("")
+    else:
+      result = runtime.putString(inbox.messages[inbox.first])
+    discard inbox.pop()
+  let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the channel or DM sender of the last pulled message.
+    activeGame.inboxes[int(heroId - 100)].lastId
+  let mailboxCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Counts this player's unread messages.
+    int32(activeGame.inboxes[int(heroId - 100)].count)
+  let mailboxSelfProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns this player's zero-based mailbox address.
+    int32(int(heroId - 100))
+  let mailboxPlayersProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the number of player mailboxes in this game.
+    int32(activeGame.inboxes.len)
+  discard result.addFunction("sendChat", 2, sendChatProc, 256)
+  discard result.addFunction("pullMailbox$", 0, pullMailboxProc, 256)
+  discard result.addFunction("mailboxId", 0, mailboxIdProc, 4)
+  discard result.addFunction("mailboxCount", 0, mailboxCountProc, 4)
+  discard result.addFunction("mailboxSelf", 0, mailboxSelfProc, 4)
+  discard result.addFunction("mailboxPlayers", 0, mailboxPlayersProc, 4)
   for name in HeroDataNames:
     discard result.addData(name)
 
@@ -229,13 +281,12 @@ proc loadBots*(
     schema = buildHeroHost(100)
     kinds = controllerKinds(PartySize, playerSlot)
     sources = groups.expandBotSources(kinds)
-  game.mailboxes.reset(PartySize)
+  for inbox in game.inboxes.mitems:
+    inbox = newMailbox()
   var bound = false
   for slot in 0 ..< PartySize:
     if kinds[slot] == PlayerController:
       continue
-    let chat = newChatHost(slot)
-    chat.mailboxes = game.mailboxes
     let source = sources[slot]
     let program =
       when defined(coworld):
@@ -248,13 +299,11 @@ proc loadBots*(
     game.heroVms[slot] = HeroVm(
       runtime: initRuntime(
         program,
-        buildHeroHost(int32(100 + slot), chat),
+        buildHeroHost(int32(100 + slot)),
         limits
       ),
       ready: true,
-      prepareDecision: chat.decisionCallback(),
     )
-    chat.bindRuntime(game.heroVms[slot].runtime)
     when defined(coworld):
       game.heroVms[slot].output = playerPrinter(int(slot))
 
@@ -271,10 +320,7 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   activeHeroSlot = slot
   let objective = game.objectiveTile(slot)
   try:
-    if game.heroVms[slot].prepareDecision != nil:
-      game.heroVms[slot].prepareDecision(game.world.tick)
-    else:
-      game.heroVms[slot].runtime.restart()
+    game.heroVms[slot].runtime.restart()
     game.heroVms[slot].runtime.setData(heroDataIds[DataSelfId], actor.id)
     game.heroVms[slot].runtime.setData(
       heroDataIds[DataSelfClass],

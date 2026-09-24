@@ -19,7 +19,6 @@ import
 type
   HeroVm* = ref object
     output*: PrintProc
-    prepareDecision*: proc(tick: int32) {.closure.}
     ## One compiled BASIC program for a party slot. Not simulation state.
     runtime*: Runtime
     ready*: bool
@@ -42,7 +41,7 @@ type
     historyPlayback*: bool
     replayMode*: bool
     heroVms*: array[PartySize, HeroVm]
-    mailboxes*: Mailboxes
+    inboxes*: array[PartySize, Mailbox]
 
 const
   AggroTiles* = 9'i32

@@ -133,7 +133,6 @@ type
     explored*: array[PlayerCount, seq[uint8]]        # HASH: derived
   OverlordVm* = ref object
     output*: PrintProc
-    prepareDecision*: proc(tick: int32) {.closure.}
     ## One compiled BASIC program for a player. Not simulation state.
     runtime*: Runtime
     ready*: bool
@@ -154,7 +153,7 @@ type
     historyPlayback*: bool
     replayMode*: bool
     brains*: array[PlayerCount, OverlordVm]
-    mailboxes*: Mailboxes
+    inboxes*: array[PlayerCount, Mailbox]
     mapSeed*: int32
     maximumTicks*: int32
 

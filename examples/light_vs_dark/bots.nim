@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[chats, mailboxes, bodies, metrics, profiles],
+  polyworld/[mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -268,7 +268,28 @@ proc observedAt(index: int32): Observed =
     return Observed(owner: -1)
   snapshot[index]
 
-proc buildOverlordHost*(playerId: int32, chat: ChatHost = nil): Host =
+proc sendChat*(
+  game: Game, sender, target: int, text: openArray[char]
+): int32 =
+  ## Routes chat according to this game's player and team rules.
+  if sender notin 0 ..< game.inboxes.len or
+    target < -2 or target >= game.inboxes.len:
+      return 0
+  let id = int32(if target < 0: target else: sender)
+  for recipient in 0 ..< game.inboxes.len:
+    case target
+    of -2:
+      discard
+    of -1:
+      if recipient != sender:
+        continue
+    else:
+      if recipient != target:
+        continue
+    if game.inboxes[recipient].push(id, text):
+      inc result
+
+proc buildOverlordHost*(playerId: int32): Host =
   ## Builds the complete world-query and command interface for one player.
   ##
   ## The same builder makes both the compile-time schema and each player's
@@ -281,8 +302,40 @@ proc buildOverlordHost*(playerId: int32, chat: ChatHost = nil): Host =
   ## cost far more than their own cycles, so a script's budget prices its
   ## demand on the simulation rather than only its own arithmetic.
   result = initHost()
-  let services = if chat == nil: newChatHost(0) else: chat
-  services.addFunctions(result)
+  let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Sends script text through the game's routing rules.
+    let player = int(playerId)
+    activeGame.brains[player].runtime.withString(args[1], text):
+      result = activeGame.sendChat(player, int(args[0].asInt), text)
+  let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Copies the oldest message into BASIC and consumes it on success.
+    let
+      player = int(playerId)
+      inbox = activeGame.inboxes[player]
+    var runtime = activeGame.brains[player].runtime
+    if inbox.count == 0:
+      result = runtime.putString("")
+    else:
+      result = runtime.putString(inbox.messages[inbox.first])
+    discard inbox.pop()
+  let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the channel or DM sender of the last pulled message.
+    activeGame.inboxes[int(playerId)].lastId
+  let mailboxCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Counts this player's unread messages.
+    int32(activeGame.inboxes[int(playerId)].count)
+  let mailboxSelfProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns this player's zero-based mailbox address.
+    int32(int(playerId))
+  let mailboxPlayersProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the number of player mailboxes in this game.
+    int32(activeGame.inboxes.len)
+  discard result.addFunction("sendChat", 2, sendChatProc, 256)
+  discard result.addFunction("pullMailbox$", 0, pullMailboxProc, 256)
+  discard result.addFunction("mailboxId", 0, mailboxIdProc, 4)
+  discard result.addFunction("mailboxCount", 0, mailboxCountProc, 4)
+  discard result.addFunction("mailboxSelf", 0, mailboxSelfProc, 4)
+  discard result.addFunction("mailboxPlayers", 0, mailboxPlayersProc, 4)
   for name in OverlordDataNames:
     discard result.addData(name)
 
@@ -550,16 +603,13 @@ proc loadBots*(
   ## Compiles one script per player and gives each its own runtime.
   let limits = overlordLimits()
   let schema = buildOverlordHost(0)
-  game.mailboxes.reset(PlayerCount)
-  for player in 0 ..< PlayerCount:
-    game.mailboxes.teams[player] = int32(player)
+  for inbox in game.inboxes.mitems:
+    inbox = newMailbox()
   var bound = false
   for player in 0'i32 ..< PlayerCount:
     when not defined(coworld):
       if sources[player].len == 0:
         continue
-    let chat = newChatHost(int(player))
-    chat.mailboxes = game.mailboxes
     let source = sources[player]
     let program =
       when defined(coworld):
@@ -567,11 +617,9 @@ proc loadBots*(
       else:
         compile(source, schema, limits)
     game.brains[player] = OverlordVm(
-      runtime: initRuntime(program, buildOverlordHost(player, chat), limits),
+      runtime: initRuntime(program, buildOverlordHost(player), limits),
       ready: true,
-      prepareDecision: chat.decisionCallback(),
     )
-    chat.bindRuntime(game.brains[player].runtime)
     if not bound:
       bindOverlordData(program)
       bound = true
@@ -596,10 +644,7 @@ proc runDecision(game: Game, player: int32) =
       break
 
   try:
-    if game.brains[player].prepareDecision != nil:
-      game.brains[player].prepareDecision(game.world.tick)
-    else:
-      game.brains[player].runtime.restart()
+    game.brains[player].runtime.restart()
     let
       economy = addr game.world.players[player]
       ids = overlordDataIds

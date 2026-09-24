@@ -67,7 +67,6 @@ type
 
   HeroVm* = ref object
     output*: PrintProc
-    prepareDecision*: proc(tick: int32) {.closure.}
     runtime*: Runtime
     limits*: Limits
     ready*: bool
@@ -321,7 +320,7 @@ type
     replayMode*: bool
     recordingError*: string
     heroVms*: seq[HeroVm]
-    mailboxes*: Mailboxes
+    inboxes*: seq[Mailbox]
     nextFootmen: seq[Footman]
     nextHeroes: seq[Hero]
     collisionUnits: seq[CollisionUnit]

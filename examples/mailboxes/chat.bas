@@ -1,7 +1,7 @@
 ' Drain all unread messages. Empty text means the queue is empty.
 message$ = pullMailbox$()
 while message$ <> ""
-  print mailboxId(), mailboxSender(), mailboxTick(), message$
+  print mailboxId(), message$
   message$ = pullMailbox$()
 wend
 if announced = 0 then
