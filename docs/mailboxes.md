@@ -1,5 +1,8 @@
 # Player mailboxes and chat
 
+Mailboxes are always available to BASIC scripts in Gods of the Arena,
+Call to Adventure, and Light vs Dark. No enable or disable flag is needed.
+
 Every player owns one private FIFO queue. There is no shared global queue or
 team queue. Sending chooses which player queues receive their own copy:
 
