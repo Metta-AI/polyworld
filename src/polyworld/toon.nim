@@ -56,6 +56,12 @@ var
   toonUnlitShadowDark: Uniform[float32]
     ## Darkest multiply an unlit+shadow-receiving fragment can reach, fully
     ## in the sun's own shadow. 1.0 = no visible darkening.
+  toonSmoothShaded: Uniform[bool]
+    ## terrain-lighting (convoy/terrain-lighting): opts a node out of the
+    ## 2-3 band toon ramp into a continuous N.L*shadow diffuse. False by
+    ## construction for every node until a game opts one in, so the OFF
+    ## path (nobody sets this) is byte-identical to before this uniform
+    ## existed.
   toonTint: Uniform[Vec4]
   toonLightingMode: Uniform[int32]
   toonPerPixelLighting: Uniform[bool]
@@ -214,6 +220,11 @@ proc toonFrag(
         lambert * sunFactor * toonShadingStrength) * toonLightLevel
   var band = texture(toonRamp, vec2(intensity, 0.5'f)).r
   if toonLightingMode == 1:
+    band = clamp(intensity, 0.0'f, 1.0'f)
+  if toonSmoothShaded:
+    # convoy/terrain-lighting: per-node continuous N.L*shadow diffuse that
+    # bypasses the 2-3 band ramp (ridge-slope banding, bible rounds 44/46).
+    # Upstream's toonLightingMode==1 is the same idea but global, not per-node.
     band = clamp(intensity, 0.0'f, 1.0'f)
   # Step 3: two hand-picked colours, then the albedo on top.
   var lit: Vec3 = mix(toonShadowColor.rgb, toonHighlightColor.rgb, band)
@@ -398,6 +409,7 @@ type
     highlightColor, shadowColor, rimColor, unlit, tint: GLint
     lightingMode, perPixelLighting, neutralMaterial: GLint
     unlitReceivesShadow, unlitShadowDark: GLint
+    smoothShaded: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength, lightLevel: GLint
@@ -448,6 +460,12 @@ type
     unlitShadowDark*: float32
       ## Multiply floor for unlitReceivesShadow nodes in full shadow. 1.0
       ## (the default) reproduces today's unlit behaviour exactly.
+    smoothShadedNodes*: HashSet[string]
+      ## convoy/terrain-lighting: nodes shaded with a continuous N.L*shadow
+      ## diffuse instead of the toon ramp (see `toonSmoothShaded`'s own
+      ## header). Empty by default -- membership here is the only way this
+      ## mode ever engages, so an empty set reproduces pre-existing pixels
+      ## exactly.
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
 
@@ -529,6 +547,7 @@ proc newToonContext*(): ToonContext =
   loc(unlit, "toonUnlit")
   loc(unlitReceivesShadow, "toonUnlitReceivesShadow")
   loc(unlitShadowDark, "toonUnlitShadowDark")
+  loc(smoothShaded, "toonSmoothShaded")
   loc(tint, "toonTint")
   loc(lightingMode, "toonLightingMode")
   loc(perPixelLighting, "toonPerPixelLighting")
@@ -663,6 +682,8 @@ proc drawPrimitive(
   )
   glUniform1i(
     u.unlitReceivesShadow, (owner.name in ctx.unlitReceivesShadow).ord.GLint)
+  glUniform1i(
+    u.smoothShaded, (owner.name in ctx.smoothShadedNodes).ord.GLint)
 
   primitive.uploadToGpu()
   glBindVertexArray(primitive.data.vertexArrayId)
