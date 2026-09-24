@@ -34,9 +34,12 @@ must be at the top level. A DATA array must contain at least one element.
 
 Without `AS`, integer literals remain signed int32 and decimal literals use
 Bassy's deterministic Q16.16 fixed-point representation. `AS int32` requires
-exact integers; `AS fixed32` converts every literal to Q16.16. Float32 is not
-part of this interface. These are the same numeric semantics as ordinary BASIC
-expressions, including int32 wraparound and fixed-point rounding.
+exact integers; `AS fixed32` converts every literal to Q16.16. Here `fixed32`
+means a signed 32-bit fixed-point value with 16 fractional bits. Numeric
+execution uses only int32 and Q16.16. Decimal literals are parsed directly into
+fixed-point values, and the language has no floating-point type or conversion
+API. The native neural operations preserve ordinary BASIC's int32 wraparound
+and fixed-point rounding.
 
 `weights(0)` reads an element. A bare `weights`, or `weights()`, supplies a
 program-local array handle to a host function. Handles are checked against the
