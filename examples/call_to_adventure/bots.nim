@@ -6,7 +6,8 @@
 
 import
   bassy,
-  polyworld/[bodies, metrics, cli, controllers, pathing, profiles],
+  polyworld/[chats, mailboxes, bodies, metrics, cli, controllers, pathing,
+    profiles],
   content,
   sim,
   replays
@@ -93,13 +94,14 @@ proc issueHeroAction(action: ReplayAction): int32 =
 proc heroLimits(): Limits =
   ## Defines one isolated hero VM's source, memory, and decision budgets.
   result = defaultLimits()
+  result.maxStringBytes = 128 * 1024
   result.maxSourceBytes = 128 * 1024
   result.maxCodeInstructions = 50_000
   result.maxArrays = 32
   result.maxArrayElements = 16_384
   result.maxGlobals = 512
   result.maxHostData = 32
-  result.maxHostFunctions = 32
+  result.maxHostFunctions = 64
   result.maxRoutines = 64
   result.maxParameters = 16
   result.maxRegisters = 256
@@ -111,9 +113,11 @@ proc heroLimits(): Limits =
   result.maxPrintBytes = 4 * 1024
   result.maxPrintEvents = 256
 
-proc buildHeroHost(heroId: int32): Host =
+proc buildHeroHost(heroId: int32, chat: ChatHost = nil): Host =
   ## Builds the world-query and high-level action API for one hero.
   result = initHost()
+  let services = if chat == nil: newChatHost(0) else: chat
+  services.addFunctions(result)
   for name in HeroDataNames:
     discard result.addData(name)
 
@@ -225,26 +229,32 @@ proc loadBots*(
     schema = buildHeroHost(100)
     kinds = controllerKinds(PartySize, playerSlot)
     sources = groups.expandBotSources(kinds)
+  game.mailboxes.reset(PartySize)
   var bound = false
   for slot in 0 ..< PartySize:
     if kinds[slot] == PlayerController:
       continue
+    let chat = newChatHost(slot)
+    chat.mailboxes = game.mailboxes
+    let source = sources[slot]
     let program =
       when defined(coworld):
-        compilePlayer(sources[slot], schema, limits, int(slot))
+        compilePlayer(source, schema, limits, int(slot))
       else:
-        compile(sources[slot], schema, limits)
+        compile(source, schema, limits)
     if not bound:
       bindHeroData(program)
       bound = true
     game.heroVms[slot] = HeroVm(
       runtime: initRuntime(
         program,
-        buildHeroHost(int32(100 + slot)),
+        buildHeroHost(int32(100 + slot), chat),
         limits
       ),
-      ready: true
+      ready: true,
+      prepareDecision: chat.decisionCallback(),
     )
+    chat.bindRuntime(game.heroVms[slot].runtime)
     when defined(coworld):
       game.heroVms[slot].output = playerPrinter(int(slot))
 
@@ -262,6 +272,8 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   let objective = game.objectiveTile(slot)
   game.heroVms[slot].runtime.restart()
   try:
+    if game.heroVms[slot].prepareDecision != nil:
+      game.heroVms[slot].prepareDecision(game.world.tick)
     game.heroVms[slot].runtime.setData(heroDataIds[DataSelfId], actor.id)
     game.heroVms[slot].runtime.setData(
       heroDataIds[DataSelfClass],
@@ -329,4 +341,3 @@ proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   )
   activeGame = nil
   activeHeroSlot = -1
-

@@ -12,7 +12,7 @@ import
   std/algorithm,
   bassy, fixxy,
   polyworld/[bodies, hashes, metrics, noises, pathing, profiles, rngs, tapes,
-    visions],
+    visions, mailboxes],
   content, events, motions,
   maps,
   replays
@@ -67,6 +67,7 @@ type
 
   HeroVm* = ref object
     output*: PrintProc
+    prepareDecision*: proc(tick: int32) {.closure.}
     runtime*: Runtime
     limits*: Limits
     ready*: bool
@@ -320,6 +321,7 @@ type
     replayMode*: bool
     recordingError*: string
     heroVms*: seq[HeroVm]
+    mailboxes*: Mailboxes
     nextFootmen: seq[Footman]
     nextHeroes: seq[Hero]
     collisionUnits: seq[CollisionUnit]

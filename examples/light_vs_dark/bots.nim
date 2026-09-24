@@ -12,7 +12,7 @@
 
 import
   bassy,
-  polyworld/[bodies, metrics, profiles],
+  polyworld/[chats, mailboxes, bodies, metrics, profiles],
   content,
   sim
 
@@ -243,13 +243,14 @@ proc overlordLimits*(): Limits =
   ## unit will exceed it and fail the script, which is the pressure that
   ## pushes authors onto `nearestEnemy` and friends.
   result = defaultLimits()
+  result.maxStringBytes = 128 * 1024
   result.maxSourceBytes = 256 * 1024
   result.maxCodeInstructions = 100_000
   result.maxArrays = 64
   result.maxArrayElements = 65_536
   result.maxGlobals = 1_024
   result.maxHostData = 64
-  result.maxHostFunctions = 64
+  result.maxHostFunctions = 128
   result.maxRoutines = 128
   result.maxParameters = 16
   result.maxRegisters = 512
@@ -267,7 +268,7 @@ proc observedAt(index: int32): Observed =
     return Observed(owner: -1)
   snapshot[index]
 
-proc buildOverlordHost*(playerId: int32): Host =
+proc buildOverlordHost*(playerId: int32, chat: ChatHost = nil): Host =
   ## Builds the complete world-query and command interface for one player.
   ##
   ## The same builder makes both the compile-time schema and each player's
@@ -280,6 +281,8 @@ proc buildOverlordHost*(playerId: int32): Host =
   ## cost far more than their own cycles, so a script's budget prices its
   ## demand on the simulation rather than only its own arithmetic.
   result = initHost()
+  let services = if chat == nil: newChatHost(0) else: chat
+  services.addFunctions(result)
   for name in OverlordDataNames:
     discard result.addData(name)
 
@@ -541,24 +544,34 @@ proc buildOverlordHost*(playerId: int32): Host =
 
 ## Lifecycle
 
-proc loadBots*(game: Game, sources: array[PlayerCount, string]) =
+proc loadBots*(
+  game: Game, sources: array[PlayerCount, string]
+) =
   ## Compiles one script per player and gives each its own runtime.
   let limits = overlordLimits()
   let schema = buildOverlordHost(0)
+  game.mailboxes.reset(PlayerCount)
+  for player in 0 ..< PlayerCount:
+    game.mailboxes.teams[player] = int32(player)
   var bound = false
   for player in 0'i32 ..< PlayerCount:
     when not defined(coworld):
       if sources[player].len == 0:
         continue
+    let chat = newChatHost(int(player))
+    chat.mailboxes = game.mailboxes
+    let source = sources[player]
     let program =
       when defined(coworld):
-        compilePlayer(sources[player], schema, limits, int(player))
+        compilePlayer(source, schema, limits, int(player))
       else:
-        compile(sources[player], schema, limits)
+        compile(source, schema, limits)
     game.brains[player] = OverlordVm(
-      runtime: initRuntime(program, buildOverlordHost(player), limits),
-      ready: true
+      runtime: initRuntime(program, buildOverlordHost(player, chat), limits),
+      ready: true,
+      prepareDecision: chat.decisionCallback(),
     )
+    chat.bindRuntime(game.brains[player].runtime)
     if not bound:
       bindOverlordData(program)
       bound = true
@@ -584,6 +597,8 @@ proc runDecision(game: Game, player: int32) =
 
   game.brains[player].runtime.restart()
   try:
+    if game.brains[player].prepareDecision != nil:
+      game.brains[player].prepareDecision(game.world.tick)
     let
       economy = addr game.world.players[player]
       ids = overlordDataIds

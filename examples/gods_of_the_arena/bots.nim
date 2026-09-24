@@ -3,7 +3,8 @@
 
 import
   bassy, fixxy,
-  polyworld/[metrics, bodies, cli, controllers, pathing, profiles, tapes],
+  polyworld/[chats, mailboxes, metrics, bodies, cli, controllers, pathing,
+    profiles, tapes],
   content,
   maps,
   motions,
@@ -102,6 +103,7 @@ proc bindHeroData(program: Program) =
 proc heroVmLimits(): Limits =
   ## Returns independent structural and per-decision limits for a hero VM.
   result = defaultLimits()
+  result.maxStringBytes = 128 * 1024
   result.maxSourceBytes = 64 * 1024
   result.maxCodeInstructions = 20_000
   result.maxArrays = 32
@@ -259,9 +261,11 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityRestore: spec.restore
     of AbilityManaCost: spec.manaCost
 
-proc initHeroHost(heroId: int32): Host =
+proc initHeroHost(heroId: int32, chat: ChatHost = nil): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
+  let services = if chat == nil: newChatHost(0) else: chat
+  services.addFunctions(result)
   for error in ActionError:
     discard result.addData($error, error.ord.int32)
   for class in HeroClass:
@@ -798,27 +802,35 @@ proc loadBots*(
     kinds = controllerKinds(game.world.heroes.len, playerSlot)
     sources = groups.expandBotSources(kinds)
   game.heroVms.setLen(game.world.heroes.len)
+  game.mailboxes.reset(game.world.heroes.len)
+  for i, hero in game.world.heroes:
+    game.mailboxes.teams[i] = int32(hero.team)
   var bound = false
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
       continue
+    let chat = newChatHost(i)
+    chat.mailboxes = game.mailboxes
+    let source = sources[i]
     let program =
       when defined(coworld):
-        compilePlayer(sources[i], schema, limits, int(i))
+        compilePlayer(source, schema, limits, int(i))
       else:
-        compile(sources[i], schema, limits)
+        compile(source, schema, limits)
     if not bound:
       bindHeroData(program)
       bound = true
     game.heroVms[i] = HeroVm(
       runtime: initRuntime(
         program,
-        initHeroHost(game.world.heroes[i].id),
+        initHeroHost(game.world.heroes[i].id, chat),
         limits
       ),
       limits: limits,
+      prepareDecision: chat.decisionCallback(),
       ready: true
     )
+    chat.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
 
@@ -833,6 +845,8 @@ proc runHeroScript(game: Game, index: int) =
     return
   vm.runtime.restart()
   try:
+    if vm.prepareDecision != nil:
+      vm.prepareDecision(game.world.tick)
     discard game.world.worldObjectCount(hero.id)
     vm.runtime.setData(heroDataIds[DataSelfId], hero.id)
     vm.runtime.setData(heroDataIds[DataSelfTeam], int32(hero.team.ord))

@@ -23,6 +23,8 @@ jobs:
           nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
+      - run: nim r -d:headless -d:mailboxCta tests/test_chats.nim
+      - run: nim r -d:headless -d:mailboxLvd tests/test_chats.nim
       - run: nim r tests/test_gota_events.nim
       - run: nim r -d:replayEvents tests/test_gota_controls.nim
       - run: nim r -d:replayEvents tests/test_gota_camps.nim

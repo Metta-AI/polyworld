@@ -11,7 +11,7 @@
 import
   bassy, fixxy,
   polyworld/[bodies, hashes, metrics, pathing, profiles, rngs, tapes,
-    visions],
+    visions, mailboxes],
   content,
   maps,
   replays
@@ -19,6 +19,7 @@ import
 type
   HeroVm* = ref object
     output*: PrintProc
+    prepareDecision*: proc(tick: int32) {.closure.}
     ## One compiled BASIC program for a party slot. Not simulation state.
     runtime*: Runtime
     ready*: bool
@@ -41,6 +42,7 @@ type
     historyPlayback*: bool
     replayMode*: bool
     heroVms*: array[PartySize, HeroVm]
+    mailboxes*: Mailboxes
 
 const
   AggroTiles* = 9'i32
