@@ -68,6 +68,24 @@ var
     ## cooler version of the same colour -- never a flat grey blend, the
     ## owner's ruling). 1.0 = no visible darkening.
   toonTint: Uniform[Vec4]
+  toonFogColor: Uniform[Vec4]
+    ## terrain-lighting (convoy/terrain-lighting): distance fog blends
+    ## geometry into the horizon rather than letting the terrain mesh's
+    ## own silhouette meet the sky as a hard edge. Set to the SAME colour
+    ## as the background gradient's own `toonHorizonColor` uniform
+    ## (`toonBackgroundFrag`, a separate shader) -- never a flat grey --
+    ## so a fogged fragment blends toward exactly what the sky already
+    ## looks like at the horizon, not an invented haze colour.
+  toonFogNear: Uniform[float32]
+  toonFogFar: Uniform[float32]
+    ## World-unit distance from the camera where the fog blend starts/
+    ## reaches full strength. `toonFogFar > toonFogNear` is the caller's
+    ## job to guarantee; this shader only ever divides by their
+    ## difference guarded by `max(..., 0.001)` (see `toonFrag` below).
+  toonFogOn: Uniform[bool]
+    ## False by construction until a game opts in (`ctx.fogOn`,
+    ## `newToonContext`'s own default) -- the OFF path never evaluates
+    ## the blend below, reproducing pre-fog pixels exactly.
   # Sun shadow map sampling, fed from polyworld/shadows each frame. Two
   # maps at neighbouring quantized sun steps, cross-faded by toonShadowStep
   # so shadows dissolve toward the next sun position instead of shimmering.
@@ -255,7 +273,25 @@ proc toonFrag(
   if not toonUnlit:
     lit = mix(lit, toonRimColor.rgb, rim * toonRimColor.a)
   let emissive: Vec3 = texture(toonEmissiveTexture, uv).rgb * toonEmissiveFactor
-  fragColor = vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint
+  var surfaceColor: Vec3 = lit * albedo.rgb + emissive
+  if toonFogOn:
+    # terrain-lighting: distance fog. `dist` is the SAME camera-to-
+    # fragment distance the rim term above already derives `eye` from,
+    # just unnormalized. `fogT` ramps 0 (no fog, at/inside toonFogNear)
+    # to 1 (fully toonFogColor, at/beyond toonFogFar); the manual
+    # smoothstep (`t*t*(3-2t)`) avoids depending on a GLSL builtin this
+    # file's shady procs have not reached for elsewhere. Blended BEFORE
+    # `toonTint` (the golden-hour grade), so fog and grade compose the
+    # same way distance and time-of-day would in the source photographs
+    # the research based this on -- the fog gets graded too, not left an
+    # untouched patch, the same way a real hazy horizon would be.
+    let
+      dist = length(worldPos - toonCameraPosition)
+      fogT = clamp(
+        (dist - toonFogNear) / max(toonFogFar - toonFogNear, 0.001'f), 0.0'f, 1.0'f)
+      fogSmooth = fogT * fogT * (3.0'f - 2.0'f * fogT)
+    surfaceColor = mix(surfaceColor, toonFogColor.rgb, fogSmooth)
+  fragColor = vec4(surfaceColor, albedo.a) * toonTint
 
 ## Sun depth pass: the same skinned vertex path projected by the sun's
 ## light matrix instead of the camera, with the base color's alpha cutout
@@ -426,6 +462,9 @@ type
     unlitReceivesShadow, unlitShadowDark: GLint
     smoothShaded: GLint
     smoothShadowDark: GLint
+    fogColor: GLint
+    fogNear, fogFar: GLint
+    fogOn: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength: GLint
@@ -477,6 +516,17 @@ type
       ## only look (no visible cast shadow) even with a node opted in.
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
+    fogColor*: Color
+      ## terrain-lighting: distance fog target colour -- a caller should
+      ## set this to the SAME value as `horizonColor` above (see
+      ## `toonFrag`'s own header) so fogged geometry blends into exactly
+      ## what the sky already looks like at the horizon.
+    fogNear*, fogFar*: float32
+      ## World-unit camera distance where the fog blend starts/reaches
+      ## full strength.
+    fogOn*: bool
+      ## False (the default) is an exact no-op -- `toonFrag` skips the
+      ## whole blend, reproducing pre-fog pixels exactly.
 
 proc uploadRamp(ctx: ToonContext, image: Image) =
   if ctx.rampTexture == 0:
@@ -515,6 +565,13 @@ proc newToonContext*(): ToonContext =
     rimColor: color(1, 1, 1, 0),
     unlitShadowDark: 0.6'f32,
     smoothShadowDark: 1.0'f32,
+    fogOn: false,
+    # Non-zero, non-degenerate placeholders (never divide-by-zero in
+    # toonFrag's guard even if a caller sets fogColor without
+    # fogNear/fogFar) -- irrelevant either way while fogOn is false,
+    # its own default just above.
+    fogNear: 1.0'f32,
+    fogFar: 2.0'f32,
   )
   result.setPalette(ToonPalettes[0])
   result.shader = compileShaderFiles(ToonVertSrc, ToonFragSrc)
@@ -543,6 +600,10 @@ proc newToonContext*(): ToonContext =
   loc(smoothShaded, "toonSmoothShaded")
   loc(smoothShadowDark, "toonSmoothShadowDark")
   loc(tint, "toonTint")
+  loc(fogColor, "toonFogColor")
+  loc(fogNear, "toonFogNear")
+  loc(fogFar, "toonFogFar")
+  loc(fogOn, "toonFogOn")
   loc(shadowMvp0, "toonShadowMvp0")
   loc(shadowMvp1, "toonShadowMvp1")
   loc(shadowMap0, "toonShadowMap0")
@@ -718,6 +779,11 @@ proc draw*(ctx: ToonContext, root: Node) =
   glUniform4f(u.tint, ctx.tint.r, ctx.tint.g, ctx.tint.b, ctx.tint.a)
   glUniform1f(u.unlitShadowDark, ctx.unlitShadowDark)
   glUniform1f(u.smoothShadowDark, ctx.smoothShadowDark)
+  glUniform4f(
+    u.fogColor, ctx.fogColor.r, ctx.fogColor.g, ctx.fogColor.b, ctx.fogColor.a)
+  glUniform1f(u.fogNear, ctx.fogNear)
+  glUniform1f(u.fogFar, ctx.fogFar)
+  glUniform1i(u.fogOn, ctx.fogOn.ord.GLint)
 
   # Sun shadow map state (polyworld/shadows): characters darken where the
   # sun cannot see them and flatten with the shared shading strength.
