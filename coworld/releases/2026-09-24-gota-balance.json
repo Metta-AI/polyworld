@@ -1,0 +1,78 @@
+{
+  "date": "2026-09-24",
+  "version": "2026.9.24.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_3936705e-0d84-4837-869c-e8591dd9207f",
+  "canonical": true,
+  "source_commit": "2ff0fc09dcbb3d28c0ef682a1c0f8b36d9e7e55e",
+  "asset_commit": "32946b35b92e2b33f38945e96b293eb6e2c98ac9",
+  "replay_version": 63,
+  "balance_content_sha256": "ecbe32f23bfde76f578f6b320592d0a52a3408cb0f3e7cc96c119dbf3d5eb7db",
+  "balance_validation": {
+    "fresh_games": 400,
+    "minimum_hero_win_rate_percent": 47.1,
+    "maximum_hero_win_rate_percent": 52.9,
+    "all_95_percent_intervals_include_50_percent": true,
+    "scope": "Local role-balanced self-play with the tested policy."
+  },
+  "changes": [
+    "Apply the exact ten-hero profile selected by the final 400 fresh self-play games.",
+    "Double building XP from 100 to 200 and god-victory XP from 500 to 1000 for every teammate.",
+    "Add the Nim balancing job system, diagnostic reports, role-balanced policy preparation, and replay verification tools.",
+    "Update the game guide and published polyworld-buff guide and assets.",
+    "Support only gameplay replay version 63."
+  ],
+  "checks": [
+    "Nim checks and the complete tests/tests.nim suite passed.",
+    "Balance tuning, review, policy, and drafting tests passed, including 72 support scenarios and 200 draft checks.",
+    "All ten local certification checks and hosted certification passed.",
+    "All five hosted smoke games completed with verified integer scores.",
+    "Served JavaScript, WASM, and data SHA-256 hashes match the production build.",
+    "The Linux certification replay reproduced all 14478 ticks on the native client and in the browser.",
+    "A replay from the forced league round reproduced exactly on the native client."
+  ],
+  "polyworld_buff": {
+    "url": "https://metta-ai.github.io/polyworld-buff/GOTA/",
+    "commit": "bd6cdc5b0471ee90836f5d282a271f7ddb79b451",
+    "matches_committed_guide": true
+  },
+  "league_settings_preserved": true,
+  "known_issues": [],
+  "native_league_replay": {
+    "round_number": 727,
+    "id": "ereq_1d891cd1-a64f-4d5f-ad46-873ad98c0425",
+    "episode_id": "260ab72f-e621-404d-80fe-d2e3cf59716e",
+    "replay_version": 63,
+    "sha256": "1cfec3b7b0ea5467e3f3dea54aaa339f41a52843bd1d9d1520581d5f75e3af45",
+    "ticks": 28190,
+    "outcome": "RedTeam"
+  },
+  "verification_round": {
+    "round_id": "round_7e1fd4e7-d014-47a6-b9e0-283ef373c933",
+    "round_number": 727,
+    "status": "completed",
+    "games": 24,
+    "completed_games": 24,
+    "failed_games": 0,
+    "failures": [],
+    "coworld_id": "cow_3936705e-0d84-4837-869c-e8591dd9207f",
+    "version": "2026.9.24.1",
+    "integer_scores_verified": 240,
+    "outcomes": {
+      "BlueTeam": 12,
+      "time_limit": 9,
+      "RedTeam": 3
+    },
+    "replay_version": 63,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=dda724b5-9d9d-407f-b758-c706121ce148",
+    "verified_at": "2026-09-24T14:54:39.496892+00:00"
+  },
+  "manifest_hash": "sha256:dca43b4e96f719a333aa5bacc13871e3408bfa1aaf1ba04a8019491d560596ea",
+  "viewer_sha256": {
+    "wasm": "e315f0433415e03e59b11254d7cc086260684cf5e496e9685055d990bed5d908",
+    "data": "6a1d07f38179cd0ce3498dbaefb725c634d74a7705426ded9a119a83dd98e3f0",
+    "js": "b61b11c1050eeb7c485b31be86effe0cd02f6a405bc06c59758d910aef803774"
+  },
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/36014572425",
+  "verified_at": "2026-09-24T14:54:51.311934+00:00"
+}
