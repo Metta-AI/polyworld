@@ -5,6 +5,7 @@
 ## cannot write world fields directly.
 
 import
+  polyworld/arrays,
   bassy,
   polyworld/[bodies, metrics, cli, controllers, pathing, profiles],
   content,
@@ -114,6 +115,7 @@ proc heroLimits(): Limits =
 proc buildHeroHost(heroId: int32): Host =
   ## Builds the world-query and high-level action API for one hero.
   result = initHost()
+  result.addArrayFunctions()
   for name in HeroDataNames:
     discard result.addData(name)
 

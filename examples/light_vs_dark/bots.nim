@@ -11,6 +11,7 @@
 ## kill things, and it is where fog of war is applied.
 
 import
+  polyworld/arrays,
   bassy,
   polyworld/[bodies, metrics, profiles],
   content,
@@ -280,6 +281,7 @@ proc buildOverlordHost*(playerId: int32): Host =
   ## cost far more than their own cycles, so a script's budget prices its
   ## demand on the simulation rather than only its own arithmetic.
   result = initHost()
+  result.addArrayFunctions()
   for name in OverlordDataNames:
     discard result.addData(name)
 
