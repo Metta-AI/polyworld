@@ -1,7 +1,7 @@
 import
   std/[json, monotimes, net, os, strutils, tempfiles, times],
   bassy, fixxy,
-  polyworld/[advisors, cli, llms, mailboxes, oracles, requests, timings],
+  polyworld/[advisors, cli, llms, mailboxes, oracles, timings],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim]
 
 const
@@ -409,6 +409,41 @@ end if
   waitForRequests([slow.requestPoller()])
   doAssert slow.oracle.client.poll(slowId) == -1
   doAssert slow.oracle.client.reply(slowId).error.contains("timed out")
+  discard received.recv()
+  doAssert slow.oracle.client.ready == -1
+  doAssert slow.oracle.client.ask("POST", "/v1/chat/completions", "{}") == 0
+  let deadline = getMonoTime() + initDuration(seconds = 3)
+  while slow.oracle.client.ready < 0:
+    doAssert getMonoTime() < deadline, "late response was not drained"
+    slow.beginTick(12)
+    sleep(1)
+  doAssert slow.oracle.client.poll(slowId) == -1
+  doAssert slow.oracle.client.response(slowId) == ""
+  let retry = slow.oracle.client.chat("", "after timeout")
+  doAssert retry > slowId
+  slow.oracle.client.settle(retry, 12)
+  doAssert slow.oracle.client.text(retry) == "hello"
+  discard received.recv()
+  slow.oracle.client.close()
+  client.close()
+
+  echo "Testing resets discard old replies and closed clients can reopen"
+  client.beginTick(20)
+  let abandoned = client.chat("", "before reset")
+  doAssert abandoned > 0
+  client.beginTick(0)
+  doAssert not client.hasPending()
+  let resetDeadline = getMonoTime() + initDuration(seconds = 3)
+  while client.ready < 0:
+    doAssert getMonoTime() < resetDeadline, "reset request was not drained"
+    client.beginTick(0)
+    sleep(1)
+  doAssert client.poll(abandoned) == -1
+  doAssert client.response(abandoned) == ""
+  discard received.recv()
+  let reopened = client.chat("", "after reset")
+  client.settle(reopened, 0)
+  doAssert client.text(reopened) == "hello"
   discard received.recv()
   client.close()
 

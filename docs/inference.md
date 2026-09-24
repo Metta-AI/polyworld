@@ -53,8 +53,10 @@ nim r -d:headless examples/light_vs_dark/lvd.nim \
 
 ## HTTP transport and normal LLMs
 
-`requests.nim` drives native libcurl multi handles without blocking inside a
-script. Polling happens at decision boundaries or inside the headless barrier.
+`llms.nim` calls Curly's `startRequest` and `pollForResponse` directly.
+Each active player gets a Curly worker on their first request. Submission and
+polling do not wait for HTTP responses. Polling happens at decision boundaries
+or inside the headless barrier. Curly owns the HTTP handles and buffers.
 The host prioritizes `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, the existing container
 sidecar root, and sends `X-Coworld-Player-Slot` with the zero-based seat index.
 It does not send an API key to the sidecar. The sidecar remains responsible for
@@ -72,8 +74,8 @@ come from the host environment, never from BASIC.
 | `llmAsk(model$, prompt$)` | Request ID for a simple chat message. Empty model uses `COGAME_LLM_MODEL`. |
 | `llmRequest(method$, path$, body$)` | Request ID for raw API access under `/v1/`. |
 | `llmPoll(id)` | 0 pending, 1 successful, -1 failed or expired. |
-| `llmText$(id)` | Ordinary text from Chat Completions or Responses, including received SSE text deltas. |
-| `llmResponse$(id)` | Complete raw body, or streaming bytes received so far. |
+| `llmText$(id)` | Ordinary text from completed Chat Completions, Responses, or SSE replies. |
+| `llmResponse$(id)` | Complete raw body, or empty while pending. |
 | `llmRead$(id, offset, count)` | A zero-based byte slice of the raw body. |
 | `llmStatus(id)` | Completed HTTP status, or 0 without one. |
 | `llmError$(id)` | Failure message, or empty string for a successful retained reply. |
@@ -86,12 +88,15 @@ multimodal JSON content, generation parameters, and other JSON fields without
 waiting for a new Nim wrapper. GET, POST, PUT, PATCH, DELETE, and HEAD are
 supported. The sidecar must expose the requested route. Tool calls are returned
 as JSON for the script to interpret, not executed automatically. Setting
-`stream: true` preserves SSE events and exposes received text through
-`llmText$`; barrier mode waits until the stream finishes.
+`stream: true` preserves SSE events. Curly's polling API returns the complete
+response, so `llmText$` and `llmResponse$` become available after the stream
+finishes. Barrier mode also waits until it finishes.
 
 This is bounded JSON/SSE access, not an unbounded file upload API. Multipart
 uploads and arbitrary custom headers are not exposed. Requests are limited to
-64 KiB, responses to 256 KiB, and response headers to 16 KiB. BASIC strings can
+64 KiB. Completed replies exceeding 256 KiB of body or 16 KiB of parsed headers
+are rejected before being retained for BASIC. Curly buffers the download before
+these checks; these are not transport memory limits. BASIC strings can
 hold 64 KiB each, with 1024 string slots and a 256 KiB total string budget per
 VM. Temporary strings are reclaimed between decisions. Use `llmRead$` for
 larger responses. JSON extraction allows up to 64 nesting levels. Oversized
@@ -99,7 +104,11 @@ responses fail with an error instead of silently truncating successful results.
 
 Each seat has one pending request shared by normal LLM and JEV calls, and
 retains its four most recent raw replies. Request functions return 0 when busy,
-rate-limited, or the body exceeds the request limit. Host environment controls:
+rate-limited, or the body exceeds the request limit. A host deadline settles
+the BASIC request and barrier; the seat stays busy until Curly's outstanding
+transfer finishes, and its late reply is discarded. Curly's transport timeout
+is rounded up to whole seconds. Closing a client waits for that bounded
+outstanding transfer before freeing its worker. Host environment controls:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

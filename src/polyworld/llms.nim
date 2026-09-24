@@ -1,12 +1,34 @@
 import
-  std/[json, os, strutils, uri],
-  jsony,
-  requests
+  std/[json, monotimes, options, os, strutils, times, uri],
+  jsony
 
 const
+  NativeRequests* = not defined(emscripten) and not defined(js)
   MaxRequestBytes* = 64 * 1024
+  MaxResponseBytes* = 256 * 1024
+  MaxHeaderBytes = 16 * 1024
   MaxReplies* = 4
   DefaultOracleModel* = "typesafe/jev-1.13"
+
+when NativeRequests:
+  import curly
+
+  type LlmConnection = object
+    curl: Curly
+    inFlight: bool
+
+  proc close(connection: var LlmConnection) {.raises: [].} =
+    ## Drains the outstanding request before releasing Curly's worker.
+    if connection.curl != nil:
+      if connection.inFlight:
+        discard connection.curl.waitForResponse()
+      connection.curl.close()
+      connection.curl = nil
+      connection.inFlight = false
+
+  proc `=destroy`(connection: var LlmConnection) =
+    ## Releases the HTTP worker when its player is destroyed.
+    connection.close()
 
 type
   LlmError* = object of CatchableError
@@ -23,7 +45,9 @@ type
     slot*: int
     tick, lastAsk, nextId, pending: int32
     asked: bool
-    request: Request
+    when NativeRequests:
+      connection: LlmConnection
+    started: MonoTime
     replies: seq[LlmReply]
 
 proc parseDocument*(body: string): JsonNode {.raises: [LlmError].} =
@@ -102,11 +126,11 @@ proc newLlmClient*(slot: int, config: LlmConfig): LlmClient =
   LlmClient(config: config, slot: slot, tick: -1)
 
 proc close*(client: LlmClient) {.raises: [].} =
-  ## Cancels pending work and forgets all private answers.
+  ## Waits for outstanding HTTP work, releases Curly, and forgets answers.
   if client == nil:
     return
-  client.request.close()
-  client.request = nil
+  when NativeRequests:
+    client.connection.close()
   client.pending = 0
   client.replies.setLen(0)
 
@@ -122,6 +146,9 @@ proc ready*(client: LlmClient): int32 {.raises: [].} =
   ## Returns zero when ready, remaining spacing ticks, or minus one.
   if not client.available or client.pending != 0:
     return -1
+  when NativeRequests:
+    if client.connection.inFlight:
+      return -1
   if client.asked:
     return int32(max(0'i64,
       int64(client.config.interval) - (int64(client.tick) - client.lastAsk)))
@@ -129,27 +156,46 @@ proc ready*(client: LlmClient): int32 {.raises: [].} =
 proc beginTick*(client: LlmClient, tick: int32) =
   ## Polls ready network work at the decision boundary and detects resets.
   if tick < client.tick:
-    client.close()
+    client.pending = 0
+    client.replies.setLen(0)
     client.asked = false
   client.tick = tick
-  if client.request == nil:
-    return
-  client.request.poll()
-  if not client.request.finished:
-    return
-  var reply = LlmReply(
-    id: client.pending,
-    status: int32(client.request.status),
-    body: move(client.request.body),
-    error: move(client.request.error)
-  )
-  if reply.error.len == 0 and reply.status notin 200 .. 299:
-    reply.error = "LLM HTTP " & $reply.status
-  if client.replies.len == MaxReplies:
-    client.replies.delete(0)
-  client.replies.add move(reply)
-  client.pending = 0
-  client.request = nil
+  when NativeRequests:
+    if not client.connection.inFlight:
+      return
+    var
+      completed = client.connection.curl.pollForResponse()
+      reply = LlmReply(id: client.pending)
+    if completed.isSome:
+      client.connection.inFlight = false
+      if client.pending == 0:
+        return
+      var received = move(completed.get())
+      reply.status = int32(received.response.code)
+      reply.error = move(received.error)
+      var headerBytes = 0
+      for (name, value) in received.response.headers:
+        headerBytes += name.len + value.len + 4
+      if received.response.body.len > MaxResponseBytes:
+        reply.error = "LLM response exceeds the byte limit"
+      elif headerBytes > MaxHeaderBytes:
+        reply.error = "LLM response headers exceed the byte limit"
+      else:
+        reply.body = move(received.response.body)
+      if (getMonoTime() - client.started).inMilliseconds >=
+        client.config.timeoutMs:
+          reply.error = "LLM request timed out"
+      if reply.error.len == 0 and reply.status notin 200 .. 299:
+        reply.error = "LLM HTTP " & $reply.status
+    elif client.pending != 0 and
+      (getMonoTime() - client.started).inMilliseconds >= client.config.timeoutMs:
+        reply.error = "LLM request timed out"
+    else:
+      return
+    if client.replies.len == MaxReplies:
+      client.replies.delete(0)
+    client.replies.add move(reply)
+    client.pending = 0
 
 proc ask*(client: LlmClient, verb, path, body: string): int32 =
   ## Forwards an inference API body unchanged and returns its request ID.
@@ -170,16 +216,20 @@ proc ask*(client: LlmClient, verb, path, body: string): int32 =
     headers.add ("X-Coworld-Player-Slot", $client.slot)
   elif client.config.key.len > 0:
     headers.add ("Authorization", "Bearer " & client.config.key)
-  try:
-    client.request = startRequest(
-      client.config.baseUrl & path,
+  when NativeRequests:
+    if client.config.timeoutMs <= 0:
+      raise newException(LlmError, "LLM timeout must be positive")
+    if client.connection.curl == nil:
+      client.connection.curl = newCurly(maxInFlight = 1)
+    client.started = getMonoTime()
+    client.connection.curl.startRequest(
       verb,
-      body,
-      headers,
-      client.config.timeoutMs
+      client.config.baseUrl & path,
+      headers = headers,
+      body = body,
+      timeout = max(1, (client.config.timeoutMs + 999) div 1000)
     )
-  except RequestError as error:
-    raise newException(LlmError, error.msg)
+    client.connection.inFlight = true
   inc client.nextId
   client.pending = client.nextId
   client.lastAsk = client.tick
@@ -209,9 +259,7 @@ proc poll*(client: LlmClient, id: int32): int32 =
   if client.reply(id).error.len > 0: -1 else: 1
 
 proc response*(client: LlmClient, id: int32): string =
-  ## Returns raw JSON or the SSE bytes received so far for a streaming call.
-  if id > 0 and id == client.pending and client.request != nil:
-    return client.request.body
+  ## Returns the completed JSON or SSE response body.
   client.reply(id).body
 
 proc contentText(content: JsonNode): string =
@@ -244,7 +292,7 @@ proc documentText(document: JsonNode): string =
     result.add document{"delta"}.getStr()
 
 proc text*(client: LlmClient, id: int32): string =
-  ## Extracts ordinary text from completed JSON or received SSE events.
+  ## Extracts ordinary text from a completed JSON or SSE response.
   let body = client.response(id)
   if body.strip().startsWith("{"):
     return documentText(parseDocument(body))
@@ -256,4 +304,4 @@ proc text*(client: LlmClient, id: int32): string =
       try:
         result.add documentText(parseDocument(data))
       except LlmError:
-        discard # An incomplete streaming event is retried next tick.
+        discard # Ignore malformed SSE data events.
