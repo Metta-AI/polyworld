@@ -14,9 +14,12 @@ const Program = """
 remoteAvailable = llmAvailable()
 quoted$ = jsonQuote$("hello")
 text$ = jsonGet$(quoted$, "")
-sent = sendChat(mailboxSelf(), "private hello")
+sent = sendChat(-2, "global hello")
 message$ = pullMailbox$()
 from = mailboxId()
+while mailboxCount() > 0
+  ignored$ = pullMailbox$()
+wend
 """
 
 echo "Testing LLM and mailbox functions through the game's actual BASIC hosts and loaders"
@@ -59,13 +62,13 @@ block:
       let vms = game.brains
     else:
       let vms = game.heroVms
-    for index, vm in vms:
+    for vm in vms:
       doAssert vm != nil and not vm.failed, vm.lastError
       doAssert vm.runtime.getGlobal("remoteAvailable") == 0
-      doAssert vm.runtime.getGlobal("sent") == 1
-      doAssert vm.runtime.getGlobal("from") == index
+      doAssert vm.runtime.getGlobal("sent") == vms.len
+      doAssert vm.runtime.getGlobal("from") == -2
       doAssert vm.runtime.getString(vm.runtime.getGlobalValue("message$")) ==
-        "private hello"
+        "global hello"
       doAssert vm.runtime.getString(vm.runtime.getGlobalValue("text$")) == "hello"
       doAssert vm.pollRequests != nil and not vm.pollRequests()
       let large = vm.runtime.putString(repeat('x', 64 * 1024))

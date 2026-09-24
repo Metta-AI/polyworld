@@ -118,21 +118,13 @@ proc heroLimits(): Limits =
 proc sendChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
-  ## Routes chat according to this game's player and team rules.
-  if sender notin 0 ..< game.inboxes.len or
-    target < -2 or target >= game.inboxes.len:
-      return 0
-  let id = int32(if target < 0: target else: sender)
+  ## Broadcasts to players within 16 tiles on the sender's level.
+  if sender notin 0 ..< game.inboxes.len or target != -2:
+    return 0
+  let origin = game.world.actors[sender].home
   for recipient in 0 ..< game.inboxes.len:
-    case target
-    of -2:
-      discard
-    of -1:
-      discard
-    else:
-      if recipient != target:
-        continue
-    if game.inboxes[recipient].push(id, text):
+    let distance = tileDistance(origin, game.world.actors[recipient].home)
+    if distance in 0 .. 16 and game.inboxes[recipient].push(-2, text):
       inc result
 
 proc buildHeroHost(heroId: int32, advisor: Advisor = nil): Host =

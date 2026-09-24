@@ -273,18 +273,15 @@ proc observedAt(index: int32): Observed =
 proc sendChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
-  ## Routes chat according to this game's player and team rules.
+  ## Routes global broadcasts and direct messages between players.
   if sender notin 0 ..< game.inboxes.len or
-    target < -2 or target >= game.inboxes.len:
+    target < -2 or target == -1 or target >= game.inboxes.len:
       return 0
   let id = int32(if target < 0: target else: sender)
   for recipient in 0 ..< game.inboxes.len:
     case target
     of -2:
       discard
-    of -1:
-      if recipient != sender:
-        continue
     else:
       if recipient != target:
         continue

@@ -206,7 +206,9 @@ strategy and lane to that player's log.
 
 ## Using LLM responses in chat
 
-The [mailbox API](mailboxes.md) provides player-to-player communication.
-`examples/inference/mailbox_llm.bas` reads a DM, asks an LLM for a text reply,
-and sends that reply to the original sender. The player's unread messages
-stay queued while its LLM request is pending.
+The [mailbox API](mailboxes.md) provides communication with routing defined
+by each game. GotA supports global, team, and DM chat; LvD supports global
+and DM chat; CTA supports global chat within 16 tiles on the same level.
+For GotA and LvD, `examples/inference/mailbox_llm.bas` reads a DM, asks an
+LLM for a text reply, and sends that reply to the original sender. The
+player's unread messages stay queued while its LLM request is pending.

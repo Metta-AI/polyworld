@@ -7,20 +7,21 @@ unread messages remain until the player pulls them.
 Each game defines `sendChat` and its BASIC callbacks in its own `bots.nim`.
 The examples use these routing rules:
 
-| `sendChat(id, text$)` target | Recipients |
-| --- | --- |
-| `-2` | Everyone, including the sender. |
-| `-1` | Teammates, including the sender. |
-| Nonnegative | The player with that zero-based roster ID. |
+| Game | Global (`-2`) | Team (`-1`) | DM (player ID) |
+| --- | --- | --- | --- |
+| Gods of the Arena | Everyone. | Heroes on the sender's red/blue team. | One player. |
+| Light vs Dark | Everyone. | Unsupported. | One player. |
+| Call to Adventure | Players within 16 tiles on the same level. | Unsupported. | Unsupported. |
 
-GotA uses the heroes' red/blue teams. CTA treats the party as one team.
-Light vs Dark treats each player as their own team. The game can change its
-routing loop to add range, visibility, or other rules. There is no shared
-routing policy or routing callback framework.
+Broadcasts include the sender. CTA uses its existing Chebyshev tile distance:
+the difference along each tile axis must be at most 16. Range and level are
+checked when sending; moving afterward does not remove queued messages.
+Each game owns this routing loop. There is no shared routing policy or
+routing callback framework.
 
 `sendChat` returns the number of inboxes that accepted a copy. Empty or
-oversized messages and invalid destinations return zero. A broadcast can
-reach some players even when another player's inbox is full.
+oversized messages and unsupported or invalid destinations return zero.
+A broadcast can reach some players even when another player's inbox is full.
 
 `pullMailbox$()` consumes the oldest message, or returns an empty string if
 there is none. `mailboxId()` identifies the last message pulled: `-2` for
@@ -33,7 +34,9 @@ CTA uses 0 to 3, and Light vs Dark uses 0 to 1.
 
 ```basic
 sendChat(-2, "Hello everyone.")
+' GotA only:
 sendChat(-1, "Meet at the checkpoint.")
+' GotA and Light vs Dark:
 sendChat(0, "A direct message to player zero.")
 message$ = pullMailbox$()
 while message$ <> ""
