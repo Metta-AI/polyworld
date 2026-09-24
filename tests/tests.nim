@@ -54,6 +54,7 @@ import
   test_gota_symmetry,
   test_gota_targets,
   test_gota_terrains,
+  test_gota_towers,
   test_gota_walls,
   test_hashes,
   test_hlf_content,
