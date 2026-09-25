@@ -125,6 +125,15 @@ proc readPlayerSource*(path: string): string =
       input.close()
     result = newString(256 * 1024 + 1)
     result.setLen(input.readBuffer(result[0].addr, result.len))
+    if result.len > 4 and result[0 .. 3] == "PK\x03\x04":
+      # Neural packages (ZIP: manifest, policy.bas, model.bin) may reach
+      # 16 MiB (docs/neural-policies.md); the game validates them before
+      # use. A larger file is read one byte past the cap, so the package
+      # loader rejects it as too large rather than as a truncated ZIP.
+      let size = min(int(getFileSize(input)), 16 * 1024 * 1024 + 1)
+      input.setFilePos(0)
+      result = newString(size)
+      result.setLen(input.readBuffer(result[0].addr, size))
   except IOError, OSError:
     raise newException(CoworldError,
       "Cannot read staged player: " & getCurrentExceptionMsg())
@@ -206,6 +215,21 @@ proc waitForCollection*() =
   ## Keeps health and contract stubs alive until the runner stops the process.
   joinThread(serverThread)
 
+proc failPlayer*(slot: int, detail, message: string) =
+  ## Ends the episode before play because a staged player is unusable:
+  ## `detail` goes to the seat's private log, `message` is the platform's
+  ## failure reason. Does not return.
+  logs[slot].failed = true
+  playerLog(slot, "\n" & detail & "\n")
+  closePlayerLogs()
+  writePlayerStatus()
+  writeAtomic(failurePath, PlayerFailure(
+    message: message,
+    failedPolicyIndex: slot
+  ).toJson())
+  waitForCollection()
+  raise newException(CoworldError, message)
+
 proc compilePlayer*(
     source: string,
     host: Host,
@@ -216,15 +240,8 @@ proc compilePlayer*(
   try:
     result = compile(source, host, limits)
   except BasicError as error:
-    playerError(slot, error.msg)
-    closePlayerLogs()
-    writePlayerStatus()
-    writeAtomic(failurePath, PlayerFailure(
-      message: "BASIC compilation failed for player slot " & $slot,
-      failedPolicyIndex: slot
-    ).toJson())
-    waitForCollection()
-    raise newException(CoworldError, "Player compilation failed")
+    failPlayer(slot, "BASIC error: " & error.msg,
+      "BASIC compilation failed for player slot " & $slot)
 
 proc requestHandler(request: Request) {.gcsafe.} =
   ## Serves health and the platform's minimal legacy contract surface.

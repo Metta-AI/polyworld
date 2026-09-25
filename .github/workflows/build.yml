@@ -23,6 +23,12 @@ jobs:
           nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
+      - name: Neural packages, one corruption suite for both validators
+        shell: bash
+        run: |
+          PY=$(command -v python3 || command -v python)
+          "$PY" tests/neural_cases.py tmp/neural_cases
+          nim r tests/test_neural_cases.nim tmp/neural_cases
       - run: nim r tests/test_gota_events.nim
       - run: nim r -d:replayEvents tests/test_gota_controls.nim
       - run: nim r -d:replayEvents tests/test_gota_camps.nim
