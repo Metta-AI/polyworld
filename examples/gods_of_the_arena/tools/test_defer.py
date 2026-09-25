@@ -6,6 +6,10 @@ a  always-defer: a net whose verb-0 logit dominates, in a learner seat with gota
    (ABI) and in a hosted package seat (decoder.defer_script, policy.bas = base.bas verbatim), plays
    byte-identical to plain base.bas in that seat: every step's state hash and the recorded replay bytes.
 b  ABI == package on a net that mixes defer and override: per-step hashes, defer/override counts.
+d  invalid overrides fall back to defer: a learner defer seat (ABI) that picks attackTarget on an empty
+   object slot at every decision plays byte-identical to plain base.bas (hashes and
+   replay bytes), with 0 overrides and every such decision counted invalid. With --old-lib, the same run
+   on OLD is reported too (before the fix the seat idled through those windows).
 c  seats without the option (learners, shadow, capture, override, plain package) are byte-identical to
    OLD (the lib built from the branch head before the defer change): per-step hashes and replay bytes.
 """
@@ -15,7 +19,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "../../../coworld/gota/runtime"))
-from native_env import Env, Lib, random_actions, HEAD_SIZES
+from native_env import Env, Lib, random_actions, HEAD_SIZES, MASK_TARGET
 import neural_package as npk
 
 ROOT = os.path.join(HERE, "..")
@@ -141,6 +145,46 @@ def job_b(lib_path, seed, ticks):
                 xp=[int(abi.stats(seat)[2]), int(ref.stats(seat)[2])])
 
 
+class InvalidDriver:
+    """Every acting decision: attackTarget (verb 3) on an empty object slot (its castPoint mask bit, set for
+    every occupied slot, is 0); verb 0 (a real defer) when no slot is empty."""
+    def __init__(self, seat):
+        self.seat, self.invalid_picks, self.defers = seat, 0, 0
+
+    def act(self, env, actions):
+        _, _, act = env.observe(1 << self.seat)
+        if act[self.seat]:
+            row = env.action_mask(self.seat)[MASK_TARGET + 5 * 25:MASK_TARGET + 6 * 25]
+            empty = np.flatnonzero(row == 0)
+            if len(empty):
+                actions[self.seat] = [3, int(empty[-1]), 0, 0, 0]
+                self.invalid_picks += 1
+            else:
+                self.defers += 1
+
+
+def run_d(lib_path, seed, ticks):
+    lib = Lib(lib_path)
+    seat = (seed * 7) % 10
+    cfg = dict(max_ticks=ticks, record=True, capture=False)
+    ref = Env(lib, learner_seats=[], **cfg)
+    h_ref = play(ref, seed); r_ref = replay_bytes(ref)
+    abi = Env(lib, learner_seats=[seat], **cfg)
+    assert abi.set_defer_script(seat, "players/base.bas") == 0
+    drv = InvalidDriver(seat)
+    h_abi = play(abi, seed, drv); r_abi = replay_bytes(abi)
+    first = next((i for i, (x, y) in enumerate(zip(h_abi, h_ref)) if x != y), -1)
+    return dict(same=h_abi == h_ref and r_abi == r_ref, first_diff_step=first,
+                defer=abi.defer_stats(seat).tolist(), invalid=int(abi.stats(seat)[21]),
+                picks=drv.invalid_picks, real_defers=drv.defers, seat=seat)
+
+
+def job_d(lib_path, old_path, seed, ticks):
+    new = run_d(lib_path, seed, ticks)
+    old = run_d(old_path, seed, ticks) if old_path else None
+    return dict(seed=seed, new=new, old=old)
+
+
 def lineup_c(lib, seed, ticks, package=True):
     """Every non-defer feature at once: 2 learners (random actions, one with a shadow), a plain package
     seat (random net, no defer_script), an override seat, capture on, puller/rusher scripts."""
@@ -198,6 +242,18 @@ def main():
                   f"(override share {o / max(1, d + o):.3f}); diverged from plain {sum(r['diverges_from_plain'] for r in rows)}/{n}",
                   flush=True)
             if ok != n or o == 0 or d == 0: fails.append("b")
+        if "d" in a.only:
+            n = max(8, a.seeds // 2)
+            rows = list(ex.map(job_d, [a.lib] * n, [a.old_lib] * n, range(1, n + 1), [a.ticks] * n))
+            for r in rows: print("d", r, flush=True)
+            ok = sum(r["new"]["same"] and r["new"]["defer"][1] == 0 and r["new"]["picks"] > 0
+                     and r["new"]["invalid"] == r["new"]["picks"] for r in rows)
+            picks = sum(r["new"]["picks"] for r in rows)
+            line = f"D invalid overrides == plain base.bas (ABI, hashes+replay, 0 overrides, invalid == picks): {ok}/{n}; {picks} invalid picks"
+            if a.old_lib:
+                line += f"; old lib same as plain {sum(r['old']['same'] for r in rows)}/{n}"
+            print(line, flush=True)
+            if ok != n: fails.append("d")
         if "c" in a.only and a.old_lib:
             n = max(8, a.seeds // 2)
             rows = list(ex.map(job_c, [a.lib] * n, [a.old_lib] * n, range(1, n + 1), [a.ticks] * n,
