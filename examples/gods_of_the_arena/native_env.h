@@ -192,7 +192,9 @@ int gota_seat_stats(GotaEnv *handle, int seat, int64_t *out);
 
 /* Goal vector w[16] in [-1, 1], w[15] must be 0; appended as the last 16 obs
  * floats of the seat from the next observation on. Kept across gota_reset.
- * Default: w_score = 1, others 0. -3 = out of range. */
+ * Default: w_score = 1, others 0; a package seat (gota_set_seat_package)
+ * keeps its manifest goal for its team unless this was called for the seat.
+ * -3 = out of range. */
 int gota_set_seat_goal(GotaEnv *handle, int seat, const float *w);
 
 /* Makes the seat SCRIPTED with this BASIC source (removes it from the learner
@@ -332,8 +334,9 @@ int gota_action_mask(GotaEnv *handle, int seat, uint8_t *out);
 /* Replays and diagnostics (config "record": true records every tick's hash
  * and command; "capture": false turns BC labeling of scripted seats off for
  * speed). gota_save_replay writes the replay (0, -1 not recording).
- * gota_last_error copies the CALLING THREAD's last error text (thread-local:
- * read it on the thread that got the error). */
+ * gota_last_error copies the calling thread's last -3 error text: the error
+ * is thread-local, so call it on the thread whose call failed, before that
+ * thread makes another call. */
 int gota_save_replay(GotaEnv *handle, const char *path);
 int gota_last_error(char *message, int32_t capacity);
 
