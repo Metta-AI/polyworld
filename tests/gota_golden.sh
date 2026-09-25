@@ -10,6 +10,7 @@ nim c --hints:off -d:release -d:headless -o:tmp/gota_golden examples/gods_of_the
 status=0
 while read -r seed ticks want; do
   [[ -z "$seed" || "$seed" == \#* ]] && continue
+  want=${want%$'\r'}  # a CRLF checkout (Windows) keeps the \r on the last field
   got=$(tmp/gota_golden --bot $P/base.bas:4 --bot $P/puller.bas:3 --bot $P/rusher.bas:3 \
     --seed "$seed" --ticks "$ticks" | grep -o 'hash: [0-9A-Fa-f]*' | tail -1 | awk '{print tolower($2)}')
   if [[ "$got" == "$want" ]]; then echo "PASS seed $seed ticks $ticks hash $got"
