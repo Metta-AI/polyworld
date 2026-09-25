@@ -102,7 +102,9 @@ proc episode(
     scripts: seq[string],
     failure = false,
     ticks = 240,
-    expectedOutput = ""
+    expectedOutput = "",
+    failureLog = "BASIC error:",
+    failureMessage = ""
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
   doAssert scripts.len == count
@@ -206,7 +208,10 @@ proc episode(
   if failure:
     doAssert not fileExists(directory / "results.json")
     doAssert output["failed_policy_index"].getInt() == 0
-    doAssert logs[0].contains("BASIC error:")
+    doAssert logs[0].contains(failureLog), logs[0]
+    if failureMessage.len > 0:
+      doAssert output["message"].getStr() == failureMessage,
+        output["message"].getStr()
   else:
     doAssert output["scores"].len == count
     if game == "gota":
@@ -258,6 +263,13 @@ for (game, count) in Games:
     scripts[slot] = "END\n"
   scripts[0] = "THIS IS NOT BASIC\n"
   episode(game, count, scripts, failure = true)
+  if game == "gota":
+    # A staged file that starts like a ZIP is a neural package; a broken
+    # one ends the episode with the package reason, not a compile error.
+    scripts[0] = "PK\x03\x04 not a neural package\n"
+    episode(game, count, scripts, failure = true,
+      failureLog = "neural package rejected:",
+      failureMessage = "neural package rejected for player slot 0")
   scripts[0] = "WHILE 1\nWEND\n"
   episode(game, count, scripts)
   echo game, ": runtime contracts passed"
