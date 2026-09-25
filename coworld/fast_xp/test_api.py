@@ -1,6 +1,4 @@
-"""Exercise the real HTTP server and native Gota worker with standard-library tools."""
-import concurrent.futures
-import io
+"""Exercise policy-reference validation and the explicit unresolved API boundary."""
 import json
 import os
 from pathlib import Path
@@ -10,7 +8,6 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "coworld/fast_xp/server"
@@ -59,50 +56,32 @@ def main():
                 assert call("/unknown")[0] == 404
                 assert call(route)[0] == 405
                 assert call(route, {}, token="wrong")[0] == 401
-                source = (ROOT / "coworld/gota/players/rusher.bas").read_text()
                 body = {"seed": 743478993, "config": {"max_ticks": 240},
-                        "players": [{"source": source} for _ in range(10)]}
+                        "roster": [{"player": {"policy_ref": "relh:v231"}, "slot": -1}]}
                 for invalid in [dict(body, seed=True), dict(body, seed=2**31),
-                                dict(body, players=[]), dict(body, extra=1),
+                                dict(body, roster=[]), dict(body, extra=1),
                                 dict(body, config={"max_ticks": 0}),
                                 dict(body, config={"max_ticks": 28801}),
-                                dict(body, players=[{"policy_ref": "x:v1"}] * 10),
-                                dict(body, players=[{"source": "x" * 65537}] * 10)]:
-                    assert call(route, invalid)[0] == 400
-                status, headers, data = call(route, body)
-                assert status == 200, (status, data)
-                assert headers.get_content_type() == "application/zip"
-                assert "run;dur=" in headers["Server-Timing"]
-                with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                    assert set(archive.namelist()) == {"replay.replay"} | {
-                        f"logs/slot-{slot}.txt" for slot in range(10)}
-                    replay = archive.read("replay.replay")
-                    assert len(replay) > 100
-                    for slot in range(10):
-                        assert b"completed" in archive.read(f"logs/slot-{slot}.txt")
-                bad = dict(body, players=[{"source": "THIS IS INVALID BASIC ???"}] * 10)
-                status, _, data = call(route, bad)
-                assert status == 422, (status, data)
-                assert "slot 0" in json.loads(data)["error"]
-                # A failed compilation must release capacity and leave later games intact.
-                status, _, data = call(route, body)
-                assert status == 200, (status, data)
-                with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                    assert archive.read("replay.replay") == replay
-                # Synchronize a long real match with a second request; capacity must reject it.
-                long_body = dict(body, config={"max_ticks": 28800})
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(call, route, long_body)
-                    deadline = time.monotonic() + 10
-                    while not list(Path(directory).glob("fast-xp-*/config.json")):
-                        assert time.monotonic() < deadline
-                        time.sleep(0.01)
-                    assert call("/healthz")[0] == 200
-                    status, headers, _ = call(route, body)
-                    assert status == 503
-                    assert headers["Retry-After"] == "1"
-                    status, _, data = future.result()
-                    assert status == 200, (status, data)
+                                dict(body, players=[{"source": "END"}] * 10),
+                                dict(body, roster=[{"player": {"source": "END"}}]),
+                                dict(body, roster=[{"player": {"policy_ref": ""}}]),
+                                dict(body, roster=[{"player": {"policy_ref": 123}}]),
+                                dict(body, roster=[{"player": {"policy_ref": "x:v1"}, "slot": 10}]),
+                                dict(body, roster=[{"player": {"policy_ref": "x:v1"}, "slot": 0}]),
+                                dict(body, roster=[{"player": {"policy_ref": "x:v1"}, "slot": 0}] * 10)]:
+                    assert call(route, invalid)[0] == 400, invalid
+                # Valid references reach the TODO boundary without starting a game.
+                for roster in [body["roster"],
+                               [{"player": {"policy_ref": "109b99c1-3bb7-4276-b17e-378b43a97874"}}],
+                               [{"player": {"policy_ref": "my-bot:v12"}, "slot": 0},
+                                {"player": {"policy_ref": "relh:v231"}, "slot": -1}],
+                               [{"player": {"policy_ref": "relh:v231"}, "slot": i}
+                                for i in range(10)]]:
+                    status, headers, data = call(route, dict(body, roster=roster))
+                    assert status == 501, (status, data)
+                    assert headers.get_content_type() == "application/json"
+                    assert "not implemented" in json.loads(data)["error"]
+                assert call("/healthz")[0] == 200
                 assert not list(Path(directory).glob("fast-xp-*")), "Leaked match files"
             except BaseException:
                 print(Path(log.name).read_text())

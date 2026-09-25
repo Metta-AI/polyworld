@@ -1,79 +1,58 @@
-# Run a Gota match
+# Gota run API
 
 POST `/v1/games/gota/run` with `Content-Type: application/json`.
-Supply `Authorization: Bearer <token>` when the operator has configured a token.
-This is a server-specific shared token, not an Observatory token. Unauthenticated
-use is supported only when the server binds to loopback.
 
-The JSON object contains:
+**Policy resolution and bot fetching are not implemented. Valid requests return
+HTTP 501 with a JSON error. No match starts and no replay is produced yet.**
 
-- `seed`: required signed 32-bit integer, recorded in the replay.
-- `players`: exactly ten objects in seat order (0–9), each with `source`: BASIC
-  text, 1–65536 UTF-8 bytes. All policies are supplied by the caller, so all ten
-  logs are returned. No policy references, file paths, or download URLs are accepted.
-- `config`: optional object with `max_ticks` (1–28800, default 28800 battle ticks
-  at 24 ticks/second). Draft time is additional. Other game settings use the
-  compiled Gota defaults. Unknown fields are errors.
+The roster uses the current XP-request shape:
 
-Only Gota is supported. The route leaves room for other game names later.
-
-## Complete Python example
-
-Run from a directory containing `my-bot.bas`. This uses only Python's standard
-library. Set FAST_XP_URL to the server's origin and FAST_XP_TOKEN if required.
-
-```python
-import json
-import os
-from pathlib import Path
-import urllib.request
-
-base = os.environ.get("FAST_XP_URL", "http://127.0.0.1:8080")
-source = Path("my-bot.bas").read_text()
-body = {
-    "seed": 743478993,
-    "players": [{"source": source} for _ in range(10)],
+```json
+{
+  "seed": 743478993,
+  "roster": [
+    {"slot": 0, "player": {"policy_ref": "my-bot:v12"}},
+    {"slot": -1, "player": {"policy_ref": "relh:v231"}}
+  ],
+  "config": {"max_ticks": 28800}
 }
-headers = {"Content-Type": "application/json"}
-if token := os.environ.get("FAST_XP_TOKEN"):
-    headers["Authorization"] = "Bearer " + token
-request = urllib.request.Request(
-    base + "/v1/games/gota/run",
-    data=json.dumps(body).encode(), headers=headers, method="POST",
-)
-with urllib.request.urlopen(request, timeout=180) as response:
-    Path("gota.zip").write_bytes(response.read())
 ```
 
-HTTP 200 returns `application/zip` containing `replay.replay` and
-`logs/slot-0.txt` through `logs/slot-9.txt`. Bot source and internal result files
-are not included. Save binary responses as bytes. The replay uses Polyworld's
-existing replay format. Use a compatible Polyworld viewer to inspect it.
-`Server-Timing` reports server validation, staging, game execution, and ZIP
-creation in milliseconds; it excludes request upload and response transfer.
+- `player.policy_ref`: a submitted policy label such as `relh:v231`, or a
+  policy-version UUID. Existence and access checks await the resolver.
+- `slot`: 0–9 pins a Gota seat; -1 (the default) selects an entry for open seats.
+  Intended behavior follows XP requests: the example pins your bot to seat zero
+  and fills remaining seats with Richard's policy. Seat expansion is a TODO.
+  Duplicate pinned seats and uncovered seats without an open-seat selector fail.
+- `seed`: required signed 32-bit integer.
+- `config.max_ticks`: optional battle tick limit, 1–28800, default 28800
+  (20 simulated minutes at 24 ticks/second, plus drafting).
 
-There is no polling endpoint or durable job history. Requests execute fresh
-matches, even when repeated. A dropped connection does not currently cancel an
-admitted match; retrying can duplicate computation. The worker has a 120-second
-execution deadline. Allow additional client/proxy time for transfers.
+Inline sources, file paths, download URLs, `random`, and `top_n` selectors are
+not supported. Unknown fields are rejected. This is a single-game endpoint;
+it does not yet implement the full XP-request target/batch interface.
 
-## Errors and concurrency
+## Authentication and output
 
-Errors use JSON `{"error": "message"}`:
+Supply `Authorization: Bearer <token>` when FAST_XP_TOKEN is configured. This is
+currently a server-specific shared token, not Observatory user authentication.
+Non-loopback binding requires a token. Caller identity, policy selection access,
+and private log authorization remain TODOs alongside fetching.
 
-- 400: invalid JSON, unsupported fields, or invalid roster/configuration.
+The intended successful response is `application/zip`, containing
+`replay.replay` and only the bot logs the caller may read. Opponent source and
+unauthorized logs must stay inside the trusted runner. A reference alone grants
+neither source nor log access. There is no polling endpoint.
+
+## Current errors
+
+Errors use JSON `{"error": "message"}` unless noted:
+
+- 400: invalid JSON, roster, configuration, or unsupported fields.
 - 401: missing or incorrect configured bearer token.
 - 404/405: unknown route or wrong method (405 can be plain text).
 - 413: request exceeds the HTTP server's 4 MiB body limit.
 - 415: content type is not application/json.
-- 422: a bot failed to compile; the error identifies its seat and diagnostic.
-- 503: match capacity is full; honor `Retry-After` and retry with backoff.
-- 504: worker exceeded its execution deadline.
-- 500: worker or server failed; consult the operator.
+- 501: policy resolution and bot fetching are not implemented. Retrying will not help.
 
-Runtime bot errors retain the game's existing behavior: disable that bot and
-record its error in its log. A match can return 200 with disabled bots; inspect
-logs before treating it as a valid performance benchmark.
-
-For multiple matches, use bounded concurrent POST requests. There is no batch
-submission, idempotency key, external policy fetching, or result persistence.
+GET `/healthz` and `/docs/llms.txt` remain available.

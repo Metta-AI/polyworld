@@ -1,10 +1,12 @@
 # Fast XP server
 
-Synchronous Mummy API for source-only Gota matches. Runs a native child process
-per match using Coworld's existing replay and private-log capture, without a
-container or per-game HTTP server. Temporary inputs and outputs are removed
-when the response archive is ready. The child process isolates Gota's global
-match state; it is not an OS security sandbox.
+Mummy API accepting an XP-request-style `roster` of `player.policy_ref` and
+`slot` entries. Resolution, authorized bot fetching, and caller identity are
+explicit TODOs: valid requests return HTTP 501 before staging or execution.
+
+The native child-process runner remains in place for the resolved sources.
+It reuses Coworld replay/log capture without a container or child HTTP server.
+Log output is gated on the resolver's caller-specific access decision.
 
 From the Polyworld repository:
 
@@ -28,8 +30,8 @@ Environment:
 
 Use a trusted TLS proxy for remote access. The shared token gates this prototype;
 it does not identify Observatory users or authorize access to submitted bots.
-No submitted-policy fetching or caching is implemented. All ten BASIC sources
-must be supplied, and all ten logs belong to that caller's inputs.
+No submitted-policy fetching or caching is implemented. Inline BASIC sources
+are no longer accepted. See `resolvePlayers` in server.nim for the TODO boundary.
 
 Run the integration checks after building both executables:
 
