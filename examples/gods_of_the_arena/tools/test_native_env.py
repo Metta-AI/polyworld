@@ -11,6 +11,10 @@
   gota_net_infer with the same weights produce identical worlds (w64/w128/w256).
 7 package validation: the Nim loader and neural_package.py reject the same corrupted packages.
 8 ops per tick: gota_net_info operations for w64/w128/w256 against the 4,000,000 budget.
+9 error paths: gota_net_infer on a non-finite observation returns -2 with gota_last_error set; an
+  invalid gota_set_policy_script returns 1 with the compile message in gota_last_error; a package
+  rejection reason and a script compile message are still reported by gota_seat_script_status after
+  gota_reset; the Python binding raises NativeEnvError on negative returns.
 """
 import os, sys, json, zipfile, io, hashlib
 import numpy as np
@@ -237,6 +241,45 @@ def test_validation(lib):
         check(f"reject {name}", py == "rejected" and nim == 2, f"py={py} nim={nim} {env.status(1)[1][:70]}")
 
 
+def test_error_paths(lib):
+    L = lib.L
+    rng = np.random.default_rng(3)
+    n = 1407 * 64 + 3 * 64 * 64 + 92 * 64
+    model = npk.encode_model((rng.standard_normal(n) * 0.05).astype(np.float32).tolist(), 64)
+    err = ctypes.create_string_buffer(512)
+    net = L.gota_net_load(model, len(model), err, 512)
+    check("net loads", bool(net), err.value.decode())
+    obs = np.full(1407, np.nan, np.float32)
+    state = np.zeros(64, np.float32)
+    logits = np.zeros(92, np.float32)
+    F = ctypes.POINTER(ctypes.c_float)
+    r = L.gota_net_infer(net, obs.ctypes.data_as(F), state.ctypes.data_as(F), logits.ctypes.data_as(F))
+    b = ctypes.create_string_buffer(1024)
+    L.gota_last_error(b, 1024)
+    check("gota_net_infer non-finite obs -> -2 with gota_last_error", r == -2 and len(b.value) > 0,
+          f"r={r} error={b.value.decode()[:80]!r}")
+    L.gota_net_destroy(net)
+    env = Env(lib, learner_seats=[])
+    bad = b"THIS IS NOT BASIC\n"
+    r = L.gota_set_policy_script(env.h, bad, len(bad))
+    L.gota_last_error(b, 1024)
+    check("bad policy script -> 1 with the compile message", r == 1 and len(b.value) > 0,
+          f"r={r} error={b.value.decode()[:80]!r}")
+    check("rejected package -> 2", env.set_package(4, b"PK\x03\x04 not a package") == 2)
+    check("bad script -> 1", env.set_script(7, "THIS IS NOT BASIC\n") == 1)
+    raised = False
+    try:
+        env.reset(5)
+    except NativeEnvError:
+        raised = True  # -2: seat 7 failed to compile
+    check("reset with a failed seat raises NativeEnvError", raised)
+    code4, msg4 = env.status(4)
+    code7, msg7 = env.status(7)
+    check("package rejection reason survives gota_reset", "neural package rejected" in msg4, f"{code4} {msg4[:70]!r}")
+    check("compile message survives gota_reset", code7 == 2 and len(msg7) > 0, f"{code7} {msg7[:70]!r}")
+    env.close()
+
+
 def main():
     lib = Lib(sys.argv[1])
     quick = len(sys.argv) > 2 and sys.argv[2] == "quick"
@@ -247,6 +290,7 @@ def main():
     test_goal(lib)
     test_rewards(lib, steps)
     test_validation(lib)
+    test_error_paths(lib)
     test_package_parity(lib, steps if quick else 7200, [64, 128, 256])
     print("ALL PASS" if not failures else f"FAILURES: {failures}")
     sys.exit(1 if failures else 0)

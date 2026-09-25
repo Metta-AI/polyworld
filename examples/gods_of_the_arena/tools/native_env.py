@@ -82,6 +82,7 @@ class Lib:
         L.gota_seat_orders.argtypes = [vp, ctypes.c_int, i32p]
         L.gota_set_seat_override.argtypes = [vp, ctypes.c_int, ctypes.c_int32]
         L.gota_set_seat_shadow.argtypes = [vp, ctypes.c_int, ctypes.c_char_p, ctypes.c_int32]
+        L.gota_set_policy_script.argtypes = [vp, ctypes.c_char_p, ctypes.c_int32]
         if hasattr(L, "gota_set_seat_defer_script"):  # absent in libs built before defer scripts
             L.gota_set_seat_defer_script.argtypes = [vp, ctypes.c_int, ctypes.c_char_p]
             L.gota_seat_defer_stats.argtypes = [vp, ctypes.c_int, i64p]
