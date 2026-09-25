@@ -13,12 +13,16 @@
 ## Discovery — 2026-09-25
 
 - User confirmed league: `gods-of-the-arena`, league ID `league_3c60897b-25cf-4b37-9d1a-8554c1198f28`.
-- Browser is signed in as player RowDaBoat; player slug and existing champion still being verified.
+- Browser is signed in as the account's sole player RowDaBoat, `ply_eeb732fa-5f40-4fa1-beac-6571738f8108`. Profile lists nine champion leagues, none GotA; no GotA policy is submitted yet. Player slug still being verified through API.
 - Live league UI identifies hosted release `2026.9.24.2`.
 - Initial live top three: Andre von Auto (`khors:v208`), Ari Sklar (`arisk-gods-of-the-arena:v4`), richard (`richard-gods-of-the-arena:v245`). Refresh before each XP request; exclude our player once confirmed.
 - Requested dashboard fails with `ERR_NAME_NOT_RESOLVED`. macOS has no Tailscale DNS resolver and no Tailscale app at standard paths. Softmax itself is reachable. Dashboard significance is not currently observable.
 - The nested engine checkout is clean but old (`7f50a61`). Fetched origin: current `origin/main` is `23f3384`, including tower and chat updates. Adjacent `board+cards game/polyworld` contains later tooling but is also behind the current remote; do not use an old engine to validate new replays.
-- No experiment, upload, or submission has occurred yet.
+- Created an isolated up-to-date worktree `gota-campaign` on branch `codex/rowdaboat-gota-20260925`. Initial policy is an exact copy of current `players/base.bas`; committed as `ae20666` and pushed to origin. Upload and initial champion submission remain pending API identity confirmation.
+- Hosted release is corroborated by the live website and release receipt: source `f4456be`, Coworld `cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4`, replay version 64. Detailed findings: `research/gota_rules_audit.md`.
+- Baseline uploaded as `rowdaboat-gods-of-the-arena:v1`, policy version `ab664012-84b3-48b3-ae1b-86f3f6cf960c`. SHA-256 matches the hosted bundled base: `5dbbd273ca48953649e8fc772644fd81242ecb3454e482154665ece13adec904`. Server returned an existing-content conflict on staging, explicitly directing completion; completion succeeded without another content upload.
+- Baseline hosted XP completed: `xreq_0ad92adc-2c3b-44e3-a1f2-7fcd0fa5805d`, 10/10 episodes, zero failed episodes, canonical release `2026.9.24.2`. No improvement claim.
+- Initial champion established: submission `sub_f669fd4c-99fe-4034-94cd-5729bdf95bce`, active competing membership `lpm_6841a493-bd35-460b-ac0f-2de1fbadb7cb`, explicit champion endpoint returned `is_champion: true`. Submission used `auto_champion: never` so later uploads cannot bypass the significance gate. This uses the user's no-existing-policy exception, not an improvement claim.
 
 ## Backlog
 
@@ -28,10 +32,28 @@
 4. Build or reuse exact-version Nim replay extractors; inspect top-player navigation, target selection, farming, casting, shop, and group movement. Prioritize this if our performance is far below theirs.
 5. Establish a hosted baseline against the current top three other players, minimum 10 episodes, preserving full results and roster.
 6. Choose one replay-supported strategy change, isolate its activation, CPUX, and evaluate dashboard significance. Revert unless kept by that evidence.
+7. Combat hypothesis from verified leader replays: after a landed basic hit, brief walk followed by reattack may reset recovery. Andre v208 has 52 verified rapid same-target hit pairs (including 10 ticks versus Berserker's native 20); Richard v245 has 173 (including 13 ticks versus Warlock's native 28). Ari v4 shows none in those recordings. Preserve class/target control and test exactly this combat strategy when dashboard comparison is available. Not implemented or kept.
 
 ## Trials
 
-No trials yet. Research and access checks above are not scored experiments.
+Initial baseline B000: use current playable reference policy unchanged because no champion exists. Commit/push complete (`ae20666`), upload complete, XP requested. This establishes the initial champion; it is not a claimed improvement.
 
 | Trial | Idea | Exact change / commit | Uploaded policy | XP ID(s) | Top-three opponents | Episodes | Mechanism proof | Dashboard significance | Verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B000 | Establish working initial baseline | Exact hosted reference, no strategy edit; `ae20666` | `rowdaboat-gods-of-the-arena:v1` / `ab664012-84b3-48b3-ae1b-86f3f6cf960c` | `xreq_0ad92adc-2c3b-44e3-a1f2-7fcd0fa5805d` | Andre von Auto `khors:v208` (`bf6c6cc2-362e-4eee-a105-810b23adf437`); Ari Sklar `arisk-gods-of-the-arena:v4` (`61f4440b-140d-4f7d-80b8-2802f7a3100d`); richard `richard-gods-of-the-arena:v245` (`7fd19643-c66a-429e-ba24-3c1e6c0d8e06`) | 10 completed, 0 failed | Exact bundled hash; all 10 logs clean; first hosted replay matches all 28,909 hashes and confirms upgrades, attacks, casts, shop, portals | Dashboard inaccessible; no comparative claim | Initial champion active; baseline complete, no improvement verdict |
+
+### B000 roster and evidence
+
+Fresh standings and live champion memberships were resolved immediately before the request, deduplicated by player and excluding RowDaBoat. All ten seats rotate: one RowDaBoat hero, three seats for each of the three opponent policies. Each other player uses exactly one live policy version. No other RowDaBoat version participates. The same format must be used for any future candidate and comparable baseline batches.
+
+Payload, roster, response and request journal are under `research/baseline-xp-*`. Initial upload receipts are under `research/baseline-upload/`. League lock API is commissioner-only (403), but the XP response itself resolves to the verified canonical Coworld. A read-only attempt to the dashboard's documented SSH host also timed out; no network configuration was changed.
+
+Completed baseline audit (`research/baseline-report.md`): all 10 requests used exactly the frozen roster and expected Coworld; our single hero rotated through seats 0–9 once each. All ten hosted scores are zero, no score is missing, and all ten private logs contain normal start/completion with no compiler or runtime diagnostics. This is an initial baseline, not a candidate-vs-submitted significance comparison. Our baseline is far below the leaders, so prioritize reconstructing their observed tactics over small parameter adjustments.
+
+First baseline replay mechanism check: all 28,909 hashes match. Our Vanguard used 8 ability upgrades, 165 direct attacks, 298 attack-moves, 115 casts, 32 purchases, and 6 portals. It ended at level 8 with six deaths and only Ranger Boots as permanent equipment. This confirms actual gameplay rather than a disabled VM. Leader combat timing and equipment priorities are separate hypotheses and must never be bundled into one experiment.
+
+Verified leader reports: `research/gota-round772-top-players.md` (Andre v208/Ari v4, 29,365 hashes), `research/gota-richard-replay.md` (Richard v245/Ari v4, 29,365 hashes), each with zero mismatches. Nim action/event and attack-recovery extractors are in `gota-campaign/examples/gods_of_the_arena/tools/`. Raw replays/events stay out of Git. No local game scores were used.
+
+### Current gate
+
+Initial champion and baseline are established. No experimental policy change has been made, kept, or submitted. Further experiment decisions require the requested dashboard, whose hostname remains unreachable; the user has been asked to connect this machine to that network or provide a reachable address. Do not substitute an eyeballed score mean for that gate.

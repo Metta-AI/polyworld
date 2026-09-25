@@ -1,0 +1,1129 @@
+{
+  "experience_request_id": "xreq_0ad92adc-2c3b-44e3-a1f2-7fcd0fa5805d",
+  "source_file": "research/baseline-xp-status.json",
+  "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+  "coworld_version": "2026.9.24.2",
+  "own_policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+  "episode_count": 10,
+  "own_zero_score_count": 10,
+  "missing_score_count": 0,
+  "hosted_episode_error_count": 0,
+  "validation_error_count": 0,
+  "own_logs_checked": true,
+  "own_logs_verified": 10,
+  "own_logs_missing": 0,
+  "own_logs_with_diagnostics": 0,
+  "replay_evidence": {
+    "source_summary": "research/baseline-replay-00.summary.json",
+    "source_url": "https://softmax-public.s3.amazonaws.com/replays/88078960-a20c-4eda-b0cf-4a8e4753086f.replay",
+    "verified_hashes": 28909,
+    "hash_mismatches": 0,
+    "seat": 0,
+    "actions": {
+      "draft": 1,
+      "levelAbility": 8,
+      "buyItem": 32,
+      "attackMove": 298,
+      "attackTarget": 165,
+      "castTarget": 108,
+      "useItem": 27,
+      "walk": 231,
+      "useItemAt": 6,
+      "castPoint": 7
+    },
+    "action_rejections": {
+      "castTarget:ActionOutOfRange": 5,
+      "attackMove:ActionChanneling": 3,
+      "walk:ActionChanneling": 3,
+      "castTarget:ActionChanneling": 2,
+      "useItem:ActionChanneling": 2
+    },
+    "end_state": {
+      "tick": 28909,
+      "class": "VanguardKnight",
+      "x": 1571260,
+      "z": -3099257,
+      "hp": 641,
+      "maxHp": 946,
+      "mana": 166,
+      "level": 8,
+      "gold": 20,
+      "deaths": 6,
+      "inventory": "[RangerBoots, NoItem, NoItem, NoItem, NoItem, NoItem]",
+      "totalXp": 2555,
+      "attackObjectId": 0,
+      "attackingFort": false,
+      "moveX": 111,
+      "moveY": 4,
+      "hasMoveTarget": true
+    },
+    "damage_by_target_kind": {
+      "3": 3992,
+      "4": 285,
+      "6": 1869,
+      "2": 145,
+      "5": 720
+    },
+    "received_xp_sources": {
+      "3:NearbyKill": 682,
+      "3:KillReward": 999,
+      "6:NearbyKill": 304,
+      "2:KillReward": 300,
+      "6:KillReward": 270
+    },
+    "purchases": [
+      {
+        "tick": 110,
+        "item": "RangerBoots"
+      },
+      {
+        "tick": 110,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 2534,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 2534,
+        "item": "ManaPotion"
+      },
+      {
+        "tick": 2540,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 4023,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 6372,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 9206,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 9206,
+        "item": "PortalScroll"
+      },
+      {
+        "tick": 9278,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 10851,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 10851,
+        "item": "PortalScroll"
+      },
+      {
+        "tick": 12381,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 14685,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 14685,
+        "item": "ManaPotion"
+      },
+      {
+        "tick": 17163,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 17163,
+        "item": "PortalScroll"
+      },
+      {
+        "tick": 17163,
+        "item": "ManaPotion"
+      },
+      {
+        "tick": 17235,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 19736,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 19736,
+        "item": "PortalScroll"
+      },
+      {
+        "tick": 19736,
+        "item": "ManaPotion"
+      },
+      {
+        "tick": 19736,
+        "item": "VitalityElixir"
+      },
+      {
+        "tick": 19808,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 20756,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 20756,
+        "item": "PortalScroll"
+      },
+      {
+        "tick": 20756,
+        "item": "ManaPotion"
+      },
+      {
+        "tick": 24074,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 24074,
+        "item": "PortalScroll"
+      },
+      {
+        "tick": 24074,
+        "item": "ManaPotion"
+      },
+      {
+        "tick": 24146,
+        "item": "HealthPotion"
+      },
+      {
+        "tick": 26961,
+        "item": "HealthPotion"
+      }
+    ]
+  },
+  "episodes_with_validation_errors": 0,
+  "validation_errors": [],
+  "episodes": [
+    {
+      "job_index": 0,
+      "child_request_id": "ereq_c9e9fc33-09b3-4c21-8241-11afc6cc0490",
+      "episode_id": "88b0584c-a256-4fbf-acba-38137f2affd7",
+      "job_id": "88078960-a20c-4eda-b0cf-4a8e4753086f",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 0,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/88078960-a20c-4eda-b0cf-4a8e4753086f.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 1061.0
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 2538.3333333333335
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 132.0
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 3183.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 2121.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 4615.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 879.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 396.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_c9e9fc33-09b3-4c21-8241-11afc6cc0490/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/0",
+        "file": "research/baseline-own-logs/0.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 1,
+      "child_request_id": "ereq_7428093d-8c53-4bda-a7bf-3c35e9c4d8aa",
+      "episode_id": "7703fed1-20f7-4f9f-b35c-02ce53e3ace3",
+      "job_id": "07cda9d9-3720-4a7e-b392-6846a2987d3d",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 1,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/07cda9d9-3720-4a7e-b392-6846a2987d3d.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 3287.6666666666665
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 673.6666666666666
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 1408.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 5059.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 2574.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 2230.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 613.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_7428093d-8c53-4bda-a7bf-3c35e9c4d8aa/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/1",
+        "file": "research/baseline-own-logs/1.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 2,
+      "child_request_id": "ereq_ade4b793-d0be-4a97-b1b0-fe84653a8b4a",
+      "episode_id": "d9210e12-e883-4b5a-ada5-bd901e9cdd52",
+      "job_id": "b3699821-86d1-489f-a514-360272983844",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 2,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/b3699821-86d1-489f-a514-360272983844.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 2933.3333333333335
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 98.66666666666667
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 322.3333333333333
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 424.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 3438.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 5362.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 296.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 543.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_ade4b793-d0be-4a97-b1b0-fe84653a8b4a/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/2",
+        "file": "research/baseline-own-logs/2.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 3,
+      "child_request_id": "ereq_0353f362-6698-4246-b6de-d97a0feecaff",
+      "episode_id": "d053006f-e41e-4382-bcf7-6e39b6c36014",
+      "job_id": "ea026690-8dcf-4790-a200-e238ec290cdd",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 3,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/ea026690-8dcf-4790-a200-e238ec290cdd.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 2201.6666666666665
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 1816.3333333333333
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 5449.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 5493.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 1112.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_0353f362-6698-4246-b6de-d97a0feecaff/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/3",
+        "file": "research/baseline-own-logs/3.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 4,
+      "child_request_id": "ereq_fe9793da-26b8-48ae-bbf0-49f03d26bc02",
+      "episode_id": "884fc79d-edef-48f7-b3a9-9c50f564cff7",
+      "job_id": "c3844cd5-ff81-4ae0-a279-bd25026b83c9",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 4,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/c3844cd5-ff81-4ae0-a279-bd25026b83c9.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 3389.3333333333335
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 518.0
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 0.0
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 1554.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 5703.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 2491.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 1974.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_fe9793da-26b8-48ae-bbf0-49f03d26bc02/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/4",
+        "file": "research/baseline-own-logs/4.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 5,
+      "child_request_id": "ereq_ec2ef1fb-bf7e-47dd-b91b-d24f22fdaecc",
+      "episode_id": "da22e716-8257-4ecc-bb70-812403bfe659",
+      "job_id": "0506c2f1-166e-476c-b5f3-251bd0436634",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 5,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/0506c2f1-166e-476c-b5f3-251bd0436634.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 828.0
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 1256.0
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 668.3333333333334
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 3057.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 2005.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 2484.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 711.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_ec2ef1fb-bf7e-47dd-b91b-d24f22fdaecc/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/5",
+        "file": "research/baseline-own-logs/5.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 6,
+      "child_request_id": "ereq_f9a0412d-c3d2-421f-aebb-247be6cf7316",
+      "episode_id": "d838f251-09e9-4354-97e4-5e6114d5ce24",
+      "job_id": "ac9221b5-fd02-4be4-9793-395e7b7778f1",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 6,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/ac9221b5-fd02-4be4-9793-395e7b7778f1.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 531.6666666666666
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 27.0
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 2175.3333333333335
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 81.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 5.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 6521.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 312.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 1283.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_f9a0412d-c3d2-421f-aebb-247be6cf7316/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/6",
+        "file": "research/baseline-own-logs/6.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 7,
+      "child_request_id": "ereq_d9a92d2a-daf0-4a10-a750-dafceb527649",
+      "episode_id": "b43dd5ab-94a0-476e-bdc0-f03f924512e0",
+      "job_id": "908ffbc1-dcbf-4dd9-b8af-dafeedf1b001",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 7,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/908ffbc1-dcbf-4dd9-b8af-dafeedf1b001.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 1326.3333333333333
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 225.33333333333334
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 1830.0
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 3979.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 676.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 467.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 5023.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_d9a92d2a-daf0-4a10-a750-dafceb527649/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/7",
+        "file": "research/baseline-own-logs/7.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 8,
+      "child_request_id": "ereq_75018035-493f-4bcc-ba87-e7adb4056e44",
+      "episode_id": "f2f2d7be-f0ad-4fe3-b3d4-c8910c1179af",
+      "job_id": "903ed3be-b285-45e1-bae0-57273c9ffbd2",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 8,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/903ed3be-b285-45e1-bae0-57273c9ffbd2.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 2477.0
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 454.3333333333333
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 0.0
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 4990.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 2441.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 1084.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 279.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_75018035-493f-4bcc-ba87-e7adb4056e44/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/8",
+        "file": "research/baseline-own-logs/8.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    },
+    {
+      "job_index": 9,
+      "child_request_id": "ereq_a4d3212a-9dd0-4357-bb97-fbcf5f0e5782",
+      "episode_id": "c6f35078-738e-4f69-bf57-03d0d675b3be",
+      "job_id": "b0d82a64-4a6c-4156-9cb0-ca656c5ac6b5",
+      "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+      "coworld_version": "2026.9.24.2",
+      "own_seat": 9,
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/b0d82a64-4a6c-4156-9cb0-ca656c5ac6b5.replay",
+      "policy_scores": [
+        {
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "policy_ref": "rowdaboat-gods-of-the-arena:v1",
+          "hosted_score": 0.0
+        },
+        {
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "policy_ref": "khors:v208",
+          "hosted_score": 2359.3333333333335
+        },
+        {
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "policy_ref": "arisk-gods-of-the-arena:v4",
+          "hosted_score": 1930.3333333333333
+        },
+        {
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "policy_ref": "richard-gods-of-the-arena:v245",
+          "hosted_score": 0.0
+        }
+      ],
+      "participant_scores": [
+        {
+          "position": 0,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 3753.0
+        },
+        {
+          "position": 1,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 3325.0
+        },
+        {
+          "position": 2,
+          "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 3,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 1678.0
+        },
+        {
+          "position": 4,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 5,
+          "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+          "hosted_score": 4113.0
+        },
+        {
+          "position": 6,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 7,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 8,
+          "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+          "hosted_score": 0.0
+        },
+        {
+          "position": 9,
+          "policy_version_id": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+          "hosted_score": 0.0
+        }
+      ],
+      "own_hosted_log": {
+        "source_url": "https://softmax.com/api/observatory/v2/episode-requests/ereq_a4d3212a-9dd0-4357-bb97-fbcf5f0e5782/ab664012-84b3-48b3-ae1b-86f3f6cf960c/policy-logs/9",
+        "file": "research/baseline-own-logs/9.log",
+        "started": true,
+        "completed": true,
+        "unexpected_nonempty_line_count": 0
+      },
+      "validation_ok": true
+    }
+  ]
+}

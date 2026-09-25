@@ -16,4 +16,12 @@ The campaign backlog and complete trial log are in the workspace root `ideas.md`
 
 ## Initial release
 
-Commit/push, upload ID, champion membership, and hosted baseline XP IDs: pending.
+- Initial source commit: `ae20666`, pushed on `codex/rowdaboat-gota-20260925`.
+- Uploaded: `rowdaboat-gods-of-the-arena:v1`, version UUID `ab664012-84b3-48b3-ae1b-86f3f6cf960c`.
+- Initial champion: membership `lpm_6841a493-bd35-460b-ac0f-2de1fbadb7cb`, competing and champion. Submission `sub_f669fd4c-99fe-4034-94cd-5729bdf95bce` uses `auto_champion: never`; initial membership was explicitly promoted, preserving the gate for future candidates.
+- Hosted baseline: `xreq_0ad92adc-2c3b-44e3-a1f2-7fcd0fa5805d`, completed 10/10, zero failed episodes. Exact opponent IDs and rotating-seat layout are in `ideas.md`.
+- No strategy improvement has been tested, kept, or submitted. Dashboard significance remains inaccessible due to missing network access.
+
+## Evidence and tools
+
+`rules-audit.md` documents the current release changes. Replay audits reconstruct only hosted recordings and require every recorded hash to match. Event counts are mechanism evidence, never a score substitute. Raw replay/event files and authenticated research receipts remain outside version control.
