@@ -7,7 +7,9 @@ import
   std/strutils,
   cli, configs
 
-when defined(coworld):
+when defined(coworldWasm):
+  import coworld_wasm
+elif defined(coworld):
   import coworld
 
 type
@@ -61,7 +63,7 @@ proc expandBotSources*(
   var next = 0
   for group in groups:
     let source =
-      when defined(coworld):
+      when defined(coworld) or defined(coworldWasm):
         readPlayerSource(group.path)
       else:
         readFile(group.path)
@@ -72,7 +74,7 @@ proc expandBotSources*(
         fail("too many bots to expand")
       result[next] = source
       inc next
-  when not defined(coworld):
+  when not (defined(coworld) or defined(coworldWasm)):
     for i, kind in kinds:
       if kind == BotController and result[i].len == 0:
         fail("bot files do not fill every slot")

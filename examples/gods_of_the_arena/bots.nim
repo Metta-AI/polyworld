@@ -13,7 +13,9 @@ import
   replays,
   terrains
 
-when defined(coworld):
+when defined(coworldWasm):
+  import polyworld/coworld_wasm
+elif defined(coworld):
   import polyworld/coworld
 
 type
@@ -864,7 +866,7 @@ proc loadBots*(
       continue
     let source = sources[i]
     let program =
-      when defined(coworld):
+      when defined(coworld) or defined(coworldWasm):
         compilePlayer(source, schema, limits, int(i))
       else:
         compile(source, schema, limits)
@@ -880,7 +882,7 @@ proc loadBots*(
       limits: limits,
       ready: true
     )
-    when defined(coworld):
+    when defined(coworld) or defined(coworldWasm):
       game.heroVms[i].output = playerPrinter(int(i))
 
 proc runHeroScript(game: Game, index: int) =
@@ -952,7 +954,7 @@ proc runHeroScript(game: Game, index: int) =
   except BasicError as error:
     vm.failed = true
     vm.lastError = error.msg
-    when defined(coworld):
+    when defined(coworld) or defined(coworldWasm):
       playerError(index, error.msg)
     else:
       echo "hero ", hero.id, " BASIC error: ", error.msg

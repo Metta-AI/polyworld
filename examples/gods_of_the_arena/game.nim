@@ -14,7 +14,9 @@ import
   controls,
   replays
 
-when defined(coworld):
+when defined(coworldWasm):
+  import polyworld/coworld_wasm as coworld
+elif defined(coworld):
   import polyworld/coworld
 
 var matchConfig = GotaConfig(seed: ArenaSeed)
@@ -107,7 +109,9 @@ proc parseGameOptions(): GameOptions =
   )
 
 var options* =
-  when defined(coworld):
+  when defined(coworldWasm):
+    GameOptions()
+  elif defined(coworld):
     block:
       let hosted = coworldOptions(10)
       matchConfig = parseConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
@@ -117,7 +121,7 @@ var options* =
 
 var run*: Game
 
-block:
+proc initializeGame() =
   startGameProfile()
   var
     replayMode = options.replayPath.len > 0
@@ -154,7 +158,7 @@ block:
       currentSetup(run, uint32(options.maximumTicks)), gameMap.preset
     )
     run.recorder.data.config =
-      when defined(coworld):
+      when defined(coworld) or defined(coworldWasm):
         coworld.config.withMapPreset(gameMap.preset)
       else:
         block:
@@ -164,6 +168,14 @@ block:
           config.withMapPreset(gameMap.preset)
     run.recorder.data.config.validateConfig(HeroClassCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
+
+when defined(coworldWasm):
+  proc initializeHosted*(configBytes: string, sources: seq[string]) =
+    matchConfig = parseConfig(configBytes)
+    options = coworld.initialize(configBytes, sources, HeroClassCount)
+    initializeGame()
+else:
+  initializeGame()
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
