@@ -1,0 +1,10 @@
+# Polyworld Fast XP
+
+> Run a fresh Gota match synchronously and download its replay and BASIC bot logs.
+
+The initial API accepts BASIC source for all ten seats. It does not resolve
+submitted policy IDs. A successful response is a ZIP file, not JSON or a job ID.
+
+## API
+
+- [Run a match](run.md): Authentication, complete Python example, limits, ZIP contents, errors, and retry behavior.
