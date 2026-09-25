@@ -60,9 +60,7 @@ proc parseGameOptions(): GameOptions =
     maximumTicks: matchConfig.maxTicks,
     spawnIntervalTicks: matchConfig.spawnIntervalTicks,
     playerSlot: matchConfig.playerSlot,
-    speed: 1,
-    windowWidth: 1920,
-    windowHeight: 1080
+    speed: 1
   )
   index = 0
   while index < arguments.len:

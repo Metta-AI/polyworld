@@ -5,11 +5,11 @@
 ## that can flow back into `World`.
 
 import
-  std/[json, math, os, strutils, times],
-  chroma, fixxy, opengl, pixie, vmath, windy, silky,
-  polyworld/[actioncam, characters, chrome, clickmarks, common, gameuis,
-    inputs, pathing, player, profiles, quadterrain, rtscameras, shadows,
-    shapes, tapes, viewers],
+  std/[math, times],
+  fixxy, opengl, pixie, vmath, windy, silky,
+  polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks,
+    common, gameuis, inputs, pathing, player, profiles, quadterrain, rtscameras,
+    shadows, shapes, tapes, terrainsurfaces, viewers],
   content,
   maps as mapgen,
   sim,
@@ -18,71 +18,23 @@ import
   ui,
   controls,
   ground,
-  decor,
+  appearances,
+  scenery,
+  layouts,
   democamera,
-  scorecard,
-  houses,
-  houseview
+  scorecard
+
+when defined(takeScreenshot):
+  import std/[os, strutils]
 
 const
   WindowTitle = "Heartleaf"
   AtlasPath = TmpRoot & "/heartleaf.atlas.png"
   LogoPath = DataRoot & "/themes/heartleaf/heartleaf_logo.png"
   SeekCheckpointTicks = TickRate * 10
-    ## One saved world every ten seconds, so a seek re-simulates at most
-    ## that much.
-  VillagerHeight = 1.7'f32
-  ModularCharacterPath = DataRoot & "/characters/modular_chars/character.glb"
-  ModularManifestPath = DataRoot & "/characters/modular_chars/manifest.json"
-  VillagerPresetNumbers: array[VillagerCount, int] = [
-    1, 2, 3, 5, 6, 9, 11, 12, 13]
-    ## The modular presets that ship pre-rendered profile portraits.
-  MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
-    ## Roads and the plaza apron wear the meadow dirt, loaded into the
-    ## marsh slot, which the village never uses.
-  PlazaBlendDepth = 0.05'f32
-  PlazaHeightBlend = 2.0'f32
-    ## Tighter than the engine defaults so dirt breaks into grass along the
-    ## texture instead of feathering across a whole tile.
-  CropHeight = 0.7'f32
-  CropBrightness = 1.3'f32
-    ## The kit plants are painted a deep green; lifted so they read on
-    ## their containers.
-  CropLooks: array[VeggieKinds, tuple[kit: DecorKit, node: string, tint: Vec3]] = [
-    (ValleyVegetation, "plant_04a", vec3(1.0, 1.05, 0.85)),   # carrot
-    (ValleyVegetation, "plant_06a", vec3(1.15, 0.95, 0.85)),  # tomato
-    (MeadowVegetation, "plant_05a", vec3(1.1, 1.15, 0.9)),    # lettuce
-    (ValleyVegetation, "plant_03a", vec3(0.9, 1.0, 0.85)),    # potato
-    (MeadowVegetation, "plant_06a", vec3(1.15, 1.0, 0.8)),    # pumpkin
-    (ValleyVegetation, "plant_05a", vec3(0.95, 1.0, 1.0)),    # radish
-    (ValleyVegetation, "plant_03a", vec3(1.0, 0.85, 0.95)),   # beet
-    (ValleyVegetation, "wheat_patch_01a", vec3(1.05, 1.05, 0.8)),  # corn
-    (ValleyVegetation, "plant_06a", vec3(0.95, 1.1, 0.9)),    # pea
-    (ValleyVegetation, "plant_02a", vec3(0.95, 1.05, 0.9)),   # onion
-    (ValleyVegetation, "plant_02a", vec3(1.0, 1.05, 1.0)),    # garlic
-    (MeadowVegetation, "plant_05a", vec3(0.9, 1.05, 1.0)),    # cabbage
-    (MeadowVegetation, "plant_06a", vec3(1.1, 1.05, 0.8)),    # squash
-    (ValleyVegetation, "plant_05a", vec3(0.95, 1.05, 0.95)),  # turnip
-    (ValleyVegetation, "plant_01a", vec3(0.95, 1.05, 0.95)),  # leek
-    (MeadowVegetation, "plant_04a", vec3(0.8, 1.0, 0.8)),     # spinach
-    (MeadowVegetation, "plant_04a", vec3(0.8, 0.95, 0.85)),   # broccoli
-    (ValleyVegetation, "plant_06a", vec3(1.1, 1.0, 0.8)),     # pepper
-    (ValleyVegetation, "plant_07a", vec3(0.9, 1.05, 0.9)),    # cucumber
-    (ValleyVegetation, "plant_07a", vec3(0.85, 1.0, 0.85)),   # zucchini
-    (ValleyVegetation, "plant_01a", vec3(1.0, 1.1, 0.85)),    # celery
-    (ValleyVegetation, "plant_06a", vec3(1.0, 0.85, 1.05)),   # eggplant
-    (ValleyVegetation, "plant_04a", vec3(1.0, 1.0, 0.85)),    # parsnip
-    (MeadowVegetation, "plant_04a", vec3(0.85, 0.95, 1.0)),   # kale
-  ]
-    ## What a stocked plot grows, in VeggieNames order. Neither kit has a
-    ## literal lettuce or corn, so kinds share plants by silhouette: grassy
-    ## stalks for the onion family, low feathery tops for roots, a bush for
-    ## tomatoes and peppers, seedling leaves for squashes, broad leaves for
-    ## the cabbage family, and the wheat clump for corn. A tint tells them
-    ## apart. Harvested plots retain their empty pots.
+  VillagerHeight = GnomeHeight
 
 type
-  GraphicsError = object of CatchableError
   SeekCheckpoint = object
     world: World
     hashCheck: ReplayHashCheck
@@ -90,7 +42,7 @@ type
 var
   window*: Window
   sk*: Silky
-  cameraDistance* = 64.0'f32
+  cameraDistance* = TownOverviewDistance
   cameraTarget* = vec3(0, 0, 0)
   cameraEye = vec3(0, 0, 0)
   panning = false
@@ -112,56 +64,9 @@ var
 
 ## Presentation helpers
 
-proc villagerPresetName(slot: int): string =
-  "Preset " & $VillagerPresetNumbers[slot]
-
-proc villagerParts(slot: int): seq[string] =
-  ## One preset's part list with the adventuring gear left at home:
-  ## villagers carry vegetables, not backpacks and weapons.
-  let
-    manifest = parseFile(ModularManifestPath)
-    wanted = villagerPresetName(slot)
-  var found = false
-  for preset in manifest["presets"]:
-    if preset["name"].getStr != wanted:
-      continue
-    found = true
-    for part in preset["parts"]:
-      let name = part.getStr
-      if name.startsWith("Back_") or name.startsWith("Wield_Gear_"):
-        continue
-      result.add name
-  doAssert found, ModularManifestPath & ": no preset " & wanted
-
-proc villagerPortraitPath(slot: int): string =
-  DataRoot & "/characters/modular_chars/character.preset_" &
-    $VillagerPresetNumbers[slot] & ".profile.png"
-
-proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
-  ## Returns a clip for one pose from the modular pack.
-  const Names: array[AnimationSlot, seq[string]] = [
-    IdleAnimation: @["Idle", "IdleBattle"],
-    WalkAnimation: @["Walk", "Run"],
-    GatherAnimation: @["Attack01", "Victory", "Idle"],
-    WaveAnimation: @["Victory", "LevelUp", "Idle"]
-  ]
-  for name in Names[slot]:
-    if name in model.clips:
-      return model.clips[name]
-  raise newException(GraphicsError, "missing clip for " & $slot)
-
 proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs the villager portraits and the theme logo.
+  ## Packs the supplied Heartleaf logo with its original transparency.
   builder.addThemeLogo(LogoPath)
-  for slot in 0 ..< VillagerCount:
-    if not builder.addImage(
-        villagerPortraitKey(int32(slot)),
-        readImage(villagerPortraitPath(slot))
-      ):
-      raise newException(
-        GraphicsError,
-        "the UI atlas is too small for villager portraits"
-      )
 
 proc tileCentreXZ(tile: Tile2): Vec2 =
   ## Converts a tile coordinate to the world-space centre of that tile.
@@ -172,13 +77,6 @@ proc tileWorldPoint(tile: Tile2): Vec3 =
   ## Returns the render centre of one map tile.
   let xz = tileCentreXZ(tile)
   vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
-
-proc decorWorldPoint(d: Decoration): Vec3 =
-  ## Converts a fractional tile-space decoration position to the world.
-  let
-    x = d.x - HalfGrid
-    z = d.y - HalfGrid
-  vec3(x, surfaceHeight(x, z) + d.lift, z)
 
 proc villagerWorldPoint(v: Villager): Vec3 =
   ## Converts a tile-space body into a render position.
@@ -219,10 +117,6 @@ proc renderTime(ticks: int32): float32 =
   ## Converts animation ticks into seconds for the clip sampler.
   (float32(ticks) + frameAlpha) / float32(TickRate)
 
-proc housePropYaw(house: House): float32 =
-  ## Faces a house model toward its own door.
-  arctan2(float32(house.facingX), float32(house.facingY))
-
 proc runGraphics*() =
   ## Runs the native or Emscripten spectator.
   startGameProfile()
@@ -242,77 +136,56 @@ proc runGraphics*() =
 
   profileBlock "terrain":
     quadterrain.seed = run.mapSeed
-    terrainBlendDepth = PlazaBlendDepth
-    terrainHeightBlend = PlazaHeightBlend
-    ## The ground mask owns every stone and dirt texel, so road and plaza
-    ## tiles bake as plain grass underneath it.
-    setTileMaterial(
-      int(RoadTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
-    setTileMaterial(
-      int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
-    setTileMaterial(
-      int(GardenTileKind),
-      GrassMaterial, DirtMaterial,
-      vec3(1), vec3(0.85),
-      1
+    initTerrain(
+      treeStyle = NoTrees,
+      terrainStyle = GeneratedTerrain,
+      rockStyle = NoRocks,
+      settings = TerrainAssets(size: 512, grass: false, water: false)
     )
-    setTileMaterial(
-      int(HouseTileKind),
-      GrassMaterial, DirtMaterial,
-      vec3(1), vec3(0.85),
-      1
-    )
-    initTerrain()
-    ## The plaza wears procedural cobbles instead of the flagstone, placed
-    ## stone by stone through the ground mask.
-    let
-      cobble = buildCobbleSheet(run.mapSeed)
-      curb = buildCurbSheet(run.mapSeed)
-      plaza = tileCentreXZ(tile2(GridSide div 2, GridSide div 2))
-    setTerrainMaterial(int(StoneMaterial), cobble.color, cobble.height)
-    ## The curb borrows the underwater slot; the village has no water.
-    setTerrainMaterial(int(UnderwaterMaterial), curb.color, curb.height)
-    setGroundRing(
-      plaza.x, plaza.y, CurbInner, CurbInner + CurbWidth,
-      CurbStones, CurbStyle.cells, CurbFade)
-    uploadGroundMask(buildGroundMask(run.world.map, run.mapSeed), MaskSize)
-    let meadowDirt = loadGroundSheet(MeadowDirtPath)
-    setTerrainMaterial(int(MarshMaterial), meadowDirt.color, meadowDirt.height)
+    terrainSplats = false
+    for (surface, name) in [
+      (GrassSurface, "heartleaf-grass-1"),
+      (DirtSurface, "heartleaf-path-2"),
+      (CobbleSurface, "heartleaf-paving-1")
+    ]:
+      let paint = readImage(DataRoot & "/terrain/tiles/" & name & ".rgb.png")
+      if surface == DirtSurface:
+        for pixel in paint.data.mitems:
+          let neutral = (pixel.r.float32 + pixel.g.float32 +
+            pixel.b.float32) / 3'f
+          pixel.r = uint8((pixel.r.float32 * 0.76'f + neutral * 0.24'f) * 0.93'f)
+          pixel.g = uint8((pixel.g.float32 * 0.76'f + neutral * 0.24'f) * 0.93'f)
+          pixel.b = uint8((pixel.b.float32 * 0.76'f + neutral * 0.24'f) * 0.93'f)
+      setTerrainMaterial(
+        surface.int,
+        paint,
+        readImage(DataRoot & "/terrain/tiles/" & name & ".height.png")
+      )
+    for kind in [RoadTile, StoneTile, GardenTileKind, HouseTileKind]:
+      setTileMaterial(
+        kind.int,
+        GrassSurface.float32,
+        DirtSurface.float32,
+        vec3(1),
+        vec3(0.85),
+        1
+      )
+    uploadGroundMask(buildTownGroundMask(run.mapSeed), MaskSize)
     setGroundLayers(
-      StoneMaterial, MarshMaterial, GrassMaterial, UnderwaterMaterial)
-    scatterGrass(800, run.mapSeed)
+      CobbleSurface.float32,
+      DirtSurface.float32,
+      GrassSurface.float32,
+      CobbleSurface.float32
+    )
 
-  var
-    kits: array[DecorKit, PropPack]
-    housePacks: HousePacks
+  var villageArt: VillageArt
 
   proc placeVillageProps() =
-    ## Lays out every prop: houses built from their recipes, then the
-    ## decorations. Walkability never changes, so the terrain bakes
-    ## without it.
-    clearProps()
-    for slot in 0 ..< VillagerCount:
-      let house = run.world.map.houses[slot]
-      housePacks.placeHouse(
-        buildHouse(
-          run.mapSeed xor int32(slot) * 7919,
-          houseKindFor(run.mapSeed, slot)),
-        tileWorldPoint(house.center),
-        housePropYaw(house))
-    for d in placeDecor(run.world.map, run.mapSeed):
-      kits[d.kit].placeProp(
-        d.node, decorWorldPoint(d), d.yaw, d.height, d.tint)
-    bakeTerrain(rebuildWalkability = false)
+    ## Places the reference village over its matching simulation map.
+    villageArt.placeVillage(run.world.map, run.mapSeed)
 
   profileBlock "props":
-    housePacks = loadHousePacks()
-    for kit in DecorKit:
-      if nodesFor(kit).len == 0:
-        continue
-      ## The toon kits are painted, not palette coloured, so they draw
-      ## textured rather than through the vertex-colour bake.
-      kits[kit] = loadPropPack(
-        DataRoot & "/" & kitFile(kit), only = nodesFor(kit), textured = true)
+    villageArt = loadVillageArt(run.mapSeed)
     placeVillageProps()
 
   ## Everything is always visible; there is no fog in a village.
@@ -326,25 +199,29 @@ proc runGraphics*() =
     villagerModels: array[VillagerCount, CharacterModel]
     villagerClips: array[VillagerCount, array[AnimationSlot, int]]
   profileBlock "models":
+    let manifest = readManifest(GnomeLibrary)
     for slot in 0 ..< VillagerCount:
-      villagerModels[slot] = loadModularCharacterModel(
-        ModularCharacterPath,
-        villagerParts(slot),
-        VillagerHeight
-      )
+      villagerModels[slot] = loadGnome(manifest, slot)
       for animation in AnimationSlot:
         villagerClips[slot][animation] =
-          villagerModels[slot].clipIndex(animation)
-  drawSplash(sk, window, splash.name)
+          villagerModels[slot].clipIndex(GnomeClips[animation])
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
+  scene.setToonHour(12)
+  profileBlock "portraits":
+    for slot in 0 ..< VillagerCount:
+      sk.addAtlasImage(
+        villagerPortraitKey(int32(slot)),
+        gnomePortrait(window, scene, villagerModels[slot])
+      )
   setEnvironmentPalette(scene.toon)
+  drawSplash(sk, window, splash.name)
   var
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
 
-  cameraTarget = vec3(0, surfaceHeight(0, 0), 0)
+  cameraTarget = TownCameraTarget
   var actionCam = initActionCam(
     minDistance = 16,
     maxDistance = 120,
@@ -358,8 +235,7 @@ proc runGraphics*() =
 
   let demoMode = options.playerSlot == 0 or run.replayMode
   var demoCamera = initDemoCamera(VillagerCount)
-  if demoMode:
-    cameraDistance = DemoDistance
+  actionCam.takeManual()
 
   ## Replay scaffolding
 
@@ -546,8 +422,7 @@ proc runGraphics*() =
       followSlot = -1
       actionCam.takeManual()
     if not overUi and window.scrollDelta.y != 0:
-      if not demoMode:
-        actionCam.takeManual()
+      actionCam.takeManual()
       cameraDistance = clamp(
         cameraDistance * pow(0.92'f32, window.scrollDelta.y / 3.0'f32),
         6.0'f32,
@@ -633,7 +508,9 @@ proc runGraphics*() =
 
   proc cameraView(): Mat4 =
     ## Returns the shared fixed-north RTS view matrix.
-    cameraEye = rtsCameraEye(cameraTarget, cameraDistance)
+    cameraEye = cameraTarget + vec3(
+      0, sin(TownCameraPitch), cos(TownCameraPitch)
+    ) * cameraDistance
     lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
 
   ## Frame
@@ -704,7 +581,11 @@ proc runGraphics*() =
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()
-        projection = perspective(45.0'f32, aspect, 0.1'f32, 1000.0'f32)
+        extent = cameraDistance * TownCameraScale
+        projection = ortho(
+          -extent * aspect, extent * aspect,
+          -extent, extent, 0.1'f, 1000'f
+        )
         viewProjection = projection * view
       updateSelection(viewProjection)
       updatePlayerOrder(viewProjection)
@@ -721,19 +602,8 @@ proc runGraphics*() =
             let veggie = run.world.gardens[garden]
             if veggie < 0:
               continue
-            let look = CropLooks[int(veggie)]
-            kits[look.kit].drawProp(
-              look.node,
-              tileWorldPoint(run.world.map.gardenTiles[garden]) +
-                vec3(0, GardenCropLift, 0),
-              float32(garden) * 0.7'f32,
-              CropHeight,
-              matrix,
-              vec4(
-                look.tint.x * CropBrightness,
-                look.tint.y * CropBrightness,
-                look.tint.z * CropBrightness,
-                1.0)
+            villageArt.drawCrop(
+              run.world.map.gardenTiles[garden], int(veggie), matrix
             )
 
         proc drawWorldVillagers() =

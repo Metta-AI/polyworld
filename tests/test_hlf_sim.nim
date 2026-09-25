@@ -513,7 +513,7 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
       doAssert validParty, &"seed {seed} had no dinner on day {w.day}"
       for v in game.world.villagers:
         doAssert not v.curfewMissed,
-          &"{VillagerNames[v.slot]} missed curfew on day {game.world.day}"
+          &"seed {seed}: {VillagerNames[v.slot]} missed curfew on day {game.world.day}"
   doAssert samples > 0
   doAssert outsidePlaza > samples * VillagerCount div 2,
     &"seed {seed}: villagers spent most of the afternoon in the plaza"

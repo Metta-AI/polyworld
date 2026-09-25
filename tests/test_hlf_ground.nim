@@ -132,4 +132,31 @@ block gardensDoNotPaintTerrain:
     map.kinds[tileIndex(garden)] = uint8(GrassTile)
   doAssert buildGroundMask(map, Seed) == original
 
+
+echo "Testing the reference town's ground mask"
+block townCoverage:
+  let mask = buildTownGroundMask(Seed)
+  doAssert mask.len == MaskSize * MaskSize * MaskChannels
+
+  proc at(x, z: int): (uint8, uint8) =
+    ## Samples a world-space tile center in the reference mask.
+    let
+      tx = (x + GridSide.int div 2) * MaskTexelsPerTile +
+        MaskTexelsPerTile div 2
+      tz = (z + GridSide.int div 2) * MaskTexelsPerTile +
+        MaskTexelsPerTile div 2
+      index = (tz * MaskSize + tx) * MaskChannels
+    (mask[index], mask[index + 1])
+
+  doAssert at(0, 0) == (0'u8, 0'u8), "The tree bed must remain grassy"
+  doAssert at(5, 0) == (255'u8, 255'u8), "The plaza needs cream paving"
+  doAssert at(0, -20) == (0'u8, 255'u8), "Lanes must be dirt, not cobble"
+  doAssert at(2, 15) == (0'u8, 0'u8), "The well belongs in a garden"
+  doAssert at(40, 30) == (0'u8, 0'u8), "Woodland must stay grassy"
+  var feathered = 0
+  for i in 0 ..< MaskSize * MaskSize:
+    if mask[i * MaskChannels + 1] in 1'u8 .. 254'u8:
+      inc feathered
+  doAssert feathered > 1000, "The golden paths lost their soft edges"
+
 echo "test_hlf_ground: all checks passed"

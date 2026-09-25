@@ -288,9 +288,7 @@ proc coworldOptions*(slotCount: int): GameOptions =
     seconds: config.maxTicks div SharedTickRate,
     spawnIntervalTicks: config.spawnIntervalTicks,
     recordPath: replayPath,
-    speed: 1,
-    windowWidth: 1920,
-    windowHeight: 1080
+    speed: 1
   )
   logs.setLen(slotCount)
   for slot, seat in seats.seats:

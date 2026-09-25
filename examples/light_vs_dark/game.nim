@@ -49,9 +49,7 @@ proc parseGameOptions(): GameOptions =
     seconds: DefaultMinutes * 60,
     maximumTicks: DefaultDurationTicks,
     seed: DefaultSeed,
-    speed: 1,
-    windowWidth: 1920,
-    windowHeight: 1080
+    speed: 1
   )
   let arguments = commandLineParams()
   var index = 0
