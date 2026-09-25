@@ -323,7 +323,7 @@ The trainer, the hosted seat and the mapping ceiling share one code path:
 ## Evidence
 
 - **No-neural parity with upstream** (`tools/parity_upstream.sh`, 20 seeds, full 28,800 ticks, mixed
-  base/puller/rusher lineup): the fork's headless binary writes replays byte-identical to
+  base/puller/rusher lineup): the headless binary with neural support writes replays byte-identical to
   upstream/main's. The native library (capture on, no neural seats) ends on upstream's final hash, and
   upstream's binary re-simulates its replay with zero mismatches.
 - **Mapping ceiling** (`tools/mapping_ceiling.py`, 100 seeds, full length): base.bas routed through the

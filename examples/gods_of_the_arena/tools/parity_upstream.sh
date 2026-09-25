@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # No-neural-seat parity against upstream: for SEEDS full-length matches with a mixed
-# base/puller/rusher lineup, (1) this fork's headless binary and upstream/main's headless binary
+# base/puller/rusher lineup, (1) this branch's headless binary and upstream/main's headless binary
 # must write byte-identical replays (every tick's state hash plus every action), and (2) the native
 # training library with the same lineup and no neural seats (capture on) must record a replay that
 # upstream/main's binary verifies tick for tick and that ends on the same final hash.

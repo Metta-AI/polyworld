@@ -1,4 +1,4 @@
-"""Local hosted canary (item 5c): the -d:coworld GotA server plays a full match with five
+"""Local hosted canary: the -d:coworld GotA server plays a full match with five
 neural-package seats (random GOTANET1 weights) and five base.bas seats through the platform's
 file handoff (COGAME_* URIs), then the recorded replay is re-simulated by the headless binary.
 Pass = results.json written, every seat's player status exit_code 0, every neural seat log has
