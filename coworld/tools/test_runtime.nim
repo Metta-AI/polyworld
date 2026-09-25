@@ -101,7 +101,10 @@ proc episode(
     count: int,
     scripts: seq[string],
     failure = false,
-    ticks = 240
+    ticks = 240,
+    expectedOutput = "",
+    failureLog = "BASIC error:",
+    failureMessage = ""
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
   doAssert scripts.len == count
@@ -178,7 +181,8 @@ proc episode(
     marker = directory / (if failure: "failure.json" else: "results.json")
     deadline = getMonoTime() + initDuration(seconds = 120)
   while not fileExists(marker):
-    doAssert process.running(), readFile(logPath)
+    doAssert process.running(), "exit " & $process.peekExitCode() &
+      ": " & readFile(logPath)
     doAssert getMonoTime() < deadline, "episode timed out"
     sleep(20)
   let output = readFile(marker).fromJson(JsonNode)
@@ -186,6 +190,9 @@ proc episode(
   var logs: seq[string]
   for slot in 0 ..< count:
     logs.add readFile(directory / ("player-" & $slot & ".log"))
+  if expectedOutput.len > 0:
+    for private in logs:
+      doAssert private.contains(expectedOutput), private
   for slot, private in logs:
     doAssert private.len <= LogLimit
     let marker = "PRIVATE-" & $slot
@@ -201,7 +208,10 @@ proc episode(
   if failure:
     doAssert not fileExists(directory / "results.json")
     doAssert output["failed_policy_index"].getInt() == 0
-    doAssert logs[0].contains("BASIC error:")
+    doAssert logs[0].contains(failureLog), logs[0]
+    if failureMessage.len > 0:
+      doAssert output["message"].getStr() == failureMessage,
+        output["message"].getStr()
   else:
     doAssert output["scores"].len == count
     if game == "gota":
@@ -253,9 +263,25 @@ for (game, count) in Games:
     scripts[slot] = "END\n"
   scripts[0] = "THIS IS NOT BASIC\n"
   episode(game, count, scripts, failure = true)
+  if game == "gota":
+    # A staged file that starts like a ZIP is a neural package; a broken
+    # one ends the episode with the package reason, not a compile error.
+    scripts[0] = "PK\x03\x04 not a neural package\n"
+    episode(game, count, scripts, failure = true,
+      failureLog = "neural package rejected:",
+      failureMessage = "neural package rejected for player slot 0")
   scripts[0] = "WHILE 1\nWEND\n"
   episode(game, count, scripts)
   echo game, ": runtime contracts passed"
+
+  for slot in 0 ..< scripts.len:
+    scripts[slot] = """
+sendChat(-2, "CHAT")
+print pullMailbox$(), mailboxId()
+"""
+  episode(game, count, scripts, ticks = 3,
+    expectedOutput = "CHAT")
+  echo game, ": hosted mailbox integration passed"
 
 episode(
   "lvd",

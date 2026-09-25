@@ -1,0 +1,5 @@
+# seed battle_ticks final_state_hash, recorded with main (23f3384) headless:
+#   gota --bot base.bas:4 --bot puller.bas:3 --bot rusher.bas:3 --seed S --ticks T
+1 7200 000000004bedee39
+2 7200 00000000ddef9e3b
+3 7200 0000000067a3e191
