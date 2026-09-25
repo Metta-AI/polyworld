@@ -36,19 +36,30 @@ var
   lanePathPoints*: array[3, seq[PathPoint]]
   lanePathTiles: array[3, seq[PathTile]]
   laneWorldLayers: array[3, seq[int32]]
-  visionBlockers: seq[int16]
-  visionSources: seq[VisionSource]
-  visionSkipNow: seq[int32]
-  heroPathPoints: seq[PathPoint]
-  heroPathTiles: seq[PathTile]
-  gotaWalkLayer: int
-  gotaWalkDestLayer: int
-  gotaWalkOrigin: FixedVec2
+  mapGlobalsHash: uint64
+  mapGlobalsReady: bool
+    ## Map-derived globals (lane paths, sight terrain) are rebuilt only when
+    ## the map changes, so worlds on one map never write them concurrently.
+
+# Per-thread scratch: separate worlds may tick concurrently on separate threads.
+var
+  visionBlockers {.threadvar.}: seq[int16]
+  visionSources {.threadvar.}: seq[VisionSource]
+  visionSkipNow {.threadvar.}: seq[int32]
+  heroPathPoints {.threadvar.}: seq[PathPoint]
+  heroPathTiles {.threadvar.}: seq[PathTile]
+  gotaWalkLayer {.threadvar.}: int
+  gotaWalkDestLayer {.threadvar.}: int
+  gotaWalkOrigin {.threadvar.}: FixedVec2
 
 ## Simulation
 
 type
   Team* = enum RedTeam, BlueTeam
+  TrainingCounter* = enum
+    ## Training-library-only per-hero counters (-d:gotaTrainingStats).
+    TrainGold, TrainLastHits, TrainNeutralKills, TrainTowerDamage,
+    TrainStructureKills, TrainHeroDamage, TrainDamageTaken, TrainGodDamage
   MatchPhase* = enum Playing, Drafting
   FootmanState* = enum Marching, Fighting, Dying
   CampState* = enum RestingCamp, FightingCamp, ReturningCamp, EmptyCamp
@@ -74,6 +85,10 @@ type
     lastError*: string
     decisions*: int
     lastWork*, lastInstructions*: int64
+    neural*: RootRef
+      ## Neural seat state (a bots.nim NeuralSeat, which derives from
+      ## polyworld/neural_host.NeuralBrain); nil for plain BASIC seats. Kept
+      ## untyped here because this module must not import float code.
 
   Footman* = object
     id*: int32
@@ -265,6 +280,9 @@ type
     when defined(replayEvents):
       events*: seq[GameEvent]
       eventTick: int32
+    when defined(gotaTrainingStats):
+      training*: seq[array[TrainingCounter, int64]]
+        ## Indexed like `heroes`; never hashed and never read by the sim.
     heroSpawns*: array[2, WorldPoint]
     casts*: seq[SpellCast]
     towerShots*: seq[TowerShot]
@@ -335,8 +353,8 @@ type
     collisionOffsets: seq[FixedVec2]
 
 var
-  navigationWorld: World
-  gotaWalkTeam: Team
+  navigationWorld {.threadvar.}: World
+  gotaWalkTeam {.threadvar.}: Team
 
 const
   WorldScale* = 60_000'i32
@@ -799,6 +817,18 @@ proc heroIndex*(world: World, id: int32): int =
       return i
   -1
 
+proc trainCount(world: World, heroId: int32, counter: TrainingCounter,
+    amount: int64) {.inline.} =
+  ## Credits a training counter to a hero; compiled out of live builds.
+  when defined(gotaTrainingStats):
+    if amount == 0:
+      return
+    let index = world.heroIndex(heroId)
+    if index >= 0:
+      if world.training.len < world.heroes.len:
+        world.training.setLen(world.heroes.len)
+      world.training[index][counter] += amount
+
 proc buildingIndex*(world: World, id: int32): int =
   ## Returns the tower slot for one id, or -1.
   if id == 0:
@@ -1001,9 +1031,20 @@ proc applyDamage[T: Hero | Footman](
     detail = 0'i32
 ) =
   ## Applies a unit hit and records its actual health change.
-  when T is Footman or defined(replayEvents):
+  when T is Footman or defined(replayEvents) or defined(gotaTrainingStats):
     let before = target.hp
   target.hp -= amount
+  when defined(gotaTrainingStats):
+    let removed = int64(max(before, 0'i32) - max(target.hp, 0'i32))
+    when T is Hero:
+      world.trainCount(target.id, TrainDamageTaken, removed)
+      let attacker = world.heroIndex(source)
+      if attacker >= 0 and world.heroes[attacker].team != target.team:
+        world.trainCount(source, TrainHeroDamage, removed)
+    else:
+      if before > 0 and target.hp <= 0:
+        world.trainCount(source,
+          (if target.camp > 0: TrainNeutralKills else: TrainLastHits), 1)
   when T is Hero:
     if amount > 0:
       for kind in RecoveryKind:
@@ -1158,9 +1199,14 @@ proc damageFort(
 ) =
   ## Applies damage only after the god's two guards have been destroyed.
   if damage > 0 and world.fortExposed(world.forts[index].team):
-    when defined(replayEvents):
+    when defined(replayEvents) or defined(gotaTrainingStats):
       let before = world.forts[index].hp
     world.forts[index].hp = max(0'i32, world.forts[index].hp - damage)
+    when defined(gotaTrainingStats):
+      let attacker = world.heroIndex(source)
+      if attacker >= 0 and world.heroes[attacker].team != world.forts[index].team:
+        world.trainCount(source, TrainGodDamage,
+          int64(max(before, 0'i32) - world.forts[index].hp))
     when defined(replayEvents):
       world.damageEvent(source, world.forts[index].id, damage,
         before, world.forts[index].hp, cause, detail)
@@ -1311,6 +1357,8 @@ proc gainRewards(
   hero.xp += xp
   hero.totalXp += xp
   hero.gold += gold
+  when defined(gotaTrainingStats):
+    world.trainCount(hero.id, TrainGold, int64(gold))
   while hero.level < HeroMaxLevel and
       hero.xp >= xpForNextLevel(hero.level):
     hero.xp -= xpForNextLevel(hero.level)
@@ -1670,9 +1718,16 @@ proc damageBuilding(
     cause = BasicAttack, detail = 0'i32
 ) =
   ## Applies building damage and releases occupied tiles on the killing hit.
-  when defined(replayEvents):
+  when defined(replayEvents) or defined(gotaTrainingStats):
     let before = world.buildings[index].hp
   world.buildings[index].hp -= damage
+  when defined(gotaTrainingStats):
+    let attacker = world.heroIndex(source)
+    if attacker >= 0 and world.heroes[attacker].team != world.buildings[index].team:
+      world.trainCount(source, TrainTowerDamage,
+        int64(max(before, 0'i32) - max(world.buildings[index].hp, 0'i32)))
+      if before > 0 and world.buildings[index].hp <= 0:
+        world.trainCount(source, TrainStructureKills, 1)
   when defined(replayEvents):
     world.damageEvent(source, world.buildings[index].id, damage,
       before, world.buildings[index].hp, cause, detail)
@@ -2557,6 +2612,17 @@ proc setHeroDestination(
   hero.hasMoveTarget = true
   true
 
+proc planRoute*(world: World, hero: Hero, mapX, mapY: int32,
+    offset = FixedVec2Zero): seq[WorldPoint] =
+  ## Returns the path a walk order to this tile would give the hero now,
+  ## without changing the hero (planning runs on a copy). Empty = no route.
+  navigationWorld = world
+  var probe = Hero()
+  probe[] = hero[]
+  probe.hasMoveTarget = false
+  if probe.setHeroDestination(int(mapX), int(mapY), hero.position.y, offset):
+    result = probe.movePath[probe.movePathIndex .. ^1]
+
 proc stopHeroPath(hero: Hero) =
   ## Drops the finished chase so a hero can acquire nearby creeps again.
   hero.hasMoveTarget = false
@@ -2832,7 +2898,7 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
     offset
   )
 
-proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
+proc isEnemyTarget*(world: World, hero: Hero, targetId: int32): bool =
   ## Returns whether `targetId` is a living enemy the hero can chase.
   if targetId == 0:
     return false
@@ -5427,18 +5493,28 @@ proc finishTick(game: Game) =
     except ReplayError as error:
       game.recordingError = error.msg
 
-proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
-  ## Advances exactly one authoritative integer simulation tick.
+type TickStage* = enum
+  ## How far `tickWorldBegin` took the current tick.
+  TickSkipped, ## Nothing ran: the match is over or the replay is exhausted.
+  TickDone, ## A draft tick ran to completion.
+  TickHeroTurn, ## Paused before the heroes' turn; call `tickWorldFinish`.
+  TickNoTurn ## Paused on a tick without a heroes' turn; call `tickWorldFinish`.
+
+proc tickWorldFinish*(game: Game)
+
+proc tickWorldBegin*(game: Game, onDraftTurn: proc() {.closure.}): TickStage =
+  ## Runs a tick up to (not including) the heroes' decisions. Battle ticks
+  ## stop with observations frozen; `tickWorldFinish` completes them.
   let world = game.world
   when defined(replayEvents):
     world.events.setLen(0)
     world.eventTick = world.tick + 1
   world.syncBuildings()
   if game.finished():
-    return
+    return TickSkipped
   if game.replayMode and
       world.tick >= game.replayData.hashes.len:
-    return
+    return TickSkipped
 
   if world.phase == Drafting:
     inc world.tick
@@ -5455,8 +5531,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       while game.replayPlayer.takeActionAt(uint32(world.tick), action):
         if world.applyReplayAction(action):
           game.metrics.command(world.heroIndex(action.heroId), world.tick)
-    elif decide and onHeroTurn != nil:
-      onHeroTurn()
+    elif decide and onDraftTurn != nil:
+      onDraftTurn()
     if world.phase == Drafting and world.draftTicksLeft() == 0:
       var available: seq[HeroClass]
       for class in HeroClass:
@@ -5465,7 +5541,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       let class = available[world.rng.below(available.len.int32)]
       discard world.applyDraft(world.draftHeroId(), class.ord.int32, TimeLimit)
     game.finishTick()
-    return
+    return TickDone
 
   dec world.spawnTimerTicks
   if world.spawnTimerTicks <= 0:
@@ -5481,27 +5557,29 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   profileBlock "vision":
     rebuildVision(world)
     world.updateKnownBuildings()
-  block:
-    discard world.freezeObservations()
-    defer:
-      world.thawObservations()
+  discard world.freezeObservations()
+  if game.historyPlayback:
+    if game.recorder != nil:
+      game.replayPlayer.data = game.recorder.data
+    var action: ReplayAction
+    while game.replayPlayer.takeActionAt(uint32(world.tick), action):
+      if applyReplayAction(world, action):
+        game.metrics.command(heroIndex(world, action.heroId), world.tick)
+  dec world.heroTurnTicks
+  if world.heroTurnTicks <= 0:
+    world.heroTurnTicks += DecisionTicks
     if game.historyPlayback:
-      if game.recorder != nil:
-        game.replayPlayer.data = game.recorder.data
-      var action: ReplayAction
-      while game.replayPlayer.takeActionAt(uint32(world.tick), action):
-        if applyReplayAction(world, action):
-          game.metrics.command(heroIndex(world, action.heroId), world.tick)
-    dec world.heroTurnTicks
-    if world.heroTurnTicks <= 0:
-      world.heroTurnTicks += DecisionTicks
-      if game.historyPlayback:
-        world.heroTurnStart = (world.heroTurnStart + 1) mod world.heroes.len
-      else:
-        profileBlock "decisions":
-          if onHeroTurn != nil:
-            onHeroTurn()
+      world.heroTurnStart = (world.heroTurnStart + 1) mod world.heroes.len
+    else:
+      return TickHeroTurn
+  TickNoTurn
 
+proc tickWorldFinish*(game: Game) =
+  ## Completes a battle tick that `tickWorldBegin` paused.
+  let world = game.world
+  # Another world may have ticked on this thread while this one was paused.
+  navigationWorld = world
+  world.thawObservations()
   world.updateCamps()
 
   # Plan every unit against the same actor state, then publish together.
@@ -5610,6 +5688,23 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       )
 
   game.finishTick()
+
+proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
+  ## Advances exactly one authoritative integer simulation tick.
+  case game.tickWorldBegin(onHeroTurn)
+  of TickSkipped, TickDone:
+    discard
+  of TickHeroTurn:
+    try:
+      profileBlock "decisions":
+        if onHeroTurn != nil:
+          onHeroTurn()
+    except CatchableError as error:
+      game.world.thawObservations()
+      raise error
+    game.tickWorldFinish()
+  of TickNoTurn:
+    game.tickWorldFinish()
 
 proc initLanePaths(map: MapData) =
   ## Samples symmetric lane goals without baking live buildings into roads.
@@ -5738,7 +5833,9 @@ proc newGame*(
   world.rng = initRng(map.seed)
   world.matchSeed = map.seed
   initTowers(world, map)
-  initLanePaths(map)
+  let rebuildMapGlobals = not mapGlobalsReady or mapGlobalsHash != map.hash
+  if rebuildMapGlobals:
+    initLanePaths(map)
   for team in Team:
     var point = worldPoint(map.layout.spawns[team.ord])
     point.y = fixedSurfaceHeight(point, team)
@@ -5779,21 +5876,25 @@ proc newGame*(
       )
   world.initOccupancy()
   world.initCamps(map)
-  sightTerrain = buildSightTerrain()
+  if rebuildMapGlobals:
+    sightTerrain = buildSightTerrain()
   let visionCells = mapTiles() * mapTiles()
   for team in Team:
     world.teamVisible[team.ord] = newSeq[uint8](visionCells)
     world.teamExplored[team.ord] = newSeq[uint8](visionCells)
-  for lane in 0 .. 2:
-    laneWorldPaths[lane].setLen(0)
-    laneWorldLayers[lane].setLen(0)
-    for tile in lanePathTiles[lane]:
-      laneWorldPaths[lane].add worldPoint(pathPoint(
-        int(tile.layer),
-        int(tile.x),
-        int(tile.z)
-      ))
-      laneWorldLayers[lane].add tile.layer
+  if rebuildMapGlobals:
+    for lane in 0 .. 2:
+      laneWorldPaths[lane].setLen(0)
+      laneWorldLayers[lane].setLen(0)
+      for tile in lanePathTiles[lane]:
+        laneWorldPaths[lane].add worldPoint(pathPoint(
+          int(tile.layer),
+          int(tile.x),
+          int(tile.z)
+        ))
+        laneWorldLayers[lane].add tile.layer
+    mapGlobalsHash = map.hash
+    mapGlobalsReady = true
   for fort in world.forts.mitems:
     fort.center.y = fixedSurfaceHeight(fort.center, fort.team)
   let heroSetup =

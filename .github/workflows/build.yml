@@ -57,3 +57,13 @@ jobs:
       - run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
       - run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
       - run: nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
+      - run: nim r -d:headless tests/test_gota_neural.nim
+      - name: No-neural parity with main (golden hashes)
+        shell: bash
+        run: bash tests/gota_golden.sh
+      - name: Native training library compiles
+        if: runner.os == 'Linux'
+        run: >-
+          nim c --app:lib -d:headless -d:gotaTrainingStats --mm:atomicArc
+          --threads:on -d:useMalloc -u:nimTypeNames -o:tmp/libgota_env.so
+          examples/gods_of_the_arena/native_env.nim
