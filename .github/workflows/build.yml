@@ -29,6 +29,7 @@ jobs:
           PY=$(command -v python3 || command -v python)
           "$PY" tests/neural_cases.py tmp/neural_cases
           nim r tests/test_neural_cases.nim tmp/neural_cases
+      - run: nim r -d:nimAllocStats tests/test_mailbox_allocations.nim
       - run: nim r tests/test_gota_events.nim
       - run: nim r -d:replayEvents tests/test_gota_controls.nim
       - run: nim r -d:replayEvents tests/test_gota_camps.nim
