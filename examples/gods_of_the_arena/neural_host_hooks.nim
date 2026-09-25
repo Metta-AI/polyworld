@@ -222,6 +222,13 @@ proc beginDecision*(game: Game, index: int, seat: NeuralSeat) =
   ## Captures the decision frame (observation, slots, resets) once per tick;
   ## a package seat also infers and decodes (neural_host.think).
   let world = game.world
+  if seat.mode == NeuralHosted:
+    # The match length as the match actually runs it. Read here, not at
+    # install: the hosted runner installs bots before it records the match
+    # config (game.config.maxTicks was 0 at install, so hosted seats saw a
+    # zero match length in their time features while the native env saw
+    # 28,800).
+    seat.maxTicks = game.config.maxTicks
   if not seat.beginFrame(world.tick):
     return
   seat.command = NeuralCommand(tick: world.tick)
