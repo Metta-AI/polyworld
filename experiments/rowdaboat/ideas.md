@@ -13,12 +13,12 @@
 ## Discovery — 2026-09-25
 
 - User confirmed league: `gods-of-the-arena`, league ID `league_3c60897b-25cf-4b37-9d1a-8554c1198f28`.
-- Browser is signed in as the account's sole player RowDaBoat, `ply_eeb732fa-5f40-4fa1-beac-6571738f8108`. Profile lists nine champion leagues, none GotA; no GotA policy is submitted yet. Player slug still being verified through API.
+- At initial discovery the account's sole player RowDaBoat, `ply_eeb732fa-5f40-4fa1-beac-6571738f8108`, had nine champion leagues and no GotA policy. The initial GotA champion is now active as recorded below. Player slug still cannot be verified through the unavailable dashboard.
 - Live league UI identifies hosted release `2026.9.24.2`.
 - Initial live top three: Andre von Auto (`khors:v208`), Ari Sklar (`arisk-gods-of-the-arena:v4`), richard (`richard-gods-of-the-arena:v245`). Refresh before each XP request; exclude our player once confirmed.
 - Requested dashboard fails with `ERR_NAME_NOT_RESOLVED`. macOS has no Tailscale DNS resolver and no Tailscale app at standard paths. Softmax itself is reachable. Dashboard significance is not currently observable.
 - The nested engine checkout is clean but old (`7f50a61`). Fetched origin: current `origin/main` is `23f3384`, including tower and chat updates. Adjacent `board+cards game/polyworld` contains later tooling but is also behind the current remote; do not use an old engine to validate new replays.
-- Created an isolated up-to-date worktree `gota-campaign` on branch `codex/rowdaboat-gota-20260925`. Initial policy is an exact copy of current `players/base.bas`; committed as `ae20666` and pushed to origin. Upload and initial champion submission remain pending API identity confirmation.
+- Created an isolated up-to-date worktree `gota-campaign` on branch `codex/rowdaboat-gota-20260925`. Initial policy is an exact copy of current `players/base.bas`; committed as `ae20666` and pushed to origin. Upload and champion receipts are recorded below.
 - Hosted release is corroborated by the live website and release receipt: source `f4456be`, Coworld `cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4`, replay version 64. Detailed findings: `research/gota_rules_audit.md`.
 - Baseline uploaded as `rowdaboat-gods-of-the-arena:v1`, policy version `ab664012-84b3-48b3-ae1b-86f3f6cf960c`. SHA-256 matches the hosted bundled base: `5dbbd273ca48953649e8fc772644fd81242ecb3454e482154665ece13adec904`. Server returned an existing-content conflict on staging, explicitly directing completion; completion succeeded without another content upload.
 - Baseline hosted XP completed: `xreq_0ad92adc-2c3b-44e3-a1f2-7fcd0fa5805d`, 10/10 episodes, zero failed episodes, canonical release `2026.9.24.2`. No improvement claim.
@@ -32,7 +32,9 @@
 4. Build or reuse exact-version Nim replay extractors; inspect top-player navigation, target selection, farming, casting, shop, and group movement. Prioritize this if our performance is far below theirs.
 5. Establish a hosted baseline against the current top three other players, minimum 10 episodes, preserving full results and roster.
 6. Choose one replay-supported strategy change, isolate its activation, CPUX, and evaluate dashboard significance. Revert unless kept by that evidence.
-7. Combat hypothesis from verified leader replays: after a landed basic hit, brief walk followed by reattack may reset recovery. Andre v208 has 52 verified rapid same-target hit pairs (including 10 ticks versus Berserker's native 20); Richard v245 has 173 (including 13 ticks versus Warlock's native 28). Ari v4 shows none in those recordings. Preserve class/target control and test exactly this combat strategy when dashboard comparison is available. Not implemented or kept.
+7. Combat hypothesis from verified leader replays: after a landed basic hit, brief walk followed by reattack may reset recovery. Andre v208 has 52 verified rapid same-target hit pairs (including 10 ticks versus Berserker's native 20); Richard v245 has 173 (including 13 ticks versus Warlock's native 28). Ari v4 shows none in those recordings. Testing this alone in T001; no keep decision.
+8. Purchase-priority hypothesis: buy the existing role equipment before replenishing consumables, preserving the build and quantities. Three verified B000 replays show expensive recurring consumables; two never buy armor despite starting visits with enough gold. Detailed evidence: `research/baseline-diagnosis.md`. Do not combine with T001.
+9. Navigation research: extract exact retreat conditions, mana, targets and distances during the verified 50–119 second alive gaps without basic hits or XP receipts. Current evidence does not justify a navigation change yet.
 
 ## Trials
 
@@ -56,4 +58,15 @@ Verified leader reports: `research/gota-round772-top-players.md` (Andre v208/Ari
 
 ### Current gate
 
-Initial champion and baseline are established. No experimental policy change has been made, kept, or submitted. Further experiment decisions require the requested dashboard, whose hostname remains unreachable; the user has been asked to connect this machine to that network or provide a reachable address. Do not substitute an eyeballed score mean for that gate.
+Initial champion and baseline are established. No experimental policy change has been kept or submitted. Further keep decisions require the requested dashboard, whose hostname remains unreachable; the user has been asked to connect this machine to that network or provide a reachable address. Do not substitute an eyeballed score mean for that gate.
+
+## T001 — post-hit attack recovery reset (ready for CPUX)
+
+- Idea: replicate the immediate walk/reattack sequence proven in Andre v208 and Richard v245 replays, using `selfAttacksLanded` to avoid canceling a hit before it lands.
+- Single change: combat recovery timing only. Preserve drafting, target selection, ability decisions, shopping and ordinary navigation. A brief move to the current observed tile center after a confirmed hit is followed by a validated attack on the next decision. No spell or item tuning.
+- Evidence required before trust: Nim isolation test shows the hook fires after a successful hit, avoids windup/no-hit and unsafe states, and accepts reattack; hosted replay must show the new sequence and faster landed-hit pairs.
+- Isolation evidence: all 44 constructed VM/host checks pass, including actual impact → walk → same-target reattack for all ten classes on both teams; reordered/missing/dead targets; root/stun/channel guards; and bounded lookup plus ordinary-turn budget. Maximum observed 18,015 instructions / 25,993 work units. Candidate SHA1 `F130B193E8360689CD13B42EADBD75D546691E42`. These are mechanism checks only, not local scores. Review corrected root arriving after the walk so legal reattack remains possible.
+- CPUX: commit/push/upload and 10 hosted episodes pending. XP ID: pending. Candidate policy version: pending.
+- Opponents refreshed this continuation: Andre von Auto `khors:v208`, Ari Sklar `arisk-gods-of-the-arena:v4`, richard `richard-gods-of-the-arena:v245` (same UUIDs as B000). Refresh again immediately before request. Hosted Coworld and source remain `2026.9.24.2` / `23f3384`.
+- Dashboard recheck: exact league XP URL still returns `ERR_NAME_NOT_RESOLVED`. This is the second goal turn observing the same access blocker; previous turn made progress by establishing champion, hosted baseline and replay evidence.
+- Verdict: pending. If no dashboard significance is available after the hosted batch, revert the policy change. Saved experimental source/commit and evidence are historical records, not a kept candidate. Submitted v1 stays unchanged.

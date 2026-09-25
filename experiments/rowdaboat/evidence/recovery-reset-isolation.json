@@ -1,0 +1,196 @@
+{
+  "policy": "/Users/softmax/Documents/ChatGPT/polyworld/gota-campaign/experiments/rowdaboat/policy.bas",
+  "policySha1": "F130B193E8360689CD13B42EADBD75D546691E42",
+  "purpose": "Isolated VM/host mechanism evidence only; no local game scores or XP comparison",
+  "checksPassed": 44,
+  "checks": [
+    "VanguardKnight/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "VanguardKnight/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Ranger/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Ranger/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Arcanist/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Arcanist/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "DruidWarden/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "DruidWarden/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "DemonHunter/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "DemonHunter/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "DeathKnight/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "DeathKnight/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Crossbowman/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Crossbowman/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Lich/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Lich/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Warlock/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Warlock/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Berserker/RedTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "Berserker/BlueTeam: actual hit -> accepted walk -> accepted attack; next hit after windup + 1",
+    "windup without any hit does not reset",
+    "old hit counter during a new windup does not reset",
+    "stale out-of-bounds index resolves the same visible target ID",
+    "index for a different object resolves the same visible target ID",
+    "dead target does not reset",
+    "target that became friendly does not reset",
+    "target missing from visible objects does not reset",
+    "hit with no current target does not reset",
+    "host-acquired target absent from policy selection does not reset",
+    "retreating policy does not reset",
+    "dead prevents reset",
+    "dead release does not replay the stale hit",
+    "channel prevents reset",
+    "channel release does not replay the stale hit",
+    "stun prevents reset",
+    "stun release does not replay the stale hit",
+    "root prevents reset",
+    "root release does not replay the stale hit",
+    "target dying after reset walk is not reattacked",
+    "object reorder after reset walk resolves the same stable target ID",
+    "stun between reset walk and attack cancels the pending attack",
+    "root after accepted walk permits the legal same-target reattack",
+    "missing target in 500-unit observation stops at bounded lookup",
+    "bounded missing-target lookup plus full ordinary turn stays within VM budgets"
+  ],
+  "cadences": [
+    {
+      "class": "VanguardKnight",
+      "team": "RedTeam",
+      "nativeAttackTicks": 27,
+      "windupTicks": 12,
+      "observedHitIntervalTicks": 13
+    },
+    {
+      "class": "VanguardKnight",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 27,
+      "windupTicks": 12,
+      "observedHitIntervalTicks": 13
+    },
+    {
+      "class": "Ranger",
+      "team": "RedTeam",
+      "nativeAttackTicks": 18,
+      "windupTicks": 8,
+      "observedHitIntervalTicks": 9
+    },
+    {
+      "class": "Ranger",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 18,
+      "windupTicks": 8,
+      "observedHitIntervalTicks": 9
+    },
+    {
+      "class": "Arcanist",
+      "team": "RedTeam",
+      "nativeAttackTicks": 30,
+      "windupTicks": 13,
+      "observedHitIntervalTicks": 14
+    },
+    {
+      "class": "Arcanist",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 30,
+      "windupTicks": 13,
+      "observedHitIntervalTicks": 14
+    },
+    {
+      "class": "DruidWarden",
+      "team": "RedTeam",
+      "nativeAttackTicks": 30,
+      "windupTicks": 13,
+      "observedHitIntervalTicks": 14
+    },
+    {
+      "class": "DruidWarden",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 30,
+      "windupTicks": 13,
+      "observedHitIntervalTicks": 14
+    },
+    {
+      "class": "DemonHunter",
+      "team": "RedTeam",
+      "nativeAttackTicks": 15,
+      "windupTicks": 6,
+      "observedHitIntervalTicks": 7
+    },
+    {
+      "class": "DemonHunter",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 15,
+      "windupTicks": 6,
+      "observedHitIntervalTicks": 7
+    },
+    {
+      "class": "DeathKnight",
+      "team": "RedTeam",
+      "nativeAttackTicks": 28,
+      "windupTicks": 12,
+      "observedHitIntervalTicks": 13
+    },
+    {
+      "class": "DeathKnight",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 28,
+      "windupTicks": 12,
+      "observedHitIntervalTicks": 13
+    },
+    {
+      "class": "Crossbowman",
+      "team": "RedTeam",
+      "nativeAttackTicks": 126,
+      "windupTicks": 56,
+      "observedHitIntervalTicks": 57
+    },
+    {
+      "class": "Crossbowman",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 126,
+      "windupTicks": 56,
+      "observedHitIntervalTicks": 57
+    },
+    {
+      "class": "Lich",
+      "team": "RedTeam",
+      "nativeAttackTicks": 32,
+      "windupTicks": 14,
+      "observedHitIntervalTicks": 15
+    },
+    {
+      "class": "Lich",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 32,
+      "windupTicks": 14,
+      "observedHitIntervalTicks": 15
+    },
+    {
+      "class": "Warlock",
+      "team": "RedTeam",
+      "nativeAttackTicks": 28,
+      "windupTicks": 12,
+      "observedHitIntervalTicks": 13
+    },
+    {
+      "class": "Warlock",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 28,
+      "windupTicks": 12,
+      "observedHitIntervalTicks": 13
+    },
+    {
+      "class": "Berserker",
+      "team": "RedTeam",
+      "nativeAttackTicks": 20,
+      "windupTicks": 9,
+      "observedHitIntervalTicks": 10
+    },
+    {
+      "class": "Berserker",
+      "team": "BlueTeam",
+      "nativeAttackTicks": 20,
+      "windupTicks": 9,
+      "observedHitIntervalTicks": 10
+    }
+  ],
+  "maximumInstructionsObserved": 18015,
+  "maximumWorkObserved": 25993
+}

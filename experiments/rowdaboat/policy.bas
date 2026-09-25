@@ -610,13 +610,61 @@ sub spells()
   next spellSlot
 end sub
 
+' Trial recovery-reset helper. Revalidate the remembered index every decision.
+sub validateResetTarget(resetId, resetIndex)
+  resetValid = 0
+  resetResolvedIndex = -1
+  if resetId = 0 then
+    exit sub
+  end if
+  resetObjects = objectCount()
+  if resetIndex >= 0 and resetIndex < resetObjects then
+    if objectId(resetIndex) = resetId then
+      resetResolvedIndex = resetIndex
+    end if
+  end if
+  if resetResolvedIndex < 0 then
+    ' Object order can change between ticks. Resolve the stable ID again,
+    ' with a bounded scan so crowded observations cannot exhaust the VM.
+    for resetProbe = 0 to 191
+      if resetProbe >= resetObjects then
+        exit for
+      end if
+      if objectId(resetProbe) = resetId then
+        resetResolvedIndex = resetProbe
+        exit for
+      end if
+    next resetProbe
+  end if
+  if resetResolvedIndex < 0 then
+    exit sub
+  end if
+  if objectHp(resetResolvedIndex) <= 0 or objectAlive(resetResolvedIndex) = 0 then
+    exit sub
+  end if
+  if objectKind(resetResolvedIndex) = 6 then
+    if objectReturning(resetResolvedIndex) then
+      exit sub
+    end if
+  elseif objectTeam(resetResolvedIndex) = selfTeam then
+    exit sub
+  end if
+  resetValid = 1
+end sub
+
 if drafting then
   chooseHero()
   end
 end if
 
+' Consume every observed hit, including while unable to act, so it cannot
+' become a stale reset trigger after control, channeling, or respawn.
+resetNewHit = selfAttacksLanded > resetSeenHits
+resetSeenHits = selfAttacksLanded
+
 ' Buy back immediately whenever affordable, including during a long respawn.
 if selfHp <= 0 then
+  resetTarget = 0
   price = buybackPrice()
   if price > 0 and selfGold >= price then
     accepted = buyback()
@@ -626,7 +674,44 @@ if selfHp <= 0 then
   end
 end if
 if selfChannelTicks > 0 or selfStunTicks > 0 then
+  resetTarget = 0
   end
+end if
+
+' One isolated combat change: after a fresh landed hit, walk to our current
+' tile for one tick, then restore only the same freshly validated target.
+' selfX/selfY are tile observations, so the walk may move by one tick's speed.
+if resetTarget <> 0 then
+  validateResetTarget(resetTarget, resetTargetIndex)
+  if resetValid and worldTick = resetTick + 1 then
+    accepted = attackTarget(resetTarget)
+    actionError = lastActionError()
+    resetTarget = 0
+    if accepted then
+      orderTick = 0
+      end
+    end if
+  end if
+  resetTarget = 0
+  nextThink = worldTick
+elseif selfRootTicks = 0 and resetNewHit and initialized and selfTarget <> 0 then
+  if selfTarget = bestId and retreating = 0 then
+    validateResetTarget(selfTarget, targetIndex)
+    if resetValid then
+      accepted = walkTo(selfX, selfY)
+      actionError = lastActionError()
+      if accepted then
+        resetTarget = selfTarget
+        resetTargetIndex = resetResolvedIndex
+        resetTick = worldTick
+        end
+      else
+        ' A rejected route can still clear the host's target; restore it.
+        accepted = attackTarget(selfTarget)
+        actionError = lastActionError()
+      end if
+    end if
+  end if
 end if
 if worldTick < nextThink then
   end
