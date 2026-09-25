@@ -79,9 +79,11 @@ block townLandmarksAreSeparate:
       house.center.x.int32 + rear.x,
       house.center.y.int32 + rear.z)] == 0,
       "The restored round mound must block its rear footprint"
+    let shoulder = houseOffset(slot, 0, -6)
     doAssert map.terrain[tileIndex(
-      house.center.x.int32 - 5, house.center.y.int32 - 1)] == 1,
-      "the previous large cottage footprint must be walkable"
+      house.center.x.int32 + shoulder.x,
+      house.center.y.int32 + shoulder.z)] == 0,
+      "the enlarged grassy bank must have a matching solid footprint"
 
 block orchardAndWellHaveThreeLanes:
   let map = generateMap(DefaultSeed)
@@ -114,9 +116,10 @@ block treesAreScattered:
     doAssert trees == borderTrees(seed)
     var variants: HashSet[int]
     for i, tree in trees:
-      doAssert insideTown(tree.x, tree.z)
+      doAssert abs(tree.x) < 32 and tree.z in -42 .. 50,
+        "cropped forest trunks must stay beside the town"
       doAssert not townRoad(tree.x, tree.z)
-      doAssert tree.z <= 26 or abs(tree.x) >= 18,
+      doAssert tree.z <= 26 or tree.z >= 40 or abs(tree.x) >= 18,
         "foreground crowns must leave the southern junction visible"
       variants.incl tree.variant
       for j in 0 ..< i:
@@ -145,7 +148,7 @@ block gridsAreWellFormed:
       doAssert map.passable[index] == 0, "a forest tile is walkable"
     if map.kinds[index] == uint8(GardenTileKind):
       inc gardens
-  doAssert walkable > 2300,
+  doAssert walkable > 1500,
     &"only {walkable} of {GridCells} tiles are walkable"
   doAssert forest == borderTrees(DefaultSeed).len,
     &"the sparse tree art and collisions disagree: {forest}"
@@ -158,8 +161,8 @@ block gridsAreWellFormed:
       if not insideTown(x - GridSide div 2, y - GridSide div 2):
         doAssert not layers[0].tiles[index].exists
         doAssert map.passable[index] == 0
-  doAssert existing in 3300 .. 3550,
-    "the town dimensions should be about 75 percent of the prior layout"
+  doAssert existing in 4000 .. 4150,
+    "the town dimensions must match the calibrated layer footprint"
   doAssert gardens == GardenCount,
     &"the grid holds {gardens} garden tiles, wanted {GardenCount}"
 
@@ -167,7 +170,7 @@ block housesSurroundThePlaza:
   let map = generateMap(DefaultSeed)
   for slot, house in map.houses:
     let ring = chebyshev(house.center, tile2(GridSide div 2, GridSide div 2))
-    doAssert ring >= 12 and ring <= 30,
+    doAssert ring >= 12 and ring <= 32,
       &"house {slot} sits {ring} tiles from the plaza"
     doAssert chebyshev(house.center, house.door) == HouseFootprint div 2 + 1,
       &"house {slot} has a detached door"

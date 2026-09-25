@@ -80,8 +80,8 @@ block:
     villager = world.villagers[0]
   for i in 1 ..< VillagerCount:
     world.villagers[i].inHouse = i.int32
-  villager.tile = tile2(68, 58)
-  villager.body.pos = fixedVec2(68.51443'fx, 58.16029'fx)
+  villager.tile = tile2(69, 57)
+  villager.body.pos = fixedVec2(69.51443'fx, 57.16029'fx)
   let destination = world.map.houses[2].door
   doAssert world.positionOpen(villager.body.pos)
   doAssert world.applyMove(0, destination.x.int32, destination.y.int32)

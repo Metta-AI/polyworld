@@ -22,9 +22,9 @@ static:
 const
   MapCenter = GridSide div 2
   TerrainAmplitudeSteps = 6'i32
-  VillageFlatRadius = 36'i32
+  VillageFlatRadius = 48'i32
     ## Inside this ring the meadow is pressed almost flat.
-  VillageFadeRadius = 46'i32
+  VillageFadeRadius = 58'i32
     ## Between flat and fade the meadow rises back to full height.
   PlazaStoneRadius* = 6'i32
     ## The plaza is a disc of paving this many tiles across from the middle.
@@ -36,7 +36,7 @@ const
   HouseFootprint* = 3'i32
   HouseRadiusSteps = int64(HouseHillRadius * 1000)
   HouseCenterSteps = int64(HouseHillCenterZ * 1000)
-  HouseFacadeSteps = int64(HouseMeshOffset.z * 1000)
+  HouseFacadeSteps = int64(HouseMeshOffset.z * 1000) + 750
   HousePadRadius = 2'i32
     ## Corners this close to a house centre sit exactly on the pad.
   HousePadFade = 4'i32
@@ -223,11 +223,14 @@ proc buildMap(seed: int32): MapData =
     let
       center = houses[slot].center
       turn = HouseTurns[slot]
-    for dz in -6'i32 .. 6'i32:
-      for dx in -6'i32 .. 6'i32:
+      anchor = houseAnchor(slot)
+    for dz in -9'i32 .. 9'i32:
+      for dx in -9'i32 .. 9'i32:
         let
-          localX = (turn[0].int64 * dx + turn[1].int64 * dz)
-          localZ = (-turn[1].int64 * dx + turn[0].int64 * dz)
+          px = dx.int64 * 1000 + TownHouses[slot][0] * 1000 - anchor.x
+          pz = dz.int64 * 1000 + TownHouses[slot][1] * 1000 - anchor.z
+          localX = (turn[0].int64 * px + turn[1].int64 * pz) div 1000
+          localZ = (-turn[1].int64 * px + turn[0].int64 * pz) div 1000
           depth = localZ - HouseCenterSteps
         if localZ <= HouseFacadeSteps and
           localX * localX + depth * depth <=

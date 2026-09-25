@@ -1,6 +1,6 @@
 import
   std/[math, os],
-  chroma, gltf, pixie, vmath,
+  chroma, gltf, jsony, pixie, vmath,
   polyworld/[common, groves, pathing, quadterrain, treegen],
   content, maps, layouts
 
@@ -11,17 +11,27 @@ const
     "hobbit_chimney"
   ]
   DetailsPath* = DataRoot & "/terrain/heartleaf/models/village_details.glb"
-  GardenCropLift* = 0.5'f * HouseScale
+  CottagePath* = DataRoot & "/terrain/heartleaf/models/cottage.glb"
+  GardenPartsPath* = DataRoot & "/terrain/heartleaf/models/garden_parts.glb"
+  GardenLayoutPath* = DataRoot & "/terrain/heartleaf/models/garden-parts.json"
+  GardenCropLift* = 1.55'f * HouseScale
 
 type
+  VillageLayer* = enum
+    AllLayer, GroundLayer, BuildingsLayer, VegetationLayer, PropsLayer
+  GardenPart* = object
+    name*, kind*: string
+    position*: array[3, float32]
   RoofTriangle* = array[3, Vec3]
   VillageArt* = object
     props*: array[VillageModels.len, PropPack]
     names*: array[VillageModels.len, string]
     placeholders*: PropPack
     grove*: Grove
-    houses*, trees*, details*: PropPack
+    houses*, trees*, details*, forestFloor*: PropPack
     roof*: seq[RoofTriangle]
+    yard*: PropPack
+    yardParts*: seq[GardenPart]
 
 proc placeholderNode*(): Node =
   ## Builds a unit box for missing props and unmodeled vegetables.
@@ -60,6 +70,14 @@ proc tintedMaterial(source: Material, tint: Vec3): Material =
   result[] = source[]
   result.baseColorFactor = color(tint.x, tint.y, tint.z, 1)
 
+proc meadowTexture*(tint = vec3(1)): Image =
+  ## Grades the continuous generated turf consistently across banks and ground.
+  result = readImage(DataRoot & "/terrain/tiles/heartleaf-layer-grass-1.rgb.png")
+  for pixel in result.data.mitems:
+    pixel.r = uint8((pixel.r.float32 * 0.87'f + 5) * tint.x)
+    pixel.g = uint8((pixel.g.float32 * 0.89'f + 4) * tint.y)
+    pixel.b = uint8((pixel.b.float32 * 0.9'f + 12) * tint.z)
+
 proc houseNodes*(): seq[Node] =
   ## Reuses the reviewed cottage mesh with nine independently stained doors.
   const DoorColors = [
@@ -69,7 +87,7 @@ proc houseNodes*(): seq[Node] =
     vec3(0.85, 0.57, 0.24), vec3(0.24, 0.49, 0.43),
     vec3(0.12, 0.44, 0.44)
   ]
-  if not fileExists(VillageRoot & "hobbit_house.glb"):
+  if not fileExists(CottagePath):
     for i in 0 ..< VillagerCount:
       let node = placeholderNode()
       node.name = "home" & $i
@@ -77,8 +95,8 @@ proc houseNodes*(): seq[Node] =
       result.add node
     return
   let
-    file = readGltfFile(VillageRoot & "hobbit_house.glb")
-    grass = readImage(DataRoot & "/terrain/tiles/heartleaf-grass-2.rgb.png")
+    file = readGltfFile(CottagePath)
+    grass = meadowTexture(vec3(0.97, 1, 0.97))
   for source in file.root.walkNodes:
     if source.mesh == nil:
       continue
@@ -93,7 +111,10 @@ proc houseNodes*(): seq[Node] =
         let primitive = Primitive()
         primitive[] = sourcePrimitive[]
         primitive.material = tintedMaterial(sourcePrimitive.material, vec3(1))
-        if materialIndex == 1:
+        if materialIndex == 0:
+          primitive.material = tintedMaterial(primitive.material,
+            vec3(0.78, 0.84, 0.91))
+        elif materialIndex == 1:
           primitive.material = tintedMaterial(primitive.material, tint)
         elif materialIndex == 2:
           primitive.material.baseColor = grass
@@ -148,13 +169,13 @@ proc broadleafNodes(seed: int32): seq[Node] =
     settings.density = 1.15'f
     settings.packing = 1.05'f
     settings.crownCoverage = 0.9'f
-    settings.leafSize = 1.7'f
+    settings.leafSize = 1.25'f
     settings.leafWidth = 1.4'f
     settings.leafTile = MixedLeaves
     settings.colorVariation = 0.14'f
     settings.leafColor = [
-      vec3(0.49, 0.69, 0.12), vec3(0.58, 0.75, 0.18),
-      vec3(0.39, 0.60, 0.13)
+      vec3(0.40, 0.59, 0.16), vec3(0.53, 0.66, 0.22),
+      vec3(0.31, 0.49, 0.16)
     ][i mod 3]
     if i >= 7:
       settings.crownRadius = 2.4'f + (i mod 4).float32 * 0.35'f
@@ -165,29 +186,42 @@ proc broadleafNodes(seed: int32): seq[Node] =
       settings.branches = 4 + i mod 5
       settings.trunkRadius = 0.22'f + (i mod 3).float32 * 0.07'f
     if i in 3 .. 5:
-      settings.height = 1.35'f
+      settings.height = 1.0'f
       settings.crownBase = 0.3'f
-      settings.crownHeight = 1.4'f
-      settings.crownRadius = 1.25'f
-      settings.trunkRadius = 0.12'f
+      settings.crownHeight = 0.95'f
+      settings.crownRadius = 1.1'f
+      settings.trunkRadius = 0.08'f
       settings.roots = 0
       settings.branches = 0
-      settings.leafSize = 0.65'f
-    if i == 6:
-      settings.crownBase = 4.2'f
-      settings.crownHeight = 3.6'f
-      settings.crownRadius = 3.4'f
+      settings.stemClearance = 0.1'f
       settings.crownCoverage = 1
+      settings.crownShape = 0.5'f
+      settings.droop = 0.25'f
+      settings.rings = 7
+      settings.shells = 3
+      settings.density = 1.5'f
+      settings.leafSize = 0.55'f
+    if i == 6:
+      settings.height = 6.4'f
+      settings.crownBase = 4.6'f
+      settings.crownHeight = 2.6'f
+      settings.crownRadius = 3.7'f
+      settings.crownShape = 0.28'f
+      settings.crownCoverage = 0.86'f
+      settings.droop = 0.25'f
       settings.shells = 3
       settings.density = 1.4'f
-      settings.leafSize = 1.3'f
+      settings.leafSize = 0.95'f
       settings.cardsPerRing = 16
-      settings.trunkRadius = 0.6'f
-      settings.rootSpread = 1.7'f
+      settings.trunkRadius = 0.8'f
+      settings.branchStart = 0.44'f
+      settings.branchLength = 1.65'f
+      settings.rootSpread = 1.9'f
+      settings.rootThickness = 0.9'f
     let node = treegen.treeNode(
       treegen.generateGeometry(settings),
       TreeMaterials(
-        bark: tintedMaterial(materials.bark, vec3(0.55, 0.31, 0.12)),
+        bark: tintedMaterial(materials.bark, vec3(0.82, 0.58, 0.32)),
         foliage: tintedMaterial(materials.foliage, settings.leafColor),
         cut: materials.cut
       )
@@ -195,17 +229,52 @@ proc broadleafNodes(seed: int32): seq[Node] =
     node.name = "leaf" & $i
     result.add node
 
+proc forestFloorNode(): Node =
+  ## Feathers the meadow into woodland soil beneath the irregular forest edge.
+  let
+    paint = meadowTexture(vec3(1))
+    primitive = Primitive(mode: TrianglesMode)
+  primitive.material = Material(baseColor: paint,
+    baseColorFactor: color(1, 1, 1, 1))
+  const Side = 49
+  for iz in 0 ..< Side:
+    for ix in 0 ..< Side:
+      let
+        x = (ix - 24).float32 * 4
+        z = (iz - 24).float32 * 4
+        outside = length(vec2(max(0'f, abs(x) - 24),
+          max(0'f, abs(z - 3) - 42'f)))
+        fade = smoothstep(0'f, 7'f, outside)
+        tint = mix(vec3(1), vec3(0.29, 0.36, 0.27), fade)
+      primitive.points.add vec3(x, -0.03, z)
+      primitive.normals.add vec3(0, 1, 0)
+      primitive.uvs.add vec2(x, z) * terrainTextureScale
+      primitive.colors.add rgbx(uint8(tint.x * 255),
+        uint8(tint.y * 255), uint8(tint.z * 255), 255)
+      if ix < Side - 1 and iz < Side - 1:
+        let index = uint32(iz * Side + ix)
+        primitive.indices32.add [index, index + Side, index + 1,
+          index + 1, index + Side, index + Side + 1]
+  Node(name: "forestFloor", visible: true, scale: vec3(1),
+    rot: quat(0, 0, 0, 1), mesh: Mesh(primitives: @[primitive]))
+
 proc loadVillageArt*(seed: int32): VillageArt =
   ## Loads only reviewed CC0 props and caches generated foliage once.
+  result.forestFloor = createPropPack([forestFloorNode()],
+    repeatTexture = true)
   result.placeholders = createPropPack([placeholderNode()])
   result.grove = generateGrove(seed.int, {LightRock})
   result.trees = createPropPack(broadleafNodes(seed), repeatTexture = true)
   let houses = houseNodes()
   result.houses = createPropPack(houses, repeatTexture = true)
   result.roof = houseRoof(houses[0])
+  result.yard = loadPropPack(GardenPartsPath, unitHeight = false,
+    textured = true, materialColors = true, textureSize = 512)
+  result.yardParts = readFile(GardenLayoutPath).fromJson(seq[GardenPart])
   if fileExists(DetailsPath):
     result.details = loadPropPack(
       DetailsPath,
+      repeatTexture = true,
       unitHeight = false,
       textured = true,
       materialColors = true,
@@ -236,71 +305,104 @@ proc villagePoint*(tile: Tile2): Vec3 =
     z = tile.y.float32 - HalfGrid + 0.5'f
   vec3(x, surfaceHeight(x, z), z)
 
-proc placeVillage*(art: VillageArt, map: MapData, seed: int32) =
+proc placeVillage*(art: VillageArt, map: MapData, seed: int32,
+    layer = AllLayer) =
   ## Assembles the reference's nine cottages, tree square and garden lanes.
   clearProps()
+  var placementLayer = GroundLayer
+
+  proc placeLayerProp(pack: PropPack, name: string, position: Vec3,
+      rotation = 0'f, scale = 1'f, tint = vec3(1), stretch = vec3(1)) =
+    ## Selects actual 3D meshes for a layer without changing their transforms.
+    if layer == AllLayer or layer == placementLayer:
+      pack.placeProp(name, position, rotation, scale, tint, stretch)
+
+  art.forestFloor.placeLayerProp("forestFloor", vec3(0))
 
   proc point(x, z: float32): Vec3 =
     ## Samples the terrain under a decorative village location.
     vec3(x + 0.5'f, surfaceHeight(x + 0.5'f, z + 0.5'f), z + 0.5'f)
 
-  proc detail(name: string, x, z: float32, yaw = 0'f, size = 1'f) =
+  proc detail(name: string, x, z: float32, yaw = 0'f, size = 1'f,
+      height = 0'f) =
     ## Queues one of the reusable painted village details.
     if art.details.hasProp(name):
-      art.details.placeProp(name, point(x, z), yaw, size)
+      art.details.placeLayerProp(name, point(x, z) + vec3(0, height, 0),
+        yaw, size)
     else:
-      art.placeholders.placeProp("placeholder", point(x, z), yaw, size)
+      art.placeholders.placeLayerProp("placeholder",
+        point(x, z) + vec3(0, height, 0), yaw, size)
 
-  proc flowers(x, z: float32, variant: int, size = 1'f) =
+  proc flowers(x, z: float32, variant: int, size = 1'f,
+      height = 0'f) =
     ## Mixes daisies, cornflowers, purple blooms and golden flowers.
     const Names = [
       "flowers_white", "flowers_white", "flowers_blue",
       "flowers_white", "flowers_purple", "flowers_gold"
     ]
-    detail(Names[abs(variant) mod Names.len], x, z, variant.float32, size)
+    detail(Names[abs(variant) mod Names.len], x, z, variant.float32, size, height)
 
+  placementLayer = VegetationLayer
   for plant in groundPlants(seed):
-    art.trees.placeProp(
+    art.trees.placeLayerProp(
       "leaf" & $plant.variant,
       point(plant.x.float32 / 1000, plant.z.float32 / 1000),
-      plant.yaw, plant.size, vec3(1, plant.height, 1)
+      plant.yaw, plant.size, stretch = vec3(1, plant.height, 1)
     )
+  placementLayer = PropsLayer
   for i, fence in GardenFences:
     let
       x = fence.x.float32 / 1000
       z = fence.z.float32 / 1000
     detail("fence", x, z, fence.yaw, fence.size)
-    flowers(x * 0.98'f, z, i, 1.1'f)
+    for j in 0 ..< 1:
+      let angle = j.float32 * 2.4'f + i.float32
+      flowers(x + cos(angle) * 0.35'f,
+        z + sin(angle) * 0.35'f, i + j div 2, 0.65'f)
 
-  art.props[1].placeProp(art.names[1], point(TownWell.x, TownWell.y),
+  art.props[1].placeLayerProp(art.names[1], point(TownWell.x, TownWell.y),
     scale = 4.5'f)
   for i in 0 ..< 12:
     let angle = i.float32 * 2'f * PI.float32 / 12'f
     flowers(TownWell.x + cos(angle) * 2.2'f,
       TownWell.y + sin(angle) * 2.2'f, i, 0.85'f)
 
-  detail("tree_curb", 0, 0, size = TownLayoutScale)
-  detail("plaza_paving", 0, 0, size = TownLayoutScale)
-  for i in 0 ..< 4:
-    let angle = 0.25'f + i.float32 * 0.88'f
+  detail("tree_curb", -1.028, -0.557, size = 1.16'f)
+  placementLayer = GroundLayer
+  detail("plaza_paving", -1.028, -0.73, size = 0.82'f)
+  placementLayer = PropsLayer
+  for angle in [0.82'f, 2.32'f]:
     # The seat fronts point along local +Z, away from the trunk.
-    detail("bench", cos(angle) * 3.7'f, sin(angle) * 3.7'f,
-      angle - PI.float32 / 2, 1.2'f)
+    detail("bench", -1.028'f + cos(angle) * 4.0'f,
+      -0.557'f + sin(angle) * 4.0'f,
+      angle - PI.float32 / 2, 1.0'f)
   for i in 0 ..< 14:
     let angle = i.float32 * 2'f * PI.float32 / 14'f
-    flowers(cos(angle) * 2.0'f, sin(angle) * 2.0'f, i, 0.8'f)
-  detail("market", -5.5, -4, 0.15'f, 1.1'f)
-  detail("lantern", -6.4'f, -5.2'f)
+    flowers(-1.028'f + cos(angle) * 2.4'f,
+      -0.557'f + sin(angle) * 2.4'f, i, 0.65'f)
+  detail("market", -5.91, -7.40, 0.15'f, 1.1'f)
+  detail("lantern", -2.30'f, -12.80'f)
   detail("lantern", 6.8'f, 2)
-  detail("sign", -5.6, -12.7, -0.2'f)
-  detail("sign", -2, 20.5, 0.2'f)
-  detail("beehive", TownOrchard.x - 1.5'f,
-    TownOrchard.y + 1.5'f, 0.1'f, 1.4'f)
-  detail("lupins", TownIsland.x, TownIsland.y + 1, size = 1.4'f)
+  detail("sign", -5.47, -15.32, -0.2'f)
+  detail("sign", -1.78, 25.32, 0.2'f)
+  detail("beehive", -10.58'f, 17.23'f, 0.1'f, 1.4'f)
+  for pixel in [vec2(129, 395), vec2(358, 451), vec2(943, 209),
+      vec2(743, 626), vec2(904, 973)]:
+    let position = referencePoint(pixel.x, pixel.y)
+    detail("lantern", position.x, position.y, size = 0.92'f)
+  for pixel in [vec2(756, 494), vec2(431, 973)]:
+    let position = referencePoint(pixel.x, pixel.y)
+    detail("birdhouse", position.x, position.y, size = 1.0'f)
+  placementLayer = VegetationLayer
+  detail("lupins", TownIsland.x, TownIsland.y + 1, size = 1.8'f)
+  for pixel in [vec2(409, 159), vec2(380, 262), vec2(1027, 618)]:
+    let position = referencePoint(pixel.x, pixel.y)
+    detail("sunflowers", position.x, position.y, size = 1.5'f)
 
   for i, house in map.houses:
     let
-      center = villagePoint(house.center)
+      anchor = houseAnchor(i)
+      center = point(anchor.x.float32 / 1000, anchor.z.float32 / 1000)
       yaw = houseYaw(i)
       turnCos = cos(yaw)
       turnSin = sin(yaw)
@@ -318,78 +420,128 @@ proc placeVillage*(art: VillageArt, map: MapData, seed: int32) =
       detail(name, position.x - 0.5'f, position.z - 0.5'f,
         yaw, size * HouseScale)
 
-    art.houses.placeProp("home" & $i, center, yaw)
-    for side in [-1'f, 1'f]:
-      art.props[2].placeProp(
-        art.names[2], localPoint(side * 3.1'f, 2.4'f), yaw,
-        0.95'f * HouseScale
-      )
-      localDetail("lupins", side * 5.8'f, 0.6'f, 1.1'f)
-      localDetail("lantern", side * 6.4'f, 4.1'f, 0.85'f)
-    for j in 0 ..< 18:
-      let
-        angle = j.float32 * 2'f * PI.float32 / 18'f
-        px = cos(angle) * 6.8'f
-        pz = sin(angle) * 4.0'f
-        position = localPoint(px, pz)
-      if pz > 3 and abs(px) < 1.7'f:
+    placementLayer = BuildingsLayer
+    art.houses.placeLayerProp("home" & $i, center, yaw)
+    for piece in art.yardParts:
+      if piece.kind == "stone":
         continue
-      flowers(position.x - 0.5'f, position.z - 0.5'f,
-        i + j, 1.2'f * HouseScale)
-    localDetail("sunflowers", 5.8'f, -1.3'f, 1.2'f)
-    if i in [0, 7, 8]:
+      placementLayer =
+        if piece.kind == "stone": GroundLayer
+        else: PropsLayer
       let
-        px = -1.6'f
-        pz = HouseHillCenterZ - 0.8'f
-        height = roofHeight(art.roof, px, pz)
-      art.props[4].placeProp(
-        art.names[4],
-        localPoint(px / HouseScale, pz / HouseScale, height / HouseScale),
-        yaw, 2.7'f * HouseScale
-      )
-    for j in 0 ..< 11:
-      let
-        angle = j.float32 * 2'f * PI.float32 / 11'f
-        px = cos(angle) * 2.4'f
-        pz = sin(angle) * 2.15'f + HouseHillCenterZ
-        height = roofHeight(art.roof, px, pz)
-      if pz > HouseMeshOffset.z - 0.5'f or height < 0.5'f:
-        continue
-      let position = localPoint(
-        px / HouseScale, pz / HouseScale, height / HouseScale)
-      art.trees.placeProp(
-        "leaf" & $(3 + j mod 3), position - vec3(0, 0.05, 0),
-        yaw + j.float32, 0.65'f * HouseScale
-      )
-      if art.details.hasProp("flowers_white"):
-        art.details.placeProp(
-          "flowers_white", position,
-          yaw + j.float32, 0.8'f * HouseScale
+        local = vec3(piece.position[0], piece.position[1],
+          piece.position[2]) * HouseMeshScale + HouseMeshOffset
+        position = center + vec3(
+          turnCos * local.x - turnSin * local.z, local.y,
+          turnSin * local.x + turnCos * local.z
         )
+      art.yard.placeLayerProp(piece.name, position, yaw, HouseMeshScale,
+        tint = vec3(0.85, 0.85, 0.85))
+    placementLayer = PropsLayer
+    for side in [-1'f, 1'f]:
+      art.props[2].placeLayerProp(
+        art.names[2], localPoint(side * 3.1'f, 2.4'f), yaw,
+        1.3'f * HouseScale
+      )
+    placementLayer = BuildingsLayer
+    if i in [0, 8]:
+      let pixel = if i == 0: vec2(437, 119) else: vec2(902, 1131)
+      var position = point(referencePoint(pixel.x, pixel.y).x,
+        referencePoint(pixel.x, pixel.y).y)
+      for iteration in 0 ..< 6:
+        let
+          dx = position.x - center.x
+          dz = position.z - center.z
+          px = turnCos * dx + turnSin * dz
+          pz = -turnSin * dx + turnCos * dz
+          height = roofHeight(art.roof, px, pz)
+        position.y = height
+        position.z = (pixel.y - 650) * 0.057'f +
+          height / tan(TownCameraPitch)
+      art.props[4].placeLayerProp(art.names[4], position, yaw, 3.7'f)
+    for bed, offset in [vec2(-2.8, -1.2), vec2(2.7, -2.2),
+        vec2(-0.8, -4.1), vec2(0.8, -0.4)]:
+      for j in 0 ..< 7:
+        let
+          angle = j.float32 * 2.399963'f + i.float32 * 0.37'f
+          radius = sqrt((j.float32 + 0.5'f) / 7'f) * 1.45'f
+          px = offset.x + cos(angle) * radius
+          pz = offset.y + sin(angle) * radius
+          height = roofHeight(art.roof, px, pz)
+        if pz > HouseMeshOffset.z - 0.25'f or height < 0.5'f:
+          continue
+        let position = localPoint(
+          px / HouseScale, pz / HouseScale, height / HouseScale)
+        if art.details.hasProp("flowers_white") and j mod 3 != 0:
+          art.details.placeLayerProp(
+            if bed == 1 and j mod 4 == 0: "flowers_blue"
+            else: "flowers_white",
+            position + vec3(0, 0.12, 0), yaw + j.float32,
+            0.55'f, stretch = vec3(1, 0.32, 1)
+          )
+    placementLayer = PropsLayer
     if i in [5, 8]:
       localDetail("laundry", 3.2'f, 2, 0.85'f)
 
+  placementLayer = PropsLayer
   for i, tile in map.gardenTiles:
-    art.props[3].placeProp(art.names[3], villagePoint(tile),
-      houseYaw(i div GardensPerHouse), 0.9'f * HouseScale)
+    let yaw = houseYaw(i div GardensPerHouse)
+    art.props[3].placeLayerProp(art.names[3], villagePoint(tile),
+      yaw, 1.55'f * HouseScale)
+    if art.details.hasProp("flowers_white"):
+      for side in [-0.35'f, 0.35'f]:
+        art.details.placeLayerProp(
+          if i mod 3 == 0: "flowers_blue" else: "flowers_white",
+          villagePoint(tile) +
+            vec3(cos(yaw) * side, GardenCropLift, sin(yaw) * side),
+          yaw, 0.75'f
+        )
 
-  for i, tree in borderTrees(seed):
-    let position = point(tree.x.float32, tree.z.float32)
-    if i mod 3 == 0:
-      art.grove.rocks.placeProp(
-        modelName(LightRock, i mod BrushVariants),
-        position + vec3(1.3, 0, -1.2), tree.yaw,
-        0.8'f + tree.size * 0.35'f
-      )
-
-  for spot in meadowSpots(seed):
+  const StoneBorders = [
+    @[(28, 260), (62, 220), (102, 165), (151, 124), (208, 97)],
+    @[(866, 107), (925, 139), (1019, 196), (1076, 254)],
+    @[(0, 488), (40, 434), (65, 406)],
+    @[(1070, 423), (1105, 461), (1131, 498)],
+    @[(28, 708)], @[(1079, 711), (1096, 741)],
+    @[(1067, 1031), (1043, 1080), (1011, 1130)],
+    @[(143, 1036), (127, 1061)],
+    @[(113, 1158), (81, 1179)],
+    @[(92, 1320)], @[(1011, 1278)],
+    @[(710, 1395), (757, 1377), (811, 1357), (852, 1351)]
+  ]
+  for key, chain in StoneBorders:
+    for i in 0 ..< chain.len:
+      let
+        pixel = chain[i]
+        position = referencePoint(pixel[0].float32, pixel[1].float32)
+        next = chain[min(i + 1, chain.high)]
+        finish = referencePoint(next[0].float32, next[1].float32)
+        count = max(1, int(ceil(length(finish - position) / 0.95'f)))
+      for j in 0 ..< count:
+        let at = mix(position, finish, j.float32 / count.float32)
+        art.grove.rocks.placeLayerProp(
+          modelName(LightRock, (key + i + j) mod BrushVariants),
+          point(at.x, at.y), (i + j).float32 * 1.3'f,
+          1.0'f + ((key + i + j) mod 3).float32 * 0.15'f,
+          tint = vec3(1.75, 1.72, 1.62)
+        )
+  placementLayer = VegetationLayer
+  for plant in groundPlants(seed):
+    if plant.variant notin 3 .. 5:
+      continue
+    placementLayer = VegetationLayer
     let
-      x = spot.x.float32 / 1000
-      z = spot.z.float32 / 1000
-    if spot.key mod 3 != 0:
-      flowers(x + 0.6'f, z + 0.5'f, spot.key, 1.15'f)
-    if spot.key mod 7 == 0:
-      detail("lupins", x - 0.5'f, z, size = 1.2'f)
+      x = plant.x.float32 / 1000
+      z = plant.z.float32 / 1000
+      key = abs(plant.x * 7 + plant.z * 11)
+    for j in 0 ..< 3:
+      let angle = j.float32 * 2.4'f + plant.yaw
+      flowers(x + cos(angle) * plant.size * 0.75'f,
+        z + sin(angle) * plant.size * 0.75'f, key div 2300, 0.9'f,
+        height = plant.size * plant.height * 0.55'f)
+    if key mod 7 == 0:
+      detail("lupins", x - 0.35'f, z, size = 1.35'f,
+        height = plant.size * 0.3'f)
   bakeTerrain(rebuildWalkability = false)
 
 proc drawCrop*(

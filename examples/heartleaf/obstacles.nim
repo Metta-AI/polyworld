@@ -1,4 +1,6 @@
-import layouts
+import
+  vmath,
+  layouts
 
 const
   ObstacleUnits* = 1000'i32
@@ -28,20 +30,25 @@ proc villageObstacles*(seed: int32): seq[Obstacle] =
       ax: fence.ax, az: fence.az, bx: fence.bx, bz: fence.bz,
       radius: fence.radius
     )
-  # The CC0 cottage includes two curved fences mirrored about its front path.
+  # The extracted yard rails retain their original curved centerlines.
   const FencePoints = [
     (2560, 45), (2640, 820), (2260, 1610), (1550, 2130), (720, 2360)
   ]
   for slot, house in TownHouses:
+    let anchor = houseAnchor(slot)
     proc transform(x, z: int): tuple[x, z: int32] =
       ## Applies the cottage mesh scale, offset, and signed yaw to its rails.
       let
-        px = x * 975 div 1000
-        pz = z * 975 div 1000 + 741
+        scale = int(HouseMeshScale * 1000)
+        front = max(0, z - 220)
+        spread = 1000 + 150 * min(front, 580) div 580
+        px = x * spread div 1000 * scale div 1000
+        pz = (z + front * 4 div 10) * scale div 1000 +
+          int(HouseMeshOffset.z * 1000)
         turn = HouseTurns[slot]
       (
-        int32(house[0] * 1000 + (turn[0] * px - turn[1] * pz) div 1000),
-        int32(house[1] * 1000 + (turn[1] * px + turn[0] * pz) div 1000)
+        int32(anchor.x + (turn[0] * px - turn[1] * pz) div 1000),
+        int32(anchor.z + (turn[1] * px + turn[0] * pz) div 1000)
       )
     for side in [-1, 1]:
       var points: seq[tuple[x, z: int32]]
@@ -60,7 +67,8 @@ proc villageObstacles*(seed: int32): seq[Obstacle] =
         result.add Obstacle(
           kind: FenceObstacle,
           ax: points[i - 1].x, az: points[i - 1].z,
-          bx: points[i].x, bz: points[i].z, radius: 91
+          bx: points[i].x, bz: points[i].z,
+          radius: int32(150 * HouseMeshScale)
         )
 
 proc nearSegment(

@@ -60,7 +60,18 @@ proc checkArt() =
         for primitive in node.mesh.primitives:
           doAssert primitive.material.baseColor != nil
     echo "Loaded generated village model: ", name
+  checkCc0(CottagePath)
   checkCc0(DetailsPath)
+  checkCc0(GardenPartsPath)
+  checkCc0(GardenLayoutPath)
+  for suffix in [".rgb.png", ".height.png"]:
+    checkCc0(DataRoot / "terrain/tiles" / ("heartleaf-turf" & suffix))
+  for family in ["grass", "path", "paving"]:
+    for variant in 1 .. 3:
+      for suffix in [".rgb.png", ".height.png"]:
+        checkCc0(DataRoot / "terrain/tiles" /
+          ("heartleaf-layer-" & family & "-" & $variant & suffix))
+  checkCc0(DataRoot / "terrain/heartleaf/layers/01-grass-and-paths.png")
   checkCc0(DataRoot / "themes/heartleaf/heartleaf_logo.png")
   var detailNames: HashSet[string]
   for node in readGltfFile(DetailsPath).root.walkNodes:
@@ -79,9 +90,17 @@ proc checkArt() =
             ("heartleaf-" & family & "-" & $variant & suffix))
   let
     houses = houseNodes()
-    originalHouse = readGltfFile(VillageRoot & "hobbit_house.glb")
+    originalHouse = readGltfFile(CottagePath)
     originalBounds = originalHouse.root.getAABounds()
     originalSize = originalBounds.max - originalBounds.min
+  doAssert originalBounds.max.z < 0.35'f,
+    "The cottage shell must not contain the extracted front yard"
+  var yardNames: HashSet[string]
+  for node in readGltfFile(GardenPartsPath).root.walkNodes:
+    if node.mesh != nil:
+      yardNames.incl node.name
+      doAssert node.getAABounds().min.y >= -0.001'f
+  doAssert yardNames.len == 30, "Every yard piece must remain independent"
   doAssert houses.len == VillagerCount
   let
     target = TownCameraTarget
@@ -108,7 +127,7 @@ proc checkArt() =
     doAssert roofHeight(roof, 0, HouseHillCenterZ) > 3
     doAssert roofHeight(roof, 0, HouseHillCenterZ - 2) > 2,
       "The round mound must extend behind the facade"
-    doAssert roofHeight(roof, 0, -8) == 0
+    doAssert roofHeight(roof, 0, -12) == 0
     for x in [bounds.min.x, bounds.max.x]:
       for y in [bounds.min.y, bounds.max.y]:
         for z in [bounds.min.z, bounds.max.z]:
@@ -117,8 +136,8 @@ proc checkArt() =
             rotated = vec3(cos(angle) * x - sin(angle) * z,
               y, sin(angle) * x + cos(angle) * z)
             position = rotated + vec3(
-              TownHouses[i][0].float32 + 0.5'f, 0,
-              TownHouses[i][1].float32 + 0.5'f
+              houseAnchor(i).x.float32 / 1000 + 0.5'f, 0,
+              houseAnchor(i).z.float32 / 1000 + 0.5'f
             )
           let clip = projection * view * vec4(position, 1)
           doAssert abs(clip.x / clip.w) < 0.8'f

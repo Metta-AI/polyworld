@@ -4,7 +4,8 @@
 
 import
   std/strformat,
-  polyworld/pathing,
+  pixie,
+  polyworld/[common, pathing],
   ../examples/heartleaf/[content, maps, ground]
 
 const Seed = 1988'i32
@@ -160,3 +161,24 @@ block townCoverage:
   doAssert feathered > 1000, "The golden paths lost their soft edges"
 
 echo "test_hlf_ground: all checks passed"
+
+block referenceLayerRegistration:
+  let
+    reference = readImage(DataRoot &
+      "/terrain/heartleaf/layers/01-grass-and-paths.png")
+    mask = buildReferenceGroundMask(reference)
+  proc coverage(px, py: int): tuple[stone, dirt: uint8] =
+    ## Samples registered reference pixels in the runtime material mask.
+    let
+      x = int(((px - 560).float32 * 0.044'f + HalfGrid) *
+        MaskTexelsPerTile.float32)
+      y = int(((py - 650).float32 * 0.057'f + HalfGrid) *
+        MaskTexelsPerTile.float32)
+      index = (y * MaskSize + x) * MaskChannels
+    (mask[index], mask[index + 1])
+  doAssert coverage(555, 314).dirt > 180
+  doAssert coverage(600, 400).dirt < 30
+  doAssert coverage(549, 553).stone > 120
+  doAssert coverage(549, 650).stone < 30
+  doAssert coverage(549, 650).dirt < 30
+  echo "Reference layer paths, plaza and planted islands register correctly."

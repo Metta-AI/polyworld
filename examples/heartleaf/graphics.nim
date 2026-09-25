@@ -8,7 +8,7 @@ import
   std/[math, times],
   fixxy, opengl, pixie, vmath, windy, silky,
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks,
-    common, gameuis, inputs, pathing, player, profiles, quadterrain, rtscameras,
+    common, gameuis, inputs, occlusions, pathing, player, profiles, quadterrain, rtscameras,
     shadows, shapes, tapes, terrainsurfaces, viewers],
   content,
   maps as mapgen,
@@ -19,6 +19,7 @@ import
   controls,
   ground,
   appearances,
+  ambience,
   scenery,
   layouts,
   democamera,
@@ -133,9 +134,18 @@ proc runGraphics*() =
       options.vsync
     )
   let splash = startSplash(sk, window)
+  var captureLayer = AllLayer
+  when defined(takeScreenshot):
+    case getEnv("HEARTLEAF_LAYER")
+    of "ground": captureLayer = GroundLayer
+    of "buildings": captureLayer = BuildingsLayer
+    of "vegetation": captureLayer = VegetationLayer
+    of "props": captureLayer = PropsLayer
+    of "", "all": discard
+    else: raise newException(ValueError, "Unknown Heartleaf capture layer")
 
   profileBlock "terrain":
-    quadterrain.seed = run.mapSeed
+    quadterrain.seed = run.world.map.seed
     initTerrain(
       treeStyle = NoTrees,
       terrainStyle = GeneratedTerrain,
@@ -143,25 +153,28 @@ proc runGraphics*() =
       settings = TerrainAssets(size: 512, grass: false, water: false)
     )
     terrainSplats = false
+    terrainTextureScale = 0.16'f
     for (surface, name) in [
-      (GrassSurface, "heartleaf-grass-1"),
-      (DirtSurface, "heartleaf-path-2"),
-      (CobbleSurface, "heartleaf-paving-1")
+      (GrassSurface, "heartleaf-layer-grass-1"),
+      (OliveSurface, "heartleaf-layer-grass-1"),
+      (MossSurface, "heartleaf-layer-grass-1"),
+      (SparseSurface, "heartleaf-layer-grass-1"),
+      (DirtSurface, "heartleaf-layer-path-2"),
+      (CobbleSurface, "heartleaf-layer-paving-1")
     ]:
-      let paint = readImage(DataRoot & "/terrain/tiles/" & name & ".rgb.png")
-      if surface == DirtSurface:
-        for pixel in paint.data.mitems:
-          let neutral = (pixel.r.float32 + pixel.g.float32 +
-            pixel.b.float32) / 3'f
-          pixel.r = uint8((pixel.r.float32 * 0.76'f + neutral * 0.24'f) * 0.93'f)
-          pixel.g = uint8((pixel.g.float32 * 0.76'f + neutral * 0.24'f) * 0.93'f)
-          pixel.b = uint8((pixel.b.float32 * 0.76'f + neutral * 0.24'f) * 0.93'f)
+      var paint: Image
+      if surface <= SparseSurface:
+        let tint = [vec3(1), vec3(0.98, 1, 0.98),
+          vec3(0.96, 0.99, 0.97), vec3(1)][surface]
+        paint = meadowTexture(tint)
+      else:
+        paint = readImage(DataRoot & "/terrain/tiles/" & name & ".rgb.png")
       setTerrainMaterial(
         surface.int,
         paint,
         readImage(DataRoot & "/terrain/tiles/" & name & ".height.png")
       )
-    for kind in [RoadTile, StoneTile, GardenTileKind, HouseTileKind]:
+    for kind in [RoadTile, StoneTile, GardenTileKind, HouseTileKind, TreeTile]:
       setTileMaterial(
         kind.int,
         GrassSurface.float32,
@@ -170,7 +183,9 @@ proc runGraphics*() =
         vec3(0.85),
         1
       )
-    uploadGroundMask(buildTownGroundMask(run.mapSeed), MaskSize)
+    uploadGroundMask(buildReferenceGroundMask(readImage(
+      DataRoot & "/terrain/heartleaf/layers/01-grass-and-paths.png"
+    )), MaskSize)
     setGroundLayers(
       CobbleSurface.float32,
       DirtSurface.float32,
@@ -182,11 +197,16 @@ proc runGraphics*() =
 
   proc placeVillageProps() =
     ## Places the reference village over its matching simulation map.
-    villageArt.placeVillage(run.world.map, run.mapSeed)
+    villageArt.placeVillage(run.world.map, run.world.map.seed, captureLayer)
 
   profileBlock "props":
-    villageArt = loadVillageArt(run.mapSeed)
+    villageArt = loadVillageArt(run.world.map.seed)
     placeVillageProps()
+  if captureLayer == AllLayer:
+    let field = villageOcclusion(run.world.map.seed, villageArt.roof)
+    uploadAmbientOcclusion(bakeOcclusion(field), field.size,
+      field.origin, field.span)
+  defer: clearAmbientOcclusion()
 
   ## Everything is always visible; there is no fog in a village.
   block:
@@ -525,6 +545,9 @@ proc runGraphics*() =
     captureCheckpoint()
 
   when defined(takeScreenshot):
+    if existsEnv("HEARTLEAF_LAYER"):
+      cameraDistance = 1402'f * 0.044'f / 2 / TownCameraScale
+      cameraTarget = TownCameraTarget
     applyScreenshotCamera(cameraDistance)
     if existsEnv("CAM_X"):
       cameraTarget.x = getEnv("CAM_X").parseFloat.float32 - HalfGrid
@@ -593,7 +616,10 @@ proc runGraphics*() =
         ## One clock for the whole frame: the palette, the sun's position,
         ## and its shadow map all follow the village hour, so the dinner
         ## bell rings at golden hour and the walk home is dusk.
-        scene.setToonHour(simClockHour(frameAlpha))
+        scene.setToonHour(simClockHour(frameAlpha),
+          azimuthOffset = 135, elevationScale = 0.72'f)
+        sunShadowBias = 0.00045'f
+        sunShadowSoftness = 1.8'f
         setEnvironmentPalette(scene.toon)
 
         proc drawCrops(matrix: Mat4) =
@@ -625,16 +651,24 @@ proc runGraphics*() =
         sunDepthPasses(window.size):
           drawTerrainSunDepth()
           scene.sunDepthPass = true
-          drawWorldVillagers()
+          when not defined(sceneCapture):
+            if captureLayer == AllLayer:
+              drawWorldVillagers()
           scene.sunDepthPass = false
-        glClearColor(0.05, 0.06, 0.09, 1.0)
+        if captureLayer in {BuildingsLayer, VegetationLayer, PropsLayer}:
+          glClearColor(0, 0, 0, 0)
+        else:
+          glClearColor(0.13, 0.19, 0.12, 1)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-        drawTerrain(viewProjection, showTiles)
-        drawCrops(viewProjection)
-        beginCharacters(scene, window, view, projection, cameraEye)
-        drawWorldVillagers()
-        finishCharacters(scene)
-        clickMarks.drawClickMarks(viewProjection)
+        drawTerrain(viewProjection, showTiles,
+          drawGround = captureLayer in {AllLayer, GroundLayer})
+        if captureLayer == AllLayer:
+          when not defined(sceneCapture):
+            drawCrops(viewProjection)
+            beginCharacters(scene, window, view, projection, cameraEye)
+            drawWorldVillagers()
+            finishCharacters(scene)
+            clickMarks.drawClickMarks(viewProjection)
         if showPaths:
           worldShapes.clear()
           for slot in 0 ..< VillagerCount:
@@ -652,74 +686,75 @@ proc runGraphics*() =
             if points.len >= 2:
               worldShapes.addPolyline(points, VillagerColors[slot])
           worldShapes.draw(viewProjection)
-      profileBlock "ui":
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_CULL_FACE)
-        glDisable(GL_BLEND)
-        when not defined(emscripten):
-          glDisable(GL_MULTISAMPLE)
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-        sk.beginUi(window, window.size)
+      when not defined(sceneCapture):
+        profileBlock "ui":
+          glDisable(GL_DEPTH_TEST)
+          glDisable(GL_CULL_FACE)
+          glDisable(GL_BLEND)
+          when not defined(emscripten):
+            glDisable(GL_MULTISAMPLE)
+          glActiveTexture(GL_TEXTURE0)
+          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          sk.beginUi(window, window.size)
 
-        ## World overlays drawn in HUD space: occupant portraits float over
-        ## each occupied house, and gesture icons over busy villagers.
-        for house in 0 ..< VillagerCount:
-          var inside: seq[int32]
-          for slot in 0 ..< VillagerCount:
-            if run.world.villagers[slot].inHouse == int32(house):
-              inside.add int32(slot)
-          if inside.len == 0:
-            continue
-          let anchor = screenPosition(
-            tileWorldPoint(run.world.map.houses[house].center) +
-              vec3(0, 3.4'f32, 0),
-            viewProjection
-          ) / sk.uiScale
-          let width = float32(inside.len) * 22 - 2
-          sk.drawSlot(
-            GameUiPanel(
-              origin: anchor - vec2(width * 0.5'f32 + 4, 12),
-              size: vec2(width + 8, 26)
+          ## World overlays drawn in HUD space: occupant portraits float over
+          ## each occupied house, and gesture icons over busy villagers.
+          for house in 0 ..< VillagerCount:
+            var inside: seq[int32]
+            for slot in 0 ..< VillagerCount:
+              if run.world.villagers[slot].inHouse == int32(house):
+                inside.add int32(slot)
+            if inside.len == 0:
+              continue
+            let anchor = screenPosition(
+              tileWorldPoint(run.world.map.houses[house].center) +
+                vec3(0, 3.4'f32, 0),
+              viewProjection
+            ) / sk.uiScale
+            let width = float32(inside.len) * 22 - 2
+            sk.drawSlot(
+              GameUiPanel(
+                origin: anchor - vec2(width * 0.5'f32 + 4, 12),
+                size: vec2(width + 8, 26)
+              )
             )
-          )
-          for index, slot in inside:
+            for index, slot in inside:
+              sk.drawSprite(
+                villagerPortraitKey(slot),
+                anchor + vec2(
+                  float32(index) * 22 - width * 0.5'f32, -9),
+                vec2(20)
+              )
+          for slot in 0 ..< VillagerCount:
+            let v = run.world.villagers[slot]
+            if v.inHouse >= 0:
+              continue
+            if v.order != TalkOrder and v.animation notin {GatherAnimation, WaveAnimation}:
+              continue
+            let anchor = screenPosition(
+              renderPoint(v) + vec3(0, VillagerHeight + 0.6'f32, 0),
+              viewProjection
+            ) / sk.uiScale
             sk.drawSprite(
-              villagerPortraitKey(slot),
-              anchor + vec2(
-                float32(index) * 22 - width * 0.5'f32, -9),
+              if v.animation == GatherAnimation: "gather" else: "wave",
+              anchor - vec2(10, 10),
               vec2(20)
             )
-        for slot in 0 ..< VillagerCount:
-          let v = run.world.villagers[slot]
-          if v.inHouse >= 0:
-            continue
-          if v.order != TalkOrder and v.animation notin {GatherAnimation, WaveAnimation}:
-            continue
-          let anchor = screenPosition(
-            renderPoint(v) + vec3(0, VillagerHeight + 0.6'f32, 0),
-            viewProjection
-          ) / sk.uiScale
-          sk.drawSprite(
-            if v.animation == GatherAnimation: "gather" else: "wave",
-            anchor - vec2(10, 10),
-            vec2(20)
-          )
 
-        let speedClicked = drawUi(
-          sk,
-          window,
-          transport,
-          cameraTarget,
-          cameraDistance,
-          viewProjection,
-          followSlot,
-          actionCam,
-          preserveFollowOnAuto = demoMode
-        )
-        if speedClicked:
-          snapFollowCamera()
-        sk.endUi()
+          let speedClicked = drawUi(
+            sk,
+            window,
+            transport,
+            cameraTarget,
+            cameraDistance,
+            viewProjection,
+            followSlot,
+            actionCam,
+            preserveFollowOnAuto = demoMode
+          )
+          if speedClicked:
+            snapFollowCamera()
+          sk.endUi()
       when defined(takeScreenshot):
         captureScreenshot(
           window,

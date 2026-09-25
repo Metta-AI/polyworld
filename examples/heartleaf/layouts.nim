@@ -5,36 +5,40 @@ import
 
 const
   TownHouses* = [
-    (0, -25), (-14, -20), (14, -18), (-16, -7), (16, -5),
-    (-17, 9), (16, 11), (-10, 26), (10, 26)
+    (0, -26), (-13, -22), (13, -20), (-16, -7), (14, -5),
+    (-18, 10), (15, 12), (-10, 31), (9, 30)
   ]
-  HouseScale* = 0.5'f
+  HousePixels* = [
+    (562, 196), (271, 278), (864, 315), (202, 533), (892, 568),
+    (153, 830), (912, 861), (347, 1200), (771, 1184)
+  ]
+  HouseScale* = 0.85'f
   HouseMeshScale* = 1.95'f * HouseScale
-  HouseMeshOffset* = vec3(0, 0.06, 0.76) * HouseMeshScale
-  HouseHillRadius* = 3.85'f * HouseMeshScale
-  HouseHillCenterZ* = -1.39'f * HouseMeshScale
+  HouseMeshOffset* = vec3(0, 0.06, 0) * HouseMeshScale
+  HouseHillRadius* = 3.88'f * HouseMeshScale
+  HouseHillCenterZ* = -1.4'f * HouseMeshScale
   HouseTurns* = [
     (996, -87), (940, -342), (883, 469), (906, -423), (829, 559),
     (839, -545), (788, 616), (819, -574), (875, 485)
   ]
   HouseGardenOffsets* = [
-    (-1'i32, 2'i32), (1'i32, 2'i32), (4'i32, 2'i32)
+    (-3'i32, 2'i32), (3'i32, 2'i32), (-1'i32, 4'i32)
   ]
   TownMinX* = -24'i32
   TownMaxX* = 24'i32
-  TownMinZ* = -33'i32
-  TownMaxZ* = 38'i32
+  TownMinZ* = -39'i32
+  TownMaxZ* = 44'i32
   BorderTreeCount* = 24
   BorderTreeVariants* = [0, 1, 2, 7, 8, 9, 10, 11, 12]
   TownPlaza* = vec2(0, 0)
-  TownWell* = vec2(2, 15)
-  TownIsland* = vec2(2, -13)
-  TownOrchard* = vec2(-7, 15)
+  TownWell* = vec2(1.26, 14.83)
+  TownIsland* = vec2(1.35, -15.1)
+  TownOrchard* = vec2(-8.1, 13.4)
   TownPlazaRadius* = 6.0'f
   TownLayoutScale* = 0.75'f
-  TownOverviewDistance* = 88.0'f
-  TownCameraTarget* = vec3(0, 0, 3)
-  TownCameraPitch* = 0.92'f
+  TownOverviewDistance* = 94.0'f
+  TownCameraTarget* = vec3(0.044, 0, 2.907)
+  TownCameraPitch* = 0.88'f
   TownCameraScale* = 0.41421356'f
 
 type
@@ -57,7 +61,8 @@ type
 
 proc referenceRoad(x, y, width: int32): RoadPoint =
   ## Converts traced reference pixels to fixed thousandths of a town tile.
-  RoadPoint(x: (x - 560) * 44, z: (y - 650) * 51, width: width)
+  RoadPoint(x: (x - 560) * 44, z: (y - 650) * 57,
+    width: width * 87 div 100)
 
 const
   TownPaths* = [
@@ -141,10 +146,16 @@ proc insideTown*(x, z: int32): bool =
   ## Clips the playable meadow to a rounded rectangle around the town.
   let
     cornerX = max(0'i32, abs(x) - 18)
-    cornerZ = max(0'i32, abs(z - 3) - 30)
+    cornerZ = max(0'i32, abs(z - 3) - 36)
   x >= TownMinX and x <= TownMaxX and
     z >= TownMinZ and z <= TownMaxZ and
     cornerX * cornerX + cornerZ * cornerZ <= 36
+
+proc houseAnchor*(slot: int): tuple[x, z: int32] =
+  ## Registers each doorway base against the supplied buildings layer.
+  let pixel = HousePixels[slot]
+  (int32((pixel[0] - 560) * 44 - 500),
+    int32((pixel[1] - 650) * 57 - 500))
 
 proc houseYaw*(slot: int): float32 =
   ## Turns each cottage facade inward by its reference image angle.
@@ -168,14 +179,40 @@ iterator roadSegments(): tuple[a, b: RoadPoint] =
   ## Shares independently traced lanes and oblique cottage approaches.
   for path in TownPaths:
     for i in 1 ..< path.len:
-      yield (path[i - 1], path[i])
+      let
+        first = path[max(0, i - 2)]
+        a = path[i - 1]
+        b = path[i]
+        last = path[min(path.high, i + 1)]
+      var previous = a
+      for step in 1 .. 4:
+        proc curve(p, q, r, t: int32): int32 =
+          ## Samples a Catmull-Rom arc with integer arithmetic for replays.
+          let k = step.int64
+          int32((2 * q.int64 * 64 + (-p + r).int64 * k * 16 +
+            (2 * p - 5 * q + 4 * r - t).int64 * k * k * 4 +
+            (-p + 3 * q - 3 * r + t).int64 * k * k * k) div 128)
+        let current = RoadPoint(
+          x: curve(first.x, a.x, b.x, last.x),
+          z: curve(first.z, a.z, b.z, last.z),
+          width: a.width + (b.width - a.width) * step.int32 div 4
+        )
+        yield (previous, current)
+        previous = current
   for slot, house in TownHouses:
-    let offset = houseOffset(slot, 0, 2)
+    let
+      offset = houseOffset(slot, 0, 2)
+      gate = RoadPoint(
+        x: house[0].int32 * 1000 - HouseTurns[slot][1].int32 * 6,
+        z: house[1].int32 * 1000 + HouseTurns[slot][0].int32 * 6,
+        width: 850
+      )
     yield (RoadPoint(
       x: (house[0].int32 + offset.x) * 1000,
       z: (house[1].int32 + offset.z) * 1000,
-      width: 650
-    ), HouseApproaches[slot])
+      width: 850
+    ), gate)
+    yield (gate, HouseApproaches[slot])
 
 proc roadClearance*(x, z: float32): float32 =
   ## Measures signed distance from the varying width of the traced lanes.
@@ -231,7 +268,7 @@ proc meadowSpots*(seed: int32): seq[MeadowSpot] =
         x = int64(ix * 2000 + key mod 1001 - 500)
         z = int64(iz * 2000 + (key div 7) mod 1001 - 500)
       if not insideTown(int32(x div 1000), int32(z div 1000)) or
-        roadContains(x.int32, z.int32, 1250) or
+        roadContains(x.int32, z.int32, 1000) or
         x * x + z * z < 49_000_000 or
         (x - 2000) * (x - 2000) +
           (z - 15000) * (z - 15000) < 12_250_000 or
@@ -241,9 +278,14 @@ proc meadowSpots*(seed: int32): seq[MeadowSpot] =
       var nearHouse = false
       for slot, house in TownHouses:
         let
-          dx = (x.int64 - house[0] * 1000) * 7 div 10
+          turn = HouseTurns[slot]
+          dx = x.int64 - house[0] * 1000
           dz = z.int64 - house[1] * 1000
-        if dx * dx + dz * dz < 10_240_000:
+          localX = (dx * turn[0] + dz * turn[1]) div 1000
+          localZ = (-dx * turn[1] + dz * turn[0]) div 1000
+          rear = localZ - int64(HouseHillCenterZ * 1000)
+        if localX * localX + rear * rear < 49_000_000 or
+          (abs(localX) < 5000 and localZ > 0 and localZ < 5700):
           nearHouse = true
         for local in HouseGardenOffsets:
           let
@@ -255,89 +297,142 @@ proc meadowSpots*(seed: int32): seq[MeadowSpot] =
       if not nearHouse:
         result.add MeadowSpot(x: x.int32, z: z.int32, key: key)
 
+proc referencePoint*(x, y: float32): Vec2 =
+  ## Maps reference pixels to town coordinates before the tile-center offset.
+  vec2((x - 560) * 0.044'f - 0.5'f, (y - 650) * 0.057'f - 0.5'f)
+
 proc borderTrees*(seed: int32): seq[BorderTree] =
-  ## Scatters a small, reproducible tree border without rows or close pairs.
+  ## Follows the reference's irregular cropped forest groups with varied crowns.
+  const Anchors = [
+    (70, 130), (214, 94), (337, 18), (772, 54), (889, 119), (1016, 166),
+    (-16, 260), (25, 416), (-28, 706), (22, 1133), (4, 1303), (146, 1395),
+    (257, 1452), (1120, 443), (1105, 696), (1070, 995), (1102, 1232),
+    (1030, 1400), (80, -30), (1054, -25), (-30, 945), (1105, 860),
+    (25, 1490), (1137, 1460)
+  ]
   var rng = initRng(seed, 0xD1B54A32D192ED03'u64)
-  for attempt in 0 ..< 10000:
-    let
-      x = rng.between(TownMinX + 2, TownMaxX - 2)
-      z = rng.between(TownMinZ + 2, TownMaxZ - 2)
-    if not insideTown(x, z) or
-      (abs(x) < 20 and z > -29 and z < 33) or townRoad(x, z):
-        continue
-    if z > 26 and abs(x) < 18:
-      continue
-    var clear = true
-    for house in TownHouses:
-      let
-        dx = x - house[0].int32
-        dz = z - house[1].int32
-      if dx * dx + dz * dz < 36:
-        clear = false
-    for tree in result:
-      let
-        dx = x - tree.x
-        dz = z - tree.z
-      if dx * dx + dz * dz < 30:
-        clear = false
-    if not clear:
-      continue
+  for i, anchor in Anchors:
+    let position = referencePoint(anchor[0].float32, anchor[1].float32)
     result.add BorderTree(
-      x: x, z: z,
-      variant: BorderTreeVariants[rng.below(BorderTreeVariants.len.int32)],
+      x: int32(round(position.x)), z: int32(round(position.y)),
+      variant: BorderTreeVariants[i mod BorderTreeVariants.len],
       yaw: rng.below(6284).float32 / 1000,
-      size: rng.between(70, 112).float32 / 100,
-      height: rng.between(85, 125).float32 / 100
+      size: rng.between(100, 135).float32 / 100,
+      height: rng.between(85, 118).float32 / 100
     )
-    if result.len == BorderTreeCount:
-      break
 
 proc groundPlants*(seed: int32): seq[GroundPlant] =
   ## Places trunks and low crowns once for both rendering and navigation.
-  result.add GroundPlant(
-    variant: 6, radius: 1400, size: 1.5'f * TownLayoutScale, height: 1
-  )
-  result.add GroundPlant(
-    x: 2000, z: -13000, variant: 4, radius: 2125,
-    yaw: 0.73'f, size: 1.7'f, height: 1
-  )
-  for i, offset in [(-1500'i32, 0'i32), (1200'i32, -2000'i32)]:
-    result.add GroundPlant(
-      x: -7000 + offset[0], z: 15000 + offset[1], radius: 400,
-      variant: i, yaw: i.float32, size: 0.58'f, height: 1
+  var plants: seq[GroundPlant]
+  proc plantAt(x, y: float32, variant: int, size, height: float32,
+      radius: int32, yaw = 0'f) =
+    ## Stores a traced plant once for both collision and presentation.
+    let position = referencePoint(x, y)
+    plants.add GroundPlant(
+      x: int32(round(position.x * 1000)),
+      z: int32(round(position.y * 1000)), radius: radius,
+      variant: variant, yaw: yaw, size: size, height: height
     )
+  plantAt(548, 651, 6, 1.12'f, 1.05'f, 1500)
+  plantAt(411, 366, 1, 0.53'f, 1, 400)
+  plantAt(397, 891, 0, 0.58'f, 1, 400)
+  plantAt(345, 954, 2, 0.52'f, 1, 400)
+  plantAt(211, 1048, 1, 0.60'f, 1, 450)
+  plantAt(806, 762, 0, 0.48'f, 1, 380)
   for tree in borderTrees(seed):
-    result.add GroundPlant(
+    plants.add GroundPlant(
       x: tree.x * 1000, z: tree.z * 1000, radius: 500,
       variant: tree.variant, yaw: tree.yaw,
       size: tree.size, height: tree.height
     )
-  for spot in meadowSpots(seed):
-    let size = 750 + int32(spot.key mod 3) * 120
-    if spot.key mod 4 == 0:
-      result.add GroundPlant(
-        x: spot.x, z: spot.z, radius: size * 5 div 4,
-        variant: 3 + spot.key mod 3, yaw: spot.key.float32 * 0.73'f,
-        size: size.float32 / 1000, height: 1
-      )
-  for slot, house in TownHouses:
-    # These are the four ground shrubs from the cottage's planting ring.
-    for j, offset in [(3400, 0), (-3400, 0), (-1700, -1732),
-        (1700, -1732)]:
-      let turn = HouseTurns[slot]
-      result.add GroundPlant(
-        x: int32(house[0] * 1000 +
-          (turn[0] * offset[0] - turn[1] * offset[1]) div 1000),
-        z: int32(house[1] * 1000 +
-          (turn[1] * offset[0] + turn[0] * offset[1]) div 1000),
-        radius: 531, variant: 3, yaw: (j * 3).float32 * 0.73'f,
-        size: 0.85'f * HouseScale, height: 1
-      )
+  const Borders = [
+    @[(130, 220), (110, 278), (147, 321), (176, 348)],
+    @[(320, 175), (373, 245), (387, 278)],
+    @[(507, 31), (546, 39)],
+    @[(634, 58), (685, 89), (725, 146), (708, 182), (645, 229), (621, 272)],
+    @[(926, 207), (966, 261), (989, 312)],
+    @[(729, 321), (758, 354)],
+    @[(1002, 357), (948, 401)],
+    @[(510, 222), (526, 263)],
+    @[(506, 321), (499, 350)],
+    @[(594, 353), (569, 411), (616, 427), (649, 414)],
+    @[(285, 395), (341, 435), (365, 454)],
+    @[(298, 471), (304, 513), (335, 548)],
+    @[(433, 494), (437, 520)],
+    @[(811, 435), (739, 480), (789, 524), (826, 567)],
+    @[(45, 527), (51, 579), (113, 613), (203, 625)],
+    @[(941, 613), (996, 606), (1029, 582)],
+    @[(390, 613), (385, 656), (394, 692)],
+    @[(699, 608), (715, 672), (697, 721), (656, 753), (603, 780)],
+    @[(433, 750), (466, 764), (503, 782)],
+    @[(231, 682), (280, 723), (287, 758), (325, 796)],
+    @[(788, 737), (766, 786), (741, 823)],
+    @[(19, 818), (59, 859), (90, 911), (137, 935)],
+    @[(684, 907), (645, 949), (608, 977)],
+    @[(871, 932), (911, 969)],
+    @[(306, 944), (311, 977)],
+    @[(399, 1008), (457, 994)],
+    @[(788, 1000), (771, 1031), (682, 1076)],
+    @[(432, 1061), (477, 1098), (515, 1131)],
+    @[(872, 1064), (904, 1109), (935, 1155)],
+    @[(265, 1054), (217, 1107), (182, 1170), (193, 1248), (245, 1296), (370, 1314)],
+    @[(621, 1180), (629, 1232), (654, 1271)],
+    @[(925, 1220), (897, 1288), (830, 1311), (758, 1310)],
+    @[(489, 1354), (545, 1374), (628, 1393)],
+    @[(91, 1341), (166, 1386), (239, 1400)],
+    @[(751, 1393), (849, 1392), (964, 1399)]
+  ]
+  for key, chain in Borders:
+    for i in 1 ..< chain.len:
+      let
+        first = vec2(chain[i - 1][0].float32, chain[i - 1][1].float32)
+        last = vec2(chain[i][0].float32, chain[i][1].float32)
+        count = max(1, int(ceil(length(last - first) / 23)))
+      for j in 0 ..< count:
+        let
+          position = mix(first, last, j.float32 / count.float32)
+          variation = (key * 13 + i * 7 + j * 3) mod 9
+          size = 0.93'f + variation.float32 * 0.035'f
+        plantAt(position.x, position.y, 3 + (key + j) mod 3,
+          size, 0.83'f + variation.float32 * 0.025'f,
+          int32(size * 850), key.float32 + j.float32 * 2.4'f)
+  for i in 0 ..< 10:
+    let
+      angle = i.float32 * 2.399963'f
+      radius = sqrt((i.float32 + 0.5'f) / 10) * 37
+    plantAt(602 + cos(angle) * radius, 403 + sin(angle) * radius,
+      3 + i mod 3, 1.05'f, 0.9'f, 890, angle)
+  result = plants
+  var kept = 0
+  for plant in result:
+    var clear = true
+    for slot, house in TownHouses:
+      let
+        anchor = houseAnchor(slot)
+        dx = plant.x.int64 - anchor.x
+        dz = plant.z.int64 - anchor.z
+        turn = HouseTurns[slot]
+        localX = (dx * turn[0] + dz * turn[1]) div 1000
+        localZ = (-dx * turn[1] + dz * turn[0]) div 1000
+      if abs(localX) < plant.radius + 1000 and
+        localZ > 0 and localZ < 7400:
+          clear = false
+      for local in HouseGardenOffsets:
+        let
+          offset = houseOffset(slot, local[0], local[1])
+          gx = dx - offset.x * 1000
+          gz = dz - offset.z * 1000
+          radius = plant.radius.int64 + 800
+        if gx * gx + gz * gz < radius * radius:
+          clear = false
+    if clear:
+      result[kept] = plant
+      inc kept
+  result.setLen(kept)
 
 proc makeGardenFences(): seq[GardenFence] =
   ## Builds the same tangent rails as the mesh, leaving both gate openings.
-  for ring in [(2'f, 15'f, 3'f, 12), (0'f, 0'f, 6.4'f, 24),
-      (2'f, -13'f, 2.6'f, 10)]:
+  for ring in [(TownWell.x, TownWell.y, 3'f, 12), (0'f, 0'f, 7.5'f, 28)]:
     for i in 0 ..< ring[3]:
       let angle = i.float32 * 2'f * PI.float32 / ring[3].float32
       if abs(cos(angle)) < 0.22'f:
@@ -354,7 +449,7 @@ proc makeGardenFences(): seq[GardenFence] =
         az: int32(round((z - dz) * 1000)),
         bx: int32(round((x + dx) * 1000)),
         bz: int32(round((z + dz) * 1000)),
-        radius: int32(round(half / 0.9'f * 100)),
+        radius: int32(round(half / 0.9'f * 145)),
         yaw: angle + PI.float32 / 2, size: half / 0.9'f
       )
 
