@@ -164,6 +164,14 @@ proc gotaTick(brain: NeuralBrain): int32 {.nimcall.} =
 proc gotaLog(brain: NeuralBrain, text: string) {.nimcall.} =
   activeGame.seatLog(brain.seat, text)
 
+proc gotaTelemetry(brain: NeuralBrain): string {.nimcall.} =
+  ## GotA counters after the tier's telemetry line.
+  let seat = NeuralSeat(brain)
+  result = " decisions=" & $seat.decisions & " invalid=" & $seat.invalid
+  if seat.deferEnabled:
+    result.add " defer=" & $seat.deferDecisions & " override=" &
+      $seat.overrideDecisions
+
 proc gotaActionMask(brain: NeuralBrain, mask: var openArray[uint8]) {.nimcall.} =
   ## The current frame's validity mask (layout: neural_basic.md, Action mask).
   let seat = NeuralSeat(brain)
@@ -174,6 +182,7 @@ proc gotaActionMask(brain: NeuralBrain, mask: var openArray[uint8]) {.nimcall.} 
 let GotaContract* = initNeuralContract("gota", PackageSchema,
   observationContractText(), actionContractText(), ObservationSize, HeadSizes,
   ActionOutputs, gotaObserve, gotaDecode, gotaHead, gotaTick, log = gotaLog,
+  telemetryExtra = gotaTelemetry,
   maskSize = MaskSize, actionMask = gotaActionMask,
   maxDecisionPeriod = MaxDecisionPeriod, opBudget = DefaultNeuralOpBudget,
   manifestKeys = GotaManifestKeys, decoderKeys = GotaDecoderKeys,
@@ -347,14 +356,19 @@ proc deferConsult*(game: Game, index: int) =
     seat.absorbing = false
     return
   inc seat.decisions
+  if seat.heads[0] != 0 and isInvalid(seat.frame, seat.heads):
+    # An override that decodes to nothing would absorb the script for the
+    # whole window and idle the hero: fall back to the script instead.
+    inc seat.invalid
+    seat.absorbing = false
+    inc seat.deferDecisions
+    return
   if seat.heads[0] == 0:
     seat.absorbing = false
     inc seat.deferDecisions
     return
   seat.absorbing = true
   inc seat.overrideDecisions
-  if isInvalid(seat.frame, seat.heads):
-    inc seat.invalid
   discard game.issueDecoded(world.heroes[index].id, seat.command)
 
 proc runOverride*(game: Game, index: int, seat: NeuralSeat) =

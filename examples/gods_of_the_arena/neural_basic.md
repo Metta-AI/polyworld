@@ -9,19 +9,23 @@ still plays through the same BASIC host and the same recorded commands, so repla
 not change. Plain `.bas` submissions are untouched: without a neural seat, a match is byte-identical to
 upstream (see "Evidence").
 
-Code map (all in `examples/gods_of_the_arena/`):
+GotA is a client of the shared neural tier: the package parser, the GOTANET1 actor, the operation budget,
+the telemetry line, the recurrent-state lifecycle and the neural BASIC functions live in
+`src/polyworld/neural_{package,actor,host}.nim`. How a game plugs in, the package and model formats and the
+budget are described in [docs/neural-policies.md](../../docs/neural-policies.md). This page covers GotA's
+contract and seats.
+
+Code map (in `examples/gods_of_the_arena/` unless noted):
 
 | file | role |
 |---|---|
-| `neural_contract.nim` | observation v1 builder, action v1 decoder, demonstration encoder, contract texts + SHA-256 |
-| `neural_actor.nim` | GOTANET1 loader and FP32 MinGRU inference |
-| `neural_package.nim` | strict ZIP/manifest parser |
-| `neural_host_hooks.nim` (included by `bots.nim`) | neural seats: frames, inference, `gota_act`, label capture, override, shadow |
+| `neural_contract.nim` | observation v1 builder, action v1 decoder, demonstration encoder, contract texts + SHA-256, GotA package options (goal, defer, mask) |
+| `neural_host_hooks.nim` (included by `bots.nim`) | `GotaContract` (the tier's NeuralContract for GotA) and the GotA seats: `gota_act`, defer, mask, label capture, override, shadow |
 | `neural/policy.bas` | default glue: draft, shopping, ability leveling, buyback (base.bas routines) + `gota_act()` |
 | `native_env.nim` / `native_env.h` | the training C ABI |
 | `tools/native_env.py` | ctypes binding |
 | `tools/test_native_env.py`, `tools/test_native_concurrency.py`, `tools/mapping_ceiling.py`, `tools/parity_upstream.sh`, `tools/canary.py` | acceptance tools |
-| `../../coworld/gota/runtime/neural_package.py` | staging validator + builder (mirrors the Nim parser) |
+| `../../coworld/gota/runtime/neural_package.py` | GotA staging validator + builder, a thin wrapper over the shared `coworld/runtime/neural_package.py` |
 
 ## Package
 
@@ -52,8 +56,10 @@ the game and the hashes stored inside `model.bin`. `decision_period` (1..24) mus
 network was trained with; the native env's `decision_period` config key is the same number.
 
 Build and validate with `python3 coworld/gota/runtime/neural_package.py build|validate`. The validator
-accepts exactly the packages the game accepts. `tools/test_native_env.py` checks that they agree on eleven
-corruptions, including an unknown decoder key, a bad goal, a hash mismatch and extra or missing files.
+accepts exactly the packages the game accepts. The shared corruption suite (`tests/neural_cases.py` and
+`tests/test_neural_cases.nim`) runs both validators in CI. `tools/test_native_env.py` also checks that the
+GotA library and the GotA wrapper agree on the GotA-specific corruptions (goal, defer and mask keys, float
+integers, booleans as numbers, non-finite numbers, zip bombs).
 
 ## Defer seats: `decoder.defer_script`
 
@@ -67,9 +73,11 @@ turn on that tick, the host consults the decoded heads once:
 - **verb 0, defer.** Every contract command (walkTo, attackMove, attackTarget, castTarget, castPoint,
   useItem, useItemAt) the script issues in this decision window executes live, on the tick it is issued.
   The window is the decision tick plus the next `decision_period - 1` ticks.
-- **Any other verb, override.** The decoded command is issued on the decision tick; an invalid choice
-  issues nothing and counts as invalid. For the rest of the window, the script's contract commands are
-  absorbed: they are not executed, the call returns 1, and `lastActionError` is unchanged.
+- **Any other verb, override.** The decoded command is issued on the decision tick. For the rest of the
+  window, the script's contract commands are absorbed: they are not executed, the call returns 1, and
+  `lastActionError` is unchanged.
+- **An override that decodes to nothing** (an invalid choice, e.g. an empty target slot) counts as invalid
+  and falls back to defer for that window, so the script keeps acting instead of the hero idling.
 
 The script is never paused or re-run, and it keeps its persistent variables. After an override it sees the
 hero where the network's command put it, but its variables may still assume that its absorbed orders ran.
@@ -86,7 +94,8 @@ without the key keep verb 0 = noop.
 The native equivalent is `gota_set_seat_defer_script(h, seat, path)` on a learner seat (see native_env.h).
 It uses the same code path, `deferConsult` in neural_host_hooks.nim, at the same point in the tick. The
 native call adds `gota_seat_orders` labels of the script's commands, issued or absorbed.
-`gota_seat_defer_stats` gives the {defer, override} decision counts for both kinds of seat. Build a
+`gota_seat_defer_stats` gives the {defer, override} decision counts for both kinds of seat (an invalid
+override that fell back counts as a defer). Build a
 package with `neural_package.py build --defer-script --policy players/base.bas --model model.bin`.
 
 ## Action mask: `decoder.mask_empty_targets`
@@ -119,7 +128,7 @@ first, so it uses the RNG exactly as unmasked sampling does. `tools/native_env.p
 
 ## model.bin (GOTANET1)
 
-The layout is paintbot-pw's PWNET001 with the magic changed to `GOTANET1`:
+GOTANET1 is the Polyworld neural model format (docs/neural-policies.md); GotA introduced it. The layout:
 `magic[8] | u32 version=1, inputs I, hidden H, outputs O, heads n, parameters P | obs sha256 hex[64] |
 action sha256 hex[64] | u32 head sizes[n] | f32 LE weights`. The weights come in this order: `W_enc[H][I]`
 (x = W_enc·obs, no bias, no activation), `W_rec[3H][H]`, then `W_dec[O][H]`. H must be 64, 128 or 256, and
@@ -162,8 +171,11 @@ Sampling (`decoder.mode = "sample"`) keeps one SplitMix64 stream per seat, seede
 softmax(logits / T), computed in float64.
 
 Package seats write to their private seat log:
-`neural: peak_ops=<ops> budget=4000000 model=w<H> ticks=<battle tick> inferences=<n>`. The line is written
-at the first inference, then every 1,800 inferences, then at the last decision of a full-length match.
+`neural: peak_ops=<ops> budget=4000000 model=w<H> ticks=<battle tick> inferences=<n> decisions=<n>
+invalid=<n>`, plus ` defer=<n> override=<n>` for defer seats. The line is written at the first inference,
+then every 1,800 inferences, then at the last decision of a full-length match. A package that fails
+validation ends a hosted episode before play with the reason in the seat log, and the platform reports
+"neural package rejected for player slot N".
 
 BASIC surface for `policy.bas`, registered only for neural seats:
 - `gota_act()`: issues the decoded command. It returns 1 if the command was accepted and 0 otherwise,
@@ -304,7 +316,7 @@ The trainer, the hosted seat and the mapping ceiling share one code path:
 - A learner in **shadow** mode (`gota_set_seat_shadow`) runs an expert script whose calls change
   nothing. Its commands become labels (DAgger).
 
-## Evidence (branch `daveey/gota-neural`)
+## Evidence
 
 - **No-neural parity with upstream** (`tools/parity_upstream.sh`, 20 seeds, full 28,800 ticks, mixed
   base/puller/rusher lineup): the fork's headless binary writes replays byte-identical to
