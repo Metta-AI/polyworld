@@ -8,7 +8,7 @@ Goal: reach first place through one-change experiments, hosted XP only.
 - Engine source: `f4456bea13d967cb3f188df357656e1410cb0a40`; replay version 64. Worktree starts from `23f3384`, which records that release.
 - Runtime: game-hosted BASIC file `policy.bas`.
 - Initial policy is a byte-for-byte copy of the current `examples/gods_of_the_arena/players/base.bas`. No strategy modification.
-- Player profile has no existing GotA champion; initial submission is authorized by the user.
+- The player had no GotA champion at discovery; v1 is now the active initial champion.
 
 Always refresh the top three unique other players and select one live policy per player before XP. Never seat two versions of our own policy against each other. Use at least 10 hosted episodes for each experiment. Keep or submit improvements only when the requested dashboard establishes statistical significance against the current submitted policy's comparable hosted results. Otherwise run more episodes or revert. Replay and isolation checks show that the mechanism fired and are not score evidence.
 
@@ -20,7 +20,7 @@ The campaign backlog and complete trial log are in the workspace root `ideas.md`
 - Uploaded: `rowdaboat-gods-of-the-arena:v1`, version UUID `ab664012-84b3-48b3-ae1b-86f3f6cf960c`.
 - Initial champion: membership `lpm_6841a493-bd35-460b-ac0f-2de1fbadb7cb`, competing and champion. Submission `sub_f669fd4c-99fe-4034-94cd-5729bdf95bce` uses `auto_champion: never`; initial membership was explicitly promoted, preserving the gate for future candidates.
 - Hosted baseline: `xreq_0ad92adc-2c3b-44e3-a1f2-7fcd0fa5805d`, completed 10/10, zero failed episodes. Exact opponent IDs and rotating-seat layout are in `ideas.md`.
-- No strategy improvement has been tested, kept, or submitted. Dashboard significance remains inaccessible due to missing network access.
+- T001 tested a single post-hit walk/reattack recovery change in commit `7dce75b`, uploaded v2 (`40fa69ae-fa23-48fe-9d13-b34099c404be`). Hosted XP `xreq_e22ca8a2-a917-4b2f-a4da-7b63f37c634f` completed 10/10 against the freshly resolved top three, with no failures or runtime diagnostics. All ten own hosted scores were zero. No significant improvement was established, so the policy change was reverted to v1 and no replacement submitted. Dashboard significance remains inaccessible due to unresolved network DNS.
 
 ## Evidence and tools
 

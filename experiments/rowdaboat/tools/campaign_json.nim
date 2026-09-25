@@ -21,6 +21,17 @@ proc describe(n: JsonNode) =
     echo "keys=", n.keys.toSeq.join(",")
 
 when isMainModule:
+  if paramCount() == 2:
+    let rows = parseFile(paramStr(1))
+    doAssert rows.kind == JArray
+    for row in rows:
+      if row{"player", "id"}.getStr == paramStr(2):
+        echo (%*{"membership_id": row["id"], "status": row["status"],
+          "is_champion": row["is_champion"], "end_time": row["end_time"],
+          "player": row["player"]["name"],
+          "policy_version_id": row["policy_version"]["id"],
+          "policy_label": row["policy_version"]["label"]}).pretty
+    quit(0)
   if paramCount() != 1:
-    quit("Usage: campaign_json RESPONSE.json", 1)
+    quit("Usage: campaign_json RESPONSE.json [PLAYER_ID_FOR_MEMBERSHIPS]", 1)
   describe(parseFile(paramStr(1)))

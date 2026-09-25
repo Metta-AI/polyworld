@@ -1,0 +1,1817 @@
+{
+  "purpose": "Hosted replay behavior proof only; no game score, XP delta, or significance claim.",
+  "xpRequestId": "xreq_e22ca8a2-a917-4b2f-a4da-7b63f37c634f",
+  "episodeRequestId": "ereq_a24cc7ff-0a9d-4624-ad5d-0aa0f8ae861e",
+  "episodeId": "46536f2b-b21c-436c-878a-d0386e34d80d",
+  "jobIndex": 0,
+  "coworldVersion": "2026.9.24.2",
+  "replayGameVersion": 64,
+  "replayUrl": "https://softmax-public.s3.amazonaws.com/replays/7909e132-9fe5-4b19-9f72-9de6a55c858c.replay",
+  "replaySha1": "1AF074498AAA2D3E8938EDFEC7CB43F02158B9E4",
+  "verifiedHashes": 28909,
+  "hashMismatches": 0,
+  "allRecordedActionsConsumed": true,
+  "candidate": {
+    "policyVersionId": "40fa69ae-fa23-48fe-9d13-b34099c404be",
+    "policyVersion": 2,
+    "policy": "rowdaboat-gods-of-the-arena",
+    "player": "RowDaBoat",
+    "seat": 0,
+    "heroId": 100,
+    "commit": "7dce75b"
+  },
+  "roster": [
+    {
+      "seat": 0,
+      "player": "RowDaBoat",
+      "policy": "rowdaboat-gods-of-the-arena",
+      "version": 2,
+      "policyVersionId": "40fa69ae-fa23-48fe-9d13-b34099c404be"
+    },
+    {
+      "seat": 1,
+      "player": "Andre von Auto",
+      "policy": "khors",
+      "version": 208,
+      "policyVersionId": "bf6c6cc2-362e-4eee-a105-810b23adf437"
+    },
+    {
+      "seat": 2,
+      "player": "Andre von Auto",
+      "policy": "khors",
+      "version": 208,
+      "policyVersionId": "bf6c6cc2-362e-4eee-a105-810b23adf437"
+    },
+    {
+      "seat": 3,
+      "player": "Andre von Auto",
+      "policy": "khors",
+      "version": 208,
+      "policyVersionId": "bf6c6cc2-362e-4eee-a105-810b23adf437"
+    },
+    {
+      "seat": 4,
+      "player": "Ari Sklar",
+      "policy": "arisk-gods-of-the-arena",
+      "version": 4,
+      "policyVersionId": "61f4440b-140d-4f7d-80b8-2802f7a3100d"
+    },
+    {
+      "seat": 5,
+      "player": "Ari Sklar",
+      "policy": "arisk-gods-of-the-arena",
+      "version": 4,
+      "policyVersionId": "61f4440b-140d-4f7d-80b8-2802f7a3100d"
+    },
+    {
+      "seat": 6,
+      "player": "Ari Sklar",
+      "policy": "arisk-gods-of-the-arena",
+      "version": 4,
+      "policyVersionId": "61f4440b-140d-4f7d-80b8-2802f7a3100d"
+    },
+    {
+      "seat": 7,
+      "player": "richard",
+      "policy": "richard-gods-of-the-arena",
+      "version": 245,
+      "policyVersionId": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06"
+    },
+    {
+      "seat": 8,
+      "player": "richard",
+      "policy": "richard-gods-of-the-arena",
+      "version": 245,
+      "policyVersionId": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06"
+    },
+    {
+      "seat": 9,
+      "player": "richard",
+      "policy": "richard-gods-of-the-arena",
+      "version": 245,
+      "policyVersionId": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06"
+    }
+  ],
+  "successfulBasicHits": 109,
+  "strictFreshHitWalkSameTargetReattackSequences": 41,
+  "acceleratedNextSameTargetHits": 29,
+  "exactResetCadenceNextHits": 29,
+  "sequences": [
+    {
+      "firstHit": {
+        "tick": 1261,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 1091,
+        "targetKind": 3,
+        "damage": 30,
+        "targetHpAfter": 30
+      },
+      "acceptedWalk": {
+        "tick": 1262,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 9,
+        "second": 27,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 1263,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 1091,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 1274,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 1091,
+        "targetKind": 3,
+        "damage": 18,
+        "targetHpAfter": -12
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 1288,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 1084,
+        "targetKind": 3,
+        "damage": 30,
+        "targetHpAfter": 18
+      },
+      "acceptedWalk": {
+        "tick": 1289,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 9,
+        "second": 27,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 1290,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 1084,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 1301,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 1084,
+        "targetKind": 3,
+        "damage": 6,
+        "targetHpAfter": -24
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 1421,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 1085,
+        "targetKind": 3,
+        "damage": 30,
+        "targetHpAfter": 30
+      },
+      "acceptedWalk": {
+        "tick": 1422,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 8,
+        "second": 30,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 1423,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 1085,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 1434,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 1085,
+        "targetKind": 3,
+        "damage": 6,
+        "targetHpAfter": -24
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 10840,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2055,
+        "targetKind": 3,
+        "damage": 40,
+        "targetHpAfter": 20
+      },
+      "acceptedWalk": {
+        "tick": 10841,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 79,
+        "second": 31,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 10842,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2055,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 11004,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2111,
+        "targetKind": 3,
+        "damage": 40,
+        "targetHpAfter": 20
+      },
+      "acceptedWalk": {
+        "tick": 11005,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 69,
+        "second": 39,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 11006,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2111,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 11044,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2104,
+        "targetKind": 3,
+        "damage": 40,
+        "targetHpAfter": 20
+      },
+      "acceptedWalk": {
+        "tick": 11045,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 70,
+        "second": 39,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 11046,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2104,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 11057,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2104,
+        "targetKind": 3,
+        "damage": 20,
+        "targetHpAfter": -20
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 11280,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2163,
+        "targetKind": 3,
+        "damage": 40,
+        "targetHpAfter": 20
+      },
+      "acceptedWalk": {
+        "tick": 11281,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 59,
+        "second": 54,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 11282,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2163,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 11293,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2163,
+        "targetKind": 3,
+        "damage": 20,
+        "targetHpAfter": -20
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 11428,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2165,
+        "targetKind": 3,
+        "damage": 45,
+        "targetHpAfter": 15
+      },
+      "acceptedWalk": {
+        "tick": 11429,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 57,
+        "second": 57,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 11430,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2165,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 11573,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2214,
+        "targetKind": 3,
+        "damage": 45,
+        "targetHpAfter": 15
+      },
+      "acceptedWalk": {
+        "tick": 11574,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 51,
+        "second": 69,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 11575,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2214,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 11586,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2214,
+        "targetKind": 3,
+        "damage": 15,
+        "targetHpAfter": -30
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 14939,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2479,
+        "targetKind": 3,
+        "damage": 45,
+        "targetHpAfter": 15
+      },
+      "acceptedWalk": {
+        "tick": 14940,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 16,
+        "second": 14,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 14941,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2479,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 14994,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2481,
+        "targetKind": 3,
+        "damage": 45,
+        "targetHpAfter": 15
+      },
+      "acceptedWalk": {
+        "tick": 14995,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 13,
+        "second": 14,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 14996,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2481,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 15146,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2536,
+        "targetKind": 3,
+        "damage": 45,
+        "targetHpAfter": 15
+      },
+      "acceptedWalk": {
+        "tick": 15147,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 10,
+        "second": 29,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 15148,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2536,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 15159,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2536,
+        "targetKind": 3,
+        "damage": 15,
+        "targetHpAfter": -30
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 16870,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2716,
+        "targetKind": 3,
+        "damage": 50,
+        "targetHpAfter": 10
+      },
+      "acceptedWalk": {
+        "tick": 16871,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 70,
+        "second": 38,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 16872,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2716,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 16892,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2724,
+        "targetKind": 3,
+        "damage": 50,
+        "targetHpAfter": 10
+      },
+      "acceptedWalk": {
+        "tick": 16893,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 69,
+        "second": 39,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 16894,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2724,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 16969,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2783,
+        "targetKind": 6,
+        "damage": 50,
+        "targetHpAfter": 50
+      },
+      "acceptedWalk": {
+        "tick": 16970,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 65,
+        "second": 34,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 16971,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2783,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 19617,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2975,
+        "targetKind": 3,
+        "damage": 50,
+        "targetHpAfter": 10
+      },
+      "acceptedWalk": {
+        "tick": 19618,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 95,
+        "second": 24,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 19619,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2975,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 19630,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2975,
+        "targetKind": 3,
+        "damage": 10,
+        "targetHpAfter": -40
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 19668,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2978,
+        "targetKind": 3,
+        "damage": 50,
+        "targetHpAfter": 10
+      },
+      "acceptedWalk": {
+        "tick": 19669,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 93,
+        "second": 24,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 19670,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 2978,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 19681,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 2978,
+        "targetKind": 3,
+        "damage": 10,
+        "targetHpAfter": -40
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 20986,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 3232,
+        "targetKind": 3,
+        "damage": 50,
+        "targetHpAfter": 10
+      },
+      "acceptedWalk": {
+        "tick": 20987,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 39,
+        "second": 83,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 20988,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 3232,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 20999,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 3232,
+        "targetKind": 3,
+        "damage": 10,
+        "targetHpAfter": -40
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 23100,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 3391,
+        "targetKind": 3,
+        "damage": 55,
+        "targetHpAfter": 5
+      },
+      "acceptedWalk": {
+        "tick": 23101,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 70,
+        "second": 40,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 23102,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 3391,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 24938,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 733
+      },
+      "acceptedWalk": {
+        "tick": 24939,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 24,
+        "second": 95,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 24940,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 50,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 24951,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 516
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 24951,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 516
+      },
+      "acceptedWalk": {
+        "tick": 24952,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 24,
+        "second": 95,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 24953,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 50,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 24964,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 299
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 24964,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 299
+      },
+      "acceptedWalk": {
+        "tick": 24965,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 24,
+        "second": 95,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 24966,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 50,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 24977,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 82
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 24977,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 50,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 82
+      },
+      "acceptedWalk": {
+        "tick": 24978,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 24,
+        "second": 95,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 24979,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 50,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 25031,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 895
+      },
+      "acceptedWalk": {
+        "tick": 25032,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 21,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25033,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25044,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 840
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25044,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 840
+      },
+      "acceptedWalk": {
+        "tick": 25045,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 21,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25046,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25057,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 785
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25057,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 785
+      },
+      "acceptedWalk": {
+        "tick": 25058,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 21,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25059,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25070,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 730
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25070,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 730
+      },
+      "acceptedWalk": {
+        "tick": 25071,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 21,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25072,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25115,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 675
+      },
+      "observedIntervalTicks": 45,
+      "accelerated": false,
+      "exactResetCadence": false
+    },
+    {
+      "firstHit": {
+        "tick": 25115,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 675
+      },
+      "acceptedWalk": {
+        "tick": 25116,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25117,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25128,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 620
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25128,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 620
+      },
+      "acceptedWalk": {
+        "tick": 25129,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25130,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25141,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 565
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25141,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 565
+      },
+      "acceptedWalk": {
+        "tick": 25142,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25143,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25154,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 510
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25154,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 510
+      },
+      "acceptedWalk": {
+        "tick": 25155,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25156,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25167,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 455
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25167,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 455
+      },
+      "acceptedWalk": {
+        "tick": 25168,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25169,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25180,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 400
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25180,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 400
+      },
+      "acceptedWalk": {
+        "tick": 25181,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25182,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25193,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 345
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25193,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 345
+      },
+      "acceptedWalk": {
+        "tick": 25194,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25195,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25206,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 290
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25206,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 290
+      },
+      "acceptedWalk": {
+        "tick": 25207,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25208,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25219,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 235
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25219,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 235
+      },
+      "acceptedWalk": {
+        "tick": 25220,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25221,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25232,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 180
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25232,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 180
+      },
+      "acceptedWalk": {
+        "tick": 25233,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25234,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25245,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 113
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25245,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 113
+      },
+      "acceptedWalk": {
+        "tick": 25246,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25247,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25258,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 46
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 25258,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 55,
+        "targetHpAfter": 46
+      },
+      "acceptedWalk": {
+        "tick": 25259,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 20,
+        "second": 93,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 25260,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 48,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 25271,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 48,
+        "targetKind": 5,
+        "damage": 22,
+        "targetHpAfter": -33
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 26000,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 109,
+        "targetKind": 2,
+        "damage": 55,
+        "targetHpAfter": 695
+      },
+      "acceptedWalk": {
+        "tick": 26001,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 39,
+        "second": 80,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 26002,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 109,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": {
+        "tick": 26013,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 109,
+        "targetKind": 2,
+        "damage": 55,
+        "targetHpAfter": 516
+      },
+      "observedIntervalTicks": 13,
+      "accelerated": true,
+      "exactResetCadence": true
+    },
+    {
+      "firstHit": {
+        "tick": 26013,
+        "actorId": 100,
+        "class": "VanguardKnight",
+        "targetId": 109,
+        "targetKind": 2,
+        "damage": 55,
+        "targetHpAfter": 516
+      },
+      "acceptedWalk": {
+        "tick": 26014,
+        "seat": 0,
+        "kind": "walk",
+        "slot": 0,
+        "first": 39,
+        "second": 80,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "acceptedSameTargetReattack": {
+        "tick": 26015,
+        "seat": 0,
+        "kind": "attackTarget",
+        "slot": 0,
+        "first": 109,
+        "second": 0,
+        "offset": "fixedVec2(0.00000, 0.00000)"
+      },
+      "noRejectionForEitherAction": true,
+      "nativeAttackPeriodTicks": 27,
+      "expectedResetIntervalTicks": 13,
+      "nextSameTargetHit": null,
+      "observedIntervalTicks": 0,
+      "accelerated": false,
+      "exactResetCadence": false
+    }
+  ]
+}

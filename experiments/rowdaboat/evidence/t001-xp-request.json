@@ -1,0 +1,71 @@
+{
+  "private": false,
+  "target": {
+    "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
+  },
+  "roster": [
+    {
+      "player": {
+        "policy_ref": "40fa69ae-fa23-48fe-9d13-b34099c404be"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "bf6c6cc2-362e-4eee-a105-810b23adf437"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "bf6c6cc2-362e-4eee-a105-810b23adf437"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "bf6c6cc2-362e-4eee-a105-810b23adf437"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "61f4440b-140d-4f7d-80b8-2802f7a3100d"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "61f4440b-140d-4f7d-80b8-2802f7a3100d"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "61f4440b-140d-4f7d-80b8-2802f7a3100d"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06"
+      },
+      "slot": -1
+    }
+  ],
+  "num_episodes": 10,
+  "notes": "T001 commit 7dce75b: post-hit attack recovery reset only; versus live top 3 unique other players; baseline B000; dashboard significance required before keep",
+  "idempotency_key": "rowdaboat-gota-t001-20260925-7dce75b"
+}

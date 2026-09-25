@@ -1,0 +1,23 @@
+[
+  {
+    "rank": 1,
+    "player_id": "ply_3d22435e-30a2-4f2a-b037-a5c249583788",
+    "player_name": "Andre von Auto",
+    "policy_version_id": "bf6c6cc2-362e-4eee-a105-810b23adf437",
+    "policy_label": "khors:v208"
+  },
+  {
+    "rank": 2,
+    "player_id": "ply_a494aa09-1efa-4b0d-8577-1f034f8206b0",
+    "player_name": "Ari Sklar",
+    "policy_version_id": "61f4440b-140d-4f7d-80b8-2802f7a3100d",
+    "policy_label": "arisk-gods-of-the-arena:v4"
+  },
+  {
+    "rank": 3,
+    "player_id": "ply_ded11f40-3e30-4921-b019-f7f6bc3e9c83",
+    "player_name": "richard",
+    "policy_version_id": "7fd19643-c66a-429e-ba24-3c1e6c0d8e06",
+    "policy_label": "richard-gods-of-the-arena:v245"
+  }
+]
