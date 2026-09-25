@@ -2,11 +2,12 @@
 neural-package seats (random GOTANET1 weights) and five base.bas seats through the platform's
 file handoff (COGAME_* URIs), then the recorded replay is re-simulated by the headless binary.
 Pass = results.json written, every seat's player status exit_code 0, every neural seat log has
-the `neural: peak_ops=... budget=... model=w... ticks=...` telemetry line, and the replay
-re-simulates with zero hash mismatches.
-Usage: python3 canary.py COWORLD_BIN HEADLESS_BIN WORKDIR [HIDDEN] [MAX_TICKS]
+the `neural: peak_ops=... budget=... model=w... ticks=... inferences=... decisions=... invalid=...`
+telemetry line (plus `defer=... override=...` in defer mode) on every line, and the replay re-simulates with zero hash mismatches.
+Usage: python3 canary.py COWORLD_BIN HEADLESS_BIN WORKDIR [HIDDEN] [MAX_TICKS] [plain|defer]
+  defer: the neural seats are defer seats (decoder.defer_script, policy.bas = base.bas).
 """
-import hashlib, json, os, socket, subprocess, sys, time, urllib.parse
+import hashlib, json, os, re, socket, subprocess, sys, time, urllib.parse
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "../../.."))
@@ -22,13 +23,14 @@ def main():
     coworld, headless, work = sys.argv[1:4]
     hidden = int(sys.argv[4]) if len(sys.argv) > 4 else 128
     max_ticks = int(sys.argv[5]) if len(sys.argv) > 5 else 28800
+    mode = sys.argv[6] if len(sys.argv) > 6 else "plain"
     os.makedirs(work, exist_ok=True)
     rng = np.random.default_rng(7)
     n = 1407 * hidden + 3 * hidden * hidden + 92 * hidden
     model = npk.encode_model((rng.standard_normal(n) * 0.05).astype(np.float32).tolist(), hidden)
     policy = open(os.path.join(ROOT, "examples/gods_of_the_arena/neural/policy.bas"), "rb").read()
-    pkg = npk.build(policy, model)
     base = open(os.path.join(ROOT, "examples/gods_of_the_arena/players/base.bas"), "rb").read()
+    pkg = npk.build(base, model, decoder={"defer_script": True}) if mode == "defer" else npk.build(policy, model)
     sources = [pkg if slot in (0, 2, 4, 6, 8) else base for slot in range(10)]  # 5 neural, both teams
     config = {"tokens": [], "players": [], "seed": 2026, "max_ticks": max_ticks}
     seats = []
@@ -75,7 +77,9 @@ def main():
         log = open(os.path.join(work, f"player-{slot}.log")).read()
         lines = [l for l in log.splitlines() if l.startswith("neural: ")]
         print(f"seat {slot} telemetry:", lines[-1] if lines else "MISSING")
-        ok &= bool(lines) and "BASIC error" not in log
+        want = (r"^neural: peak_ops=\d+ budget=4000000 model=w%d ticks=\d+ inferences=\d+ decisions=\d+ invalid=\d+"
+                % hidden) + (r" defer=\d+ override=\d+$" if mode == "defer" else "$")
+        ok &= bool(lines) and all(re.match(want, l) for l in lines) and "BASIC error" not in log
     out = subprocess.run([headless, "--replay", os.path.join(work, "replay")], cwd=ROOT, capture_output=True, text=True)
     tail = [l for l in out.stdout.splitlines() if l.startswith(("hash:", "replay", "result"))]
     print("replay re-simulation:", tail, "rc", out.returncode)
