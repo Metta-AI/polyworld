@@ -357,6 +357,10 @@ proc revealVision*(
       ):
         visible[index] = 255
 
+proc sameHeights(first, second: seq[int16]): bool =
+  first.len == second.len and (first.len == 0 or
+    equalMem(unsafeAddr first[0], unsafeAddr second[0], first.len * sizeof(int16)))
+
 proc revealVisionCached*(
     cache: var VisionCache,
     visible: var seq[uint8],
@@ -367,7 +371,8 @@ proc revealVisionCached*(
   ## Retains only the previous frame's source rays. Terrain or blocker changes
   ## invalidate every entry, including height changes without moving a source.
   if cache.width != width or cache.height != height or
-      cache.terrain != terrainHeights or cache.blockers != blockerHeights:
+      not sameHeights(cache.terrain, terrainHeights) or
+      not sameHeights(cache.blockers, blockerHeights):
     cache.sources.clear()
     cache.width = width
     cache.height = height
@@ -376,22 +381,23 @@ proc revealVisionCached*(
   visible.setLen(int(width * height))
   for value in visible.mitems:
     value = 0
-  var nextSources: Table[VisionSource, seq[int32]]
+  var nextSources = initTable[VisionSource, seq[int32]](sources.len)
   for source in sources:
     if nextSources.hasKey(source):
       continue
-    if not cache.sources.hasKey(source):
-      var cells: seq[int32]
+    var cells: seq[int32]
+    cache.sources.withValue(source, previous):
+      cells = move(previous[])
+    do:
       for z in max(0'i32, source.z - source.radius) .. min(height - 1, source.z + source.radius):
         for x in max(0'i32, source.x - source.radius) .. min(width - 1, source.x + source.radius):
           if source.radius > 0 and source.inVisionRange(x, z) and lineVisible(
               width, height, terrainHeights, blockerHeights,
               source.x, source.z, x, z, source.radius, source.eyeHeight):
             cells.add z * width + x
-      cache.sources[source] = move(cells)
-    for index in cache.sources[source]:
+    for index in cells:
       visible[index] = 255
-    nextSources[source] = move(cache.sources[source])
+    nextSources[source] = move(cells)
   cache.sources = move(nextSources)
 
 proc blurVisibility*(visible: openArray[uint8], width, height: int32): seq[uint8] =

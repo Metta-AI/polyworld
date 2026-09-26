@@ -305,8 +305,8 @@ type
     teamExplored*: array[2, seq[uint8]]
     visionCache: array[2, VisionCache]
     visionSkipKeys: seq[int32]
-    scriptObjects: seq[WorldObject]
-    scriptObjectCount: int
+    scriptObjects: array[Team, seq[WorldObject]]
+    scriptObjectsReady: array[Team, bool]
     scriptObjectsHeroId: int32
     scriptObjectsTick: int32
     observationsFrozen: bool
@@ -2103,7 +2103,7 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
     return true
   let buildingIndex = index - world.forts.len
   if buildingIndex < world.buildings.len:
-    let tower = world.buildings[buildingIndex]
+    let tower {.cursor.} = world.buildings[buildingIndex]
     value = WorldObject(
       id: tower.id,
       kind: (if tower.kind == TowerBuilding: TowerObjectKind
@@ -2147,7 +2147,7 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
     return true
   let footmanIndex = heroIndex - world.heroes.len
   if footmanIndex < world.footmen.len:
-    let footman = world.footmen[footmanIndex]
+    let footman {.cursor.} = world.footmen[footmanIndex]
     value = WorldObject(
       id: footman.id,
       kind: (if footman.camp > 0: NeutralObjectKind else: FootmanObjectKind),
@@ -2202,7 +2202,7 @@ proc freezeObservations*(world: World): bool =
       cmp(world.spellObservationKey(first, team),
         world.spellObservationKey(second, team))
     )
-  world.scriptObjectsTick = -1
+  world.scriptObjectsReady = [false, false]
   world.observationsFrozen = true
   true
 
@@ -2212,7 +2212,7 @@ proc thawObservations*(world: World) =
   world.observedObjects.setLen(0)
   for spells in world.observedSpells.mitems:
     spells.setLen(0)
-  world.scriptObjectsTick = -1
+  world.scriptObjectsReady = [false, false]
 
 iterator observedCasts*(world: World, team: Team): SpellCast =
   ## Reads the common decision frame, or live casts outside that phase.
@@ -2241,44 +2241,42 @@ proc scriptObjectKey(value: WorldObject, observer: Team):
   (group, int(value.faction != observer.ord.int32), direction * value.position.z,
     direction * value.position.x, value.id)
 
-proc ensureScriptObjects(world: World, heroId: int32) =
-  ## Rebuilds the visible object list once per hero decision tick.
-  if world.scriptObjectsHeroId == heroId and
-      world.scriptObjectsTick == world.tick:
-    return
-  world.scriptObjectCount = 0
+proc ensureScriptObjects(world: World, heroId: int32): int =
+  ## A frozen frame has one visibility and ordering per team, shared by its heroes.
   let observer = heroIndex(world, heroId)
-  if observer >= 0:
-    let team = world.heroes[observer].team
-    var value: WorldObject
-    let count =
-      if world.observationsFrozen: world.observedObjects.len
-      else: rawWorldObjectCount(world)
-    for i in 0 ..< count:
-      if world.observationsFrozen:
-        value = world.observedObjects[i]
-      elif not rawWorldObjectAt(world, i, value):
-        continue
-      if not objectVisibleTo(world, team, value) or
-          (value.kind in [TowerObjectKind, BarracksObjectKind] and value.hp <= 0):
-        continue
-      if world.scriptObjectCount == world.scriptObjects.len:
-        world.scriptObjects.add value
-      else:
-        world.scriptObjects[world.scriptObjectCount] = value
-      inc world.scriptObjectCount
-    world.scriptObjects.setLen(world.scriptObjectCount)
-    world.scriptObjects.sort(proc(first, second: WorldObject): int =
-      ## Orders observed identities in the querying team's coordinate frame.
-      cmp(first.scriptObjectKey(team), second.scriptObjectKey(team))
-    )
+  if observer < 0:
+    world.scriptObjectsReady = [false, false]
+    return -1
+  let team = world.heroes[observer].team
+  result = team.ord
+  if world.scriptObjectsReady[team] and (world.observationsFrozen or
+      (world.scriptObjectsHeroId == heroId and world.scriptObjectsTick == world.tick)):
+    return
+  world.scriptObjects[team].setLen(0)
+  var value: WorldObject
+  let count =
+    if world.observationsFrozen: world.observedObjects.len
+    else: rawWorldObjectCount(world)
+  for i in 0 ..< count:
+    if world.observationsFrozen:
+      value = world.observedObjects[i]
+    elif not rawWorldObjectAt(world, i, value):
+      continue
+    if not objectVisibleTo(world, team, value) or
+        (value.kind in [TowerObjectKind, BarracksObjectKind] and value.hp <= 0):
+      continue
+    world.scriptObjects[team].add value
+  world.scriptObjects[team].sort(proc(first, second: WorldObject): int =
+    cmp(first.scriptObjectKey(team), second.scriptObjectKey(team))
+  )
+  world.scriptObjectsReady[team] = true
   world.scriptObjectsHeroId = heroId
   world.scriptObjectsTick = world.tick
 
 proc worldObjectCount*(world: World, heroId: int32): int =
   ## Returns the number of objects visible to one hero script.
-  world.ensureScriptObjects(heroId)
-  world.scriptObjectCount
+  let team = world.ensureScriptObjects(heroId)
+  if team >= 0: world.scriptObjects[Team(team)].len else: 0
 
 proc worldObjectAt*(
     world: World,
@@ -2287,10 +2285,10 @@ proc worldObjectAt*(
     value: var WorldObject
 ): bool =
   ## Reads one object from a hero's stable visibility-filtered enumeration.
-  world.ensureScriptObjects(heroId)
-  if index < 0 or index >= world.scriptObjectCount:
+  let team = world.ensureScriptObjects(heroId)
+  if team < 0 or index < 0 or index >= world.scriptObjects[Team(team)].len:
     return false
-  value = world.scriptObjects[index]
+  value = world.scriptObjects[Team(team)][index]
   true
 
 proc worldObjectById*(
@@ -3062,7 +3060,7 @@ proc updateTower*(world: World, tower: var Building) =
     targetFootman = footmanIndex(world, tower.targetId)
     targetHero = heroIndex(world, tower.targetId)
   if targetFootman >= 0:
-    let footman = world.footmen[targetFootman]
+    let footman {.cursor.} = world.footmen[targetFootman]
     if not world.hostile(footman, tower.team) or
         footman.state == Dying or footman.hp <= 0 or
         not within(tower.position, footman.position, attackRange) or
@@ -3080,7 +3078,8 @@ proc updateTower*(world: World, tower: var Building) =
       bestSquared = int64(attackRange) * attackRange
       bestId = 0'i32
       bestPosition: WorldPoint
-    for i, footman in world.footmen:
+    for i in 0 ..< world.footmen.len:
+      let footman {.cursor.} = world.footmen[i]
       if not world.hostile(footman, tower.team) or footman.state == Dying or
           footman.hp <= 0 or
           not visible(world, tower.team, footman.position):
@@ -3493,7 +3492,7 @@ proc updateFootman(world: World, footman: var Footman) =
     targetHero = heroIndex(world, footman.targetHeroId)
     targetBuilding = buildingIndex(world, footman.targetBuildingId)
   if targetFootman >= 0:
-    let other = world.footmen[targetFootman]
+    let other {.cursor.} = world.footmen[targetFootman]
     if not world.hostile(other, footman.team) or
         not visible(world, footman.team, other.position) or
         not within(
@@ -3527,7 +3526,8 @@ proc updateFootman(world: World, footman: var Footman) =
       bestSquared = int64(FootmanSightRadius) * FootmanSightRadius
       bestId = 0'i32
       bestPosition: WorldPoint
-    for i, other in world.footmen:
+    for i in 0 ..< world.footmen.len:
+      let other {.cursor.} = world.footmen[i]
       if not world.hostile(other, footman.team):
         continue
       if not visible(world, footman.team, other.position):
@@ -3824,7 +3824,7 @@ proc applyDraft*(
   hero.maxMana = heroMaxMana(hero.class, hero.level)
   hero.mana = hero.maxMana
   hero.initHeroCharges()
-  world.scriptObjectsTick = -1
+  world.scriptObjectsReady = [false, false]
   inc world.draftTurn
   world.draftTurnTicks = 0
   if world.draftTurn == world.draftOrder.len:
@@ -5114,7 +5114,8 @@ proc separateUnits(game: Game) =
   let world = game.world
   var maximumRadius = FixedZero
   game.collisionUnits.setLen(0)
-  for i, footman in world.footmen:
+  for i in 0 ..< world.footmen.len:
+    let footman {.cursor.} = world.footmen[i]
     if footman.state != Dying:
       game.collisionUnits.add CollisionUnit(body: footman.body, index: i,
         layer: footman.navLayer, team: footman.team,
@@ -5506,8 +5507,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 
   # Plan every unit against the same actor state, then publish together.
   game.nextFootmen.setLen(world.footmen.len)
-  for i, footman in world.footmen:
-    game.nextFootmen[i] = footman
+  for i in 0 ..< world.footmen.len:
+    game.nextFootmen[i] = world.footmen[i]
   game.nextHeroes.setLen(world.heroes.len)
   for i, hero in world.heroes:
     if game.nextHeroes[i] == nil:
@@ -5528,7 +5529,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 
   swap(world.footmen, game.nextFootmen)
   for i, hero in game.nextHeroes:
-    world.heroes[i][] = hero[]
+    swap(world.heroes[i][], hero[])
 
   world.advanceSpells()
   world.advanceTowerShots()
@@ -5540,7 +5541,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     if world.footmen[read].state != Dying or
         world.footmen[read].deathTicks < FootmanDeathTicks + CorpseLingerTicks:
       if write != read:
-        world.footmen[write] = world.footmen[read]
+        world.footmen[write] = move(world.footmen[read])
       inc write
     else:
       when defined(replayEvents):
@@ -5725,9 +5726,7 @@ proc newGame*(
     world: World(
       forts: startingForts(map),
       nextFootmanId: FirstFootmanId,
-      winner: RedTeam,
-      scriptObjects: newSeqOfCap[WorldObject](256),
-      scriptObjectsTick: -1
+      winner: RedTeam
     ),
     map: map,
     replayMode: replayMode,

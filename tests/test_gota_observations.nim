@@ -22,6 +22,36 @@ proc reveal(world: World, team: Team, position: WorldPoint) =
     z = mapCoordinate(position.z)
   world.teamVisible[team.ord][int(z) * mapTiles() + int(x)] = 255
 
+proc objects(world: World, heroId: int32): seq[WorldObject] =
+  for i in 0 ..< world.worldObjectCount(heroId):
+    var value: WorldObject
+    doAssert world.worldObjectAt(heroId, i, value)
+    result.add value
+
+echo "Testing team observations stay frozen and refresh for the next frame"
+block:
+  let world = observationWorld()
+  world.heroes[0].hp = 100
+  let
+    red = world.objects(100)
+    blue = world.objects(105)
+  doAssert red != blue
+  doAssert world.objects(100) == red
+  world.heroes[0].hp = 75
+  doAssert world.objects(100) == red
+  world.heroes[0].hp = 100
+  doAssert world.freezeObservations()
+  doAssert world.objects(100) == red
+  world.heroes[0].hp = 50
+  doAssert world.objects(105) == blue
+  doAssert world.objects(101) == red
+  world.thawObservations()
+  doAssert world.freezeObservations()
+  let next = world.objects(101)
+  doAssert next != red
+  doAssert world.objects(100) == next
+  world.thawObservations()
+
 proc warning(heroId: int32, x = 0'i32): SpellCast =
   ## Creates a delayed spell whose aim position differs from its origin.
   SpellCast(

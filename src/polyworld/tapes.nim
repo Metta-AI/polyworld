@@ -124,7 +124,7 @@ proc encodeReplayFile*[T](
   result.addUint16(gameVersion)
   result.addUint16(uint16(game.len))
   result.add game
-  result.add data.toFlatty()
+  result.toFlatty(data)
   if result.len > maxBytes:
     fail("encoded replay exceeds the file size limit")
 

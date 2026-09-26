@@ -18,7 +18,8 @@ Only the immutable compiled module may be shared across attempts.
 
 The build uses ARC and Emscripten's default allocator directly. Nim allocation tracing is disabled because its counters
 require Nim's allocator. This affects runtime instrumentation, not game behavior. Linear memory grows from 16 MiB to a
-96 MiB cap. That cap leaves room for the host but does not guarantee a complete Worker fits its isolate limit.
+96 MiB cap, and allocation failure aborts the instance. That cap leaves room for the host but does not guarantee a
+complete Worker fits its isolate limit.
 
 ## ABI version 1
 
