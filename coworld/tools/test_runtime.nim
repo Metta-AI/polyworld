@@ -211,7 +211,16 @@ proc episode(
     doAssert logs[0].contains(failureLog), logs[0]
     if failureMessage.len > 0:
       doAssert output["message"].getStr() == failureMessage,
-        output["message"].getStr()
+        "failPlayer must report the failing slot and reason: " &
+          output["message"].getStr()
+    let status = readFile(directory / "status.json").fromJson(JsonNode)
+    doAssert status["players"][0]["state"].getStr() == "exited"
+    doAssert status["players"][0]["exit_code"].getInt() == 1
+    doAssert status["players"][0]["reason"].getStr() == "BASIC VM disabled",
+      "failPlayer must write the failed slot's status with the right reason"
+    for slot in 1 ..< count:
+      doAssert status["players"][slot]["exit_code"].getInt() == 0,
+        "failPlayer must not mark unrelated slots as failed"
   else:
     doAssert output["scores"].len == count
     if game == "gota":
