@@ -55,6 +55,18 @@ var
   toonUnlitShadowDark: Uniform[float32]
     ## Darkest multiply an unlit+shadow-receiving fragment can reach, fully
     ## in the sun's own shadow. 1.0 = no visible darkening.
+  toonUnlitFullBright: Uniform[bool]
+    ## convoy/spark-r1: an unlit node ordinarily still reads `albedo * toonHighlightColor`
+    ## (by design, see this module's header -- eyes/mouths WANT to match the character's own
+    ## highlight-band tint). A small saturated dynamic-FX primitive meant to read as its own
+    ## light source (an ember, a weld spark) does NOT want that: `toonHighlightColor` is a
+    ## time-of-day/weather uniform (e.g. a cool blue-grey at night), and multiplying a hot
+    ## orange or blue-white accent colour by it desaturates the effect toward the ambient
+    ## scene tint -- exactly indistinguishable-from-background at night, which is what made
+    ## cards-r1's weld spark (and the pre-existing ember it reuses) read as invisible under
+    ## a native screenshot despite provably-correct, non-empty geometry (bible round 232).
+    ## False by construction for every node until a game opts one in, so the OFF path is
+    ## byte-identical to before this uniform existed.
   toonSmoothShaded: Uniform[bool]
     ## terrain-lighting (convoy/terrain-lighting): opts a node out of the
     ## 2-3 band toon ramp into a continuous ambient N.L diffuse, and turns
@@ -241,7 +253,14 @@ proc toonFrag(
         (1.0'f - sunFactor) / max(toonShadowStrength, 0.0001'f), 0.0'f, 1.0'f)
       band = mix(1.0'f, toonUnlitShadowDark, shadowTerm)
   # Step 3: two hand-picked colours, then the albedo on top.
-  var lit: Vec3 = mix(toonShadowColor.rgb, toonHighlightColor.rgb, band)
+  # convoy/spark-r1: a `toonUnlitFullBright` fragment reuses `band` (already the 1.0
+  # full-bright / `toonUnlitShadowDark` in-shadow range from the branch above) as a
+  # neutral grey multiplier, so it still darkens correctly under the sun's own shadow
+  # (if also `toonUnlitReceivesShadow`) without ever being tinted toward
+  # `toonHighlightColor`'s time-of-day colour.
+  var lit: Vec3 =
+    if toonUnlitFullBright: vec3(band, band, band)
+    else: mix(toonShadowColor.rgb, toonHighlightColor.rgb, band)
   if toonSmoothShaded:
     # THE GROUND IS HIT BY THE SUN, cast-shadow multiply. Owner ruling
     # 2026-09-23, verbatim: "a shadow is the ground's own colour made
@@ -460,6 +479,7 @@ type
     alphaCutoff, ramp: GLint
     highlightColor, shadowColor, rimColor, unlit, tint: GLint
     unlitReceivesShadow, unlitShadowDark: GLint
+    unlitFullBright: GLint
     smoothShaded: GLint
     smoothShadowDark: GLint
     fogColor: GLint
@@ -503,6 +523,17 @@ type
     unlitShadowDark*: float32
       ## Multiply floor for unlitReceivesShadow nodes in full shadow. 1.0
       ## (the default) reproduces today's unlit behaviour exactly.
+    unlitFullBright*: HashSet[string]
+      ## convoy/spark-r1: subset of unlitNodes rendered as a true, untinted
+      ## full-bright colour (`albedo` alone, times only the sun-shadow term
+      ## if also in `unlitReceivesShadow`) instead of this module's default
+      ## unlit behaviour of `albedo * toonHighlightColor` (the character
+      ## eyes/mouths use case this module was designed for, see header --
+      ## tinting toward the highlight band is correct for THEM, wrong for a
+      ## small saturated FX primitive meant to read as its own light
+      ## source). Empty by default -- membership here does nothing unless
+      ## the node is also in `unlitNodes`, and an empty set reproduces
+      ## pre-existing pixels exactly.
     smoothShadedNodes*: HashSet[string]
       ## convoy/terrain-lighting: nodes shaded with a continuous ambient
       ## N.L diffuse instead of the toon ramp, plus the explicit
@@ -597,6 +628,7 @@ proc newToonContext*(): ToonContext =
   loc(unlit, "toonUnlit")
   loc(unlitReceivesShadow, "toonUnlitReceivesShadow")
   loc(unlitShadowDark, "toonUnlitShadowDark")
+  loc(unlitFullBright, "toonUnlitFullBright")
   loc(smoothShaded, "toonSmoothShaded")
   loc(smoothShadowDark, "toonSmoothShadowDark")
   loc(tint, "toonTint")
@@ -693,6 +725,8 @@ proc drawPrimitive(
   glUniform1i(u.unlit, (owner.name in ctx.unlitNodes).ord.GLint)
   glUniform1i(
     u.unlitReceivesShadow, (owner.name in ctx.unlitReceivesShadow).ord.GLint)
+  glUniform1i(
+    u.unlitFullBright, (owner.name in ctx.unlitFullBright).ord.GLint)
   glUniform1i(
     u.smoothShaded, (owner.name in ctx.smoothShadedNodes).ord.GLint)
   if useSkinning:
