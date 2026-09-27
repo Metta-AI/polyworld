@@ -83,7 +83,7 @@ magic stays `GOTANET1` for every game. All values are little-endian.
 | 0 | magic `GOTANET1` (8 bytes) |
 | 8 | u32 version = 1 |
 | 12 | u32 inputs I (1..4096) |
-| 16 | u32 hidden H (64, 128 or 256) |
+| 16 | u32 hidden H (64, 128, 256, 384 or 512) |
 | 20 | u32 outputs O (2..1024, the sum of the head sizes) |
 | 24 | u32 heads K (1..32) |
 | 28 | u32 parameters = I*H + 3*H*H + O*H (at most 2,000,000) |
@@ -114,6 +114,13 @@ A model costs `2 * parameters + 32 * H` operations per inference
 `opBudget` caps this cost. It defaults to 4,000,000 and is separate from the BASIC
 instruction budget. The cap is checked when the model is loaded, so an over-budget
 model is rejected up front. It is never stopped halfway through a match.
+
+The two widest accepted widths, w384 and w512, cost about 2,048,256 and 3,124,224
+operations per inference respectively (game-specific; GotA's exact figures are in
+`examples/gods_of_the_arena/neural_basic.md`), both under the default 4,000,000
+budget. `infer`'s fixed stack buffers are sized from `MaxActorWidth` (the largest
+entry in `ActorWidths`), so adding a wider width never changes the arithmetic for
+narrower ones.
 
 ## Adding neural seats to a game
 

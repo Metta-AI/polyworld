@@ -301,3 +301,18 @@ block:
   var stale = initRuntime(program, host)
   discard stale.run()
   doAssert stale.getGlobal("fresh") == 0, "a decision is fresh only on its tick"
+
+echo "Testing widened neural actor widths (384, 512) load; neighbors are rejected"
+block:
+  let wide = toyContract(budget = 4_000_000)
+  for hidden in ActorWidths:
+    let model = toyModel(hidden, seed = 3, contract = wide)
+    let manifest = toyManifest(ToyPolicy, model, wide, hidden = hidden)
+    let package = parsePackage(toyPackage(manifest, ToyPolicy, model), wide)
+    doAssert package.actor.hiddenSize == hidden
+  for hidden in [383, 385, 511, 513]:
+    let model = toyModel(hidden, seed = 3, contract = wide)
+    let manifest = toyManifest(ToyPolicy, model, wide, hidden = hidden)
+    rejects(toyPackage(manifest, ToyPolicy, model),
+      "unsupported neural actor dimensions", wide)
+  doAssert MaxActorWidth == ActorWidths[^1]
