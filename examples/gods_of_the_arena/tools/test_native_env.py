@@ -8,13 +8,15 @@
 4 goals: a goal set before reset is the last 16 floats of the first observation.
 5 rewards: rewards[s] == delta(stats[s][0]) / 1000 every step.
 6 package parity: a seat hosting a neural package and a learner seat driven through
-  gota_net_infer with the same weights produce identical worlds (w64/w128/w256).
+  gota_net_infer with the same weights produce identical worlds (w64/w128/w256/w384/w512).
 7 package validation: the Nim loader and neural_package.py reject the same corrupted packages.
-8 ops per tick: gota_net_info operations for w64/w128/w256 against the 4,000,000 budget.
+8 ops per tick: gota_net_info operations for w64/w128/w256/w384/w512 against the 4,000,000 budget.
 9 error paths: gota_net_infer on a non-finite observation returns -2 with gota_last_error set; an
   invalid gota_set_policy_script returns 1 with the compile message in gota_last_error; a package
   rejection reason and a script compile message are still reported by gota_seat_script_status after
   gota_reset; the Python binding raises NativeEnvError on negative returns.
+10 widths: w64/w128/w256/w384/w512 load in both the Nim loader and neural_package.py; every other
+  width (including ones whose parameter count fits) is rejected by both, with the dimensions error.
 """
 import os, sys, json, zipfile, io, hashlib
 import numpy as np
@@ -139,6 +141,50 @@ def random_model(hidden, seed):
     return npk.encode_model(w.tolist(), hidden)
 
 
+ACCEPT_WIDTHS = [64, 128, 256, 384, 512]
+REJECT_WIDTHS = [1, 32, 63, 65, 96, 192, 255, 257, 320, 383, 385, 448, 511, 513, 640]
+
+
+def test_widths(lib):
+    """Both loaders accept exactly the five widths and reject every neighbor
+    tried above, even where the parameter count alone would fit."""
+    env = Env(lib, learner_seats=[])
+    for hidden in ACCEPT_WIDTHS + REJECT_WIDTHS:
+        model = random_model(hidden, 7)
+        want = hidden in ACCEPT_WIDTHS
+        try:
+            npk.validate(npk.build(POLICY, model)); py = "accepted"
+        except npk.PackageError as e:
+            py = "rejected: " + str(e)
+        err = ctypes.create_string_buffer(512)
+        net = lib.L.gota_net_load(model, len(model), err, 512)
+        nim = "accepted" if net else "rejected: " + err.value.decode()
+        if net:
+            info = np.zeros(8, np.int64)
+            lib.L.gota_net_info(net, info.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)))
+            lib.L.gota_net_destroy(net)
+        if want:
+            ok = py == "accepted" and nim == "accepted"
+        else:
+            # Both must reject. Most neighbors fail the width check itself
+            # ("dimensions"); a width far enough out (640) also overflows
+            # model.bin's own size cap, and the package-level Python
+            # validator (which checks a ZIP entry's declared size before
+            # parsing it) surfaces that first, while gota_net_load here is
+            # given the raw model bytes with no package wrapper, so it only
+            # ever sees the dimensions check. Both rejections are correct.
+            def is_rejection(msg):
+                return "dimensions" in msg or "byte limit" in msg or \
+                    "parameter count" in msg
+            ok = is_rejection(py) and is_rejection(nim)
+        check(f"width {hidden} {'accepted' if want else 'rejected'} by both", ok,
+              f"py={py[:60]} nim={nim[:60]}")
+        if want:
+            rc = env.set_package(hidden % 10, npk.build(POLICY, model))
+            check(f"width {hidden} accepted by the hosted seat too", rc == 0,
+                  f"rc={rc} {env.status(hidden % 10)[1][:70]!r}")
+
+
 def argmax_heads(logits):
     out, o = [], 0
     for s in HEAD_SIZES:
@@ -237,7 +283,7 @@ def test_validation(lib):
             npk.validate(bad); py = "accepted"
         except npk.PackageError as e:
             py = "rejected"
-        nim = env.set_package(1, bad)
+        nim = env.set_package(1, bad, check=False)
         check(f"reject {name}", py == "rejected" and nim == 2, f"py={py} nim={nim} {env.status(1)[1][:70]}")
 
 
@@ -265,8 +311,8 @@ def test_error_paths(lib):
     L.gota_last_error(b, 1024)
     check("bad policy script -> 1 with the compile message", r == 1 and len(b.value) > 0,
           f"r={r} error={b.value.decode()[:80]!r}")
-    check("rejected package -> 2", env.set_package(4, b"PK\x03\x04 not a package") == 2)
-    check("bad script -> 1", env.set_script(7, "THIS IS NOT BASIC\n") == 1)
+    check("rejected package -> 2", env.set_package(4, b"PK\x03\x04 not a package", check=False) == 2)
+    check("bad script -> 1", env.set_script(7, "THIS IS NOT BASIC\n", check=False) == 1)
     raised = False
     try:
         env.reset(5)
@@ -291,7 +337,8 @@ def main():
     test_rewards(lib, steps)
     test_validation(lib)
     test_error_paths(lib)
-    test_package_parity(lib, steps if quick else 7200, [64, 128, 256])
+    test_widths(lib)
+    test_package_parity(lib, steps if quick else 7200, [64, 128, 256, 384, 512])
     print("ALL PASS" if not failures else f"FAILURES: {failures}")
     sys.exit(1 if failures else 0)
 

@@ -242,6 +242,14 @@ proc resetEnv(env: Env, seed: int64): int =
         game.heroVms[i].neural = seat
     else:
       result = -2
+  if result == -2:
+    var failures: string
+    for i in 0 ..< 10:
+      if env.status[i].code == 2:
+        if failures.len > 0:
+          failures.add "; "
+        failures.add "seat " & $i & ": " & env.status[i].message
+    lastError = "seat compilation failed: " & failures
   env.over = false
   env.started = true
   # Draft (BASIC picks), then the first battle decision.

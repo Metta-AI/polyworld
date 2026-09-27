@@ -3,13 +3,50 @@
 import
   std/[json, monotimes, net, os, osproc, strtabs, strutils, tempfiles,
     times, uri],
-  crunchy, jsony
+  crunchy, jsony,
+  polyworld/neural_host,
+  ../../examples/gods_of_the_arena/neural_contract,
+  ../../tests/neural_toy as zip
 
 const
   Root = currentSourcePath().parentDir.parentDir.parentDir
   LogLimit = 10 * 1024 * 1024
   SocketTimeout = 5000
   Games = [("gota", 10), ("lvd", 2), ("cta", 4)]
+
+proc gotaModelBytes(): string =
+  ## A minimal valid w64 GOTANET1 model matching the live GotA contract.
+  var weights = newSeq[float32](
+    zip.weightCount(64, ObservationSize, ActionOutputs))
+  encodeActor(ObservationSize, 64, HeadSizes, ObservationContractHash,
+    ActionContractHash, weights)
+
+proc gotaBrokenPolicyPackage(): string =
+  ## A neural package with a valid manifest and model, but a policy.bas
+  ## that fails to compile: exercises `installPackageSeat`'s own compile
+  ## error path (a valid package whose embedded script is broken), as
+  ## opposed to a corrupt/unparsable package.
+  let
+    model = gotaModelBytes()
+    policy = "THIS IS NOT BASIC\n"
+    manifest = %*{
+      "schema": PackageSchema,
+      "observation_contract": ObservationContractHash,
+      "action_contract": ActionContractHash,
+      "decision_period": 4,
+      "files": {
+        "policy.bas": sha256Hex(policy), "model.bin": sha256Hex(model)
+      },
+      "model": {
+        "format": "GOTANET1", "inputs": ObservationSize, "hidden": 64,
+        "heads": HeadSizes
+      }
+    }
+  zip.writeZip([
+    zip.entry("manifest.json", $manifest),
+    zip.entry("policy.bas", policy),
+    zip.entry("model.bin", model)
+  ])
 
 proc fileUri(path: string): string =
   ## Encodes one absolute path for the runner's local file handoff.
@@ -210,7 +247,7 @@ proc episode(
     doAssert output["failed_policy_index"].getInt() == 0
     doAssert logs[0].contains(failureLog), logs[0]
     if failureMessage.len > 0:
-      doAssert output["message"].getStr() == failureMessage,
+      doAssert output["message"].getStr().startsWith(failureMessage),
         "failPlayer must report the failing slot and reason: " &
           output["message"].getStr()
     let status = readFile(directory / "status.json").fromJson(JsonNode)
@@ -279,6 +316,14 @@ for (game, count) in Games:
     episode(game, count, scripts, failure = true,
       failureLog = "neural package rejected:",
       failureMessage = "neural package rejected for player slot 0")
+    # A valid package whose embedded policy.bas fails to compile is its
+    # own failure, reported through the same failPlayer path (not the
+    # generic "BASIC compilation failed" message).
+    scripts[0] = gotaBrokenPolicyPackage()
+    episode(game, count, scripts, failure = true,
+      failureLog = "neural package rejected for player slot 0",
+      failureMessage = "neural package rejected for player slot 0: " &
+        "policy.bas failed to compile:")
   scripts[0] = "WHILE 1\nWEND\n"
   episode(game, count, scripts)
   echo game, ": runtime contracts passed"

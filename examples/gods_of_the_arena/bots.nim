@@ -859,10 +859,14 @@ proc installPackageSeat*(game: Game, i: int, bytes: string) =
   var schema = initHeroHost(0)
   schema.addNeuralSeatFunctions(0)
   let program =
-    when defined(coworld):
-      compilePlayer(package.policy, schema, limits, i)
-    else:
+    try:
       compile(package.policy, schema, limits)
+    except BasicError as error:
+      let message = "neural package rejected for player slot " & $i &
+        ": policy.bas failed to compile: " & error.msg
+      when defined(coworld):
+        failPlayer(i, message, message)
+      raise newException(BasicError, message)
   bindHeroData(program)
   var host = initHeroHost(heroId)
   host.addNeuralSeatFunctions(heroId)

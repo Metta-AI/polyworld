@@ -59,7 +59,7 @@ class NativeEnvError(RuntimeError):
     """A negative return code from libgota_env (code = the return value)."""
     def __init__(self, call, code, message=""):
         super().__init__(f"{call} returned {code}" + (f": {message}" if message else ""))
-        self.call, self.code = call, code
+        self.call, self.code, self.message = call, code, message
 
 
 class Lib:
@@ -188,10 +188,16 @@ class Env:
     def state_hash(self):
         return self.L.gota_state_hash(self.h)
 
-    def set_script(self, seat, source):
-        """0 ok, 1 compile failed (see status); raises on negative codes."""
+    def set_script(self, seat, source, check=True):
+        """0 ok, 1 compile failed (see status). Always raises NativeEnvError on
+        a negative code; also raises on a compile failure (code 1) unless
+        `check=False`, in which case the caller inspects `status(seat)`."""
         b = source.encode()
-        return self._c("gota_set_seat_script", self.L.gota_set_seat_script(self.h, seat, b, len(b)))
+        r = self._c("gota_set_seat_script",
+            self.L.gota_set_seat_script(self.h, seat, b, len(b)))
+        if check and r != 0:
+            raise NativeEnvError("gota_set_seat_script", r, self.status(seat)[1])
+        return r
 
     def set_override(self, seat, on):
         return self._c("gota_set_seat_override", self.L.gota_set_seat_override(self.h, seat, int(on)))
@@ -212,9 +218,15 @@ class Env:
         self._c("gota_action_mask", self.L.gota_action_mask(self.h, seat, ptr(out, ctypes.c_uint8)))
         return out
 
-    def set_package(self, seat, data):
-        """0 ok, 1 compile failed, 2 package rejected (see status); raises on negative codes."""
-        return self._c("gota_set_seat_package", self.L.gota_set_seat_package(self.h, seat, data, len(data)))
+    def set_package(self, seat, data, check=True):
+        """0 ok, 1 compile failed, 2 package rejected (see status). Always
+        raises NativeEnvError on a negative code; also raises on 1/2 unless
+        `check=False`, in which case the caller inspects `status(seat)`."""
+        r = self._c("gota_set_seat_package",
+            self.L.gota_set_seat_package(self.h, seat, data, len(data)))
+        if check and r != 0:
+            raise NativeEnvError("gota_set_seat_package", r, self.status(seat)[1])
+        return r
 
     def set_goal(self, seat, w):
         w = np.ascontiguousarray(w, np.float32)
