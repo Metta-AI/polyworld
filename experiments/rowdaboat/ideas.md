@@ -81,3 +81,17 @@ Initial champion and baseline are established. No experimental policy change has
 - Current authoritative state: v1 is still the active competing champion, and the live leaderboard places RowDaBoat at rank 21. The goal has not been achieved. There is no running trial or uncommitted candidate to finish.
 - Initial champion, baseline, rule audit, top-player replay research, one isolated trial, and its revert are complete. Remaining policy advances require a significance decision from the requested dashboard; further hosted batches cannot make that decision observable while its network remains unavailable. No additional trial is started simply to work around that gate.
 - Required external change: connect this machine to the dashboard's Tailscale network/DNS, or provide a reachable URL for the same dashboard. The earlier access question remains unanswered. Once access works, verify RowDaBoat's player slug, refresh the release and top three, and resume the backlog with existing-equipment purchase priority as the next isolated hypothesis.
+
+## Resumed campaign — 2026-09-28
+
+- User requested continuation. This starts a fresh access-blocker audit. The first resumed dashboard check again returned `ERR_NAME_NOT_RESOLVED`; an access question is pending while independent research proceeds.
+- Live champion remains submitted v1, `ab664012-84b3-48b3-ae1b-86f3f6cf960c`. Active source is unchanged and the live leaderboard now places RowDaBoat at rank 18. No improvement is inferred from league standing changes.
+- Hosted manifest still reports `2026.9.24.2`, replay 64. Fetched origin/main `278447ae` adds Heartleaf work; GotA rules, APIs and example policies are unchanged. Audit: `research/gota-rules-resume-20260928.md`.
+- Fresh top three unique other players are relh `relh-gods-of-the-arena:v380` (`272e3b71-e3f6-4b9d-b4d9-b990d179a19c`), richard `richard-gods-of-the-arena:v340` (`8bf344e5-c1b5-4b9b-94c5-b9f7437998b3`), and Andre von Auto `khors:v219` (`594e4f86-57a5-4217-bccd-960e495791ce`). The old B000/T001 opponent snapshot is not a current comparison baseline.
+- New leader replays from round 906 are being reconstructed for mechanism research only. The latest-replay endpoint's `policy_version_ids` list is not seat ordered; use each participant's explicit `position`. This differs from the validated XP response shape and must not silently misattribute actions.
+
+### B001 — refresh submitted baseline against current top three (preparation)
+
+- Idea: establish current hosted behavior and results for submitted v1 against the changed top-three roster before any new strategy trial.
+- Policy change: none. Reuse the already committed, pushed and uploaded v1 source/version; do not create or promote a duplicate artifact. At least ten hosted episodes with complete seat rotation, one own hero and three seats of each unique opponent policy.
+- XP ID: pending. Opponents: the Sep 28 top three above, to be refreshed immediately before request. Evidence and verdict: pending baseline completion; no candidate or keep decision exists.
