@@ -1,10 +1,12 @@
 # Polyworld Fast XP
 
-> A synchronous Gota run API using submitted policy references in an XP-request-style roster.
+> A synchronous Gota run API accepting your BASIC source and opponent policy references.
 
-Policy resolution and bot fetching are TODOs. Valid requests currently return
-HTTP 501, not a replay. Inline BASIC source is not accepted.
+Use `player.source` for your bot and `player.policy_ref` for opponents, with
+exactly one per player. Responses contain the replay and logs only for seats
+using supplied source. Inline-only matches work; selected policy references
+return HTTP 501 until bot fetching is implemented.
 
 ## API
 
-- [Run API](run.md): Request shape, authentication, current limitations, and intended output.
+- [Run API](run.md): Request shape, seating, authentication, log visibility, and errors.

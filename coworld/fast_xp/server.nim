@@ -5,9 +5,15 @@ import
   zippy/ziparchives
 
 type
+  PlayerKind* = enum
+    InlineSource, PolicyReference
   RosterEntry* = object
-    policyRef*: string
     slot*: int
+    case kind*: PlayerKind
+    of InlineSource:
+      source*: string
+    of PolicyReference:
+      policyRef*: string
   RunInput* = object
     seed*, maxTicks*: int
     roster*: seq[RosterEntry]
@@ -53,7 +59,7 @@ proc integer(node: JsonNode, key: string, low, high: int): int =
   int(value)
 
 proc parseRun*(body: string): RunInput =
-  ## Validates policy references and seating before allocating a worker.
+  ## Validates player inputs and seating before allocating a worker.
   var node: JsonNode
   try:
     node = parseJson(body)
@@ -74,14 +80,17 @@ proc parseRun*(body: string): RunInput =
   for entry in node["roster"]:
     checkFields(entry, ["player", "slot"])
     if not entry.hasKey("player"):
-      reject(400, "Each roster entry requires player.policy_ref")
+      reject(400, "Each roster entry requires a player")
     let player = entry["player"]
-    checkFields(player, ["policy_ref"])
-    if not player.hasKey("policy_ref") or player["policy_ref"].kind != JString:
-      reject(400, "Each player requires a policy_ref string")
-    let policyRef = player["policy_ref"].getStr()
-    if policyRef.strip().len == 0 or '\0' in policyRef:
-      reject(400, "policy_ref must be nonempty and contain no NUL characters")
+    checkFields(player, ["source", "policy_ref"])
+    if player.hasKey("source") == player.hasKey("policy_ref"):
+      reject(400, "Each player requires exactly one of source or policy_ref")
+    let field = if player.hasKey("source"): "source" else: "policy_ref"
+    if player[field].kind != JString:
+      reject(400, field & " must be a string")
+    let value = player[field].getStr()
+    if value.strip().len == 0 or '\0' in value:
+      reject(400, field & " must be nonempty and contain no NUL characters")
     let slot = if entry.hasKey("slot"):
         integer(entry, "slot", -1, SeatCount - 1)
       else: -1
@@ -91,20 +100,43 @@ proc parseRun*(body: string): RunInput =
       pinned.incl slot
     else:
       hasOpenSeatSelector = true
-    result.roster.add RosterEntry(policyRef: policyRef, slot: slot)
+    result.roster.add(if field == "source":
+      RosterEntry(kind: InlineSource, source: value, slot: slot)
+    else:
+      RosterEntry(kind: PolicyReference, policyRef: value, slot: slot))
   if pinned.len < SeatCount and not hasOpenSeatSelector:
     reject(400, "Unfilled seats require a roster entry with slot -1")
 
-proc resolvePlayers(input: RunInput): seq[ResolvedPlayer] =
-  ## Stops at the missing authorized policy-reference-to-source boundary.
-  # TODO: Resolve name:vN or policy-version UUID through Observatory.
-  # TODO: Authenticate the caller and enforce policy selection permissions.
-  # TODO: Fill seats using XP-request pinned/open-slot roster semantics.
-  # TODO: Fetch BASIC bytes through an authorized existing access path, verify
-  # their hash and size, and cache immutable content by hash.
-  # TODO: Return exactly ten seat-ordered sources and caller-specific log access.
-  # Never assume that permission to run an opponent permits reading its logs.
+proc fetchPolicySource(policyRef: string): string =
+  ## Fetches an opponent's private BASIC source.
+  # TODO: Resolve name:vN or UUID through Observatory, download and verify the
+  # artifact, and cache immutable content by hash using a service credential.
   reject(501, "Policy reference resolution and bot fetching are not implemented")
+
+proc resolvePlayers(input: RunInput): seq[ResolvedPlayer] =
+  ## Pins explicit seats and fills the rest from open entries in roster order.
+  var
+    selected: array[SeatCount, int]
+    openEntries: seq[int]
+    nextOpen: int
+  for slot in 0 ..< SeatCount:
+    selected[slot] = -1
+  for index, entry in input.roster:
+    if entry.slot >= 0:
+      selected[entry.slot] = index
+    else:
+      openEntries.add index
+  for slot in 0 ..< SeatCount:
+    if selected[slot] < 0:
+      selected[slot] = openEntries[nextOpen mod openEntries.len]
+      inc nextOpen
+    let entry = input.roster[selected[slot]]
+    case entry.kind
+    of InlineSource:
+      result.add ResolvedPlayer(source: entry.source, canReadLog: true)
+    of PolicyReference:
+      result.add ResolvedPlayer(source: fetchPolicySource(entry.policyRef),
+        canReadLog: false)
 
 proc fileUri(path: string): string =
   ## Encodes an absolute staging path for the Coworld file handoff.

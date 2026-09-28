@@ -1,12 +1,13 @@
 # Fast XP server
 
-Mummy API accepting an XP-request-style `roster` of `player.policy_ref` and
-`slot` entries. Resolution, authorized bot fetching, and caller identity are
-explicit TODOs: valid requests return HTTP 501 before staging or execution.
+Mummy API accepting an XP-request-style roster with inline `player.source` for
+caller-supplied BASIC bots and `player.policy_ref` for opponents. Each player
+specifies exactly one. Inline-only rosters run locally; selected references
+return HTTP 501 until authorized bot fetching is implemented.
 
-The native child-process runner remains in place for the resolved sources.
-It reuses Coworld replay/log capture without a container or child HTTP server.
-Log output is gated on the resolver's caller-specific access decision.
+The native child-process runner reuses Coworld replay/log capture without a
+container or child HTTP server. It returns logs only for inline-source seats;
+policy-reference seats never expose logs, regardless of policy ownership.
 
 From the Polyworld repository:
 
@@ -30,8 +31,8 @@ Environment:
 
 Use a trusted TLS proxy for remote access. The shared token gates this prototype;
 it does not identify Observatory users or authorize access to submitted bots.
-No submitted-policy fetching or caching is implemented. Inline BASIC sources
-are no longer accepted. See `resolvePlayers` in server.nim for the TODO boundary.
+No submitted-policy fetching or caching is implemented. See `fetchPolicySource`
+in server.nim for the TODO boundary.
 
 Run the integration checks after building both executables:
 

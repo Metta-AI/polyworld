@@ -1,4 +1,5 @@
-"""Exercise policy-reference validation and the explicit unresolved API boundary."""
+"""Exercise inline matches, seating, private references, and request validation."""
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "coworld/fast_xp/server"
@@ -63,15 +65,22 @@ def main():
                                 dict(body, config={"max_ticks": 0}),
                                 dict(body, config={"max_ticks": 28801}),
                                 dict(body, players=[{"source": "END"}] * 10),
-                                dict(body, roster=[{"player": {"source": "END"}}]),
+                                dict(body, roster=[{"player": {}}]),
+                                dict(body, roster=[{"player": {"source": "END", "policy_ref": "x:v1"}}]),
+                                dict(body, roster=[{"player": {"source": " "}}]),
+                                dict(body, roster=[{"player": {"source": 123}}]),
+                                dict(body, roster=[{"player": {"source": "END\0"}}]),
+                                dict(body, roster=[{"player": {"source": "END", "canReadLog": True}}]),
                                 dict(body, roster=[{"player": {"policy_ref": ""}}]),
                                 dict(body, roster=[{"player": {"policy_ref": 123}}]),
                                 dict(body, roster=[{"player": {"policy_ref": "x:v1"}, "slot": 10}]),
                                 dict(body, roster=[{"player": {"policy_ref": "x:v1"}, "slot": 0}]),
                                 dict(body, roster=[{"player": {"policy_ref": "x:v1"}, "slot": 0}] * 10)]:
                     assert call(route, invalid)[0] == 400, invalid
-                # Valid references reach the TODO boundary without starting a game.
-                for roster in [body["roster"],
+                mixed = [{"player": {"source": 'print "mine"\nend'}, "slot": 0},
+                         {"player": {"policy_ref": "relh:v231"}, "slot": -1}]
+                # References remain private and unresolved, even beside supplied source.
+                for roster in [mixed, body["roster"],
                                [{"player": {"policy_ref": "109b99c1-3bb7-4276-b17e-378b43a97874"}}],
                                [{"player": {"policy_ref": "my-bot:v12"}, "slot": 0},
                                 {"player": {"policy_ref": "relh:v231"}, "slot": -1}],
@@ -81,6 +90,35 @@ def main():
                     assert status == 501, (status, data)
                     assert headers.get_content_type() == "application/json"
                     assert "not implemented" in json.loads(data)["error"]
+                def source(marker):
+                    return {"source": f'print "{marker}"\nend'}
+
+                rosters = [
+                    ([{"player": source("all-seats")}], ["all-seats"] * 10),
+                    ([{"slot": slot, "player": source(f"seat-{slot}")}
+                      for slot in reversed(range(10))], [f"seat-{slot}" for slot in range(10)]),
+                    ([{"slot": 5, "player": source("pinned")},
+                      {"player": source("open-a")}, {"player": source("open-b")}],
+                     ["open-a", "open-b", "open-a", "open-b", "open-a",
+                      "pinned", "open-b", "open-a", "open-b", "open-a"]),
+                ]
+                for roster, markers in rosters:
+                    status, headers, data = call(route, dict(body, roster=roster))
+                    assert status == 200, (status, data)
+                    assert headers.get_content_type() == "application/zip"
+                    assert headers["Cache-Control"] == "no-store"
+                    assert headers["Server-Timing"].startswith("run;dur=")
+                    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                        assert set(archive.namelist()) == {"replay.replay"} | {
+                            f"logs/slot-{slot}.txt" for slot in range(10)}
+                        assert len(archive.read("replay.replay")) > 0
+                        for slot, marker in enumerate(markers):
+                            output = archive.read(f"logs/slot-{slot}.txt").decode()
+                            assert marker in output, (slot, output)
+                            assert "completed" in output and "BASIC error" not in output
+                status, _, data = call(route, dict(body, roster=[{"player": {"source": "if\n"}}]))
+                assert status == 422, (status, data)
+                assert "slot 0" in json.loads(data)["error"]
                 assert call("/healthz")[0] == 200
                 assert not list(Path(directory).glob("fast-xp-*")), "Leaked match files"
             except BaseException:
