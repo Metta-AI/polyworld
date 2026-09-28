@@ -6,7 +6,7 @@
 ## trainer last chose for it, so scripts never block and no threads are
 ## needed. `step` applies one action per agent, runs `actionTicks` ticks of
 ## every lane, and returns each agent's newest features and team reward.
-## Three rewards, picked by RewardMode:
+## Rewards, picked by RewardMode:
 ## - LeaderboardReward follows the hosted score: each hero is worth
 ##   max(0, XP * 1440 - tick * 200), summed over the team; a step's reward
 ##   is the change divided by 5 * 1440 * 1000, and a loss or timeout drops
@@ -15,6 +15,8 @@
 ##   tick penalty and no reset on a loss, so a policy learns from scratch.
 ## - XpOutcomeReward is XpReward plus OutcomeBonus for a win and minus it
 ##   for a loss or timeout, so surviving matters beyond the next XP.
+## - MobaReward pays small XP and objective-health changes, plus a bounded
+##   terminal outcome. Components stay visible in LaneStats for reward audits.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
 ## Finished lanes restart with the next seed inside the same step.
@@ -31,16 +33,19 @@ const
   TeamSize = 5
   XpDenominator = 100
   OutcomeBonus = 50'f32
+  MobaXpDenominator = 10_000'f32
+  MobaStructureDenominator = 4_000'f32
 
 type
   RewardMode* = enum
-    LeaderboardReward, XpReward, XpOutcomeReward
+    LeaderboardReward, XpReward, XpOutcomeReward, MobaReward
 
   LaneStats* {.bycopy.} = object
     ## Summary of one finished match, from the first policy team's side.
     finished*, outcome*, tick*, selfPlay*: int32
     potential*: int64
       ## Leaderboard score numerator at the end; points = potential / 7200.
+    xpDelta*, structureDelta*: int64
 
   StepLane = object
     game: Game
@@ -52,6 +57,7 @@ type
     features: seq[array[GotaFeatureCount, int32]]
     actions: seq[int32]
     potentials: array[Team, int64]
+    structures: array[Team, int64]
 
   StepBatch* = ref object
     lanes: seq[StepLane]
@@ -74,6 +80,14 @@ proc teamXp(world: World, team: Team): int64 =
   for hero in world.heroes:
     if hero.team == team:
       result += int64(hero.totalXp)
+
+proc structurePotential(world: World, team: Team): int64 =
+  ## Objective health relative to the opposing team, as in training.nim.
+  for building in world.buildings:
+    if building.kind == TowerBuilding:
+      result += 2 * (if building.team == team: 1'i64 else: -1'i64) * int64(max(building.hp, 0))
+  for fort in world.forts:
+    result += 20 * (if fort.team == team: 1'i64 else: -1'i64) * int64(max(fort.hp, 0))
 
 proc outcome(world: World, team: Team, timedOut: bool): int32 =
   ## 1 for a win, -1 for a loss or timeout, 0 while playing.
@@ -153,7 +167,9 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     lane.potentials[side] =
       case batch.rewardMode
       of LeaderboardReward: teamPotential(game.world, side)
-      of XpReward, XpOutcomeReward: teamXp(game.world, side)
+      of XpReward, XpOutcomeReward, MobaReward: teamXp(game.world, side)
+    if batch.rewardMode == MobaReward:
+      lane.structures[side] = structurePotential(game.world, side)
 
 proc newStepBatch*(
     configPath, bot, opponent, policy: string,
@@ -234,7 +250,9 @@ proc step*(
     let
       done = game.world.gameOver or game.world.tick >= batch.maxTicks
       world = game.world
-    var reward: array[Team, float32]
+    var
+      reward: array[Team, float32]
+      xpDeltas, structureDeltas: array[Team, int64]
     for side in Team:
       case batch.rewardMode
       of LeaderboardReward:
@@ -244,22 +262,35 @@ proc step*(
         reward[side] = float32(potential - lane.potentials[side]) /
           float32(ScoreDenominator)
         lane.potentials[side] = potential
-      of XpReward, XpOutcomeReward:
+      of XpReward, XpOutcomeReward, MobaReward:
         let xp = teamXp(world, side)
-        reward[side] = float32(xp - lane.potentials[side]) /
-          float32(XpDenominator)
-        if batch.rewardMode == XpOutcomeReward and done:
-          reward[side] +=
-            float32(outcome(world, side, true)) * OutcomeBonus
+        xpDeltas[side] = xp - lane.potentials[side]
+        if batch.rewardMode == MobaReward:
+          let structure = structurePotential(world, side)
+          structureDeltas[side] = structure - lane.structures[side]
+          reward[side] = float32(xpDeltas[side]) / MobaXpDenominator +
+            float32(structureDeltas[side]) / MobaStructureDenominator
+          if done:
+            reward[side] += float32(outcome(world, side, true))
+          lane.structures[side] = structure
+        else:
+          reward[side] = float32(xpDeltas[side]) / float32(XpDenominator)
+          if batch.rewardMode == XpOutcomeReward and done:
+            reward[side] += float32(outcome(world, side, true)) * OutcomeBonus
         lane.potentials[side] = xp
-    stats[laneIndex] = LaneStats()
+    stats[laneIndex] = LaneStats(
+      xpDelta: xpDeltas[lane.team],
+      structureDelta: structureDeltas[lane.team]
+    )
     if done:
       stats[laneIndex] = LaneStats(
         finished: 1,
         outcome: outcome(world, lane.team, true),
         tick: world.tick,
         selfPlay: int32(batch.selfPlay),
-        potential: teamPotential(world, lane.team)
+        potential: teamPotential(world, lane.team),
+        xpDelta: xpDeltas[lane.team],
+        structureDelta: structureDeltas[lane.team]
       )
     for i, index in lane.agents:
       rewards[agent + i] = reward[world.heroes[index].team]

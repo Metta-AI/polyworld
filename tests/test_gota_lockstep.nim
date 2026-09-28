@@ -75,3 +75,20 @@ for mode in RewardMode:
   let frame = run(false, mode, 480, 10)
   for reward in frame.rewards:
     doAssert reward == reward, "reward must not be NaN"
+
+echo "Testing MOBA reward attribution and terminal scale"
+let moba = newStepBatch(config, bot, bot, policy, 1, 1, 1, false, MobaReward)
+var
+  mobaActions = newSeq[int32](moba.agentCount)
+  mobaRewards = newSeq[float32](moba.agentCount)
+  mobaTerminals = newSeq[uint8](moba.agentCount)
+  mobaStats = newSeq[LaneStats](1)
+moba.step(mobaActions, mobaRewards, mobaTerminals, mobaStats)
+doAssert mobaStats[0].finished == 1
+doAssert mobaStats[0].outcome == -1
+for i in 0 ..< moba.agentCount:
+  doAssert mobaTerminals[i] == 1
+  doAssert abs(mobaRewards[i] - (
+    float32(mobaStats[0].xpDelta) / 10_000'f32 +
+    float32(mobaStats[0].structureDelta) / 4_000'f32 - 1'f32
+  )) < 0.00001'f32
