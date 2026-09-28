@@ -213,6 +213,21 @@ for mode in ["mixed", "mono"]:
     rejected = true
   doAssert rejected
 
+echo "Checking result duration includes bounded drafting time"
+block:
+  let
+    run = fixture(1, "mixed")
+    game = run["schedule"][0]
+  for ticks in [28800, 28909, 31200]:
+    validateResult(resultFor(game, "time_limit", ticks), game, run)
+  for ticks in [-1, 31201]:
+    var rejected = false
+    try:
+      validateResult(resultFor(game, "time_limit", ticks), game, run)
+    except TournamentError:
+      rejected = true
+    doAssert rejected
+
 echo "Checking the zero floor precedes hero and game averages"
 block:
   let

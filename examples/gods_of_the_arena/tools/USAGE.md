@@ -118,11 +118,10 @@ release. Use `--stats-worker PATH` for a preserved older build. A mismatched
 inspector reports an error and leaves the game result intact. Plain
 `--report-only` is offline and rebuilds from the saved counters.
 
-For replay versions 26 through 29, the inspector recovers tower and footman
-finishing blows from exact reward accounting after subtracting hero kills.
-Footmen award 25 XP and 15 gold, towers 100 XP and 75 gold, and heroes 150 XP
-and 100 gold. Both remaining totals must give nonnegative integer kill counts.
-This accounting needs review when a later replay version changes rewards.
+The inspector counts finishing blows from each verified tick's death events.
+Tower kills include barracks; footman last hits exclude neutral camps, whose
+kills are saved separately. Shared XP and god bonuses do not affect these
+counters. Result validation allows battle time plus all ten draft deadlines.
 
 Win/loss is average binary team victory, with no MMR adjustment. Score is lifetime
 XP minus 200 per simulated minute, including fractional minutes, rounded down

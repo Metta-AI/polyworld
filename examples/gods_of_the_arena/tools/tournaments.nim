@@ -2,7 +2,7 @@ import
   std/[algorithm, json, math, os, posix, random, sequtils,
     sets, strutils, tables, times, uri],
   jsony,
-  ../scores
+  ../[content, scores]
 
 const
   Root* = currentSourcePath().parentDir.parentDir.parentDir.parentDir
@@ -198,8 +198,10 @@ proc validateResult*(raw, game, run: JsonNode) =
         require(value.kind in {JInt, JFloat} and
           value.getFloat.classify notin {fcNan, fcInf, fcNegInf},
           "Invalid score values")
+  let maximumTicks = run["game_config"]["max_ticks"].getInt +
+    game["seats"].len * DraftPickTicks
   require(raw{"ticks"} != nil and raw["ticks"].kind == JInt and
-    raw["ticks"].getInt in 0 .. run["game_config"]["max_ticks"].getInt,
+    raw["ticks"].getInt in 0 .. maximumTicks,
     "Invalid result ticks")
   require(raw{"seed"} == game["seed"], "Result seed differs from schedule")
   let outcome = raw{"outcome"}.getStr

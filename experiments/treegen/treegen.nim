@@ -332,10 +332,11 @@ proc drawUi(app: var TreeApp, window: Window) =
     subWindow("Tree generator", app.showPanel, PanelPosition,
       vec2(PanelWidth, window.size.y.float32 - 24)):
         text("TREEGEN  /  procedural tree lab")
-        text($app.geometry.cards & " leaf cards   " &
-          $((app.geometry.bark.indices.len +
+        let triangles = (app.geometry.bark.indices.len +
           app.geometry.foliage.indices.len +
-          app.geometry.cut.indices.len) div 3) & " triangles")
+          app.geometry.cut.indices.len) div 3
+        text($app.geometry.cards & " leaf cards   " &
+          $triangles & " triangles")
         text("Presets")
         block:
           let previous = app.presetName

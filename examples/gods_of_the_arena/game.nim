@@ -64,9 +64,7 @@ proc parseGameOptions(): GameOptions =
     playerSlot: matchConfig.playerSlot,
     headlessTickRate: matchConfig.headlessTickRate,
     waitForLlm: matchConfig.waitForLlm,
-    speed: 1,
-    windowWidth: 1920,
-    windowHeight: 1080
+    speed: 1
   )
   index = 0
   while index < arguments.len:
