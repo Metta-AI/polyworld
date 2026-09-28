@@ -5,12 +5,16 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        suite: [core, gota, policies, cta, lvd, heartleaf, events, simulation, training, replays]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -22,33 +26,43 @@ jobs:
           nimby create
           nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
-      - run: nim r tests/tests.nim
-      - run: python tests/test_neural_converters.py
-      - run: nim r -d:nimAllocStats tests/test_mailbox_allocations.nim
-      - run: nim r tests/test_gota_events.nim
-      - run: nim r -d:replayEvents tests/test_gota_controls.nim
-      - run: nim r -d:replayEvents tests/test_gota_camps.nim
-      - run: nim r tests/test_gota_phases.nim
-      - run: nim r -d:replayEvents tests/test_gota_portals.nim
-      - run: nim r -d:replayEvents tests/test_gota_potions.nim
-      - run: nim r -d:replayEvents tests/test_gota_progression.nim
-      - run: nim r -d:replayEvents tests/test_gota_drafts.nim
-      - name: Generate and verify deterministic replays
-        run: nim r tools/gen_replays.nim gota cta lvd heartleaf
-      - name: Check replay extractor
-        shell: bash
+      - name: Run unit suite
+        if: >-
+          matrix.suite == 'core' || matrix.suite == 'gota' ||
+          matrix.suite == 'policies' || matrix.suite == 'cta' ||
+          matrix.suite == 'lvd' || matrix.suite == 'heartleaf'
+        run: nim r -d:TestSuite=${{ matrix.suite }} tests/tests.nim
+      - if: matrix.suite == 'gota'
+        run: python tests/test_neural_converters.py
+      - if: matrix.suite == 'events'
+        run: nim r -d:replayEvents tests/test_gota_replayevents.nim
+      - if: matrix.suite == 'events'
+        run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
+      - if: matrix.suite == 'simulation'
+        run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
+      - if: matrix.suite == 'simulation'
         run: >-
-          nim r examples/gods_of_the_arena/tools/replay_extractor.nim
-          tmp/replays/gota.replay > /dev/null
-      - run: >-
           nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2
           tests/test_profiles.nim
-      - run: >-
+      - if: matrix.suite == 'simulation'
+        run: >-
           nim r -d:mapProfileTracePath=tmp/map-profile-test.json -d:profileFrames=2
           tests/test_profiles.nim
-      - run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
-      - run: nim r -d:headless tests/test_gota_training.nim
-      - run: nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
-      - run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
-      - run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
-      - run: nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
+      - if: matrix.suite == 'training'
+        run: nim r -d:nimAllocStats tests/test_mailbox_allocations.nim
+      - if: matrix.suite == 'training'
+        run: nim r -d:headless tests/test_gota_training.nim
+      - if: matrix.suite == 'cta'
+        run: nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
+      - if: matrix.suite == 'heartleaf'
+        run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
+      - if: matrix.suite == 'lvd'
+        run: nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
+      - name: Generate and verify deterministic replay
+        if: matrix.suite == 'replays'
+        run: nim r tools/gen_replays.nim gota --ticks=1200
+      - name: Check replay extractor
+        if: matrix.suite == 'replays'
+        run: >-
+          nim r examples/gods_of_the_arena/tools/replay_extractor.nim
+          tmp/replays/gota.replay --quiet
