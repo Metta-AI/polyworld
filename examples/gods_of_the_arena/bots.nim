@@ -313,7 +313,12 @@ proc infoFunctions(host: var Host, heroId: int32) =
       ))
     of 11, 12:
       let metric = if args[0].asInt == 11: KillsMetric else: AssistsMetric
-      toValue(if world.stats == nil: 0 else: world.stats.values[index][metric])
+      toValue(
+        if world.stats == nil:
+          0
+        else:
+          int(world.stats.values[index][metric])
+      )
     of 13: toValue(worldToTiles(hero.velocity.x, WorldScale))
     of 14: toValue(worldToTiles(hero.velocity.z, WorldScale))
     of 15: toValue(worldToTiles(hero.class.heroAttackRange(), WorldScale))
