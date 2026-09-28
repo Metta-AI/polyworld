@@ -167,6 +167,8 @@ proc runGraphics*() =
         let tint = [vec3(1), vec3(0.98, 1, 0.98),
           vec3(0.96, 0.99, 0.97), vec3(1)][surface]
         paint = meadowTexture(tint)
+      elif surface == DirtSurface:
+        paint = pathTexture()
       else:
         paint = readImage(DataRoot & "/terrain/tiles/" & name & ".rgb.png")
       setTerrainMaterial(

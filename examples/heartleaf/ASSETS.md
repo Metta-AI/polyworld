@@ -72,6 +72,25 @@ uniform scale. Thirty yard pieces were extracted into independently placeable
 rails, posts and stones with their own ground pivots. Planters and chimneys are
 separate models. There is no embedded yard grass disk to cover the terrain.
 
+Heartleaf grades its terrain materials at load time: paths use warm ochre,
+roof turf uses brighter yellow-green, and timber keeps a lighter honey tone.
+The original shared CC0 textures stay unchanged. Independent clover meshes
+overhang the roof edges, and sunflower heads face forward with dark brown seed
+centers. Benches use a brighter timber tint.
+
+Garden rails bend gently from their cottage facades toward the
+stepping-stone gates. The same fixed-point transform positions the rendered
+fences and their collision centerlines. This keeps the cottage silhouettes at
+gentle angles while leaving gates, planters and path approaches clear.
+
+The detail pack includes a four-legged tiered beehive, a reusable clothesline
+with purple, blue and cream cloth, and hollow wooden bucket planters with
+recessed soil. Both laundry gardens share the enlarged line with the same
+diagonal orientation. Buckets sit beside the cottage entrances. Signposts and
+birdhouses use twice their original scale, and lamp poles use 1.5 times theirs.
+The plaza fence and its attached flowers turn together to leave the southern
+stepping-stone entrance clear; navigation uses those same rotated rails.
+
 Doorway bases register to the nine building-layer anchors. Planting follows
 explicit bands from the vegetation layer, with seeded crown and color variation.
 Twenty-four irregular forest trees frame the map, including cropped trees just

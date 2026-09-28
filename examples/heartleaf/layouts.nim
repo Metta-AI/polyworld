@@ -18,11 +18,15 @@ const
   HouseHillRadius* = 3.88'f * HouseMeshScale
   HouseHillCenterZ* = -1.4'f * HouseMeshScale
   HouseTurns* = [
-    (996, -87), (940, -342), (883, 469), (906, -423), (829, 559),
-    (839, -545), (788, 616), (819, -574), (875, 485)
+    (996, -87), (883, -469), (883, 469), (848, -530), (829, 559),
+    (788, -616), (788, 616), (819, -574), (875, 485)
+  ]
+  YardTurns* = [
+    (996, -87), (829, -559), (629, 777), (777, -629), (829, 559),
+    (515, -857), (616, 788), (819, -574), (875, 485)
   ]
   HouseGardenOffsets* = [
-    (-3'i32, 2'i32), (3'i32, 2'i32), (-1'i32, 4'i32)
+    (-3'i32, 2'i32), (3'i32, 2'i32), (-2'i32, 4'i32)
   ]
   TownMinX* = -24'i32
   TownMaxX* = 24'i32
@@ -161,6 +165,23 @@ proc houseYaw*(slot: int): float32 =
   ## Turns each cottage facade inward by its reference image angle.
   arctan2(HouseTurns[slot][1].float32, HouseTurns[slot][0].float32)
 
+proc yardTurn*(slot: int, z: int32): tuple[cosine, sine: int32] =
+  ## Bends the garden toward its path while keeping its roots at the facade.
+  let
+    along = clamp(z, 0'i32, 5000'i32)
+    house = HouseTurns[slot]
+    yard = YardTurns[slot]
+  (
+    int32(house[0] + (yard[0] - house[0]) * along div 5000),
+    int32(house[1] + (yard[1] - house[1]) * along div 5000)
+  )
+
+proc yardPoint*(slot: int, x, z: int32): tuple[x, z: int32] =
+  ## Shares the garden's bent centerlines between geometry and collision.
+  let turn = yardTurn(slot, z)
+  ((turn.cosine * x - turn.sine * z) div 1000,
+    (turn.sine * x + turn.cosine * z) div 1000)
+
 proc houseOffset*(slot: int, x, z: int32): tuple[x, z: int32] =
   ## Rotates tile offsets with fixed point arithmetic for portable replays.
   let
@@ -174,6 +195,19 @@ proc houseOffset*(slot: int, x, z: int32): tuple[x, z: int32] =
     else:
       (value + 500) div 1000
   (rounded(px), rounded(pz))
+
+proc gardenOffset*(slot: int, x, z: int32): tuple[x, z: int32] =
+  ## Keeps planter tiles beside the bent yard's central approach.
+  let
+    side = if slot in [2, 6] and x == -2 and z == 4: 2'i32 else: x
+    point = yardPoint(slot, side * 1000, z * 1000)
+  proc rounded(value: int32): int32 =
+    ## Rounds signed thousandths to the nearest simulation tile.
+    if value < 0:
+      -((-value + 500) div 1000)
+    else:
+      (value + 500) div 1000
+  (rounded(point.x), rounded(point.z))
 
 iterator roadSegments(): tuple[a, b: RoadPoint] =
   ## Shares independently traced lanes and oblique cottage approaches.
@@ -202,9 +236,11 @@ iterator roadSegments(): tuple[a, b: RoadPoint] =
   for slot, house in TownHouses:
     let
       offset = houseOffset(slot, 0, 2)
+      anchor = houseAnchor(slot)
+      entrance = yardPoint(slot, 0, 6000)
       gate = RoadPoint(
-        x: house[0].int32 * 1000 - HouseTurns[slot][1].int32 * 6,
-        z: house[1].int32 * 1000 + HouseTurns[slot][0].int32 * 6,
+        x: anchor.x + entrance.x,
+        z: anchor.z + entrance.z,
         width: 850
       )
     yield (RoadPoint(
@@ -289,7 +325,7 @@ proc meadowSpots*(seed: int32): seq[MeadowSpot] =
           nearHouse = true
         for local in HouseGardenOffsets:
           let
-            offset = houseOffset(slot, local[0], local[1])
+            offset = gardenOffset(slot, local[0], local[1])
             gx = x - (house[0] + offset.x) * 1000
             gz = z - (house[1] + offset.z) * 1000
           if gx * gx + gz * gz < 2_560_000:
@@ -419,7 +455,7 @@ proc groundPlants*(seed: int32): seq[GroundPlant] =
           clear = false
       for local in HouseGardenOffsets:
         let
-          offset = houseOffset(slot, local[0], local[1])
+          offset = gardenOffset(slot, local[0], local[1])
           gx = dx - offset.x * 1000
           gz = dz - offset.z * 1000
           radius = plant.radius.int64 + 800
@@ -434,10 +470,11 @@ proc makeGardenFences(): seq[GardenFence] =
   ## Builds the same tangent rails as the mesh, leaving both gate openings.
   for ring in [(TownWell.x, TownWell.y, 3'f, 12), (0'f, 0'f, 7.5'f, 28)]:
     for i in 0 ..< ring[3]:
-      let angle = i.float32 * 2'f * PI.float32 / ring[3].float32
-      if abs(cos(angle)) < 0.22'f:
+      let baseAngle = i.float32 * 2'f * PI.float32 / ring[3].float32
+      if abs(cos(baseAngle)) < 0.22'f:
         continue
       let
+        angle = baseAngle + (if ring[3] == 28: 0.20'f else: 0'f)
         x = ring[0] + cos(angle) * ring[2]
         z = ring[1] + sin(angle) * ring[2]
         half = ring[2] * PI.float32 / ring[3].float32

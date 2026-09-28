@@ -303,7 +303,7 @@ proc buildMap(seed: int32): MapData =
   for slot, house in houses:
     for local in HouseGardenOffsets:
       let
-        offset = houseOffset(slot, local[0], local[1])
+        offset = gardenOffset(slot, local[0], local[1])
         garden = tile2(
           house.center.x.int32 + offset[0],
           house.center.y.int32 + offset[1]

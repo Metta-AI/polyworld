@@ -44,6 +44,24 @@ block:
   doAssert rail.obstacleClear(1300, 1000, 2000, 1000)
   doAssert rail.obstacleClear(-2000, -1600, -2000, 1600)
 
+echo "Testing the southern plaza gate follows the stepping-stone path"
+block:
+  let world = newWorld(map, 1)
+  doAssert world.travelClear(bodyPoint(-1500, 6200), bodyPoint(-1500, 9000)),
+    "The central tree fence or planting crosses its entrance path"
+
+echo "Testing the right-hand gates clear their painted stone approaches"
+block:
+  let world = newWorld(map, 1)
+  for path in [(797, 350, 758, 386), (837, 904, 793, 938)]:
+    let
+      first = bodyPoint(int32((path[0] - 560) * 44 - 500),
+        int32((path[1] - 650) * 57 - 500))
+      last = bodyPoint(int32((path[2] - 560) * 44 - 500),
+        int32((path[3] - 650) * 57 - 500))
+    doAssert world.travelClear(first, last),
+      "A right-hand garden blocks its painted stepping-stone approach"
+
 echo "Testing every house and garden remains reachable without collisions"
 var destinations: seq[Tile2]
 for house in map.houses:

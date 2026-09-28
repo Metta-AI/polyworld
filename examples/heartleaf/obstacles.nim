@@ -45,10 +45,10 @@ proc villageObstacles*(seed: int32): seq[Obstacle] =
         px = x * spread div 1000 * scale div 1000
         pz = (z + front * 4 div 10) * scale div 1000 +
           int(HouseMeshOffset.z * 1000)
-        turn = HouseTurns[slot]
+        rotated = yardPoint(slot, px.int32, pz.int32)
       (
-        int32(anchor.x + (turn[0] * px - turn[1] * pz) div 1000),
-        int32(anchor.z + (turn[1] * px + turn[0] * pz) div 1000)
+        anchor.x + rotated.x,
+        anchor.z + rotated.z
       )
     for side in [-1, 1]:
       var points: seq[tuple[x, z: int32]]

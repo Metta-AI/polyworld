@@ -80,7 +80,8 @@ proc checkArt() =
       doAssert node.skin == nil
   for name in ["bench", "fence", "lantern", "market", "laundry",
     "beehive", "sign", "flowers_white", "flowers_blue", "flowers_purple",
-    "flowers_gold", "lupins", "sunflowers", "tree_curb", "plaza_paving"]:
+    "flowers_gold", "lupins", "sunflowers", "eave_clover", "tree_curb",
+    "plaza_paving", "bucket_planter", "birdhouse"]:
       doAssert name in detailNames, "Missing village detail: " & name
   for directory in ["tiles", "stamps"]:
     for family in ["grass", "path", "paving"]:
