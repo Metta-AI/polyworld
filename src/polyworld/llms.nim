@@ -91,11 +91,42 @@ proc environmentInt(name: string, fallback, maximum: int): int =
   if result < 1 or result > maximum:
     raise newException(LlmError, name & " is outside the supported range")
 
+proc validateBaseUrl(baseUrl: string) {.raises: [LlmError].} =
+  ## Allows the production OpenRouter root and explicit loopback endpoints.
+  if baseUrl.len == 0:
+    return
+  if baseUrl.find({'\x00' .. '\x20', '\x7f', '\\', '@', '%', '?', '#'}) >= 0:
+    raise newException(LlmError, "Invalid host LLM base URL")
+  var url: Uri
+  try:
+    url = parseUri(baseUrl)
+  except ValueError:
+    raise newException(LlmError, "Invalid host LLM base URL")
+  let
+    hostname = url.hostname.toLowerAscii()
+    scheme = url.scheme.toLowerAscii()
+    local = hostname in ["localhost", "127.0.0.1", "::1"]
+  if url.username.len > 0 or url.password.len > 0 or
+    scheme notin ["http", "https"]:
+      raise newException(LlmError, "Invalid host LLM base URL")
+  if not local and not (hostname == "openrouter.ai" and scheme == "https" and
+    url.port in ["", "443"] and url.path.strip(leading = false, trailing = true,
+      chars = {'/'}) == "/api"):
+      raise newException(LlmError,
+        "LLM base URL must be https://openrouter.ai/api or localhost, " &
+        "127.0.0.1, or [::1]")
+  if url.port.len > 0:
+    try:
+      if parseInt(url.port) notin 1 .. 65535:
+        raise newException(LlmError, "Invalid LLM endpoint port")
+    except ValueError:
+      raise newException(LlmError, "Invalid LLM endpoint port")
+
 proc llmConfig*(): LlmConfig =
   ## Uses the platform sidecar first, or explicit local OpenRouter access.
   if not NativeRequests or getEnv("COGAME_LLM").toLowerAscii == "off":
     return
-  result.baseUrl = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
+  result.baseUrl = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
   result.sidecar = result.baseUrl.len > 0
   if not result.sidecar:
     result.key = getEnv("COGAME_LLM_KEY", getEnv("OPENROUTER_API_KEY"))
@@ -105,15 +136,7 @@ proc llmConfig*(): LlmConfig =
   if result.baseUrl.len == 0:
     return
   result.baseUrl = result.baseUrl.strip(trailing = true, chars = {'/'})
-  var url: Uri
-  try:
-    url = parseUri(result.baseUrl)
-  except ValueError:
-    raise newException(LlmError, "Invalid host LLM base URL")
-  if url.hostname.len == 0 or url.username.len > 0 or
-    url.password.len > 0 or url.query.len > 0 or url.anchor.len > 0 or
-    (url.scheme != "https" and not (result.sidecar and url.scheme == "http")):
-      raise newException(LlmError, "Invalid host LLM base URL")
+  validateBaseUrl(result.baseUrl)
   result.model = getEnv("COGAME_LLM_MODEL")
   result.oracleModel = getEnv("COGAME_ORACLE_MODEL", DefaultOracleModel)
   result.interval = int32(environmentInt("COGAME_LLM_INTERVAL", 1, 100000))
@@ -123,6 +146,7 @@ proc newLlmClient*(slot: int, config: LlmConfig): LlmClient =
   ## Creates one isolated seat without opening a network connection.
   if slot < 0 or config.interval < 0 or config.timeoutMs < 0:
     raise newException(LlmError, "Invalid LLM client configuration")
+  validateBaseUrl(config.baseUrl)
   LlmClient(config: config, slot: slot, tick: -1, oracle: newOracle())
 
 proc newLlmClient*(slot: int): LlmClient =
@@ -232,6 +256,7 @@ proc ask*(client: LlmClient, verb, path, body: string): int32 =
       raise newException(LlmError, "LLM path must stay under /v1/")
   if client.nextId == int32.high:
     raise newException(LlmError, "LLM request ID limit reached")
+  validateBaseUrl(client.config.baseUrl)
   var headers = @[("Content-Type", "application/json")]
   if client.config.sidecar:
     headers.add ("X-Coworld-Player-Slot", $client.slot)

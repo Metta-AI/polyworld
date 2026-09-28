@@ -57,7 +57,14 @@ proc serve() {.thread.} =
         paired = nil
         socket.sendReply("{}")
       elif first.contains("/systemone"):
-        if body.contains("Gods of the Arena, a team lane battle"):
+        if body.contains("\"regression\""):
+          let reply = parseDocument(body)["state"]["regression"].getStr()
+          if reply == "delay":
+            sleep(180)
+            socket.sendReply("{}")
+          else:
+            socket.sendReply(reply)
+        elif body.contains("Gods of the Arena, a team lane battle"):
           socket.sendReply(JevResponse)
         elif body.contains("\"strategy\""):
           inc strategyRequests
@@ -109,6 +116,73 @@ proc settle(client: LlmClient, id: int32, tick: int32) =
     doAssert getMonoTime() < deadline, "request remained pending"
     client.beginTick(tick)
     sleep(1)
+
+echo "Testing the LLM endpoint allowlist before opening connections"
+block:
+  let names = [
+    "COGAME_LLM", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "COGAME_LLM_BASE_URL",
+    "COGAME_LLM_KEY", "OPENROUTER_API_KEY", "COGAME_LLM_INTERVAL",
+    "COGAME_LLM_TIMEOUT_MS"
+  ]
+  var saved: seq[(string, bool, string)]
+  for name in names:
+    saved.add (name, existsEnv(name), getEnv(name))
+    delEnv(name)
+  defer:
+    for (name, existed, value) in saved:
+      if existed:
+        putEnv(name, value)
+      else:
+        delEnv(name)
+  putEnv("COGAME_LLM_KEY", "test-only-key")
+  doAssert llmConfig().baseUrl == "https://openrouter.ai/api"
+  for endpoint in [
+    "https://openrouter.ai/api", "https://OPENROUTER.AI:443/api/",
+    "http://localhost:9100", "https://localhost:9100/api",
+    "http://127.0.0.1:12345", "http://[::1]:9100"
+  ]:
+    for name in ["COGAME_LLM_BASE_URL", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"]:
+      putEnv(name, endpoint)
+      let config = llmConfig()
+      discard newLlmClient(0, config)
+      doAssert config.sidecar == (name == "AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+      delEnv(name)
+  for endpoint in [
+    "https://example.com/api", "https://openrouter.ai.evil.test/api",
+    "https://evilopenrouter.ai/api", "https://localhost.evil.test",
+    "http://openrouter.ai/api", "https://openrouter.ai:8443/api",
+    "https://openrouter.ai/other", "https://user@openrouter.ai/api",
+    "https://openrouter.ai@evil.test/api", "https://openrouter.ai/api?x=1",
+    "https://openrouter.ai/api#fragment", "https://openrouter.ai/api\n",
+    "https://openrouter.ai\\@evil.test/api", "https://%6fpenrouter.ai/api",
+    "http://127.0.0.1:0", "http://localhost:65536", "http://localhost:abc",
+    "http://192.168.1.1", "http://127.1", "http://2130706433"
+  ]:
+    for name in ["COGAME_LLM_BASE_URL", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"]:
+      putEnv(name, endpoint)
+      var rejected = false
+      try:
+        discard llmConfig()
+      except LlmError:
+        rejected = true
+      doAssert rejected, endpoint
+      delEnv(name)
+    var rejected = false
+    try:
+      discard newLlmClient(0, LlmConfig(baseUrl: endpoint))
+    except LlmError:
+      rejected = true
+    doAssert rejected, endpoint
+  let client = newLlmClient(0, LlmConfig(
+    baseUrl: "http://localhost:1", interval: 1, timeoutMs: 10
+  ))
+  client.config.baseUrl = "https://example.com/api"
+  var rejected = false
+  try:
+    discard client.ask("POST", "/v1/chat/completions", "{}")
+  except LlmError:
+    rejected = true
+  doAssert rejected and not client.hasPending()
 
 echo "Testing the native sidecar transport and complete OpenRouter payloads"
 block:
@@ -303,6 +377,64 @@ end if
   doAssert scriptClient.oracle.poll(replacement) == -1
   doAssert scriptClient.response(replacement) == ""
 
+  echo "Testing empty JEV answers and timeouts settle BASIC polling"
+  block:
+    var short = config
+    short.timeoutMs = 40
+    for reply in [
+      "{\"answers\":{}}", "{}", "{\"answers\":null}",
+      "{\"answers\":{\"guard\":{\"noul\":\"invalid\"}}}",
+      "not json", "delay"
+    ]:
+      let testClient = newLlmClient(0,
+        if reply == "delay": short else: config)
+      var host = initHost()
+      testClient.addFunctions(host)
+      let program = compile("""
+if request = 0 then
+  oracleStateText("regression", fixture$)
+  oracleQuestion("guard", 0, "Guard?")
+  oracleCriterion("guard", "true", "Yes")
+  oracleCriterion("guard", "false", "No")
+  request = oracleAsk()
+else
+  result = oraclePoll(request)
+end if
+""", host)
+      var runtime = initRuntime(program, host)
+      testClient.bindRuntime(runtime)
+      runtime.setGlobal("fixture$", runtime.putString(reply))
+      testClient.beginTick(0)
+      discard runtime.run()
+      let id = runtime.getGlobal("request")
+      doAssert id > 0 and testClient.oracle.poll(id) == 0
+      testClient.settle(id, 1)
+      discard received.recv()
+      runtime.restart()
+      testClient.beginTick(2)
+      discard runtime.run()
+      doAssert runtime.getGlobal("result") == -1
+      doAssert not testClient.hasPending()
+      doAssert testClient.oracle.pending == 0
+      if reply == "delay":
+        doAssert testClient.error(id).contains("timed out")
+      else:
+        doAssert testClient.status(id) == 200
+        doAssert testClient.ready == 0
+        runtime.restart()
+        runtime.setGlobal("request", 0)
+        runtime.setGlobal("fixture$", runtime.putString(
+          "{\"answers\":{\"guard\":{\"noul\":0.8}}}"
+        ))
+        testClient.beginTick(2)
+        discard runtime.run()
+        let next = runtime.getGlobal("request")
+        doAssert next > id
+        testClient.settle(next, 3)
+        discard received.recv()
+        doAssert testClient.oracle.poll(next) == 1
+      testClient.close()
+
   echo "Testing BASIC readback of the captured live OpenRouter JEV response"
   block:
     let scriptClient = newLlmClient(0, config)
@@ -315,7 +447,11 @@ end if
     discard runtime.run()
     doAssert runtime.getGlobal("request") > 0
     waitForRequests([scriptClient.requestPoller()])
-    discard received.recv()
+    let request = received.recv()
+    doAssert request.startsWith("POST /v1/systemone HTTP/")
+    doAssert request.contains("X-Coworld-Player-Slot: 0")
+    doAssert not request.toLowerAscii.contains("authorization:")
+    doAssert not request.contains("must-not-be-sent")
     runtime.restart()
     scriptClient.beginTick(1)
     discard runtime.run()

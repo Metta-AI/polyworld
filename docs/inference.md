@@ -34,7 +34,9 @@ game's fixed 24 Hz simulation clock. A tick rate of 24 approximates real time;
 1 allows one simulation tick per wall-clock second. A slow LLM can make a
 barrier run slower than that rate. The pacer never runs catch-up bursts.
 Graphical playback keeps its existing controls. Replay playback uses recorded
-actions and never calls an LLM.
+actions and never calls an LLM. Live ranked play permits nondeterministic LLM
+replies and completion timing. A repeated live run is not promised to reproduce
+the same actions. Replays preserve actions, not the LLM exchanges.
 
 The hosted JSON config uses `headless_tick_rate` and `wait_for_llm`.
 Local GotA `--config` accepts the same fields. They are stored in replay
@@ -69,8 +71,13 @@ provider authentication, model availability, spend limits, and accounting.
 
 Without a sidecar, local runs can use `COGAME_LLM_KEY` or
 `OPENROUTER_API_KEY`. The default direct root is `https://openrouter.ai/api`;
-`COGAME_LLM_BASE_URL` overrides it and must use HTTPS. Credentials and endpoints
-come from the host environment, never from BASIC.
+`COGAME_LLM_BASE_URL` may select that exact HTTPS host and `/api` root
+(on the default port or 443), or a local HTTP/HTTPS endpoint. The local host
+allowlist is `localhost`, `127.0.0.1`, and `[::1]`, with an optional port.
+The same allowlist applies to the sidecar URL. Other hosts, embedded credentials,
+query strings, fragments, and encoded hostnames are rejected before a request
+can send credentials. Credentials and endpoints come from the host environment,
+never from BASIC.
 
 | BASIC call | Result |
 | --- | --- |
@@ -131,6 +138,34 @@ Native installations need libcurl with asynchronous DNS support. The hosted
 Docker image installs libcurl and CA certificates. Browser builds expose the
 same function names but remote inference reports unavailable.
 
+## Platform spend and rate limits
+
+The platform documents [spend limits][spend] and [request ceilings][rates].
+The league setting `episode_player_pod_llm_spend_limit_usd` is enforced by the
+sidecar. An experience request can also impose a per-player budget; the lower
+applicable limit wins. Polyworld sends `X-Coworld-Player-Slot` on every sidecar
+request, so delegated calls use that seat's accounting and cap. HTTP 429 settles
+our request as failed, and BASIC can read the status and original error body.
+
+The platform passes `BEDROCK_SIDECAR_SPEND_LIMIT_USD` to its worker and sidecar.
+It is not part of the game application's injected endpoint environment.
+Polyworld therefore relies on the sidecar's meter instead of inventing a game
+spend variable or duplicating provider-cost accounting. Direct local OpenRouter
+calls are outside these hosted caps.
+
+The documented defaults are 30 chat calls per minute per player slot and a
+separate 120 System One calls per minute per slot. These are configurable
+ceilings, not a universal 30-rpm bucket. The sidecar's `GET /spend`, with the
+same `X-Coworld-Player-Slot` header, reports effective limits and spend. This is
+a host-side diagnostic; BASIC's raw API access remains confined to `/v1/`.
+A spend cutoff lasts for the episode; a rate ceiling clears over time. Keep a
+valid fallback action when a call fails. Simulation-tick spacing alone does
+not enforce a wall-clock request rate in an unrestricted-speed match.
+
+[spend]: https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#track-your-spend-and-spend-limit
+[rates]: https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#stay-under-the-request-ceiling
+[systemone]: https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#system-one-models-jev
+
 ## JEV structured judgments
 
 `oracles.nim` constructs SystemOne requests directly in Nim. The BASIC draft
@@ -144,6 +179,9 @@ dotted objects and bounded indices, for example `candidates[0].hp`.
 Drafts are cleared after submission and at the next decision. `oracleReady()`
 and `oracleAvailable()` mirror the normal LLM helpers. `oraclePoll(id)` returns
 zero while pending, the number of usable answers on success, or -1 on failure.
+A completed reply with no usable answers fails immediately, including missing,
+empty, or invalid `answers`. It does not stay pending. JEV uses the same
+`COGAME_LLM_TIMEOUT_MS` deadline as chat, including in barrier mode.
 
 | Question kind | Meaning of `oracleAnswer(id, key$)` |
 | --- | --- |
@@ -158,11 +196,17 @@ zero while pending, the number of usable answers on success, or -1 on failure.
 16 notes, and 32 KiB of serialized draft JSON. `examples/inference/jev.bas`
 demonstrates noul and choice questions.
 
-The existing sidecar must provide `/v1/systemone` for JEV. Local mock tests
-verify this wire format; they do not certify a particular hosted deployment.
-The inspected local Metta sidecar registers Chat Completions and Anthropic
-routes, but no SystemOne route. JEV and other API paths need corresponding
-sidecar routing before they work in that deployment.
+The current platform [System One contract][systemone] includes `/v1/systemone`
+and per-seat attribution with `X-Coworld-Player-Slot`. Legacy-lane episodes
+can return HTTP 503 when OpenRouter is unavailable. A particular league's
+deployed sidecar still needs to support the route and allow the selected model.
+
+A cassette test replays a saved real HTTP response through the local test
+server. Our existing cassette came from direct OpenRouter, so it checks JEV
+parsing and BASIC readback through the sidecar-shaped route without paid calls.
+It is not a recording from a deployed league sidecar. The tests also verify
+that the request uses `/v1/systemone`, includes the player slot, and omits the
+API key. They do not certify a deployed sidecar's routing or credentials.
 
 ## Manual live JEV test
 
