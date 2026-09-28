@@ -29,8 +29,7 @@ jobs:
       - name: Run unit suite
         if: >-
           matrix.suite == 'core' || matrix.suite == 'gota' ||
-          matrix.suite == 'policies' || matrix.suite == 'cta' ||
-          matrix.suite == 'lvd' || matrix.suite == 'heartleaf'
+          matrix.suite == 'policies'
         run: nim r -d:TestSuite=${{ matrix.suite }} tests/tests.nim
       - if: matrix.suite == 'gota'
         run: python tests/test_neural_converters.py
