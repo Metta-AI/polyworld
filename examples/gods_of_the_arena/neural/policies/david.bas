@@ -1,4 +1,6 @@
 ' David GOTANET1 observation and action glue using ordinary BASIC queries.
+' Reusable glue and a synthetic example written for this API.
+' This is not a submitted player policy and contains no learned coefficients.
 ' Coordinates and math cross the Q16.16 boundary explicitly.
 dim nnData(1406)
 dim nnObjects(24)

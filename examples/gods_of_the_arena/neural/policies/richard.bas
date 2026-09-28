@@ -1,4 +1,5 @@
-' Pair this synthetic example with the generated weights.bin fixture.
+' Synthetic test example written for this API, not a submitted player policy.
+' Pair it with the generated weights.bin fixture; no trained weights are used.
 dim data(24)
 if drafting then
   for i = 0 to 9

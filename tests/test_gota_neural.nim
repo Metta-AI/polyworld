@@ -301,8 +301,10 @@ block:
   let game = newGame(generateMap(7), 600, 10, false,
     ReplayData(), drafting = false)
   game.recorder = initReplayRecorder(game.currentSetup(1000))
-  game.loadBots([BotGroup(path: Examples / "richard.zip", count: 5),
-    BotGroup(path: Examples / "david.zip", count: 5)])
+  game.loadBots([
+    BotGroup(path: Examples / "synthetic-richard.zip", count: 5),
+    BotGroup(path: Examples / "synthetic-david.zip", count: 5)
+  ])
   game.runBotDecisions()
   for vm in game.heroVms:
     doAssert not vm.failed, vm.lastError

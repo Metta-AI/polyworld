@@ -1,4 +1,6 @@
 ' Andre PufferNet helpers. BASIC owns observations, timing and sampling.
+' Reusable glue and a synthetic example written for this API.
+' This is not a submitted player policy and contains no learned coefficients.
 dim andreData(44)
 dim andreWeights(10)
 DATA andreExponentials AS fixed32 = _

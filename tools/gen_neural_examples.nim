@@ -22,8 +22,9 @@ proc main() =
         of "david": davidFixture()
         else: andreFixture()
       name = if author == "david": "model.bin" else: "weights.bin"
-    writeFile(directory / (author & ".zip"),
+      path = directory / ("synthetic-" & author & ".zip")
+    writeFile(path,
       zipFixture([("policy.bas", source), (name, model)], true))
-    echo directory / (author & ".zip")
+    echo path
 
 main()

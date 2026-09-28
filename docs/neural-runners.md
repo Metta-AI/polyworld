@@ -80,20 +80,23 @@ entries and multi-disk/ZIP64 packages fail. Errors use `PolicyError` or the
 architecture's `NeuralError` and flow through the existing player failure path.
 
 Runnable synthetic ZIPs are included under
-`examples/gods_of_the_arena/neural/examples/`. Regenerate them or make copies
-with synthetic weights:
+`examples/gods_of_the_arena/neural/examples/` as `synthetic-richard.zip`,
+`synthetic-david.zip` and `synthetic-andre.zip`. Their names identify the runner
+being tested. Their weights are deterministic test matrices, mostly zeros with
+a few hand-set coefficients. They contain no trained weights or submitted
+player policies. Regenerate copies locally:
 
 ```sh
 nim r tools/gen_neural_examples.nim
 nim c -d:headless -o:tmp/gota examples/gods_of_the_arena/gota.nim
-tmp/gota --bot tmp/neural-examples/richard.zip:5 \
-  --bot tmp/neural-examples/david.zip:5 --ticks 240
+tmp/gota --bot tmp/neural-examples/synthetic-richard.zip:5 \
+  --bot tmp/neural-examples/synthetic-david.zip:5 --ticks 240
 ```
 
 The readable BASIC examples are under
-`examples/gods_of_the_arena/neural/policies/`. The generated models are sparse
-fixtures, not trained competitors. No downloaded policies or trained weights
-are included in this repository.
+`examples/gods_of_the_arena/neural/policies/`. These are reusable BASIC glue
+and examples written for this API. Downloaded and converted player policies
+and trained weights stay in ignored `tmp/` for local validation.
 
 ## Richard
 

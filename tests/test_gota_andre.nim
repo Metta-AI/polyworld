@@ -212,7 +212,8 @@ decision = andreAction
   game.runBotDecisions()
   doAssert vm.runtime.getBlob(state) != deadState
   game.loadBots([BotGroup(path: Root /
-    "examples/gods_of_the_arena/neural/examples/andre.zip", count: 10)])
+    "examples/gods_of_the_arena/neural/examples/synthetic-andre.zip",
+    count: 10)])
   game.world.heroes[0].hp = game.world.heroes[0].maxHp
   game.runBotDecisions()
   for vm in game.heroVms:
