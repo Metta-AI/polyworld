@@ -5,7 +5,7 @@
 
 import
   std/strutils,
-  cli, configs
+  cli, configs, policies
 
 when defined(coworld):
   import coworld
@@ -64,7 +64,7 @@ proc expandBotSources*(
       when defined(coworld):
         readPlayerSource(group.path)
       else:
-        readFile(group.path)
+        readPolicyBytes(group.path)
     for _ in 0 ..< group.count:
       while next < kinds.len and kinds[next] == PlayerController:
         inc next
