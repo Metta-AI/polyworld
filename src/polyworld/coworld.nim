@@ -2,7 +2,7 @@ import
   std/[os, posix, strutils, times, uri],
   jsony, mummy,
   bassy,
-  cli
+  cli, policies
 
 const
   PlayerLogLimit* = 10 * 1024 * 1024
@@ -118,16 +118,11 @@ proc readLocal*(value: string): string =
       "Cannot read local input: " & getCurrentExceptionMsg())
 
 proc readPlayerSource*(path: string): string =
-  ## Bounds source reads by the largest game limit before BASIC validates it.
+  ## Bounds staged raw BASIC and ZIP files before package validation.
   try:
-    let input = open(path, fmRead)
-    defer:
-      input.close()
-    result = newString(256 * 1024 + 1)
-    result.setLen(input.readBuffer(result[0].addr, result.len))
-  except IOError, OSError:
-    raise newException(CoworldError,
-      "Cannot read staged player: " & getCurrentExceptionMsg())
+    readPolicyBytes(path)
+  except PolicyError as error:
+    raise newException(CoworldError, error.msg)
 
 proc writeAtomic*(path, bytes: string) =
   ## Publishes a complete artifact using a rename in the same directory.
@@ -206,6 +201,25 @@ proc waitForCollection*() =
   ## Keeps health and contract stubs alive until the runner stops the process.
   joinThread(serverThread)
 
+proc rejectPlayer(slot: int, message: string) {.noreturn.} =
+  ## Reports package and compilation failures through the same seat boundary.
+  playerError(slot, message)
+  closePlayerLogs()
+  writePlayerStatus()
+  writeAtomic(failurePath, PlayerFailure(
+    message: "Policy loading failed for player slot " & $slot,
+    failedPolicyIndex: slot
+  ).toJson())
+  waitForCollection()
+  raise newException(CoworldError, "Player loading failed")
+
+proc loadPlayerPolicy*(bytes: string, slot: int): Policy =
+  ## Parses extensionless staged policy packages with private diagnostics.
+  try:
+    result = loadPolicy(bytes)
+  except PolicyError as error:
+    rejectPlayer(slot, error.msg)
+
 proc compilePlayer*(
     source: string,
     host: Host,
@@ -216,15 +230,7 @@ proc compilePlayer*(
   try:
     result = compile(source, host, limits)
   except BasicError as error:
-    playerError(slot, error.msg)
-    closePlayerLogs()
-    writePlayerStatus()
-    writeAtomic(failurePath, PlayerFailure(
-      message: "BASIC compilation failed for player slot " & $slot,
-      failedPolicyIndex: slot
-    ).toJson())
-    waitForCollection()
-    raise newException(CoworldError, "Player compilation failed")
+    rejectPlayer(slot, error.msg)
 
 proc requestHandler(request: Request) {.gcsafe.} =
   ## Serves health and the platform's minimal legacy contract surface.

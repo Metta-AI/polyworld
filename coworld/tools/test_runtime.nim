@@ -3,7 +3,9 @@
 import
   std/[json, monotimes, net, os, osproc, strtabs, strutils, tempfiles,
     times, uri],
-  crunchy, jsony
+  crunchy, jsony,
+  ../../tests/neuralfixtures,
+  polyworld/policies
 
 const
   Root = currentSourcePath().parentDir.parentDir.parentDir
@@ -102,7 +104,8 @@ proc episode(
     scripts: seq[string],
     failure = false,
     ticks = 240,
-    expectedOutput = ""
+    expectedOutput = "",
+    expectedRuntimeError = ""
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
   doAssert scripts.len == count
@@ -140,7 +143,7 @@ proc episode(
       "log_uri": (directory / ("player-" & $slot & ".log")).fileUri(),
       "artifact_uri": (directory / ("player-" & $slot & ".zip")).fileUri()
     }
-    boundedLog = boundedLog or source.len > 7000
+    boundedLog = boundedLog or (source.len > 7000 and not source.isPackage)
     instructionFailure = instructionFailure or source.contains("WHILE")
   let seatDocument = %*{
     "schema": "coworld-player-seats/1",
@@ -239,7 +242,9 @@ proc episode(
   checkHttp(port, "/client/global")
   checkWebSocket(port)
   doAssert process.running(), "server stopped before collection"
-  if instructionFailure:
+  if instructionFailure or expectedRuntimeError.len > 0:
+    if expectedRuntimeError.len > 0:
+      doAssert logs[0].contains(expectedRuntimeError), logs[0]
     doAssert logs[0].contains("BASIC error:")
     let status = readFile(directory / "status.json").fromJson(JsonNode)
     doAssert status["players"][0]["exit_code"].getInt() == 1
@@ -278,3 +283,74 @@ episode(
   ticks = 28800
 )
 echo "10 MiB player log bound passed"
+
+block:
+  const Source = """
+dim data(24)
+if initialized = 0 then
+  state = blobCreate()
+  initialized = 1
+end if
+res = nn_richard("weights.bin", state, data)
+print "PACKAGE-PASSED"
+"""
+  let packed = zipFixture([("nested/policy.bas", Source),
+    ("weights.bin", richardFixture())], true)
+  var scripts: seq[string]
+  for i in 0 ..< 10:
+    scripts.add(if i mod 2 == 0: packed else: "print \"PACKAGE-PASSED\"\n")
+  episode("gota", 10, scripts, expectedOutput = "PACKAGE-PASSED")
+  scripts[0] = zipFixture([("a.bas", "end"), ("b.bas", "end")])
+  episode("gota", 10, scripts, failure = true)
+  scripts[0] = "PK\x03\x04corrupt"
+  episode("gota", 10, scripts, failure = true)
+  echo "GOTA extensionless ZIP, mixed roster and package failures passed"
+
+  scripts[0] = zipFixture([("policy.bas",
+    repeat("' Oversized source for VM compilation.\n", 2000))], true)
+  episode("gota", 10, scripts, failure = true,
+    expectedRuntimeError = "BASIC source exceeds")
+  echo "GOTA unpacked BASIC reaches the VM source limit and player failure log"
+
+block:
+  let
+    library = readFile(Root /
+      "examples/gods_of_the_arena/neural/policies/david.bas").split(
+        "' Example policy.")[0]
+    source = library & "nnStep()\nprint \"DAVID-PASSED\"\n"
+    packed = zipFixture([("policy.bas", source),
+      ("model.bin", davidFixture())], true)
+  var scripts: seq[string]
+  for i in 0 ..< 10:
+    scripts.add(if i mod 2 == 0: packed else: "print \"DAVID-PASSED\"\n")
+  episode("gota", 10, scripts, ticks = 240, expectedOutput = "DAVID-PASSED")
+  echo "GOTA David BASIC observations, state and mixed hosted roster passed"
+
+  scripts[0] = zipFixture([("policy.bas", """
+dim data(0)
+state = blobCreate()
+res = nn_david("model.bin", state, data)
+"""), ("model.bin", "invalid")])
+  episode("gota", 10, scripts, ticks = 240,
+    expectedRuntimeError = "David model needs GOTANET1 magic")
+  echo "GOTA model errors reach the per-player failure log and status"
+
+block:
+  let
+    library = readFile(Root /
+      "examples/gods_of_the_arena/neural/policies/andre.bas").split(
+        "' Example policy.")[0]
+    source = library & """
+dim f(40)
+andreAdvance()
+f(0) = 100
+andreCapture()
+print "ANDRE-PASSED"
+"""
+    packed = zipFixture([("nested/policy.bas", source),
+      ("weights.bin", andreFixture())], true)
+  var scripts: seq[string]
+  for i in 0 ..< 10:
+    scripts.add(if i mod 2 == 0: packed else: "print \"ANDRE-PASSED\"\n")
+  episode("gota", 10, scripts, ticks = 240, expectedOutput = "ANDRE-PASSED")
+  echo "GOTA Andre recurrent inference and mixed extensionless roster passed"
