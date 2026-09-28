@@ -6,8 +6,8 @@ const
   League = "league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
 
 when isMainModule:
-  if paramCount() != 6:
-    quit("Usage: make_xp LEADERBOARD CHAMPIONS OWN_VERSION OUTPUT NOTES IDEMPOTENCY_KEY", 1)
+  if paramCount() notin 6..7:
+    quit("Usage: make_xp LEADERBOARD CHAMPIONS OWN_VERSION OUTPUT NOTES IDEMPOTENCY_KEY [REFERENCE_ROSTER_ORDER]", 1)
   var rows = parseFile(paramStr(1)).getElems
   let memberships = parseFile(paramStr(2))
   var members: Table[string, JsonNode]
@@ -22,7 +22,7 @@ when isMainModule:
       members[player] = m
   rows.sort(proc(a, b: JsonNode): int = cmp(a{"rank"}.getInt(high(int)), b{"rank"}.getInt(high(int))))
   var seen: HashSet[string]
-  let opponents = newJArray()
+  var opponents = newJArray()
   for row in rows:
     let player = row{"player_id"}.getStr
     if player == OurPlayer or player in seen or not members.hasKey(player): continue
@@ -34,6 +34,26 @@ when isMainModule:
       "player_name": row["player_name"], "policy_version_id": p["id"], "policy_label": p["label"]}
     if opponents.len == 3: break
   doAssert opponents.len == 3, "Need three distinct other live champions"
+  if paramCount() == 7:
+    # Rank swaps must not silently change the opponent seat blocks between
+    # comparable XP batches. Selection is still the freshly resolved top 3.
+    let reference = parseFile(paramStr(7))
+    doAssert reference.len == 3, "Expected three reference opponents"
+    let ordered = newJArray()
+    var orderedPlayers: HashSet[string]
+    for previous in reference:
+      let player = previous["player_id"].getStr
+      doAssert player notin orderedPlayers, "Duplicate reference player"
+      orderedPlayers.incl(player)
+      var current: JsonNode
+      for opponent in opponents:
+        if opponent["player_id"].getStr == player:
+          current = opponent
+      doAssert current != nil, "Top-three membership changed; refresh the baseline"
+      doAssert current["policy_version_id"] == previous["policy_version_id"],
+        "Live opponent version changed; refresh the baseline"
+      ordered.add current
+    opponents = ordered
   let roster = newJArray()
   roster.add %*{"player": {"policy_ref": paramStr(3)}, "slot": -1}
   for opponent in opponents:

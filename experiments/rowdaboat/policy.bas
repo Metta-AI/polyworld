@@ -12,6 +12,7 @@ dim castRange(3)
 dim castDelay(3)
 dim castGround(3)
 dim castMinimum(3)
+dim farmRetry(31)
 
 sub chooseHero()
   if draftTurnId <> selfId then
@@ -227,6 +228,32 @@ sub readObject(index)
   end if
 end sub
 
+sub observeFarmCamp()
+  ' The ordinary scan rotates. Check the active objective separately without
+  ' treating an unscanned or hidden member as proof that the camp is cleared.
+  farmLiving = 0
+  farmReturning = 0
+  farmScanComplete = objects <= 192
+  for farmScan = 0 to 191
+    if farmScan >= objects then
+      exit for
+    end if
+    if objectKind(farmScan) = 6 then
+      if objectCamp(farmScan) = farmGoal then
+        if objectHp(farmScan) > 0 and objectAlive(farmScan) then
+          if objectReturning(farmScan) then
+            farmReturning = farmReturning + 1
+          else
+            farmLiving = farmLiving + 1
+            ' Preserve the existing health, range, and target scoring rules.
+            readObject(farmScan)
+          end if
+        end if
+      end if
+    end if
+  next farmScan
+end sub
+
 sub observe()
   campScore = -10000
   campId = 0
@@ -268,6 +295,9 @@ sub observe()
   if scanOffset >= objects - 48 then
     scanOffset = 0
   end if
+  if farmGoal >= 0 and bestId = 0 then
+    observeFarmCamp()
+  end if
   if bestId = 0 and campId <> 0 and towerAggro = 0 and enemyPower = 0 then
     bestId = campId
     bestIndex = campIndex
@@ -306,6 +336,120 @@ sub observe()
         end if
       end if
     next inspectSlot
+  end if
+end sub
+
+sub deferFarmCamp(reason)
+  ' This is a revisit delay, not an inferred hidden respawn timer.
+  farmRetry(farmGoal) = worldTick + tickRate * 60
+  farmLeaveX = farmX
+  farmLeaveY = farmY
+  farmLeaving = 1
+  farmDeferred = reason
+  farmGoal = -1
+  farmNearSince = 0
+  farmTripLeft = farmTripLeft - 1
+  if farmTripLeft <= 0 then
+    farmDeparture = 0
+    farmLaneUntil = worldTick + tickRate * 15
+  end if
+end sub
+
+sub farmNavigation()
+  farmMoving = 0
+  ' Match the existing threshold for starting neutral combat. Existing
+  ' retreat decisions and ongoing attacks have already taken precedence.
+  if selfHp * 10 < selfMaxHp * 7 then
+    if farmGoal >= 0 then
+      deferFarmCamp(4)
+    end if
+    farmTripLeft = 0
+    farmDeparture = 0
+    farmLaneUntil = worldTick + tickRate * 15
+    exit sub
+  end if
+  if farmGoal >= 0 then
+    farmDx = farmX - myX
+    farmDy = farmY - myY
+    farmDistance = farmDx * farmDx + farmDy * farmDy
+    if worldTick >= farmDeadline then
+      deferFarmCamp(5)
+    elseif farmLiving = 0 and farmReturning > 0 then
+      deferFarmCamp(2)
+    elseif farmDistance <= 16 then
+      if farmLiving = 0 and farmScanComplete then
+        ' Complete nearby observation found no visible opportunity. A mob
+        ' outside vision may still live; leave instead of waiting for it.
+        deferFarmCamp(1)
+      else
+        if farmNearSince = 0 then
+          farmNearSince = worldTick
+        end if
+        if worldTick - farmNearSince >= tickRate * 2 then
+          ' Bound an obscured, overcrowded, or otherwise unavailable visit.
+          deferFarmCamp(3)
+        end if
+      end if
+    end if
+  end if
+  if farmGoal < 0 then
+    if farmTripLeft <= 0 then
+      if worldTick < farmLaneUntil then
+        exit sub
+      end if
+      farmTripLeft = 2
+      farmDeparture = 0
+    end if
+    farmClosest = 1000000
+    for farmCandidate = 0 to 31
+      if farmCandidate >= campCount() then
+        exit for
+      end if
+      if campTier(farmCandidate) = 1 and worldTick >= farmRetry(farmCandidate) then
+        farmCandidateX = originX + side * campX(farmCandidate)
+        farmCandidateY = originY + side * campY(farmCandidate)
+        farmDx = farmCandidateX - homeX
+        farmDy = farmCandidateY - homeY
+        farmHomeDistance = farmDx * farmDx + farmDy * farmDy
+        farmDx = farmCandidateX - enemyX
+        farmDy = farmCandidateY - enemyY
+        farmEnemyDistance = farmDx * farmDx + farmDy * farmDy
+        farmDx = farmCandidateX - myX
+        farmDy = farmCandidateY - myY
+        farmDistance = farmDx * farmDx + farmDy * farmDy
+        farmDx = farmCandidateX - farmLeaveX
+        farmDy = farmCandidateY - farmLeaveY
+        farmOutside = farmLeaving = 0 or farmDx * farmDx + farmDy * farmDy > 144
+        if farmHomeDistance < farmEnemyDistance and farmOutside then
+          if farmDeparture or farmDistance <= 576 then
+            if farmDistance < farmClosest then
+              farmClosest = farmDistance
+              farmGoal = farmCandidate
+              farmX = farmCandidateX
+              farmY = farmCandidateY
+            end if
+          end if
+        end if
+      end if
+    next farmCandidate
+    if farmGoal < 0 then
+      farmTripLeft = 0
+      farmDeparture = 0
+      farmLaneUntil = worldTick + tickRate * 15
+      exit sub
+    end if
+    farmDeadline = worldTick + tickRate * 45
+    farmNearSince = 0
+  end if
+  ' Camp travel precedes the existing forward-portal branch. Successful
+  ' cached orders may return early from moveTo; failed routes defer the visit.
+  routeFound = 1
+  accepted = 1
+  moveTo(farmX, farmY, 1)
+  if routeFound = 0 or accepted = 0 then
+    deferFarmCamp(6)
+  else
+    farmMoving = 1
   end if
 end sub
 
@@ -645,6 +789,11 @@ speed = (selfMoveSpeed \ 100) / (worldScale \ 100)
 
 if initialized = 0 then
   initialized = 1
+  farmGoal = -1
+  farmTripLeft = 2
+  farmDeparture = 1
+  farmLaneUntil = 0
+  farmNearSince = 0
   spawnX = myX
   spawnY = myY
   homeX = myX
@@ -726,6 +875,13 @@ if initialized = 0 then
   end if
 end if
 
+if farmLeaving then
+  farmDx = myX - farmLeaveX
+  farmDy = myY - farmLeaveY
+  if farmDx * farmDx + farmDy * farmDy > 144 then
+    farmLeaving = 0
+  end if
+end if
 if selfHp < previousHp then
   hurtTick = worldTick
 end if
@@ -828,6 +984,11 @@ if bestId <> 0 then
       orderTick = 0
     end if
   end if
+  end
+end if
+
+farmNavigation()
+if farmMoving then
   end
 end if
 
