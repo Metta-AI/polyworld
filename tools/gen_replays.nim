@@ -29,7 +29,9 @@ proc generate(name, directory: string, seats, ticks: int) =
     replay = output / (name & ".replay")
     repeated = output / (name & "-repeat.replay")
     duration =
-      if ticks > 0: @["--ticks", $ticks]
+      # Heartleaf's seek mode records a prefix of its day-based match.
+      if ticks > 0 and name == "heartleaf": @["--seek-tick", $ticks]
+      elif ticks > 0: @["--ticks", $ticks]
       elif name == "heartleaf": @["--days", "7"]
       else: @["--ticks", "28800"]
     arguments = @[

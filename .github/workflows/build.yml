@@ -57,6 +57,11 @@ jobs:
         run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
       - if: matrix.suite == 'lvd'
         run: nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
+      - name: Check short game determinism
+        if: >-
+          matrix.suite == 'cta' || matrix.suite == 'lvd' ||
+          matrix.suite == 'heartleaf'
+        run: nim r tools/gen_replays.nim ${{ matrix.suite }} --ticks=48
       - name: Generate and verify deterministic replay
         if: matrix.suite == 'replays'
         run: nim r tools/gen_replays.nim gota --ticks=1200
