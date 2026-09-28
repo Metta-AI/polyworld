@@ -379,22 +379,17 @@ sub inventory()
   ' and one for a role-specific burst consumable. Stacks top up on return.
   budget = selfGold
   buy(8, 100, 1)
-  ' Purchase the existing role equipment before replenishing consumables.
-  if role = 0 or role = 4 then
-    buy(16, 160, 1)
-  elseif role = 1 then
-    buy(19, 180, 1)
-  else
-    buy(20, 190, 1)
-  end if
   buy(1, 30, 2)
   buy(21, 100, 2)
   buy(22, 45, 2)
   if role = 0 or role = 4 then
+    buy(16, 160, 1)
     buy(2, 75, 2)
   elseif role = 1 then
+    buy(19, 180, 1)
     buy(4, 40, 2)
   else
+    buy(20, 190, 1)
     buy(3, 90, 2)
   end if
 end sub

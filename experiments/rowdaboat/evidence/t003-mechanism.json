@@ -1,0 +1,51 @@
+{
+  "purpose": "Hosted purchase-order mechanism evidence only; no score or significance inference.",
+  "xpRequestId": "xreq_8ce60a8e-b40a-4c2c-8930-54eb8b9e9f91",
+  "episodeRequestId": "ereq_c2bddcef-ec07-42f7-8cf1-3224a70a45ee",
+  "episodeId": "47b07ba5-2a72-4c6e-8497-4e80519ca05b",
+  "jobIndex": 0,
+  "release": "2026.9.24.2",
+  "gameVersion": 64,
+  "replayUrl": "https://softmax-public.s3.amazonaws.com/replays/d7d7dd39-ae94-4205-a6d7-2305c2e57713.replay",
+  "verifiedHashes": 28909,
+  "hashMismatches": 0,
+  "allRecordedActionsConsumed": true,
+  "actionConsumptionBasis": "replay_audit raises before writing summary unless replayPlayer.finished",
+  "candidate": {
+    "policyVersionId": "a6e2c7f1-7039-4ca0-855b-0540c09755d1",
+    "policyVersion": 4,
+    "commit": "f21ddd45f53bc4c9e200ec4530a2a3555d67ec0c",
+    "policy": "rowdaboat-gods-of-the-arena",
+    "player": "RowDaBoat",
+    "seat": 0,
+    "heroId": 100,
+    "class": "VanguardKnight",
+    "team": "Red"
+  },
+  "seatMapping": "Explicit participants.position checked against replay player name; policy_version_ids array order unused",
+  "opening": {
+    "tick": 110,
+    "acceptedPurchaseOrder": ["RangerBoots", "HealthPotion"],
+    "attackMove": [11, 11]
+  },
+  "equipmentVisit": {
+    "tick": 4448,
+    "recordedBuyItemOrder": [16, 1],
+    "acceptedEventsInReplayOrder": [
+      {"event": "ItemPurchased", "itemId": 16, "item": "KnightArmor", "countBefore": 0, "countAfter": 1},
+      {"event": "GoldSpent", "itemId": 16, "amount": -160, "before": 205, "after": 45},
+      {"event": "HealthAdjusted", "itemId": 16, "amount": 120, "before": 321, "after": 441},
+      {"event": "ItemPurchased", "itemId": 1, "item": "HealthPotion", "countBefore": 0, "countAfter": 1},
+      {"event": "GoldSpent", "itemId": 1, "amount": -30, "before": 45, "after": 15}
+    ],
+    "actionRejectionsAtThisTick": 0,
+    "roleEquipmentAcceptedBeforeConsumableReplenishment": true
+  },
+  "limits": [
+    "This episode proves activation of the VanguardKnight equipment branch only.",
+    "Accepted purchase order and stat changes do not establish a score improvement or keep verdict."
+  ],
+  "metadata": "research/t003-job0-metadata.json",
+  "rawAuditPrefix": "research/t003-replay-00",
+  "profile": "research/t003-replay-00.profile.json"
+}
