@@ -1,0 +1,17 @@
+{
+  "policy": "/Users/softmax/Documents/ChatGPT/polyworld/gota-campaign/experiments/rowdaboat/policy.bas",
+  "policySha1": "89B3C37F22E5FDB0DAE0D52E4491FE37E4800D73",
+  "purpose": "Isolated BASIC/host shopping mechanism only; no local games or scores",
+  "checksPassed": 7,
+  "checks": [
+    "VanguardKnight: accepted existing role equipment before replenishment with boots already owned",
+    "Ranger: accepted existing role equipment before replenishment with boots already owned",
+    "Arcanist: accepted existing role equipment before replenishment with boots already owned",
+    "150-gold opening still buys boots then health potion",
+    "owned equipment is not duplicated; original consumable order and two-unit caps remain",
+    "full inventory makes no purchase attempts and preserves gold",
+    "outside-shop gate still prevents equipment and consumable purchases"
+  ],
+  "maximumInstructionsObserved": 6561,
+  "maximumWorkObserved": 10716
+}

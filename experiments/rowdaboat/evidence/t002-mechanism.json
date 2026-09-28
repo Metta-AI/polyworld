@@ -1,0 +1,62 @@
+{
+  "purpose": "Hosted replay mechanism evidence only; no score or significance inference.",
+  "xpRequestId": "xreq_d729af06-d2cd-4e22-922e-917ff89ad9a0",
+  "episodeRequestId": "ereq_fa3fca4a-6e05-4282-9808-472efbb1cf5f",
+  "episodeId": "4ca514b5-7a7b-46b0-bcf7-0707cb9c8f08",
+  "jobIndex": 0,
+  "release": "2026.9.24.2",
+  "gameVersion": 64,
+  "replayUrl": "https://softmax-public.s3.amazonaws.com/replays/f7178598-a0b4-4f14-ac2d-3e5360414580.replay",
+  "verifiedHashes": 28909,
+  "hashMismatches": 0,
+  "allRecordedActionsConsumed": true,
+  "actionConsumptionBasis": "replay_audit raises before writing summary unless replayPlayer.finished",
+  "candidate": {
+    "policyVersionId": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+    "policyVersion": 3,
+    "commit": "8c4a3e6",
+    "player": "RowDaBoat",
+    "policy": "rowdaboat-gods-of-the-arena",
+    "seat": 0,
+    "heroId": 100,
+    "class": "VanguardKnight",
+    "team": "Red"
+  },
+  "seatMapping": "Explicit participants.position checked against replay player name; policy_version_ids array order unused",
+  "openingRoute": [
+    {"tick": 110, "action": "attackMove", "x": 76, "y": 22, "campIndex": 11, "tier": 1},
+    {"tick": 410, "action": "attackTarget", "targetId": 1079},
+    {"tick": 468, "event": "CampEngaged", "campIndex": 11, "targetId": 1079, "actorId": 100},
+    {"tick": 476, "event": "Damage", "cause": "AbilityEffect", "actorId": 100, "targetId": 1079, "amount": 40},
+    {"tick": 480, "event": "CampReturning", "campIndex": 11},
+    {"tick": 481, "event": "Healing", "cause": "CampReset", "targetId": 1079, "hpAfter": 100},
+    {"tick": 486, "event": "Damage", "cause": "BasicAttack", "actorId": 100, "targetId": 1079, "amount": 25},
+    {"tick": 504, "event": "Death", "targetId": 1079, "killerId": 17, "killerKind": "allied tower", "candidateLastHit": false},
+    {"tick": 506, "action": "attackMove", "x": 64, "y": 33, "campIndex": 13, "tier": 1},
+    {"tick": 683, "event": "CampEngaged", "campIndex": 13, "targetId": 1081, "actorId": 100},
+    {"tick": 692, "event": "Damage", "cause": "AbilityEffect", "actorId": 100, "targetId": 1081, "amount": 40},
+    {"tick": 700, "event": "Damage", "cause": "BasicAttack", "actorId": 100, "targetId": 1081, "amount": 25},
+    {"tick": 714, "event": "Death", "targetId": 1081, "killerId": 103, "killerKind": "allied hero", "candidateLastHit": false},
+    {"tick": 716, "action": "attackMove", "x": 11, "y": 11, "destination": "existing VanguardKnight lane goal"}
+  ],
+  "openingRouteActionRejections": 0,
+  "firstOwnNeutralLastHits": [
+    {"tick": 4362, "targetId": 1077, "cause": "BasicAttack"},
+    {"tick": 4470, "targetId": 1076, "cause": "BasicAttack"}
+  ],
+  "observed": {
+    "twoTier1CampOpening": true,
+    "ownBasicDamageAtBothOpeningCamps": true,
+    "departureTwoTicksAfterEachOpeningNeutralDeath": true,
+    "ownLastHitAtEitherOpeningCamp": false,
+    "sustainedReturningOnlyDeferralProved": false
+  },
+  "limits": [
+    "One hosted episode proves route activation, not score improvement or general safety.",
+    "The first camp's returning state lasted one tick; the dedicated returning-only deferral branch is not established by this trace.",
+    "Lane attackMove subsequently encounters higher-tier neutrals; those encounters do not mean the tier-1 route selected higher-tier camp objectives."
+  ],
+  "rawAuditPrefix": "research/t002-replay-00",
+  "profile": "research/t002-replay-00.profile.json",
+  "metadata": "research/t002-job0-metadata.json"
+}
