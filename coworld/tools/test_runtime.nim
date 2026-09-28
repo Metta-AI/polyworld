@@ -328,3 +328,23 @@ res = nn_david("model.bin", state, data)
   episode("gota", 10, scripts, ticks = 240,
     expectedRuntimeError = "David model needs GOTANET1 magic")
   echo "GOTA model errors reach the per-player failure log and status"
+
+block:
+  let
+    library = readFile(Root /
+      "examples/gods_of_the_arena/neural/policies/andre.bas").split(
+        "' Example policy.")[0]
+    source = library & """
+dim f(40)
+andreAdvance()
+f(0) = 100
+andreCapture()
+print "ANDRE-PASSED"
+"""
+    packed = zipFixture([("nested/policy.bas", source),
+      ("weights.bin", andreFixture())], true)
+  var scripts: seq[string]
+  for i in 0 ..< 10:
+    scripts.add(if i mod 2 == 0: packed else: "print \"ANDRE-PASSED\"\n")
+  episode("gota", 10, scripts, ticks = 240, expectedOutput = "ANDRE-PASSED")
+  echo "GOTA Andre recurrent inference and mixed extensionless roster passed"

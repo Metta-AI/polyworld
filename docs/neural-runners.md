@@ -20,8 +20,9 @@ res = nn_david("weights.bin", state, data)
 ' Read res(0) through res(91) and issue ordinary game commands.
 ```
 
-`nn_richard(resource$, state, data)` has the same three arguments. Inputs and
-outputs cross the boundary as Q16.16 arrays. Integral BASIC values are converted
+`nn_richard(resource$, state, data)` and `andre_nn(resource$, state, data)` have
+the same three arguments. Inputs and outputs cross the boundary as Q16.16
+arrays. Integral BASIC values are converted
 with range checking. A runner can use FP32, integers or another representation
 internally. Outputs round to the nearest Q16.16 value, with ties away from zero.
 Nonfinite and unrepresentable outputs fail the policy with a descriptive error.
@@ -187,6 +188,78 @@ legacy file digests and contracts. Conditional masking, deferred scripts and
 unrecognized glue require an explicit manual conversion. There is no automatic
 `gota_act()` execution path in the game.
 
+## Andre
+
+`andre_nn("weights.bin", state, data)` implements the PufferNet encoder,
+stacked MinGRU, highway and decoder used by
+[Andre's evaluator](https://github.com/treeform/andre_von_puffer/blob/51a0d652c1bfb048bc5448261c32ac50d2db0fbf/tools/puffernet.nim)
+and [GOTA trainer](https://github.com/treeform/andre_von_puffer/tree/51a0d652c1bfb048bc5448261c32ac50d2db0fbf/games/gota/train).
+Those reference links require access to the private repository. The runner
+receives 45 Q16.16 values and returns 12 Q16.16 values:
+
+| Range | Contents |
+| --- | --- |
+| Inputs 0..39 | Hero BASIC features, clamped to -100..100 and divided by 100 |
+| Inputs 40..44 | One-hot player seat within the team |
+| Outputs 0..10 | Eleven macroaction logits |
+| Output 11 | Value estimate, excluded from action selection |
+
+Macroactions are mid push, retreat to spawn, defend own god, push enemy god,
+side A, side B, regroup, hunt a hero, siege, hold and fight, and farm creeps.
+The original hero BASIC still constructs all 40 features, drafts, shops, casts
+spells and interprets these actions. The public example uses simple synthetic
+features and weights; it is not a copy of the private trained policy.
+
+The loader accepts raw little-endian FP32 checkpoints when the shape is
+unambiguous, or an eight-byte `ANDRENN1` header followed by uint32 hidden width
+and layer count, then the unchanged checkpoint bytes. Widths are multiples of
+four from 4 through 4,096, with 1 through 16 layers and at most four million
+parameters. All weights must be finite. There are no biases. With `H` hidden
+values and `L` layers, tensor order and dimensions are:
+
+1. Encoder: `H * 45` floats.
+2. Decoder: `12 * H` floats, including the value row.
+3. Recurrent projections: `L` tensors of `3 * H * H` floats.
+
+Round the cursor up to eight floats after each tensor. The existing PufferNet
+evaluator accepts up to seven missing final floats and supplies zeros. This
+loader preserves that convention, including the reviewed width-12, one-layer
+checkpoint with 1,116 stored floats and 1,120 aligned floats. Ambiguous raw
+shapes need the explicit header. This is compatibility with the working CPU
+evaluator, not a claim of identical GPU trainer arithmetic.
+
+Each layer computes `next = old + sigmoid(gate) * (candidate - old)` and its
+highway blend in ordered FP32 arithmetic without fused multiply/add. Its state
+is `H * L` little-endian FP32 values in layer order. The loader and runner reject
+invalid shapes, nonfinite state and unrepresentable outputs. The value estimate
+uses the same unscaled Q16.16 conversion as the logits.
+
+Convert a private hero policy and checkpoint with:
+
+```sh
+python3 examples/gods_of_the_arena/tools/convert_andre.py \
+  private-hero.bas private-weights.bin tmp/andre.zip
+```
+
+Use `--hidden` and `--layers` when the checkpoint length is ambiguous.
+`--action-ticks` defaults to 24; `--temperature` defaults to 1 and accepts zero
+for first-index argmax or 0.01 through 10 for sampling. The converter recognizes
+the 40-feature integer BASIC policy and its single `METTA_DECISION` marker. It
+adds the shape header without modifying any checkpoint payload bytes.
+
+The reusable `neural/policies/andre.bas` helpers preserve the evaluator's timing:
+the network advances before the hero script, using the most recently captured
+features. Initial features are zero except for the seat one-hot. The marker
+captures new features and reads the held action. Inference continues on cadence
+through death and stun with stale features; recurrent state resets at the next
+match, not on death. No game-specific automatic neural execution path is added.
+
+As with David, Q16.16 observations/logits and the deterministic BASIC exponential
+approximation and LCG sampler can change decisions relative to FP32 and
+SplitMix64 sampling. Native inference is checked separately against PufferNet
+with identical rounded inputs. The training speedups in PR #75 are not required
+by this deployment interface.
+
 ## Ordinary observation getters
 
 These functions are available to every BASIC policy. Unknown fields or invalid
@@ -236,4 +309,6 @@ conversion, failed-call atomicity, visibility, BASIC cadence, masks, sampling an
 resets. Private reference comparisons are separate from the published fixtures.
 Native benchmark results depend on the machine and compiler: on the development
 machine David's 1407/512/92 synthetic model took approximately 1.2 ms per step;
-each small Richard network was below one microsecond.
+each small Richard network was below one microsecond. Andre's width-12,
+one-layer model took about one microsecond; width 64 with three layers took
+approximately 25 microseconds.

@@ -13,11 +13,15 @@ proc main() =
     else:
       paramStr(1)
   createDir(directory)
-  for author in ["richard", "david"]:
+  for author in ["richard", "david", "andre"]:
     let
       source = readFile(Policies / (author & ".bas"))
-      model = if author == "richard": richardFixture() else: davidFixture()
-      name = if author == "richard": "weights.bin" else: "model.bin"
+      model =
+        case author
+        of "richard": richardFixture()
+        of "david": davidFixture()
+        else: andreFixture()
+      name = if author == "david": "model.bin" else: "weights.bin"
     writeFile(directory / (author & ".zip"),
       zipFixture([("policy.bas", source), (name, model)], true))
     echo directory / (author & ".zip")

@@ -2,7 +2,7 @@ import
   std/[os, strutils, tempfiles],
   bassy,
   polyworld/cli,
-  ../examples/gods_of_the_arena/neural/[common, richard, david],
+  ../examples/gods_of_the_arena/neural/[common, richard, david, andre],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim],
   neuralfixtures
 
@@ -17,7 +17,9 @@ proc hostFor(policy: Policy): Host =
   ## Creates the same direct callback registry without a game world.
   result = initHost()
   let context = NeuralContext(policy: policy)
-  result.addNeuralFunctions(richardRunner(context), davidRunner(context))
+  result.addNeuralFunctions(
+    richardRunner(context), davidRunner(context), andreRunner(context)
+  )
 
 echo "Testing exact Richard integer wrapping and residual fixed-point scores"
 for residual in [false, true]:

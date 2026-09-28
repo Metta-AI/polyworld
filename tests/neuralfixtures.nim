@@ -89,3 +89,20 @@ proc davidFixture*(inputs = 1407, hidden = 64): string =
     let active = i == 0 or i == hidden * inputs or
       i == hidden * (inputs + 3 * hidden)
     result.addWord(cast[uint32](if active: 1.0'f else: 0.0'f))
+
+proc andreFixture*(hidden = 12, layers = 1, wrapped = true): string =
+  ## Builds an aligned PufferNet with one active channel in each layer.
+  let
+    decoder = (45 * hidden + 7) and not 7
+    recurrent = (decoder + 12 * hidden + 7) and not 7
+    stride = (3 * hidden * hidden + 7) and not 7
+    count = recurrent + layers * stride
+  if wrapped:
+    result = "ANDRENN1"
+    result.addWord(uint32(hidden))
+    result.addWord(uint32(layers))
+  for i in 0 ..< count:
+    let active = i == 0 or i == decoder or
+      i == decoder + 11 * hidden or
+      (i >= recurrent and (i - recurrent) mod stride == 0)
+    result.addWord(cast[uint32](if active: 1.0'f else: 0.0'f))

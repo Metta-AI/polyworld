@@ -19,6 +19,7 @@ import
   test_fxmeshes,
   test_gameuis,
   test_gota_abilities,
+  test_gota_andre,
   test_gota_attacks,
   test_gota_base,
   test_gota_brushes,

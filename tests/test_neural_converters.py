@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] /
                        "examples/gods_of_the_arena/tools"))
 import convert_david
 import convert_richard
+import convert_andre
 
 
 def rejected(call):
@@ -97,4 +98,33 @@ with tempfile.TemporaryDirectory() as directory:
     write_package()
     assert rejected(lambda: convert_david.convert(path))
 
-print("Synthetic Richard and David converters passed")
+source = "dim f(40)\nif selfHp <= 0 then\nend\nend if\n' METTA_DECISION\n"
+weights = bytes(4 * (convert_andre.count_parameters(12, 1) - 4))
+converted, model = convert_andre.convert(source, weights)
+assert model[:16] == b"ANDRENN1" + struct.pack("<2I", 12, 1)
+assert model[16:] == weights
+assert "andreAdvance()\ndim f(40)" in converted
+assert "andreCapture()\ndecision = andreAction" in converted
+assert "blobClear" not in converted
+assert "andrePeriod = 24" in converted
+assert "andreTemperature = 1.0000000000" in converted
+custom, _ = convert_andre.convert(source, weights, action_ticks=6, temperature=0)
+assert "andrePeriod = 6" in custom and "andreTemperature = 0.0000000000" in custom
+for hidden, layers in [(4, 1), (12, 3), (64, 3)]:
+    values = bytes(4 * convert_andre.count_parameters(hidden, layers))
+    assert convert_andre.model_bytes(values)[:16] == (
+        b"ANDRENN1" + struct.pack("<2I", hidden, layers))
+ambiguous = bytes(4 * convert_andre.count_parameters(12, 13))
+assert rejected(lambda: convert_andre.model_bytes(ambiguous))
+assert convert_andre.model_bytes(ambiguous, 12, 13)[16:] == ambiguous
+for values in [b"", b"bad", weights[:-16], weights + struct.pack("<f", float("nan"))]:
+    assert rejected(lambda: convert_andre.model_bytes(values))
+for basic in ["end", source * 2, source + "andreState = 1\n",
+              source.replace("f(40)", "f(39)"), source + "a = 1 / 2\n"]:
+    assert rejected(lambda: convert_andre.convert(basic, weights))
+for options in [{"hidden": 3}, {"layers": 0}, {"action_ticks": 0},
+                {"action_ticks": 32768}, {"temperature": -1},
+                {"temperature": 0.001}, {"temperature": float("inf")}]:
+    assert rejected(lambda: convert_andre.convert(source, weights, **options))
+
+print("Synthetic Richard, David and Andre converters passed")
