@@ -28,6 +28,8 @@ import
   test_gota_potions,
   test_gota_progression,
   test_gota_drafts,
-  test_gota_training
+  test_gota_training,
+  test_llms,
+  test_llm_hosts
 
 echo "CI tests passed"

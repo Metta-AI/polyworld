@@ -4,7 +4,7 @@
 import
   std/math,
   bassy, fixxy,
-  polyworld/[mailboxes, metrics, bodies, cli, controllers,
+  polyworld/[llms, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
   neural/[common, richard, david, andre],
   content,
@@ -105,6 +105,8 @@ proc bindHeroData(program: Program) =
 proc heroVmLimits(): Limits =
   ## Returns independent structural and per-decision limits for a hero VM.
   result = defaultLimits()
+  result.maxStrings = 1024
+  result.maxStringLength = 64 * 1024
   result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 64 * 1024
   result.maxCodeInstructions = 20_000
@@ -422,9 +424,15 @@ proc infoFunctions(host: var Host, heroId: int32) =
   discard host.addFunction("spellInfo", 2, spellInfo, 4)
   discard host.addFunction("matchInfo", 1, matchInfo, 4)
 
-proc initHeroHost(heroId: int32, policy: Policy = nil): Host =
+proc initHeroHost(
+    heroId: int32,
+    policy: Policy = nil,
+    llm: LlmClient = nil
+): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
+  let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
+  services.addFunctions(result)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends script text through the game's routing rules.
     let player = activeGame.world.heroIndex(heroId)
@@ -1013,6 +1021,7 @@ proc loadBots*(
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
       continue
+    let llm = newLlmClient(i)
     let policy =
       when defined(coworld):
         loadPlayerPolicy(sources[i], int(i))
@@ -1030,12 +1039,15 @@ proc loadBots*(
     game.heroVms[i] = HeroVm(
       runtime: initRuntime(
         program,
-        initHeroHost(game.world.heroes[i].id, policy),
+        initHeroHost(game.world.heroes[i].id, policy, llm),
         limits
       ),
       limits: limits,
+      prepareDecision: llm.decisionCallback(),
+      pollRequests: llm.requestPoller(),
       ready: true
     )
+    llm.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
 
@@ -1050,6 +1062,8 @@ proc runHeroScript(game: Game, index: int) =
     return
   try:
     vm.runtime.restart()
+    if vm.prepareDecision != nil:
+      vm.prepareDecision(game.world.tick)
     discard game.world.worldObjectCount(hero.id)
     vm.runtime.setData(heroDataIds[DataSelfId], hero.id)
     vm.runtime.setData(heroDataIds[DataSelfTeam], int32(hero.team.ord))
