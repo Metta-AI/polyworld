@@ -999,9 +999,9 @@ proc loadBots*(
       continue
     let policy =
       when defined(coworld):
-        loadPlayerPolicy(sources[i], limits.maxSourceBytes, int(i))
+        loadPlayerPolicy(sources[i], int(i))
       else:
-        loadPolicy(sources[i], limits.maxSourceBytes)
+        loadPolicy(sources[i])
     let source = policy.source
     let program =
       when defined(coworld):

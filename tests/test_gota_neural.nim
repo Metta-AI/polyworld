@@ -61,7 +61,7 @@ echo "Testing model binding, aliasing, restart, reset and failed-call atomicity"
 let policy = loadPolicy(zipFixture([
   ("policy.bas", "end"), ("a.bin", davidFixture(1)),
   ("b.bin", davidFixture(1)), ("bad.bin", "corrupt")
-]), 65536)
+]))
 let host = hostFor(policy)
 var limits = defaultLimits()
 limits.maxNativeMemoryBytes = NativeMemoryBytes
@@ -209,7 +209,7 @@ block:
       huge[offset + i] = char((0x7f7fffff'u32 shr (8 * i)) and 255)
   let policy = loadPolicy(zipFixture([
     ("a.bas", "end"), ("huge.bin", huge)
-  ]), 65536)
+  ]))
   let host = hostFor(policy)
   var vm = initRuntime(compile("""
 dim data(0)

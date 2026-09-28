@@ -97,7 +97,7 @@ block:
     policy = loadPolicy(zipFixture([
       ("policy.bas", "end"), ("a.bin", andreFixture()),
       ("b.bin", andreFixture()), ("huge.bin", huge)
-    ]), 65536)
+    ]))
     context = NeuralContext(policy: policy)
   var host = initHost()
   host.addNeuralFunctions(

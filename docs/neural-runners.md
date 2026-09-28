@@ -71,13 +71,19 @@ Resource paths are relative to the ZIP root, so the example policy uses
 No common neural manifest is required. Architectures define their own binary
 formats, and unused auxiliary files remain read-only resources.
 
-Packages are read in memory without extraction. Limits are 16 MiB compressed,
-16 MiB total expanded, 256 entries, and GOTA's existing BASIC source cap. Expanded
-limits apply during decompression. Stored and deflated entries, including data
-descriptors, are supported. Duplicate or unsafe paths, links, special files,
-encryption, other compression methods, invalid checksums, truncation, overlapping
-entries and multi-disk/ZIP64 packages fail. Errors use `PolicyError` or the
-architecture's `NeuralError` and flow through the existing player failure path.
+Zippy reads the archive and returns the BASIC entry and binary resources as
+strings. Uploads are limited to 16 MiB and packages to 256 files. The loader
+requires one BASIC file and canonical resource paths. ZIP decoding, compression
+support and checksum checks belong to Zippy, including stored, deflated and
+ZIP64 archives. Polyworld does not implement ZIP parsing or decompression.
+
+After unpacking, the VM compiler applies its existing BASIC source limit.
+Native model and buffer limits apply when the neural runner is used. There is
+no separate expanded-size limit in the ZIP decoder. The current Zippy reader
+requires a filename, so byte uploads temporarily stage the compressed archive;
+entry contents stay in memory, and the temporary ZIP is removed after reading.
+Errors use `PolicyError`, `BasicError` or `NeuralError` and reach the existing
+per-player failure reporting.
 
 Runnable synthetic ZIPs are included under
 `examples/gods_of_the_arena/neural/examples/` as `synthetic-richard.zip`,
@@ -306,9 +312,9 @@ Run `nim check tests/tests.nim`, `nim r tests/tests.nim`, and
 `tmp/coworld/`. For local development with an uninstalled companion Bassy checkout,
 set `BASSY_PATH=/absolute/path/to/bassy/src`.
 
-Tests cover raw and extensionless ZIP policies, mixed rosters, bounded decompression,
-malformed packages/models, arrays and blobs, native memory churn, input/output
-conversion, failed-call atomicity, visibility, BASIC cadence, masks, sampling and
+Tests cover raw and extensionless ZIP policies, mixed rosters, downstream BASIC
+source limits, malformed packages/models, arrays and blobs, native memory churn,
+input/output conversion, failed-call atomicity, visibility, BASIC cadence, masks, sampling and
 resets. Private reference comparisons are separate from the published fixtures.
 Native benchmark results depend on the machine and compiler: on the development
 machine David's 1407/512/92 synthetic model took approximately 1.2 ms per step;

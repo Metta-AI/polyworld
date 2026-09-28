@@ -213,10 +213,10 @@ proc rejectPlayer(slot: int, message: string) {.noreturn.} =
   waitForCollection()
   raise newException(CoworldError, "Player loading failed")
 
-proc loadPlayerPolicy*(bytes: string, maxSourceBytes, slot: int): Policy =
+proc loadPlayerPolicy*(bytes: string, slot: int): Policy =
   ## Parses extensionless staged policy packages with private diagnostics.
   try:
-    result = loadPolicy(bytes, maxSourceBytes)
+    result = loadPolicy(bytes)
   except PolicyError as error:
     rejectPlayer(slot, error.msg)
 

@@ -306,6 +306,12 @@ print "PACKAGE-PASSED"
   episode("gota", 10, scripts, failure = true)
   echo "GOTA extensionless ZIP, mixed roster and package failures passed"
 
+  scripts[0] = zipFixture([("policy.bas",
+    repeat("' Oversized source for VM compilation.\n", 2000))], true)
+  episode("gota", 10, scripts, failure = true,
+    expectedRuntimeError = "BASIC source exceeds")
+  echo "GOTA unpacked BASIC reaches the VM source limit and player failure log"
+
 block:
   let
     library = readFile(Root /
