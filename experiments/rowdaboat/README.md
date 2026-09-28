@@ -25,3 +25,10 @@ The campaign backlog and complete trial log are in the workspace root `ideas.md`
 ## Evidence and tools
 
 `rules-audit.md` documents the current release changes. Replay audits reconstruct only hosted recordings and require every recorded hash to match. Event counts are mechanism evidence, never a score substitute. Raw replay/event files and authenticated research receipts remain outside version control.
+
+## September 28 refresh
+
+- Hosted release and reference policy remain unchanged. Submitted v1 remains champion; live rank at refresh was 18.
+- B001 (`xreq_eae98a9c-061b-4be8-84b8-3b7ff1b89905`) refreshed the submitted baseline against relh v380, richard v340 and Andre's khors v219. All ten hosted episodes completed with correct roster/rotations and clean logs; all ten own scores were zero. This is a new baseline, not a candidate comparison.
+- Current leader replays support a substantive camp-first/camp-to-lane navigation experiment. Equipment priority stays separate. New reports and Nim descriptive extractors preserve exact seat attribution and distinguish observed action sequences from inferred strategy.
+- The required dashboard still fails DNS resolution. No new candidate was implemented, kept or submitted during this refresh; significance remains a required gate.

@@ -1,0 +1,71 @@
+{
+  "private": false,
+  "target": {
+    "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
+  },
+  "roster": [
+    {
+      "player": {
+        "policy_ref": "ab664012-84b3-48b3-ae1b-86f3f6cf960c"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "594e4f86-57a5-4217-bccd-960e495791ce"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "594e4f86-57a5-4217-bccd-960e495791ce"
+      },
+      "slot": -1
+    },
+    {
+      "player": {
+        "policy_ref": "594e4f86-57a5-4217-bccd-960e495791ce"
+      },
+      "slot": -1
+    }
+  ],
+  "num_episodes": 10,
+  "notes": "B001 refreshed submitted v1 baseline: source ae20666 unchanged; Sep28 top3 unique other players; campaign 94f43a3; no candidate change or keep decision",
+  "idempotency_key": "rowdaboat-gota-b001-20260928-94f43a3"
+}

@@ -1,0 +1,1018 @@
+{
+  "purpose": "Hosted behavior observations only; no score or significance inference.",
+  "episodeId": "58b2cfb6-2655-47a1-b318-0bc660a4b925",
+  "release": "2026.9.24.2",
+  "replayUrl": "https://softmax-public.s3.amazonaws.com/replays/b9e8a144-a4c4-45f1-9565-aff9db52fe2f.replay",
+  "verifiedHashes": 29137,
+  "mismatches": 0,
+  "gameVersion": 64,
+  "allRecordedActionsConsumed": true,
+  "actionConsumptionBasis": "replay_audit raises before writing summary unless replayPlayer.finished",
+  "seatMapping": "participants.position checked against replay player name; policy_version_ids order unused",
+  "seat": 4,
+  "heroId": 104,
+  "player": "RowDaBoat",
+  "policy": "rowdaboat-gods-of-the-arena",
+  "version": 1,
+  "policyVersionId": "ab664012-84b3-48b3-ae1b-86f3f6cf960c",
+  "actionCounts": {
+    "draft": 1,
+    "levelAbility": 8,
+    "buyItem": 33,
+    "attackMove": 189,
+    "attackTarget": 185,
+    "walk": 277,
+    "castTarget": 103,
+    "useItem": 25,
+    "useItemAt": 6,
+    "castPoint": 13
+  },
+  "damageByTargetKind": {
+    "3": 5391,
+    "2": 1218,
+    "6": 1321
+  },
+  "lastHitsByTargetKind": {
+    "3": 92,
+    "6": 5
+  },
+  "purchases": [
+    {
+      "tick": 338,
+      "item": "RangerBoots"
+    },
+    {
+      "tick": 338,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 2097,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 3357,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 3357,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 7993,
+      "item": "PortalScroll"
+    },
+    {
+      "tick": 7993,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 8953,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 11237,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 11237,
+      "item": "PortalScroll"
+    },
+    {
+      "tick": 12833,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 12839,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 15095,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 16632,
+      "item": "PortalScroll"
+    },
+    {
+      "tick": 18174,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 18174,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 18180,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 20448,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 22272,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 22272,
+      "item": "PortalScroll"
+    },
+    {
+      "tick": 22272,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 22344,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 24108,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 24108,
+      "item": "PortalScroll"
+    },
+    {
+      "tick": 24108,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 25746,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 25746,
+      "item": "PortalScroll"
+    },
+    {
+      "tick": 25746,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 25752,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 27816,
+      "item": "HealthPotion"
+    },
+    {
+      "tick": 27816,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 27822,
+      "item": "ManaPotion"
+    },
+    {
+      "tick": 28890,
+      "item": "HealthPotion"
+    }
+  ],
+  "casts": {
+    "HealingBloom": 64,
+    "KindredWisps": 39,
+    "GolemSeed": 13
+  },
+  "firstDamageByTargetKind": {
+    "3": {
+      "kind": "Damage",
+      "tick": 1178,
+      "actor": {
+        "id": 104,
+        "kind": 2,
+        "team": 0,
+        "class": 3,
+        "player": 4,
+        "x": 2645803,
+        "y": 60000,
+        "z": 2540166
+      },
+      "target": {
+        "id": 1025,
+        "kind": 3,
+        "team": 1,
+        "class": 0,
+        "player": -1,
+        "x": 2538499,
+        "y": 60000,
+        "z": 2666690
+      },
+      "cause": "BasicAttack",
+      "detail": 0,
+      "amount": 21,
+      "requested": 21,
+      "before": 60,
+      "after": 39,
+      "related": -1,
+      "action": 0,
+      "slot": 0,
+      "first": 0,
+      "second": 0,
+      "offsetX": 0,
+      "offsetY": 0,
+      "error": "NoActionError"
+    },
+    "2": {
+      "kind": "Damage",
+      "tick": 2831,
+      "actor": {
+        "id": 104,
+        "kind": 2,
+        "team": 0,
+        "class": 3,
+        "player": 4,
+        "x": 2888948,
+        "y": 60000,
+        "z": 1369735
+      },
+      "target": {
+        "id": 106,
+        "kind": 2,
+        "team": 1,
+        "class": 4,
+        "player": 6,
+        "x": 2916873,
+        "y": 60000,
+        "z": 1530005
+      },
+      "cause": "BasicAttack",
+      "detail": 0,
+      "amount": 25,
+      "requested": 25,
+      "before": 114,
+      "after": 89,
+      "related": -1,
+      "action": 0,
+      "slot": 0,
+      "first": 0,
+      "second": 0,
+      "offsetX": 0,
+      "offsetY": 0,
+      "error": "NoActionError"
+    },
+    "6": {
+      "kind": "Damage",
+      "tick": 8137,
+      "actor": {
+        "id": 104,
+        "kind": 2,
+        "team": 0,
+        "class": 3,
+        "player": 4,
+        "x": -2252080,
+        "y": 60000,
+        "z": -2442480
+      },
+      "target": {
+        "id": 1526,
+        "kind": 6,
+        "team": 2,
+        "class": 3,
+        "player": -1,
+        "x": -2044818,
+        "y": 60000,
+        "z": -2323835
+      },
+      "cause": "BasicAttack",
+      "detail": 0,
+      "amount": 29,
+      "requested": 29,
+      "before": 300,
+      "after": 271,
+      "related": -1,
+      "action": 0,
+      "slot": 0,
+      "first": 0,
+      "second": 0,
+      "offsetX": 0,
+      "offsetY": 0,
+      "error": "NoActionError"
+    }
+  },
+  "openingOwnNeutralDamageThroughTick1400": [],
+  "allOpeningNeutralDeathsThroughTick1400": [
+    {
+      "tick": 718,
+      "actorId": 20,
+      "actorKind": 4,
+      "targetId": 1078
+    },
+    {
+      "tick": 778,
+      "actorId": 102,
+      "actorKind": 2,
+      "targetId": 1079
+    },
+    {
+      "tick": 936,
+      "actorId": 107,
+      "actorKind": 2,
+      "targetId": 1080
+    },
+    {
+      "tick": 995,
+      "actorId": 102,
+      "actorKind": 2,
+      "targetId": 1081
+    }
+  ],
+  "respawnTicks": [
+    2096,
+    4680,
+    5950,
+    7992,
+    11236,
+    15094,
+    16631
+  ],
+  "targetCommandCountsByKind": {
+    "3": 138,
+    "2": 43,
+    "6": 4
+  },
+  "targetChangesByKind": {
+    "3": 125,
+    "2": 26,
+    "6": 4
+  },
+  "first80TargetChanges": [
+    {
+      "tick": 1124,
+      "targetId": 1024,
+      "targetKind": 3
+    },
+    {
+      "tick": 1154,
+      "targetId": 1025,
+      "targetKind": 3
+    },
+    {
+      "tick": 1202,
+      "targetId": 1017,
+      "targetKind": 3
+    },
+    {
+      "tick": 1208,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 1280,
+      "targetId": 1017,
+      "targetKind": 3
+    },
+    {
+      "tick": 1286,
+      "targetId": 1019,
+      "targetKind": 3
+    },
+    {
+      "tick": 1298,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 1454,
+      "targetId": 1017,
+      "targetKind": 3
+    },
+    {
+      "tick": 1490,
+      "targetId": 1016,
+      "targetKind": 3
+    },
+    {
+      "tick": 1502,
+      "targetId": 1018,
+      "targetKind": 3
+    },
+    {
+      "tick": 1532,
+      "targetId": 1017,
+      "targetKind": 3
+    },
+    {
+      "tick": 1580,
+      "targetId": 1018,
+      "targetKind": 3
+    },
+    {
+      "tick": 1586,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 1616,
+      "targetId": 1018,
+      "targetKind": 3
+    },
+    {
+      "tick": 1808,
+      "targetId": 1106,
+      "targetKind": 3
+    },
+    {
+      "tick": 1826,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 2529,
+      "targetId": 1147,
+      "targetKind": 3
+    },
+    {
+      "tick": 2559,
+      "targetId": 1155,
+      "targetKind": 3
+    },
+    {
+      "tick": 2655,
+      "targetId": 1149,
+      "targetKind": 3
+    },
+    {
+      "tick": 2679,
+      "targetId": 1157,
+      "targetKind": 3
+    },
+    {
+      "tick": 2787,
+      "targetId": 1202,
+      "targetKind": 3
+    },
+    {
+      "tick": 2805,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 2811,
+      "targetId": 1202,
+      "targetKind": 3
+    },
+    {
+      "tick": 2817,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 2823,
+      "targetId": 1202,
+      "targetKind": 3
+    },
+    {
+      "tick": 2829,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 2883,
+      "targetId": 1202,
+      "targetKind": 3
+    },
+    {
+      "tick": 2943,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 4005,
+      "targetId": 1303,
+      "targetKind": 3
+    },
+    {
+      "tick": 4101,
+      "targetId": 1305,
+      "targetKind": 3
+    },
+    {
+      "tick": 4143,
+      "targetId": 1297,
+      "targetKind": 3
+    },
+    {
+      "tick": 4227,
+      "targetId": 1350,
+      "targetKind": 3
+    },
+    {
+      "tick": 4305,
+      "targetId": 1343,
+      "targetKind": 3
+    },
+    {
+      "tick": 5107,
+      "targetId": 1401,
+      "targetKind": 3
+    },
+    {
+      "tick": 5209,
+      "targetId": 1450,
+      "targetKind": 3
+    },
+    {
+      "tick": 5221,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 5287,
+      "targetId": 1450,
+      "targetKind": 3
+    },
+    {
+      "tick": 5293,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 5377,
+      "targetId": 1453,
+      "targetKind": 3
+    },
+    {
+      "tick": 5383,
+      "targetId": 1452,
+      "targetKind": 3
+    },
+    {
+      "tick": 6455,
+      "targetId": 1544,
+      "targetKind": 3
+    },
+    {
+      "tick": 6479,
+      "targetId": 1555,
+      "targetKind": 3
+    },
+    {
+      "tick": 6623,
+      "targetId": 1601,
+      "targetKind": 3
+    },
+    {
+      "tick": 6713,
+      "targetId": 1602,
+      "targetKind": 3
+    },
+    {
+      "tick": 6785,
+      "targetId": 1603,
+      "targetKind": 3
+    },
+    {
+      "tick": 7043,
+      "targetId": 106,
+      "targetKind": 2
+    },
+    {
+      "tick": 7163,
+      "targetId": 1652,
+      "targetKind": 3
+    },
+    {
+      "tick": 7259,
+      "targetId": 1655,
+      "targetKind": 3
+    },
+    {
+      "tick": 7271,
+      "targetId": 1646,
+      "targetKind": 3
+    },
+    {
+      "tick": 7337,
+      "targetId": 1644,
+      "targetKind": 3
+    },
+    {
+      "tick": 9397,
+      "targetId": 1850,
+      "targetKind": 3
+    },
+    {
+      "tick": 9445,
+      "targetId": 1852,
+      "targetKind": 3
+    },
+    {
+      "tick": 9631,
+      "targetId": 1845,
+      "targetKind": 3
+    },
+    {
+      "tick": 9739,
+      "targetId": 1900,
+      "targetKind": 3
+    },
+    {
+      "tick": 9835,
+      "targetId": 1902,
+      "targetKind": 3
+    },
+    {
+      "tick": 9907,
+      "targetId": 1893,
+      "targetKind": 3
+    },
+    {
+      "tick": 9913,
+      "targetId": 1902,
+      "targetKind": 3
+    },
+    {
+      "tick": 9997,
+      "targetId": 1893,
+      "targetKind": 3
+    },
+    {
+      "tick": 10141,
+      "targetId": 1903,
+      "targetKind": 3
+    },
+    {
+      "tick": 10453,
+      "targetId": 1953,
+      "targetKind": 3
+    },
+    {
+      "tick": 10519,
+      "targetId": 1948,
+      "targetKind": 3
+    },
+    {
+      "tick": 11777,
+      "targetId": 107,
+      "targetKind": 2
+    },
+    {
+      "tick": 11951,
+      "targetId": 2182,
+      "targetKind": 3
+    },
+    {
+      "tick": 11999,
+      "targetId": 107,
+      "targetKind": 2
+    },
+    {
+      "tick": 13295,
+      "targetId": 2246,
+      "targetKind": 3
+    },
+    {
+      "tick": 13343,
+      "targetId": 2248,
+      "targetKind": 3
+    },
+    {
+      "tick": 13373,
+      "targetId": 107,
+      "targetKind": 2
+    },
+    {
+      "tick": 13385,
+      "targetId": 2239,
+      "targetKind": 3
+    },
+    {
+      "tick": 13391,
+      "targetId": 107,
+      "targetKind": 2
+    },
+    {
+      "tick": 13475,
+      "targetId": 2247,
+      "targetKind": 3
+    },
+    {
+      "tick": 13967,
+      "targetId": 2291,
+      "targetKind": 3
+    },
+    {
+      "tick": 13985,
+      "targetId": 2299,
+      "targetKind": 3
+    },
+    {
+      "tick": 14123,
+      "targetId": 2347,
+      "targetKind": 3
+    },
+    {
+      "tick": 14201,
+      "targetId": 2340,
+      "targetKind": 3
+    },
+    {
+      "tick": 14207,
+      "targetId": 2347,
+      "targetKind": 3
+    },
+    {
+      "tick": 15287,
+      "targetId": 2458,
+      "targetKind": 3
+    },
+    {
+      "tick": 15293,
+      "targetId": 2449,
+      "targetKind": 3
+    },
+    {
+      "tick": 15335,
+      "targetId": 2450,
+      "targetKind": 3
+    },
+    {
+      "tick": 15359,
+      "targetId": 2448,
+      "targetKind": 3
+    },
+    {
+      "tick": 15383,
+      "targetId": 2459,
+      "targetKind": 3
+    }
+  ],
+  "campEngagementCounts": {
+    "4": 2,
+    "0": 1,
+    "13": 2
+  },
+  "campEngagements": [
+    {
+      "tick": 8137,
+      "campIndex": 4,
+      "tier": 3,
+      "targetId": 1526,
+      "heroX": -2252080,
+      "heroZ": -2442480,
+      "campX": -2044818,
+      "campZ": -2323835
+    },
+    {
+      "tick": 11391,
+      "campIndex": 4,
+      "tier": 3,
+      "targetId": 1527,
+      "heroX": -2241145,
+      "heroZ": -2376818,
+      "campX": -2031005,
+      "campZ": -2264933
+    },
+    {
+      "tick": 17007,
+      "campIndex": 0,
+      "tier": 2,
+      "targetId": 2747,
+      "heroX": -452800,
+      "heroZ": -2154466,
+      "campX": -270000,
+      "campZ": -2010000
+    },
+    {
+      "tick": 17474,
+      "campIndex": 13,
+      "tier": 1,
+      "targetId": 2744,
+      "heroX": 171054,
+      "heroZ": -1376206,
+      "campX": 390000,
+      "campZ": -1470000
+    },
+    {
+      "tick": 23781,
+      "campIndex": 13,
+      "tier": 1,
+      "targetId": 3358,
+      "heroX": 438347,
+      "heroZ": -1364877,
+      "campX": 390000,
+      "campZ": -1470000
+    }
+  ],
+  "walksImmediatelyAfterBasicHit": 1,
+  "first24OtherWalks": [
+    {
+      "tick": 1196,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 103,
+      "second": 98,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1214,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1262,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1292,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1304,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1352,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1400,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1448,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1460,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1526,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1544,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1856,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 108,
+      "second": 86,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1862,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1868,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 102,
+      "second": 80,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1874,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 1880,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 110,
+      "second": 4,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2841,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 109,
+      "second": 77,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2859,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 110,
+      "second": 76,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2865,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 77,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2901,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2961,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2985,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 105,
+      "second": 10,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 2991,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 110,
+      "second": 4,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    },
+    {
+      "tick": 3039,
+      "seat": 4,
+      "kind": "walk",
+      "slot": 0,
+      "first": 110,
+      "second": 4,
+      "offset": "fixedVec2(0.00000, 0.00000)"
+    }
+  ]
+}
