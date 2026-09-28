@@ -1,0 +1,262 @@
+{
+  "xp_id": "xreq_d729af06-d2cd-4e22-922e-917ff89ad9a0",
+  "coworld_id": "cow_e282a46f-31c4-43b1-a9e2-aaa31d3aaed4",
+  "coworld_version": "2026.9.24.2",
+  "own_policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+  "episodes": [
+    {
+      "episode_request_id": "ereq_fa3fca4a-6e05-4282-9808-472efbb1cf5f",
+      "episode_id": "4ca514b5-7a7b-46b0-bcf7-0707cb9c8f08",
+      "own_seat": 0,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 1047.6666666666667
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 833.0
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 1420.6666666666667
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/f7178598-a0b4-4f14-ac2d-3e5360414580.replay"
+    },
+    {
+      "episode_request_id": "ereq_ae704f0f-c047-470c-907d-7b25b2cc4827",
+      "episode_id": "ddd79355-9b52-445d-adb5-7cf82a529cfc",
+      "own_seat": 1,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 967.3333333333334
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 426.0
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 2396.0
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/ebd1f1b2-8309-458e-88cb-980fc9af8c4e.replay"
+    },
+    {
+      "episode_request_id": "ereq_31fafcff-306d-4ea2-88a6-4bd96981bed4",
+      "episode_id": "6ac5bc7b-3c65-49be-bf82-c8cd84d5254a",
+      "own_seat": 2,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 2688.6666666666665
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 1328.0
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 0.0
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/4992a052-f9fa-4391-afe1-4f9a3f3e27c7.replay"
+    },
+    {
+      "episode_request_id": "ereq_678794a2-35bc-45e4-8dda-2744219da6bb",
+      "episode_id": "ab6614de-c299-4363-ad20-97ff2268c49e",
+      "own_seat": 3,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 1072.3333333333333
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 2646.0
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 1605.0
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/e7209065-af2c-433e-98bf-31942afcd86a.replay"
+    },
+    {
+      "episode_request_id": "ereq_0f13e623-622d-464f-9886-8577617f6748",
+      "episode_id": "f6ee4dfd-09ee-4bb1-a624-1869ad2736e7",
+      "own_seat": 4,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 882.6666666666666
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 3282.3333333333335
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 755.3333333333334
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/5e61d3a7-f406-449a-a5a3-7c12c096a41d.replay"
+    },
+    {
+      "episode_request_id": "ereq_5b84ac99-1d0c-4af9-9ac3-a990dc49d3d5",
+      "episode_id": "bbce3144-7415-4f03-87fd-b6863df73655",
+      "own_seat": 5,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 1711.6666666666667
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 1141.0
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 1053.6666666666667
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/a7fdd73d-77a0-4249-8a07-17c7d76da641.replay"
+    },
+    {
+      "episode_request_id": "ereq_8c1237fd-f133-40d2-a15c-97c946853382",
+      "episode_id": "e4b439a1-809e-499c-b12d-3c663f5a7e85",
+      "own_seat": 6,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 1174.0
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 1333.3333333333333
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        },
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 1191.3333333333333
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/c09f3232-733b-463d-8550-ef34c2d41e6c.replay"
+    },
+    {
+      "episode_request_id": "ereq_376dda6e-f594-4699-bd9a-57d6b50c404e",
+      "episode_id": "948f0298-9a0f-44f7-a4d1-6e53748fb099",
+      "own_seat": 7,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 1820.3333333333333
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 1592.0
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 2520.3333333333335
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/12263cc3-0ee2-4a02-bbc4-1651d163d674.replay"
+    },
+    {
+      "episode_request_id": "ereq_2f4acd22-739a-4e31-bf8d-67d59041ba84",
+      "episode_id": "3b969afc-2c9e-400b-a3e6-99c203ed1693",
+      "own_seat": 8,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 564.6666666666666
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 93.33333333333333
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 2701.3333333333335
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/68bdfff5-5d81-46c5-a265-d452e92073b4.replay"
+    },
+    {
+      "episode_request_id": "ereq_a9515a6d-7bed-4874-8711-0c584752e17d",
+      "episode_id": "644489d4-949b-40b3-b694-b9f2651bfa9a",
+      "own_seat": 9,
+      "own_hosted_score": 0.0,
+      "hosted_policy_scores": [
+        {
+          "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+          "score": 490.3333333333333
+        },
+        {
+          "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+          "score": 2598.0
+        },
+        {
+          "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+          "score": 1329.6666666666667
+        },
+        {
+          "policy_version_id": "9945aaa3-f99a-47c1-b947-b3533bfa71ab",
+          "score": 0.0
+        }
+      ],
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/220c5364-6f24-48b6-9fe8-cc5b9941ff3b.replay"
+    }
+  ],
+  "own_zero_score_count": 10,
+  "clean_policy_logs": 10,
+  "provenance_passed": true,
+  "significance": "Not assessed; dashboard evidence required"
+}

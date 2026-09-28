@@ -1,0 +1,23 @@
+[
+  {
+    "rank": 1,
+    "player_id": "ply_18302115-9fc9-482d-a2f3-f4c592bf9e57",
+    "player_name": "relh",
+    "policy_version_id": "272e3b71-e3f6-4b9d-b4d9-b990d179a19c",
+    "policy_label": "relh-gods-of-the-arena:v380"
+  },
+  {
+    "rank": 3,
+    "player_id": "ply_ded11f40-3e30-4921-b019-f7f6bc3e9c83",
+    "player_name": "richard",
+    "policy_version_id": "8bf344e5-c1b5-4b9b-94c5-b9f7437998b3",
+    "policy_label": "richard-gods-of-the-arena:v340"
+  },
+  {
+    "rank": 2,
+    "player_id": "ply_3d22435e-30a2-4f2a-b037-a5c249583788",
+    "player_name": "Andre von Auto",
+    "policy_version_id": "594e4f86-57a5-4217-bccd-960e495791ce",
+    "policy_label": "khors:v219"
+  }
+]
