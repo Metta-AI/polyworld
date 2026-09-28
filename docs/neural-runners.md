@@ -152,9 +152,11 @@ observation and action contracts before selecting this BASIC glue. State stores
 one little-endian FP32 value per hidden unit. Outputs are unscaled Q16.16 logits.
 The loader does not infer observations or decode actions.
 
-`neural/policies/david.bas` supplies explicit observation assembly, Newton square
-root, a Q16.16 exponential lookup/interpolation routine, static target masks,
-seeded sampling, argmax with first-index ties and ordinary action dispatch.
+`neural/policies/david.bas` builds observations, calls the native network and
+interprets the five action heads. BASIC owns static target masks, seeded
+sampling, argmax with first-index ties and ordinary action dispatch. Observation
+distances use the ordinary `sqrt()` host function; sampling uses `exp()`. There
+are no network layers, neural weights or exponential lookup tables in BASIC.
 Nonnegative int32 counters are normalized before converting to Q16.16. Layout:
 
 | Range | Contents |
@@ -177,8 +179,8 @@ Masks and decoding are BASIC code and can be customized.
 
 The supplied sampler uses a wrapping int32 LCG seeded by the match seed and hero
 ID, with a 15-bit draw. It is deterministic but differs from the reference host's
-SplitMix64 sampler. Its exponential approximation and Q16.16 observations/logits
-also affect decisions. Supporting this architecture does **not** imply identical
+SplitMix64 sampler. Q16.16 observations, logits and sampling probabilities also
+affect decisions. Supporting this architecture does **not** imply identical
 FP32-host trajectories. Native recurrent inference is compared separately using
 identical Q16.16-rounded inputs. Recordings replay the dispatched actions without
 rerunning neural inference.
@@ -263,9 +265,10 @@ captures new features and reads the held action. Inference continues on cadence
 through death and stun with stale features; recurrent state resets at the next
 match, not on death. No game-specific automatic neural execution path is added.
 
-As with David, Q16.16 observations/logits and the deterministic BASIC exponential
-approximation and LCG sampler can change decisions relative to FP32 and
-SplitMix64 sampling. Native inference is checked separately against PufferNet
+As with David, Q16.16 observations/logits and the BASIC LCG sampler can change
+decisions relative to FP32 and SplitMix64 sampling. BASIC calls the ordinary
+`exp()` host function to calculate action chances from the returned logits.
+Native inference is checked separately against PufferNet
 with identical rounded inputs. The training speedups in PR #75 are not required
 by this deployment interface.
 
@@ -285,9 +288,13 @@ true (-1) or false (0); `matchInfo` is an integer getter returning 1 or 0.
 | `spellInfo(index, field)` | 0 x, 1 z, 2 hostile, 3 non-Strike |
 | `matchInfo(field)` | 0 battle tick, 1 configured max ticks, 2 seed int32 bits, 3 wave countdown, 4 wave interval, 5 half map size, 6 map size, 7 game over, 8/9 own towers alive/total, 10/11 own barracks alive/total, 12/13 remembered enemy towers alive/total, 14/15 remembered enemy barracks alive/total |
 | `floor(value)` | Greatest integer not exceeding an integer or Q16.16 value |
+| `sqrt(value)` | Fixxy square root rounded down to Q16.16; negative input returns zero |
+| `exp(value)` | Native exponential rounded to Q16.16, ties away from zero; an unrepresentable result raises `BasicError` |
 
 The enemy fort center and roster IDs are public static information. Enemy HP and
 living structure counts retain normal visibility and team-memory rules.
+The math functions are available to ordinary policies as well. `sqrt` and `exp`
+accept Q16.16 values or integers within that range and each cost one work unit.
 
 ## Adding an architecture
 

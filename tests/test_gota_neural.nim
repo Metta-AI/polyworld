@@ -253,8 +253,12 @@ nnRatio(2147483647, 2147483647)
 largeRatio = nnValue
 nnRatio(100000, 20000)
 largeCounter = nnValue
-nnExp(-1.0)
-exponential = nnValue
+exponential = exp(-1.0)
+root = sqrt(2.0)
+emptyRoot = sqrt(-1.0)
+unitWeight = exp(0.0)
+smallWeight = exp(-16.0)
+probeWeight = exp(probe)
 """)
   let game = newGame(generateMap(7), 600, 10, false,
     ReplayData(), drafting = false)
@@ -269,6 +273,10 @@ exponential = nnValue
   doAssert vm.runtime.getGlobalValue("largeCounter").asFixed == 5.0'fx
   doAssert abs(vm.runtime.getGlobalValue("exponential").asFixed.toFloat32 -
     0.36787945'f) < 0.00002'f
+  doAssert int32(vm.runtime.getGlobalValue("root").asFixed) == 92681
+  doAssert vm.runtime.getGlobalValue("emptyRoot").asFixed == FixedZero
+  doAssert vm.runtime.getGlobalValue("unitWeight").asFixed == FixedOne
+  doAssert vm.runtime.getGlobalValue("smallWeight").asFixed == FixedZero
   for head in 0 ..< 5:
     doAssert vm.runtime.getArray("nnHeads", int32(head)) == 0
   doAssert vm.runtime.getArray("nnAllowed", 8) == 1
@@ -293,6 +301,10 @@ exponential = nnValue
         else:
           doAssert sequence[step * 5 + head] == chosen
   doAssert sequence.contains(0) and sequence.contains(1)
+  for probe in [10.4'fx, 11.0'fx, 32767.0'fx]:
+    vm.runtime.setGlobal("probe", toValue(probe))
+    vm.runtime.restart()
+    doAssert rejected(proc() = discard vm.runtime.run())
 
 echo "Testing complete public BASIC and ZIP examples"
 block:

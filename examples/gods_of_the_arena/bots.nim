@@ -2,6 +2,7 @@
 ## on the simulation.
 
 import
+  std/math,
   bassy, fixxy,
   polyworld/[mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
@@ -393,13 +394,28 @@ proc infoFunctions(host: var Host, heroId: int32) =
             inc count
       count
     else: 0'i32
-  let floorProc: NumericHostProc = proc(args: openArray[Value]): Value =
-    ## Converts a numeric value to its greatest integer lower bound.
-    if args[0].kind == IntegerValue:
-      args[0]
-    else:
-      toValue(int32(args[0].asFixed) shr 16)
+  let
+    floorProc: NumericHostProc = proc(args: openArray[Value]): Value =
+      ## Converts a numeric value to its greatest integer lower bound.
+      if args[0].kind == IntegerValue:
+        args[0]
+      else:
+        toValue(int32(args[0].asFixed) shr 16)
+    sqrtProc: NumericHostProc = proc(args: openArray[Value]): Value =
+      ## Uses Fixxy's square root for observation distances.
+      toValue(fixxy.sqrt(args[0].asFixed))
+    expProc: NumericHostProc = proc(args: openArray[Value]): Value =
+      ## Rounds the native exponential to Q16.16 with a checked result range.
+      let value = args[0].asFixed.toFloat64
+      if value > 11.0:
+        raise newException(BasicError, "exp() result is outside Q16.16")
+      let scaled = math.round(math.exp(value) * 65536.0)
+      if scaled > float64(high(int32)):
+        raise newException(BasicError, "exp() result is outside Q16.16")
+      toValue(Fixed(int32(scaled)))
   discard host.addFunction("floor", 1, floorProc, 1)
+  discard host.addFunction("sqrt", 1, sqrtProc, 1)
+  discard host.addFunction("exp", 1, expProc, 1)
   discard host.addFunction("selfInfo", 1, selfInfo, 4)
   discard host.addFunction("objectInfo", 2, objectInfo, 4)
   discard host.addFunction("abilityInfo", 2, abilityInfo, 4)
