@@ -33,11 +33,11 @@ The four authorized inputs live in `polyworld_art/terrain/heartleaf/layers`:
 | `03-trees-and-vegetation.png` | Trees, grounded hedges and flowers along the traced planting bands |
 | `04-props.png` | Independent yard fences, planters, furniture, well, market, lamps and stone borders |
 
-Run the repeatable capture script to render those four layers plus the assembled
+Run the repeatable Nim tool to render those four layers plus the assembled
 town from actual game geometry:
 
 ```sh
-sh tools/capture_heartleaf_layers.sh
+nim r tools/capture_heartleaf_layers.nim
 ```
 
 Outputs go to `tmp/heartleaf-layers`; an optional first argument changes that
