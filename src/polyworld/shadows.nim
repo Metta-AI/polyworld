@@ -26,10 +26,19 @@ import
   std/os,
   opengl, shady, vmath
 
+## footprint-r1 (bible round 288): `SunShadowMapSize`'s emscripten branch halved again,
+## 2048 -> 1024 -- the wasm/browser build has a real memory budget to respect (see
+## rendermesh.nim's `TerrainTexelBudget` header for the measured startup-heap breakdown
+## this same round found and fixed on the terrain side). Two shadow maps
+## (`toonShadowMap0`/`1`, this file's own header: "every frame renders two maps, one at
+## each neighbouring sun step") at depth format: 2048x2048x2 cost ~33.5MB; 1024x1024x2
+## costs ~8.4MB -- a real, if smaller than the terrain fix, GPU-texture-memory saving,
+## at PCF-filtered depth resolution still well above the toon-shading band's own visible
+## step count. Desktop (`else` branch) is untouched at 4096, same as before this round.
 const
   SunShadowMapSize* =
     when defined(emscripten):
-      2048
+      1024
     else:
       4096
   SunShadowTexel* = 1.0'f32 / SunShadowMapSize.float32
