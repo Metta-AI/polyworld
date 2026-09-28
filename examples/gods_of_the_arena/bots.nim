@@ -305,7 +305,12 @@ proc infoFunctions(host: var Host, heroId: int32) =
     of 7: toValue(hero.inOwnSpawn)
     of 8: toValue(world.phase != Drafting and hero.canShop)
     of 9: toValue(hero.abilityPoints())
-    of 10: toValue(score(hero.totalXp, int(max(0'i32, world.battleTick()))))
+    of 10:
+      toValue(score(
+        hero.totalXp,
+        int(world.tick),
+        world.gameOver and not world.draw and hero.team == world.winner
+      ))
     of 11, 12:
       let metric = if args[0].asInt == 11: KillsMetric else: AssistsMetric
       toValue(if world.stats == nil: 0 else: world.stats.values[index][metric])

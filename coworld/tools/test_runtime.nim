@@ -219,8 +219,16 @@ proc episode(
       for xp in output["total_xp"]:
         doAssert xp.getInt() >= 0
       for slot, score in output["scores"].elems:
-        let expected = max(0, output["total_xp"][slot].getInt * 1440 -
-          200 * output["ticks"].getInt) div 1440
+        let
+          outcome = output["outcome"].getStr
+          won = (outcome == "RedTeam" and slot < 5) or
+            (outcome == "BlueTeam" and slot >= 5)
+          ticks = output["ticks"].getInt
+          expected =
+            if won and ticks > 0:
+              int(output["total_xp"][slot].getBiggestInt * 1440 div ticks)
+            else:
+              0
         doAssert score.kind == JInt
         doAssert score.getInt() == expected
     else:

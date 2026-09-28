@@ -1,4 +1,4 @@
-import ../examples/gods_of_the_arena/lockstep
+include ../examples/gods_of_the_arena/lockstep
 
 let policy = "dim f(" & $GotaFeatureCount & ")\n" & """
 f(0) = 100
@@ -75,3 +75,35 @@ for mode in RewardMode:
   let frame = run(false, mode, 480, 10)
   for reward in frame.rewards:
     doAssert reward == reward, "reward must not be NaN"
+
+echo "Testing training Glory agrees with hosted scoring"
+for (ended, draw, winner) in [
+  (true, false, RedTeam),
+  (true, false, BlueTeam),
+  (true, true, RedTeam),
+  (false, false, RedTeam)
+]:
+  let
+    batch = newStepBatch(config, bot, bot, policy, 1, 28800, 24,
+      true, LeaderboardReward)
+    world = batch.lanes[0].game.world
+  world.tick = if ended: 15120 else: 28800
+  world.draftTicks = 120
+  world.gameOver = ended
+  world.draw = draw
+  world.winner = winner
+  for hero in world.heroes:
+    hero.totalXp = 3150
+  let hosted = scores(world.totalXp(), int(world.tick), world.scores())
+  var
+    actions = newSeq[int32](batch.agentCount)
+    rewards = newSeq[float32](batch.agentCount)
+    terminals = newSeq[uint8](batch.agentCount)
+    stats = newSeq[LaneStats](1)
+  batch.step(actions, rewards, terminals, stats)
+  doAssert stats[0].finished == 1
+  doAssert stats[0].outcome == (if hosted[0] > 0: 1 else: -1)
+  doAssert stats[0].potential == int64(hosted[0]) * 7200
+  for agent in 0 ..< batch.agentCount:
+    doAssert terminals[agent] == 1
+    doAssert abs(rewards[agent] - float32(hosted[agent]) / 1000) < 0.000001'f

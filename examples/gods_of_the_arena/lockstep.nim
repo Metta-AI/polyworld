@@ -7,10 +7,10 @@
 ## needed. `step` applies one action per agent, runs `actionTicks` ticks of
 ## every lane, and returns each agent's newest features and team reward.
 ## Three rewards, picked by RewardMode:
-## - LeaderboardReward follows the hosted score: each hero is worth
-##   max(0, XP * 1440 - tick * 200), summed over the team; a step's reward
-##   is the change divided by 5 * 1440 * 1000, and a loss or timeout drops
-##   the team's potential to zero, as the leaderboard scores non-winners zero.
+## - LeaderboardReward follows Emmett's Glory: each hero's whole XP per
+##   elapsed minute, averaged over the team and divided by 1000. Steps reward
+##   the change in that potential; a loss, draw, or timeout cancels it, so the
+##   episode's total reward is the winning team's Glory divided by 1000.
 ## - XpReward is the change in the team's total XP divided by 100, with no
 ##   tick penalty and no reset on a loss, so a policy learns from scratch.
 ## - XpOutcomeReward is XpReward plus OutcomeBonus for a win and minus it
@@ -24,8 +24,7 @@ include bots
 const
   GotaFeatureCount* {.intdefine.} = 8
   GotaActionCount* {.intdefine.} = 8
-  ScoreTicksPerMinute = 1440'i64
-  ScoreXpPerMinute = 200'i64
+  ScoreTicksPerMinute = int64(TickRate * 60)
   ScoreDenominator = 5 * ScoreTicksPerMinute * 1000
   GotaSourceCommit {.strdefine.} = ""
   TeamSize = 5
@@ -63,11 +62,11 @@ type
     agentsPerLane*: int
 
 proc teamPotential(world: World, team: Team): int64 =
-  ## The hosted leaderboard score numerator for one team.
+  ## Scales whole XP per minute into the training API's score numerator.
   for hero in world.heroes:
     if hero.team == team:
-      result += max(int64(hero.totalXp) * ScoreTicksPerMinute -
-        int64(world.tick) * ScoreXpPerMinute, 0)
+      result += int64(xpPerMinute(hero.totalXp, int(world.tick))) *
+        ScoreTicksPerMinute
 
 proc teamXp(world: World, team: Team): int64 =
   ## Total XP earned by one team's heroes.
@@ -77,7 +76,7 @@ proc teamXp(world: World, team: Team): int64 =
 
 proc outcome(world: World, team: Team, timedOut: bool): int32 =
   ## 1 for a win, -1 for a loss or timeout, 0 while playing.
-  if world.gameOver and world.winner == team: 1
+  if world.gameOver and not world.draw and world.winner == team: 1
   elif world.gameOver or timedOut: -1
   else: 0
 
@@ -259,7 +258,11 @@ proc step*(
         outcome: outcome(world, lane.team, true),
         tick: world.tick,
         selfPlay: int32(batch.selfPlay),
-        potential: teamPotential(world, lane.team)
+        potential:
+          if outcome(world, lane.team, true) == 1:
+            teamPotential(world, lane.team)
+          else:
+            0
       )
     for i, index in lane.agents:
       rewards[agent + i] = reward[world.heroes[index].team]

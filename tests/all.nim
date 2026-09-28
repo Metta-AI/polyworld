@@ -27,6 +27,8 @@ import
   test_gota_portals,
   test_gota_potions,
   test_gota_progression,
+  test_gota_scores,
+  test_gota_gods,
   test_gota_drafts,
   test_gota_training,
   test_llms,

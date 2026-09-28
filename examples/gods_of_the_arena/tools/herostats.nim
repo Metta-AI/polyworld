@@ -204,7 +204,7 @@ proc inspectReplay*(path: string, metadata: JsonNode): JsonNode =
   requireStats(game.replayPlayer.finished, "Unconsumed replay actions")
   let
     victories = game.world.scores()
-    seatScores = scores(game.world.totalXp(), int(game.world.tick))
+    seatScores = scores(game.world.totalXp(), int(game.world.tick), victories)
     observed = metadata{"participant_scores"}
     players = metadata{"participants"}
   requireStats(observed != nil and observed.len == seatScores.len,
@@ -216,7 +216,7 @@ proc inspectReplay*(path: string, metadata: JsonNode): JsonNode =
       "Invalid or duplicate score position")
     positions.incl(slot)
     requireStats(score["score"].getFloat == seatScores[slot].float64,
-      "Replay XP and duration differ from the league seat scores")
+      "Replay XP, duration, or outcome differs from the league seat scores")
   result = %*{"schema": StatsSchema, "id": metadata["id"],
     "verified": true, "ticks": game.world.tick, "hash_mismatches": 0,
     "replay_version": data.header.gameVersion,

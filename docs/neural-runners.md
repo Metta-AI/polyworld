@@ -282,7 +282,7 @@ true (-1) or false (0); `matchInfo` is an integer getter returning 1 or 0.
 
 | Function | Fields |
 | --- | --- |
-| `selfInfo(field)` | 0 x, 1 z, 2 level XP, 3 XP needed, 4 total XP, 5 has move target, 6 class role, 7 in own spawn, 8 can shop, 9 ability points, 10 score, 11 kills, 12 assists, 13 velocity x, 14 velocity z, 15 attack range, 16 move speed, 17 enemy fort center x, 18 enemy fort center z |
+| `selfInfo(field)` | 0 x, 1 z, 2 level XP, 3 XP needed, 4 total XP, 5 has move target, 6 class role, 7 in own spawn, 8 can shop, 9 ability points, 10 Emmett's Glory (zero until a win), 11 kills, 12 assists, 13 velocity x, 14 velocity z, 15 attack range, 16 move speed, 17 enemy fort center x, 18 enemy fort center z |
 | `objectInfo(index, field)` | 0 x, 1 z, 2 max HP, 3 alive, 4 facing x, 5 facing z, 6 velocity x, 7 velocity z |
 | `abilityInfo(slot, field)` | 0 range, 1 casting enum, 2 radius, 3 kind enum (Strike 0, Heal 1, Restore 2) |
 | `spellInfo(index, field)` | 0 x, 1 z, 2 hostile, 3 non-Strike |
