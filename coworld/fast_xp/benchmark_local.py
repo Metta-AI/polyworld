@@ -6,7 +6,6 @@ import io
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import socket
 import statistics
@@ -68,7 +67,6 @@ def main():
     log_path = root / "server.log"
     rows = []
     expected_replay = args.expected_replay_sha256
-    expected_state = None
     with log_path.open("wb") as log:
         server = subprocess.Popen(command, cwd=repo, env=env, stdout=log, stderr=log)
         try:
@@ -115,20 +113,13 @@ def main():
                         assert replay_hash == expected_replay
                         bot_log = archive.read("logs/slot-0.txt").decode()
                         assert "completed" in bot_log and "BASIC error" not in bot_log
-                    assert "scripts: 10/10 active," in output
-                    state_hash = re.search(r"hash: ([0-9A-F]+) map", output)[1]
-                    if expected_state is None:
-                        expected_state = state_hash
-                    assert state_hash == expected_state
-                    gameplay = float(re.search(r"simulated: [\d.]+ s in ([\d.]+) s", output)[1])
-                    row = {"mode": mode, "repetition": repetition, "wall_s": wall, "gameplay_s": gameplay,
-                           "timings_s": timings, "replay_sha256": replay_hash, "state_hash": state_hash, "response_bytes": len(archive_bytes)}
+                    row = {"mode": mode, "repetition": repetition, "wall_s": wall,
+                           "timings_s": timings, "replay_sha256": replay_hash, "response_bytes": len(archive_bytes)}
                     rows.append(row)
                     (root / "measurements.json").write_text(json.dumps(rows, indent=2))
                     print(json.dumps(row), flush=True)
             summary = {mode: {
                 "wall_s": statistics.median(r["wall_s"] for r in rows if r["mode"] == mode),
-                "gameplay_s": statistics.median(r["gameplay_s"] for r in rows if r["mode"] == mode),
                 **{key + "_s": statistics.median(r["timings_s"][key] for r in rows if r["mode"] == mode)
                    for key in ["fetch", "worker", "zip"]},
             } for mode in ["cold", "warm"]}

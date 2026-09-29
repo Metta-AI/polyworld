@@ -35,7 +35,7 @@ jq -n --rawfile source ./my-bot.bas \
     {slot:0, player:{source:$source}},
     {player:{policy_ref:"109b99c1-3bb7-4276-b17e-378b43a97874"}}
   ], config:{max_ticks:28800}}' > request.json
-curl --fail-with-body --max-time 180 \
+curl --fail-with-body --max-time 900 \
   -H 'Content-Type: application/json' \
   --data-binary @request.json "$FAST_XP_URL/v1/games/gota/run" -o result.zip
 ```
@@ -53,6 +53,15 @@ jq -n --rawfile package package.b64 \
 
 On macOS, use `base64 -i ./my-bot.zip | tr -d '\n' > package.b64`.
 Send `request.json` with the same curl command. No Observatory submission is needed.
+
+For ten games, use the same request with `num_episodes` set to 10:
+
+```sh
+jq '.num_episodes = 10' request.json > batch.json
+curl --fail-with-body --max-time 900 \
+  -H 'Content-Type: application/json' \
+  --data-binary @batch.json "$FAST_XP_URL/v1/games/gota/run" -o result.zip
+```
 
 Only unpack `result.zip` after a successful HTTP response; errors are JSON.
 
@@ -73,7 +82,12 @@ Only unpack `result.zip` after a successful HTTP response; errors are JSON.
   whitespace, up to 16 MiB before encoding. Uses Gota’s normal policy format.
 - `policy_ref`: a submitted policy version. The server downloads and runs its
   uploaded artifact, up to 16 MiB.
-- `seed` is required: a signed 32-bit integer.
+- `seed` is required: a signed 32-bit integer. Game index `i` uses `seed + i`;
+  the last seed must also fit in that range.
+- `num_episodes` is optional, defaults to 1, and accepts 1–10. All games share
+  the supplied configuration and bots. Unpinned entries rotate through open
+  seats between games, matching Observatory; pinned seats stay fixed.
+  For example, add `"num_episodes": 10` to run ten games with one upload.
 - `config` is optional. `config.max_ticks` defaults to 28800; valid values are
   1–28800. This bounds battle ticks, plus drafting. It is not wall-clock seconds.
 - Supply actual source text, not a local path or URL. `random`, `top_n`, batch
@@ -90,11 +104,31 @@ The connection stays open while the game runs. A successful response is HTTP
 
 There are no source files or logs for `policy_ref` seats in the response, even
 if you own that submitted policy. Use `source` or `package_base64` for any seat whose logs you
-need. There is no job ID or polling endpoint.
+need. There is no polling endpoint or later result retrieval. `X-Request-ID` identifies
+the request for server-log lookups.
 
-`Server-Timing` reports `run`, `fetch`, `worker`, and `zip` durations in
-milliseconds. Full matches can take tens of seconds. Allow enough client timeout;
-the native worker's execution deadline is 120 seconds, plus fetching and transfer.
+For `num_episodes` greater than 1, the ZIP contains `manifest.json` and numbered
+folders such as `games/000/replay.replay` and `games/000/logs/slot-0.txt`.
+The manifest lists each game's zero-based index, seed, status, HTTP status,
+`roster_entries_by_slot` (indexes into your submitted roster), timing, and artifact
+paths. Check it for failed games: completed batches return HTTP 200 even when
+some or all games fail, and successful games remain available. Private opponents'
+logs and detailed errors are still excluded after seat rotation. A single game
+keeps the flat ZIP and HTTP error behavior shown above.
+
+The server runs six games at a time on the hosted VM and queues the rest. Ready
+batches take turns receiving free workers. Up to 16 requests can be admitted;
+HTTP 429 means that request limit is full, not merely that six games are running.
+Each game's 120-second execution deadline starts when its worker starts, excluding
+queue time. Set the client timeout to at least 900 seconds for batches; other
+queued work can make the wait longer. Disconnected clients' accepted games finish,
+but their results are discarded. There is no automatic retry.
+
+`Server-Timing` reports `run`, `fetch`, `queue`, `worker`, and `zip` in milliseconds.
+`run` is elapsed server time; `fetch` covers shared policy preparation once per
+request. `queue` and `worker` are sums across games and can exceed elapsed time
+because games overlap. `zip` covers response packaging. Upload/download time is
+not included. Individual game timings are in the batch manifest.
 
 ## Errors
 
@@ -109,9 +143,8 @@ treating the response as a ZIP.
 - 422: Policy loading or BASIC compilation failed. Only uploaded-bot diagnostics are disclosed.
 - 502: policy lookup/download/verification failed; policy artifacts may be
   at most 16 MiB. Read the error message for the failing stage.
-- 503: capacity is full or the server lacks its Observatory credential. For
-  capacity errors, wait for `Retry-After` before retrying; configuration errors
-  need the operator to fix the server.
+- 429: 16 requests are already admitted; retry after the `Retry-After` interval.
+- 503: the server is shutting down or lacks its Observatory credential.
 - 504: a policy fetch or game execution timed out.
 - 500: game worker failed; the operator can inspect server diagnostics.
 

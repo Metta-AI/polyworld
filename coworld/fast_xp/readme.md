@@ -34,7 +34,7 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 
 - `FAST_XP_HOST`: bind address, default `127.0.0.1`.
 - `FAST_XP_PORT`: port, default `8080`.
-- `FAST_XP_WORKERS`: simultaneous requests (fetching plus matches), default `2`, range 1–256.
+- `FAST_XP_WORKERS`: simultaneous game processes, default `2`, range 1–256; the hosted VM uses six. Up to 16 requests may be admitted, using 24 HTTP threads.
 - `FAST_XP_TOKEN`: bearer token for callers of this server; required for non-loopback binding.
 - `FAST_XP_GOTA_WORKER`: executable path, default `gota_worker` beside server.
 - `FAST_XP_OBSERVATORY_URL`: API root, default `https://softmax.com/api/observatory`.
@@ -68,14 +68,14 @@ redirects. Artifact downloads never carry the Observatory authorization headers.
 ```sh
 nix develop .. --command nim check coworld/fast_xp/server.nim
 nix develop .. --command python3 coworld/fast_xp/test_api.py
+nix develop .. --command python3 coworld/fast_xp/test_queue.py
 ```
 
 Build both executables first. The API tests run a local fake Observatory/artifact
 service, so they need neither a real token nor external network access.
 
 For a real full-match cold/warm benchmark, see `benchmark_local.py --help`. It
-uses the same saved personal token and checks repeated replay bytes and final
-state hashes. Use `--expected-replay-sha256` to compare against a reference from
+uses the same saved personal token and checks repeated replay bytes. Use `--expected-replay-sha256` to compare against a reference from
 the same game revision; older Gota versions have different replays.
 
 The worker imports the production Gota executable entry point; it shares package
@@ -83,3 +83,30 @@ loading, neural runners and scoring rather than maintaining a separate game path
 Build with the committed dependency versions. For an isolated build, set
 `POLYWORLD_DEPS` to a dedicated directory and run
 `nim r coworld/tools/sync_dependencies.nim` in the workspace Nix shell first.
+
+## Batches, queue and logs
+
+`num_episodes` accepts 1–10 (default 1). Each game increments the seed and rotates
+unpinned roster entries; see `/docs/llms.txt` for response layout and partial failures.
+One dispatcher assigns games round-robin across ready requests to the fixed worker
+pool. Mummy handlers retain request ownership while waiting; game processes never
+run on HTTP threads. Shutdown stops admission, cancels queued games, and drains
+running games, then gives queued responses five seconds to leave before closing
+connections. Drain before planned deploys; allow 180 seconds for service stop.
+
+Structured JSON logs contain request acceptance, game outcomes, and request
+completion/errors, correlated by `X-Request-ID`. They include queue, fetch, worker,
+ZIP, and total server times. Worker chatter and private contents are not logged.
+Player logs keep the production game's existing size limit and are deleted with
+temporary match files after the response is built.
+
+The hosted service uses `LogNamespace=fast-xp`, with journald limits of 100 MiB
+persistent, 25 MiB runtime and seven days retention. Inspect it with:
+
+```sh
+journalctl --namespace=fast-xp -u fast-xp -o cat
+journalctl --namespace=fast-xp -u fast-xp -o cat | rg 'REQUEST-ID'
+```
+
+Keep these limits in `/etc/systemd/journald@fast-xp.conf.d/limits.conf`; do not
+change the host-wide journal configuration. Temporary results are not an archive.

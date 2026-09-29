@@ -38,13 +38,17 @@ competitively; the short example only prints its ID.
   Remaining seats are filled in ascending seat order, cycling through open
   entries in roster order. Duplicate pinned seats and uncovered seats without
   an open entry fail. A pinned entry is not also used to fill open seats.
-- `seed`: required signed 32-bit integer.
+- `seed`: required signed 32-bit integer; game index `i` uses `seed + i`.
+- `num_episodes`: optional, 1–10, default 1. The final seed must fit in signed
+  32-bit range. Unpinned entries rotate between games, matching Observatory;
+  pinned seats stay fixed. Artifacts are resolved and uploaded once per batch.
 - `config.max_ticks`: optional battle tick limit, 1–28800, default 28800
   (20 simulated minutes at 24 ticks/second, plus drafting).
 
 File paths, download URLs, `random`, and `top_n` selectors are not supported.
 Unknown fields, NUL characters, and empty source/reference strings are rejected.
-This is a single-game endpoint, not the full XP-request target/batch interface.
+This endpoint supports repeated games with the same configuration, not
+Observatory’s full target-selection interface.
 
 ## Authentication and output
 
@@ -56,9 +60,24 @@ machine credential); request-supplied bots determine log visibility.
 A successful response is `application/zip`, containing `replay.replay` and
 `logs/slot-N.txt` for each seat populated from `source` or `package_base64`. No bot source files
 are included. Policy-reference seats never contribute logs to the response.
-There is no polling endpoint. `Server-Timing` reports total request processing time, policy resolution/fetching,
-worker execution, and ZIP packaging in milliseconds. Fetching includes cache
-verification; worker execution includes compilation, gameplay, replay and logs.
+For multiple games, the ZIP instead contains `manifest.json` and per-game folders
+(`games/000/`, `games/001/`, ...). The manifest includes indexes, seeds, seating
+as roster-entry indexes, status, artifact paths, and queue/worker milliseconds.
+Failed games appear with sanitized errors; successful games remain available.
+Batch completion returns HTTP 200 even if games failed. Shared validation or
+fetch failures return an HTTP error before execution.
+
+There is no polling or later retrieval. The response's `X-Request-ID` identifies
+server log records. Ready batches share six hosted execution workers, with at
+most 16 admitted requests. Additional games wait rather than fail when workers
+are busy. The execution deadline remains 120 seconds per game, excluding queue
+wait. Use a client timeout of at least 900 seconds for batches; queueing adds to
+the wait. Accepted work finishes if the caller disconnects, then is discarded.
+
+`Server-Timing` reports `run`, `fetch`, `queue`, `worker`, and `zip` milliseconds.
+Fetch is shared once per request. Queue and worker values sum all games and are
+not batch wall time. Run is total elapsed server processing; upload and download
+are excluded. There are no automatic retries.
 
 ## Errors
 
@@ -76,9 +95,8 @@ Errors use JSON `{"error": "message"}` unless noted:
   bytes did not match the expected size/hash. Policy artifacts must be raw BASIC or ZIP packages
   of at most 16 MiB. The error message identifies the failing stage without
   exposing credentials, source or signed URLs.
-- 503: all workers are busy, or the server has no Observatory credential for
-  reference fetching. Busy requests may retry after the `Retry-After` interval;
-  missing credentials require server configuration.
+- 429: the admitted-request limit is full; retry after `Retry-After`.
+- 503: shutting down or missing the server’s Observatory credential.
 - 504: a policy fetch timed out or the match exceeded its 120-second execution deadline.
 
 GET `/healthz` and `/docs/llms.txt` remain available.

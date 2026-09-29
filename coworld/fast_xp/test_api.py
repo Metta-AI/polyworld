@@ -164,7 +164,9 @@ def main():
                 assert call(route, {}, token="wrong")[0] == 401
                 body = {"seed": 743478993, "config": {"max_ticks": 240},
                         "roster": [{"player": {"policy_ref": "relh:v231"}, "slot": -1}]}
-                for invalid in [dict(body, seed=True), dict(body, seed=2**31),
+                for invalid in [dict(body, num_episodes=0), dict(body, num_episodes=11),
+                                dict(body, num_episodes=True), dict(body, num_episodes=2, seed=2**31-1),
+                                dict(body, seed=True), dict(body, seed=2**31),
                                 dict(body, roster=[]), dict(body, extra=1),
                                 dict(body, config={"max_ticks": 0}),
                                 dict(body, config={"max_ticks": 28801}),
@@ -226,29 +228,27 @@ def main():
                     assert b"fake-observatory-token" not in data
                 assert not (cache / ("b" * 64)).exists(), "Never cache failed verification"
                 assert not list(cache.glob("*.part")), "Leaked partial download"
-                # Two simultaneous cold requests share one download; excess work is refused.
+                # Sixteen admitted requests share one download; only admission overflow is refused.
                 (cache / digest).unlink(missing_ok=True)
                 PolicyService.entered.clear()
                 PolicyService.hold.clear()
                 before = len(PolicyService.downloads)
                 lookup_start = len(PolicyService.lookups)
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    first = pool.submit(call, route, body)
-                    assert PolicyService.entered.wait(5)
-                    second = pool.submit(call, route, body)
+                with ThreadPoolExecutor(max_workers=16) as pool:
+                    futures = [pool.submit(call, route, body) for _ in range(16)]
                     try:
-                        for _ in range(100):
-                            if len(PolicyService.lookups) >= lookup_start + 2:
+                        assert PolicyService.entered.wait(5)
+                        for _ in range(250):
+                            if len(PolicyService.lookups) >= lookup_start + 16:
                                 break
                             time.sleep(.02)
-                        assert len(PolicyService.lookups) == lookup_start + 2
+                        assert len(PolicyService.lookups) == lookup_start + 16
                         assert call("/healthz")[0] == 200
                         status, headers, _ = call(route, body)
-                        assert status == 503 and headers["Retry-After"] == "1"
+                        assert status == 429 and headers["Retry-After"] == "5"
                     finally:
                         PolicyService.hold.set()
-                    assert first.result()[0] == 200
-                    assert second.result()[0] == 200
+                    assert all(future.result()[0] == 200 for future in futures)
                 assert len(PolicyService.downloads) == before + 1
                 assert not PolicyService.failures, PolicyService.failures
                 assert "fake-observatory-token" not in Path(log.name).read_text()
@@ -299,6 +299,38 @@ def main():
                             archive.writestr(name, contents)
                     player = {"package_base64": base64.b64encode(invalid_zip.getvalue()).decode()}
                     assert call(route, dict(body, roster=[{"player": player}]))[0] == 422
+                # Rotate private references and uploaded seats without changing log ownership.
+                batch_body = dict(body, num_episodes=3, roster=[
+                    {"slot": 0, "player": {"source": 'print "pinned"\nend'}},
+                    {"player": {"source": 'print "moving"\nend'}},
+                    {"player": {"policy_ref": "package:v1"}}])
+                hashes = []
+                before = len(PolicyService.lookups)
+                for _ in range(2):
+                    status, headers, data = call(route, batch_body)
+                    assert status == 200, (status, data)
+                    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                        manifest = json.loads(archive.read("manifest.json"))
+                        assert manifest["request_id"] == headers["X-Request-ID"]
+                        current = []
+                        expected = {"manifest.json"}
+                        for i, game in enumerate(manifest["games"]):
+                            assert game["seed"] == body["seed"] + i
+                            assert game["status"] == "completed" and game["active_bots"] == 10
+                            seats = [0] + [1 + ((j-i) % 2) for j in range(9)]
+                            assert game["roster_entries_by_slot"] == seats
+                            prefix = f"games/{i:03d}/"
+                            expected.add(prefix + "replay.replay")
+                            current.append(hashlib.sha256(archive.read(prefix + "replay.replay")).hexdigest())
+                            for slot, entry in enumerate(seats):
+                                if entry != 2:
+                                    path = prefix + f"logs/slot-{slot}.txt"
+                                    expected.add(path)
+                                    assert (b"pinned" if slot == 0 else b"moving") in archive.read(path)
+                        assert set(archive.namelist()) == expected
+                        hashes.append(current)
+                assert hashes[0] == hashes[1]
+                assert len(PolicyService.lookups) == before + 2, "Resolve once per batch"
                 def source(marker):
                     return {"source": f'print "{marker}"\nend'}
 
