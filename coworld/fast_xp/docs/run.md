@@ -17,16 +17,18 @@ Use policy references for opponents:
 ```
 
 Policy references are resolved through Observatory using the server's credential.
-Use `source` to send BASIC text (up to 64 KiB per bot), or `policy_ref` to run
-a submitted policy version. The server downloads and runs the referenced
-artifact (up to 16 MiB).
+Use `source` for BASIC text (up to 64 KiB), `package_base64` for an uploaded ZIP
+(up to 16 MiB before base64 encoding), or `policy_ref` for a submitted policy version.
+`package_base64` uses standard padded base64 without whitespace and Gota’s normal
+policy format. The roster accepts 1–10 entries; the JSON request limit is 224 MiB.
+The server downloads and runs referenced artifacts (up to 16 MiB).
 The UUID above selects Richard's public benchmark policy. Both mixed and
 inline-only rosters run locally.
 For example, `"roster": [{"player": {"source": "print selfId\nend"}}]`
 uses the supplied script in all ten seats. Supply a complete BASIC bot to play
 competitively; the short example only prints its ID.
 
-- Each `player` requires exactly one of `source` or `policy_ref`.
+- Each `player` requires exactly one of `source`, `package_base64`, or `policy_ref`.
 - `source`: nonempty BASIC source text, preserved as supplied. Its seat's logs
   are returned to this request; no submitted-policy ownership lookup is needed.
 - `policy_ref`: a submitted policy label such as `my-bot:v12`, or a policy-version
@@ -50,10 +52,10 @@ Supply `Authorization: Bearer <token>` when FAST_XP_TOKEN is configured. This is
 currently a server-specific shared token, not Observatory user authentication.
 Non-loopback binding requires a token. Submitted-policy fetching uses the server's configured
 Observatory credential (an elevated personal team token locally, or a scoped
-machine credential); request-supplied source determines log visibility.
+machine credential); request-supplied bots determine log visibility.
 
 A successful response is `application/zip`, containing `replay.replay` and
-`logs/slot-N.txt` for each seat populated from inline source. No bot source files
+`logs/slot-N.txt` for each seat populated from `source` or `package_base64`. No bot source files
 are included. Policy-reference seats never contribute logs to the response.
 There is no polling endpoint. `Server-Timing` reports total request processing time, policy resolution/fetching,
 worker execution, and ZIP packaging in milliseconds. Fetching includes cache
@@ -68,9 +70,9 @@ Errors use JSON `{"error": "message"}` unless noted:
 - 404: unknown route or policy version.
 - 405: wrong method (can be plain text).
 - 409: policy version has no downloadable player file.
-- 413: request exceeds the HTTP server's 4 MiB body limit, including all sources.
+- 413: JSON request exceeds 224 MiB, or an uploaded package exceeds 16 MiB.
 - 415: content type is not application/json.
-- 422: Policy loading or BASIC compilation failed; details are included only for inline-source seats.
+- 422: Policy loading or BASIC compilation failed; details are included only for uploaded seats.
 - 500: game worker failed.
 - 502: Observatory rejected the server credential, a fetch failed, or downloaded
   bytes did not match the expected size/hash. Policy artifacts must be raw BASIC or ZIP packages

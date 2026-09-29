@@ -1,8 +1,8 @@
 # Fast XP server
 
-A synchronous Mummy API for Gota. Send inline `player.source` for your BASIC bot
+A synchronous Mummy API for Gota. Send `player.source` for BASIC text, `player.package_base64` for a ZIP upload,
 and `player.policy_ref` for submitted opponents (exact `name:vN` or version UUID).
-The native worker returns a replay and logs only for inline-source seats.
+The native worker returns a replay and logs only for uploaded seats.
 
 ## Run locally
 

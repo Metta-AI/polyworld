@@ -1,4 +1,5 @@
 """Exercise inline matches, seating, private references, and request validation."""
+import base64
 import io
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
@@ -266,6 +267,38 @@ def main():
                 with zipfile.ZipFile(io.BytesIO(data)) as archive:
                     assert set(archive.namelist()) == {"replay.replay"} | {
                         f"logs/slot-{slot}.txt" for slot in range(1, 10)}
+                # Uploaded ZIPs use the same loader, but only uploaded seats get logs.
+                upload = io.BytesIO()
+                with zipfile.ZipFile(upload, "w", compression=zipfile.ZIP_STORED) as archive:
+                    archive.writestr("nested/policy.bas", 'print "uploaded-package"\nend\n')
+                    archive.writestr("assets/data.bin", b"x" * (5 * 1024 * 1024))
+                uploaded = {"package_base64": base64.b64encode(upload.getvalue()).decode()}
+                upload_roster = [{"slot": 0, "player": uploaded},
+                                 {"slot": 5, "player": {"source": 'print "inline-seat"\nend'}},
+                                 {"player": {"policy_ref": "package:v1"}}]
+                status, _, data = call(route, dict(body, roster=upload_roster))
+                assert status == 200, (status, data)
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    assert set(archive.namelist()) == {"replay.replay", "logs/slot-0.txt", "logs/slot-5.txt"}
+                    assert b"uploaded-package" in archive.read("logs/slot-0.txt")
+                    assert b"inline-seat" in archive.read("logs/slot-5.txt")
+                for player in [{"package_base64": "!invalid!"},
+                               {"package_base64": "ZW5k"},
+                               {"package_base64": 1},
+                               {"package_base64": ""},
+                               dict(uploaded, source="end"),
+                               dict(uploaded, policy_ref="package:v1")]:
+                    assert call(route, dict(body, roster=[{"player": player}]))[0] == 400
+                too_large = base64.b64encode(b"PK\x03\x04" + b"x" * (16 * 1024 * 1024 - 3)).decode()
+                assert call(route, dict(body, roster=[{"player": {"package_base64": too_large}}]))[0] == 413
+                for files in [[("../escape.bas", "end")], [("a.bas", "end"), ("b.bas", "end")],
+                              [("data.bin", "x")], [("policy.bas", "if\n")]]:
+                    invalid_zip = io.BytesIO()
+                    with zipfile.ZipFile(invalid_zip, "w") as archive:
+                        for name, contents in files:
+                            archive.writestr(name, contents)
+                    player = {"package_base64": base64.b64encode(invalid_zip.getvalue()).decode()}
+                    assert call(route, dict(body, roster=[{"player": player}]))[0] == 422
                 def source(marker):
                     return {"source": f'print "{marker}"\nend'}
 

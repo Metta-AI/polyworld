@@ -12,8 +12,8 @@ Send **POST `/v1/games/gota/run`** on this server, with:
 Use the fast-XP service's shared caller token, supplied by its operator. An
 Observatory user token is not the caller token for this server.
 
-The JSON body contains a seed and a roster of bots. Supply your own bot's BASIC
-source text inline. Select submitted opponents using policy-version UUIDs or
+The JSON body contains a seed and a roster of bots. Supply your own bot as BASIC
+`source` text or a ZIP in `package_base64`. Select submitted opponents using policy-version UUIDs or
 exact policy labels such as `my-bot:v12`. The server fetches submitted policies
 using its own Observatory credential; callers do not need their source.
 
@@ -45,12 +45,27 @@ curl --fail-with-body --max-time 180 \
   --data-binary @request.json "$FAST_XP_URL/v1/games/gota/run" -o result.zip
 ```
 
+To upload a ZIP instead, replace the source-file `jq` command above with:
+
+```sh
+base64 -w 0 ./my-bot.zip > package.b64
+jq -n --rawfile package package.b64 \
+  '{seed:743478993, roster:[
+    {slot:0, player:{package_base64:$package}},
+    {player:{policy_ref:"109b99c1-3bb7-4276-b17e-378b43a97874"}}
+  ]}' > request.json
+```
+
+On macOS, use `base64 -i ./my-bot.zip | tr -d '\n' > package.b64`.
+Send `request.json` with the same curl command. No Observatory submission is needed.
+
 Only unpack `result.zip` after a successful HTTP response; errors are JSON.
 
 ## Roster and settings
 
+- The roster accepts 1–10 entries; the complete JSON request may be up to 224 MiB.
 - Gota has ten seats, numbered 0–9. Seats 0–4 are Red; 5–9 are Blue.
-- Every `player` must contain exactly one of `source` or `policy_ref`.
+- Every `player` must contain exactly one of `source`, `package_base64`, or `policy_ref`.
 - `slot: 0` through `slot: 9` pins an entry to that seat. Pinned seats must be unique.
 - Omit `slot` (or use `-1`) to provide a bot for unfilled seats. The server fills
   seats in ascending order, cycling through these unpinned entries in roster
@@ -59,6 +74,8 @@ Only unpack `result.zip` after a successful HTTP response; errors are JSON.
 - To fill every seat with your own bot, use one unpinned `source` entry. If all
   entries are pinned, supply all ten seats.
 - `source`: BASIC source text, up to 64 KiB per bot.
+- `package_base64`: a ZIP file encoded as standard padded base64 without
+  whitespace, up to 16 MiB before encoding. Uses Gota’s normal policy format.
 - `policy_ref`: a submitted policy version. The server downloads and runs its
   uploaded artifact, up to 16 MiB.
 - `seed` is required: a signed 32-bit integer.
@@ -74,10 +91,10 @@ The connection stays open while the game runs. A successful response is HTTP
 200 with `Content-Type: application/zip`, containing:
 
 - `replay.replay`
-- `logs/slot-N.txt` for each seat using inline `source`
+- `logs/slot-N.txt` for each seat using uploaded `source` or `package_base64`
 
 There are no source files or logs for `policy_ref` seats in the response, even
-if you own that submitted policy. Use inline source for any seat whose logs you
+if you own that submitted policy. Use `source` or `package_base64` for any seat whose logs you
 need. There is no job ID or polling endpoint.
 
 `Server-Timing` reports `run`, `fetch`, `worker`, and `zip` durations in
@@ -93,9 +110,9 @@ treating the response as a ZIP.
 - 401: missing or incorrect fast-XP caller token.
 - 404: unknown route or policy version.
 - 409: selected policy has no downloadable player file.
-- 413: JSON request exceeds 4 MiB, including inline source.
+- 413: JSON request exceeds 224 MiB, or an uploaded package exceeds 16 MiB.
 - 415: incorrect content type.
-- 422: Policy loading or BASIC compilation failed. Only inline-source diagnostics are disclosed.
+- 422: Policy loading or BASIC compilation failed. Only uploaded-bot diagnostics are disclosed.
 - 502: policy lookup/download/verification failed; policy artifacts may be
   at most 16 MiB. Read the error message for the failing stage.
 - 503: capacity is full or the server lacks its Observatory credential. For

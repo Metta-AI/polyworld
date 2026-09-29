@@ -1,18 +1,21 @@
 import
-  std/[json, locks, monotimes, os, osproc, strtabs, strutils, tables,
+  std/[base64, json, locks, monotimes, os, osproc, strtabs, strutils, tables,
     tempfiles, times, uri],
   mummy,
   zippy/ziparchives,
   policies
+import polyworld/policies as policyPackages
 
 type
   PlayerKind* = enum
-    InlineSource, PolicyReference
+    InlineSource, UploadedPackage, PolicyReference
   RosterEntry* = object
     slot*: int
     case kind*: PlayerKind
     of InlineSource:
       source*: string
+    of UploadedPackage:
+      packageBytes*: string
     of PolicyReference:
       policyRef*: string
   RunInput* = object
@@ -25,6 +28,8 @@ type
 const
   SeatCount = 10
   MaxTicks = 28800
+  MaxBodyBytes = 224 * 1024 * 1024 # Ten 16 MiB artifacts encoded as base64 plus JSON.
+  MaxEncodedPackageBytes = ((policyPackages.MaxPackageBytes + 2) div 3) * 4
   Instructions = staticRead("docs/llms.txt")
   RunGuide = staticRead("docs/run.md")
 
@@ -66,8 +71,8 @@ proc parseRun*(body: string): RunInput =
     if node["config"].hasKey("max_ticks"):
       result.maxTicks = integer(node["config"], "max_ticks", 1, MaxTicks)
   if not node.hasKey("roster") or node["roster"].kind != JArray or
-      node["roster"].len == 0:
-    reject(400, "roster must be a nonempty array")
+      node["roster"].len == 0 or node["roster"].len > SeatCount:
+    reject(400, "roster must contain 1–10 entries")
   var pinned: set[0 .. SeatCount - 1]
   var hasOpenSeatSelector = false
   for entry in node["roster"]:
@@ -75,10 +80,12 @@ proc parseRun*(body: string): RunInput =
     if not entry.hasKey("player"):
       reject(400, "Each roster entry requires a player")
     let player = entry["player"]
-    checkFields(player, ["source", "policy_ref"])
-    if player.hasKey("source") == player.hasKey("policy_ref"):
-      reject(400, "Each player requires exactly one of source or policy_ref")
-    let field = if player.hasKey("source"): "source" else: "policy_ref"
+    checkFields(player, ["source", "package_base64", "policy_ref"])
+    if player.len != 1:
+      reject(400, "Each player requires exactly one of source, package_base64 or policy_ref")
+    let field = if player.hasKey("source"): "source"
+      elif player.hasKey("package_base64"): "package_base64"
+      else: "policy_ref"
     if player[field].kind != JString:
       reject(400, field & " must be a string")
     let value = player[field].getStr()
@@ -93,10 +100,26 @@ proc parseRun*(body: string): RunInput =
       pinned.incl slot
     else:
       hasOpenSeatSelector = true
-    result.roster.add(if field == "source":
-      RosterEntry(kind: InlineSource, source: value, slot: slot)
+    case field
+    of "source":
+      result.roster.add RosterEntry(kind: InlineSource, source: value, slot: slot)
+    of "package_base64":
+      if value.len > MaxEncodedPackageBytes:
+        reject(413, "Uploaded package exceeds 16 MiB")
+      var bytes: string
+      try:
+        bytes = decode(value)
+      except ValueError:
+        reject(400, "package_base64 must be standard padded base64 without whitespace")
+      if bytes.len > policyPackages.MaxPackageBytes:
+        reject(413, "Uploaded package exceeds 16 MiB")
+      if encode(bytes) != value:
+        reject(400, "package_base64 must be standard padded base64 without whitespace")
+      if not policyPackages.isPackage(bytes):
+        reject(400, "package_base64 must encode a ZIP file")
+      result.roster.add RosterEntry(kind: UploadedPackage, packageBytes: bytes, slot: slot)
     else:
-      RosterEntry(kind: PolicyReference, policyRef: value, slot: slot))
+      result.roster.add RosterEntry(kind: PolicyReference, policyRef: value, slot: slot)
   if pinned.len < SeatCount and not hasOpenSeatSelector:
     reject(400, "Unfilled seats require a roster entry with slot -1")
 
@@ -122,6 +145,8 @@ proc resolvePlayers(input: RunInput): seq[ResolvedPlayer] =
     case entry.kind
     of InlineSource:
       result.add ResolvedPlayer(bytes: entry.source, canReadLog: true)
+    of UploadedPackage:
+      result.add ResolvedPlayer(bytes: entry.packageBytes, canReadLog: true)
     of PolicyReference:
       let reference = entry.policyRef.strip()
       if reference notin sources:
@@ -263,6 +288,6 @@ when isMainModule:
   if not fileExists(worker):
     raise newException(ValueError, "Build gota_worker first: " & worker)
   let server = newServer(handleRequest, workerThreads = capacity + 2,
-    maxBodyLen = 4 * 1024 * 1024)
+    maxBodyLen = MaxBodyBytes)
   echo "Fast XP server listening on http://", host, ":", port
   server.serve(Port(port), host)
