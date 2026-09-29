@@ -1070,14 +1070,16 @@ proc runGraphics*() =
 
   proc updateTerrainVision() {.measure.} =
     ## Uploads the selected team's softened visible and explored terrain.
-    if terrainVisionTick == run.world.tick and terrainVisionMode == viewMode:
-      return
+    if terrainVisionMode == viewMode and
+      (viewMode == 0 or terrainVisionTick == run.world.tick):
+        return
     terrainVisionTick = run.world.tick
     terrainVisionMode = viewMode
     var values = newSeq[uint8](GridSide * GridSide)
     if viewMode == 0:
       for value in values.mitems:
         value = 255
+      uploadTerrainVisibility(values)
     else:
       let player = viewMode - 1
       for y in 0 ..< GridSide:
@@ -1087,7 +1089,7 @@ proc runGraphics*() =
             if run.world.visible(player, x, y): 255
             elif run.world.explored(player, x, y): 48
             else: 0
-    uploadTerrainVisibility(blurVisibility(values, GridSide, GridSide))
+      uploadTerrainVisibility(blurVisibility(values, GridSide, GridSide))
 
   proc drawWorldBars(
       viewProjection: Mat4,
