@@ -87,7 +87,7 @@ per-player failure reporting.
 
 Runnable synthetic ZIPs are included under
 `examples/gods_of_the_arena/neural/examples/` as `synthetic-richard.zip`,
-`synthetic-david.zip` and `synthetic-andre.zip`. Their names identify the runner
+`synthetic-david.zip`, `synthetic-andre.zip` and `synthetic-fly.zip`. Their names identify the runner
 being tested. Their weights are deterministic test matrices, mostly zeros with
 a few hand-set coefficients. They contain no trained weights or submitted
 player policies. Regenerate copies locally:
@@ -277,9 +277,11 @@ by this deployment interface.
 `fly_nn("fly.bin", state, data)` runs a connectome-constrained rate network:
 a fixed sparse wiring diagram, such as a cut of the FlyWire fruit fly
 connectome, with trained connection strengths, input projection and readout.
-It uses the same 45 inputs and 12 outputs as Andre, so the Andre glue in
-`neural/policies/andre.bas` works unchanged with the call renamed. A fly model
-can replace an Andre model behind the same hero BASIC.
+It uses the same 45 inputs and 12 outputs as Andre, so a fly model can replace
+an Andre model behind the same hero BASIC. `neural/policies/fly.bas` shows how
+to run it: the Andre helpers with `fly` names, calling
+`fly_nn("fly.bin", flyState, flyData)` every 24 ticks and choosing the action
+from the returned logits. Package it with `fly.bin` next to the `.bas` file.
 
 Each call adds a fixed drive to the recurrent potentials, then runs `steps`
 updates. Every update computes all rates first, `rate = tanh(max(x, 0))`

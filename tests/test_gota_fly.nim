@@ -1,8 +1,12 @@
 import
-  std/math,
+  std/[math, os],
   bassy,
+  polyworld/cli,
   ../examples/gods_of_the_arena/neural/[common, richard, david, andre, fly],
+  ../examples/gods_of_the_arena/[bots, maps, replays, sim],
   neuralfixtures
+
+const Root = currentSourcePath().parentDir.parentDir
 
 proc rejected(action: proc() {.closure.}): bool =
   ## Requires malformed inputs to fail through the library boundary.
@@ -10,36 +14,6 @@ proc rejected(action: proc() {.closure.}): bool =
     action()
   except BasicError:
     return true
-
-proc addSingle(bytes: var string, value: float32) =
-  ## Appends one little-endian FP32 word.
-  bytes.addWord(cast[uint32](value))
-
-proc flyFixture(
-    leak = 1.0'f,
-    source = 0'u32,
-    offsets = [0'u32, 0, 1],
-    valueBias = 0.25'f
-): string =
-  ## Two neurons: input drives neuron 0, and 0 -> 1 with weight 2.
-  result = FlyMagic
-  for value in [2'u32, 1, 45, 1, 1, 1]:
-    result.addWord(value)
-  result.addSingle(leak)
-  for offset in offsets:
-    result.addWord(offset)
-  result.addWord(source)
-  result.addSingle(2.0)
-  result.addSingle(0.0)
-  result.addSingle(0.0)
-  result.addWord(0)
-  for i in 0 ..< 45:
-    result.addSingle(if i == 0: 1.0'f else: 0.0'f)
-  result.addWord(1)
-  for i in 0 ..< 12:
-    result.addSingle(1.0)
-  for i in 0 ..< 12:
-    result.addSingle(if i == 11: valueBias else: 0.0'f)
 
 proc near(value: Fixed, expected: float): bool =
   ## Q16.16 outputs match a float reference to rounding.
@@ -125,3 +99,24 @@ answer = res(0)
     vm.restart()
     doAssert rejected(proc() = discard vm.run())
     doAssert vm.getBlob(state) == before
+
+echo "Testing the fly.bas example package in every hero seat"
+block:
+  let game = newGame(generateMap(7), 600, 10, false,
+    ReplayData(), drafting = false)
+  game.recorder = initReplayRecorder(game.currentSetup(1000))
+  game.loadBots([BotGroup(path: Root /
+    "examples/gods_of_the_arena/neural/examples/synthetic-fly.zip",
+    count: 10)])
+  game.world.tick = 1
+  game.runBotDecisions()
+  for i, vm in game.heroVms:
+    doAssert not vm.failed, vm.lastError
+    doAssert vm.runtime.nativeMemoryBytes < NativeMemoryBytes
+    for seat in 0 ..< 5:
+      let value = vm.runtime.getArrayValue("flyData", int32(40 + seat))
+      doAssert value.asFixed == fixed(int32(seat == i mod 5))
+    let state = vm.runtime.getGlobalValue("flyState")
+    doAssert vm.runtime.getBlob(state).len == 8
+    doAssert vm.runtime.inputValues(
+      vm.runtime.getGlobalValue("flyResult"), 12)[11] == 0.25'fx
