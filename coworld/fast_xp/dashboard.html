@@ -10,7 +10,7 @@
 <div class="stats" id="stats"></div>
 <div class="grid">
 <section class="panel"><h2>Host CPU · running / queued games</h2><canvas id="capacity" aria-label="CPU and game concurrency chart"></canvas><div class="legend"><span><i style="background:#8bc4ff"></i>CPU % · left</span><span><i style="background:#65d7b0"></i>Running · right</span><span><i style="background:#e8bb70"></i>Queued · right</span></div></section>
-<section class="panel"><h2>Game latency · approximate p95</h2><canvas id="latency" aria-label="Queue and execution latency chart"></canvas><div class="legend"><span><i style="background:#e8bb70"></i>Queue seconds</span><span><i style="background:#b8a0ff"></i>Execution seconds</span></div></section>
+<section class="panel"><h2>Game latency · approximate p95 per minute</h2><canvas id="latency" aria-label="Queue and execution latency chart; dashed lines connect minutes without completed games"></canvas><div class="legend"><span><i style="background:#e8bb70"></i>Queue seconds</span><span><i style="background:#b8a0ff"></i>Execution seconds</span><span><i style="border-top:2px dashed #96a5bc"></i>No completed games between points</span></div></section>
 <section class="panel"><h2>Successful games / minute</h2><canvas id="throughput" aria-label="Successful games per minute chart"></canvas></section>
 <section class="panel wide"><h2>Successful timings · approximate percentiles</h2><table><thead><tr><th>Measurement</th><th>Samples</th><th>Median</th><th>p95</th></tr></thead><tbody id="timings"></tbody></table></section>
 </div>
@@ -29,7 +29,18 @@ function plot(id,series,start,end,right=false){
  const g=c.getContext('2d');g.scale(scale,scale);const w=r.width,h=r.height,L=46,R=right?40:12,T=10,B=26;
  const maxima=[1,1];for(const s of series)for(const p of s.points)if(p[1]!=null)maxima[s.axis||0]=Math.max(maxima[s.axis||0],p[1]);if(right)maxima[0]=100;
  g.font='11px system-ui';for(let i=0;i<=4;i++){const y=T+(h-T-B)*i/4;g.strokeStyle='#2b3340';g.beginPath();g.moveTo(L,y);g.lineTo(w-R,y);g.stroke();g.fillStyle='#96a5bc';g.textAlign='right';g.fillText(number(maxima[0]*(1-i/4)),L-7,y+4);if(right){g.textAlign='left';g.fillText(number(maxima[1]*(1-i/4)),w-R+6,y+4)}}
- for(const s of series){g.strokeStyle=s.color;g.lineWidth=1.8;g.beginPath();let active=false,last=0;for(const [t,v] of s.points){if(v==null){active=false;continue}const x=L+(t-start)/Math.max(1,end-start)*(w-L-R),y=T+(1-v/maxima[s.axis||0])*(h-T-B);if(!active||t-last>90)g.moveTo(x,y);else g.lineTo(x,y);active=true;last=t}g.stroke();g.fillStyle=s.color;for(const [t,v] of s.points){if(v==null||t<start)continue;const x=L+(t-start)/Math.max(1,end-start)*(w-L-R),y=T+(1-v/maxima[s.axis||0])*(h-T-B);g.fillRect(x-1,y-1,2,2)}}
+ for(const s of series){
+  const points=s.points.map(([t,v],i)=>[t,v,i]).filter(([t,v])=>v!=null&&t>=start&&t<=end).map(([t,v,i])=>[t,L+(t-start)/Math.max(1,end-start)*(w-L-R),T+(1-v/maxima[s.axis||0])*(h-T-B),i]);
+  g.strokeStyle=s.color;g.lineWidth=1.8;
+  for(const gap of [false,true]){
+   if(gap&&!s.connectGaps)continue;
+   g.setLineDash(gap?[4,5]:[]);g.globalAlpha=gap?0.5:1;g.beginPath();
+   for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i];if((b[0]-a[0]>90||b[3]-a[3]>1)!==gap)continue;g.moveTo(a[1],a[2]);g.lineTo(b[1],b[2])}g.stroke();
+  }
+  g.setLineDash([]);g.globalAlpha=1;g.fillStyle=s.color;
+  for(const [,x,y]of points){if(s.connectGaps){g.beginPath();g.arc(x,y,3,0,Math.PI*2);g.fill()}else g.fillRect(x-1,y-1,2,2)}
+ }
+ if(id==='latency'&&!series.some(s=>s.points.some(([t,v])=>v!=null&&t>=start&&t<=end))){g.fillStyle='#96a5bc';g.textAlign='center';g.fillText('No completed games in this window',(L+w-R)/2,h/2)}
  g.fillStyle='#96a5bc';g.textAlign='left';g.fillText(new Date(start*1000).toLocaleTimeString(),L,h-4);g.textAlign='right';g.fillText(new Date(end*1000).toLocaleTimeString(),w-R,h-4);
 }
 function render(d){
@@ -42,7 +53,7 @@ function render(d){
  plot('capacity',[{points:d.samples.map(s=>[s.timestamp,s.cpu_percent]),color:colors[0]},{points:d.samples.map(s=>[s.timestamp,s.running]),color:colors[1],axis:1},{points:d.samples.map(s=>[s.timestamp,s.queued]),color:colors[2],axis:1}],start,end,true);
  const timeline=new Map(d.timeline.map(t=>[t.timestamp,t])),minutes=[];
  const origin=d.timestamp-d.uptime_seconds;for(let t=origin+Math.max(0,Math.floor((start-origin)/60))*60;t<=end;t+=60)minutes.push(timeline.get(t)||{timestamp:t,games:0,queue:{p95_ms:null},worker:{p95_ms:null}});
- plot('latency',[{points:minutes.map(t=>[t.timestamp,t.queue.p95_ms==null?null:t.queue.p95_ms/1000]),color:colors[2]},{points:minutes.map(t=>[t.timestamp,t.worker.p95_ms==null?null:t.worker.p95_ms/1000]),color:colors[3]}],start,end);
+ plot('latency',[{points:minutes.map(t=>[t.timestamp,t.queue.p95_ms==null?null:t.queue.p95_ms/1000]),color:colors[2],connectGaps:true},{points:minutes.map(t=>[t.timestamp,t.worker.p95_ms==null?null:t.worker.p95_ms/1000]),color:colors[3],connectGaps:true}],start,end);
  plot('throughput',[{points:minutes.map(t=>[t.timestamp,t.games]),color:colors[1]}],start,end);
 }
 async function refresh(){if(document.hidden||busy)return;busy=true;try{const r=await fetch('/v1/metrics?minutes='+el('window').value,{cache:'no-store',signal:AbortSignal.timeout(4000)});if(!r.ok)throw Error();latest=await r.json();render(latest);lastSuccess=Date.now();el('status').textContent='Live · '+new Date().toLocaleTimeString();el('status').className=''}catch{el('status').textContent=lastSuccess?'Disconnected · last update '+new Date(lastSuccess).toLocaleTimeString():'Unable to reach server';el('status').className='bad'}finally{busy=false}}

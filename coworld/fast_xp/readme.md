@@ -76,6 +76,8 @@ responses return at most 1441 host samples. Percentiles are approximate upper
 bounds from 25%-wide histogram buckets. Successful single-request, batch-request,
 and game durations are separate; failures and timeouts have their own counters.
 A batch returning HTTP 200 can still contain failed games.
+The latency chart marks each minute with completed games; dashed lines connect
+idle gaps for readability. They are not latency measurements during idle time.
 
 Request time excludes client upload/download. Preparation includes policy lookup,
 artifact fetching and staging. Game execution includes subprocess startup and
