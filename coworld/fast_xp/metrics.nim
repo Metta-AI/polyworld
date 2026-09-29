@@ -22,6 +22,7 @@ type
     sampleCount, recentCount: int
     running, queued, admitted, capacity: int
     oldest: int64
+    instanceType: array[64, char]
 
 var
   metricsLock: Lock
@@ -58,7 +59,15 @@ proc histogramJson(hist: Histogram): JsonNode =
         break
 
 proc setCapacity*(capacity: int) =
-  withLock metricsLock: state.capacity = capacity
+  var instanceType: array[64, char]
+  try:
+    if readFile("/sys/devices/virtual/dmi/id/sys_vendor").strip() == "Amazon EC2":
+      let name = readFile("/sys/devices/virtual/dmi/id/product_name").strip()
+      for i in 0 ..< min(name.len, instanceType.len): instanceType[i] = name[i]
+  except CatchableError: discard
+  withLock metricsLock:
+    state.capacity = capacity
+    state.instanceType = instanceType
 
 proc admissionChanged*(delta: int) =
   withLock metricsLock: state.admitted += delta
@@ -153,12 +162,14 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
     recent: seq[RecentGame]
     running, queued, admitted, capacity: int
     oldest: int64
+    instanceType: array[64, char]
   withLock metricsLock:
     running = state.running
     queued = state.queued
     admitted = state.admitted
     capacity = state.capacity
     oldest = state.oldest
+    instanceType = state.instanceType
     for bucket in state.buckets:
       if bucket.minute >= max(0'i64, now div 60 - minutes + 1): buckets.add bucket
     for i in max(0, state.sampleCount - state.samples.len) ..< state.sampleCount:
@@ -191,7 +202,12 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
       timeline.add %*{"timestamp": epoch + bucket.minute * 60,
         "games": bucket.games, "failed_games": bucket.failedGames,
         "queue": histogramJson(bucket.queue), "worker": histogramJson(bucket.worker)}
-  result = %*{"timestamp": epoch + now, "uptime_seconds": now, "window_minutes": minutes,
+  var instanceName = ""
+  for ch in instanceType:
+    if ch == '\0': break
+    instanceName.add ch
+  result = %*{"instance_type": (if instanceName.len == 0: newJNull() else: %instanceName),
+    "timestamp": epoch + now, "uptime_seconds": now, "window_minutes": minutes,
     "running": running, "queued": queued, "admitted_requests": admitted,
     "worker_limit": capacity, "request_limit": 16,
     "oldest_queue_ms": (if queued == 0: 0'i64 else: max(0'i64, (getMonoTime().ticks - oldest) div 1_000_000)),

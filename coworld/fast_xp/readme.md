@@ -81,7 +81,9 @@ Request time excludes client upload/download. Preparation includes policy lookup
 artifact fetching and staging. Game execution includes subprocess startup and
 artifact generation, not just simulation ticks. Memory is the service's cgroup
 usage, including child workers; CPU is host utilization. Unsupported host counters
-appear as unavailable. The dashboard does not alter worker counts or save metrics
+appear as unavailable. The EC2 instance type is read from DMI at startup, so it
+updates after an instance resize/restart without a hardcoded deployment label.
+It is unavailable on local machines or when DMI cannot be read. The dashboard does not alter worker counts or save metrics
 to disk. It exposes no policy names, bot contents, logs, credentials or artifact URLs.
 
 ## Checks
