@@ -6,7 +6,7 @@
 ## trainer last chose for it, so scripts never block and no threads are
 ## needed. `step` applies one action per agent, runs `actionTicks` ticks of
 ## every lane, and returns each agent's newest features and team reward.
-## Four rewards, picked by RewardMode:
+## Five rewards, picked by RewardMode:
 ## - LeaderboardReward follows Emmett's Glory: each hero's whole XP per
 ##   elapsed minute, averaged over the team and divided by 1000. Steps reward
 ##   the change in that potential; a loss, draw, or timeout cancels it, so the
@@ -18,6 +18,9 @@
 ## - AdvantageReward is the change in the team's lead (XP difference plus
 ##   2 x tower HP and 20 x fort HP differences) divided by 1000, plus 1 for
 ##   a win and minus 1 for a loss or timeout. It is zero-sum between teams.
+## - GloryReward is AdvantageReward plus the winning team's Emmett's Glory
+##   (average whole XP per minute over its heroes) divided by 100, so fast,
+##   XP-rich wins count for more, as they do on the leaderboard.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
 ## Finished lanes restart with the next seed inside the same step.
@@ -37,7 +40,7 @@ const
 
 type
   RewardMode* = enum
-    LeaderboardReward, XpReward, XpOutcomeReward, AdvantageReward
+    LeaderboardReward, XpReward, XpOutcomeReward, AdvantageReward, GloryReward
 
   LaneStats* {.bycopy.} = object
     ## Summary of one finished match, from the first policy team's side.
@@ -88,6 +91,16 @@ proc teamAdvantage(world: World, team: Team): int64 =
         int64(max(building.hp, 0))
   for fort in world.forts:
     result += 20 * (if fort.team == team: 1 else: -1) * int64(max(fort.hp, 0))
+
+proc teamGlory(world: World, team: Team): int =
+  ## Average Emmett's Glory of a team's heroes, ignoring whether it won.
+  var heroes = 0
+  for hero in world.heroes:
+    if hero.team == team:
+      result += xpPerMinute(hero.totalXp, int(world.tick))
+      inc heroes
+  if heroes > 0:
+    result = result div heroes
 
 proc outcome(world: World, team: Team, timedOut: bool): int32 =
   ## 1 for a win, -1 for a loss or timeout, 0 while playing.
@@ -168,7 +181,7 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
       case batch.rewardMode
       of LeaderboardReward: teamPotential(game.world, side)
       of XpReward, XpOutcomeReward: teamXp(game.world, side)
-      of AdvantageReward: teamAdvantage(game.world, side)
+      of AdvantageReward, GloryReward: teamAdvantage(game.world, side)
 
 proc newStepBatch*(
     configPath, bot, opponent, policy: string,
@@ -267,12 +280,15 @@ proc step*(
           reward[side] +=
             float32(outcome(world, side, true)) * OutcomeBonus
         lane.potentials[side] = xp
-      of AdvantageReward:
+      of AdvantageReward, GloryReward:
         let advantage = teamAdvantage(world, side)
         reward[side] = float32(advantage - lane.potentials[side]) /
           float32(AdvantageDenominator)
         if done:
-          reward[side] += float32(outcome(world, side, true))
+          let result = outcome(world, side, true)
+          reward[side] += float32(result)
+          if batch.rewardMode == GloryReward and result == 1:
+            reward[side] += float32(teamGlory(world, side)) / 100'f32
         lane.potentials[side] = advantage
     stats[laneIndex] = LaneStats()
     if done:
