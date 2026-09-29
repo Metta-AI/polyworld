@@ -77,6 +77,7 @@ var
   frameAlpha = 0.0'f32
   previousUnitPositions: Table[int32, Vec3]
   previousUnitFacings: Table[int32, float32]
+  unitPoses: seq[CharacterPose]
   terrainVisionTick = int32.low
   terrainVisionMode = int32.low
 
@@ -1406,10 +1407,8 @@ proc runGraphics*() =
           clockHour(float32(run.world.tick) + frameAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
-        # One loop for both passes: units render into the sun's depth map
-        # first, then for the camera.
-        proc drawWorldUnits() {.measure.} =
-          ## Measures character drawing separately from static scenery.
+        profileBlock "prepare unit poses":
+          var count = 0
           for unit in run.world.units:
             if not shownUnit(unit):
               continue
@@ -1417,13 +1416,27 @@ proc runGraphics*() =
               model = unitModels[unit.owner][unit.kind]
               clip = unitClips[unit.owner][unit.kind][unit.animation]
             var animTime = renderTime(unit.animationTicks)
-            ## One-shot clips must be clamped: the sampler wraps with `mod`,
-            ## so a death would otherwise loop forever.
+            # Hold one-shot clips at their final pose instead of looping.
             if unit.animation == DeathAnimation or
                 unit.animation == VictoryAnimation:
               animTime = min(animTime, clipDuration(model, clip))
-            drawCharacter(scene, model, renderPoint(unit), renderFacing(unit),
-              clip, animTime)
+            if count == unitPoses.len:
+              unitPoses.add CharacterPose()
+            scene.prepareCharacter(
+              unitPoses[count],
+              model,
+              renderPoint(unit),
+              renderFacing(unit),
+              clip,
+              animTime
+            )
+            inc count
+          unitPoses.setLen(count)
+
+        proc drawWorldUnits() {.measure.} =
+          ## Reuses each unit's pose for both shadow maps and the main view.
+          for pose in unitPoses.mitems:
+            scene.drawCharacter(pose)
 
         sunDepthPasses(window.size):
           drawTerrainSunDepth()
