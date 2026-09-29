@@ -1569,6 +1569,55 @@ proc createPropPack*(
   for i, model in result.models:
     result.names[model.name] = i
 
+proc retexturePropPack*(
+  source: PropPack,
+  image: Image,
+  textureSize = 512,
+  whiteLayer = -1
+): PropPack =
+  ## Reuses flattened geometry with a new atlas and optional unpainted layer.
+  if source == nil or source.textureArray == 0 or image == nil:
+    raise newException(QuadTerrainError, "Retexturing needs a textured pack.")
+  for model in source.models:
+    if not model.materialColors:
+      raise newException(
+        QuadTerrainError, "Retexturing needs material colors, not baked paint."
+      )
+  var size = max(image.width, image.height)
+  if textureSize > 0:
+    size = min(size, textureSize)
+  var chains: seq[seq[Image]]
+  if whiteLayer >= 0:
+    let white = newImage(size, size)
+    white.fill(rgbx(255, 255, 255, 255))
+    chains.add mipChain(white)
+  let square =
+    if image.width == size and image.height == size:
+      image
+    else:
+      image.resize(size, size)
+  chains.add mipChain(square)
+  result = PropPack(
+    textureArray: buildTextureArray(chains, GL_CLAMP_TO_EDGE.GLint)
+  )
+  for original in source.models:
+    let model = PropModel(
+      name: original.name,
+      height: original.height,
+      vertices: original.vertices,
+      uvs: original.uvs,
+      materialColors: true,
+      textureArray: result.textureArray
+    )
+    for i in countup(2, model.uvs.high, 3):
+      model.uvs[i] =
+        if whiteLayer >= 0 and model.uvs[i] != whiteLayer.float32:
+          1
+        else:
+          0
+    result.names[model.name] = result.models.len
+    result.models.add model
+
 proc hasProp*(pack: PropPack, name: string): bool =
   ## Returns whether a pack contains a model with the requested node name.
   pack != nil and name in pack.names

@@ -42,22 +42,30 @@ block:
   loadExtensions()
   pollEvents()
   initSunShadows()
+  var cache: UnitModelCache
   let
     scene = CharacterScene(toon: newToonContext(), shading: ToonCharacters)
     manifest = readManifest(ChargenLibrary)
     roster = readCharacterRoster([Emerald, WetAsphalt])
-    model = loadUnitModel(manifest, roster.players[0][PeonUnit.ord], PeonUnit)
+    model = cache.loadUnitModel(
+      manifest, roster.players[0][PeonUnit.ord], PeonUnit
+    )
     clip = model.clipIndex(unitClip(PeonUnit, RunAnimation))
+  var variant = roster.players[0][PeonUnit.ord]
+  variant.skinRgb = [0.2'f, 0.4'f, 0.7'f]
+  let
+    secondModel = cache.loadUnitModel(manifest, variant, PeonUnit)
+    freshModel = loadUnitModel(manifest, variant, PeonUnit)
   scene.toon.view = lookAt(vec3(2, 2, 4), vec3(0, 0.6, 0), vec3(0, 1, 0))
   scene.toon.proj = ortho(-1.2'f, 1.2'f, -1.2'f, 1.2'f, 0.1'f, 100'f)
   scene.toon.cameraPosition = vec3(2, 2, 4)
   var first, second: CharacterPose
   scene.prepareCharacter(first, model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
-  scene.prepareCharacter(second, model, vec3(0.4, 0, 0), -0.5, clip, 0.75)
+  scene.prepareCharacter(second, secondModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
   sunShadowsEnabled = false
   clearFrame(window.size)
   scene.drawCharacter(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
-  scene.drawCharacter(model, vec3(0.4, 0, 0), -0.5, clip, 0.75)
+  scene.drawCharacter(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
   let reference = readColors(window.size)
   clearFrame(window.size)
   scene.drawCharacter(first)
@@ -75,7 +83,7 @@ block:
   for step in 0 .. 1:
     beginSunDepthPass(step)
     scene.drawCharacter(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
-    scene.drawCharacter(model, vec3(0.4, 0, 0), -0.5, clip, 0.75)
+    scene.drawCharacter(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
     let referenceDepth = readDepth()
     endSunDepthPass(window.size)
     beginSunDepthPass(step)

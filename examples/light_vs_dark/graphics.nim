@@ -242,6 +242,7 @@ proc runGraphics*() =
     unitModels: array[PlayerCount, array[UnitKind, CharacterModel]]
     unitClips: array[PlayerCount, array[UnitKind, array[AnimationSlot, int]]]
     teamColors: array[PlayerCount, ColorRGBX]
+    unitModelCache: UnitModelCache
   profileBlock "models":
     let
       manifest = readManifest(ChargenLibrary)
@@ -250,7 +251,7 @@ proc runGraphics*() =
       # The orange elemental's UI still identifies its owning faction.
       teamColors[player] = FactionColors[roster.factions[player]]
       for kind in UnitKind:
-        let model = loadUnitModel(
+        let model = unitModelCache.loadUnitModel(
           manifest, roster.players[player][kind.ord], kind
         )
         unitModels[player][kind] = model
