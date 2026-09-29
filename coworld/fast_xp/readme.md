@@ -91,12 +91,13 @@ to disk. It exposes no policy names, bot contents, logs, credentials or artifact
 ```sh
 nix develop .. --command nim check coworld/fast_xp/server.nim
 nix develop .. --command nim r coworld/fast_xp/test_metrics.nim
-nix develop .. --command python3 coworld/fast_xp/test_api.py
-nix develop .. --command python3 coworld/fast_xp/test_queue.py
+nix develop .. --command nim r coworld/fast_xp/test_api.nim
+nix develop .. --command nim r coworld/fast_xp/test_queue.nim
 ```
 
-Build both executables first. The API tests run a local fake Observatory/artifact
-service, so they need neither a real token nor external network access.
+Build both executables first. The Nim API tests run a local mock Observatory/artifact
+service, so they need neither a real token nor external network access. The queue
+tests use a Nim worker fixture and exercise the real 120-second execution deadline.
 
 For a real full-match cold/warm benchmark, see `benchmark_local.py --help`. It
 uses the same saved personal token and checks repeated replay bytes. Use `--expected-replay-sha256` to compare against a reference from
