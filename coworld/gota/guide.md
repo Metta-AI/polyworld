@@ -2,17 +2,17 @@
 
 **New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.
 
-Two teams of five BASIC heroes battle to slay the enemy god. Each hero's ladder
-score is lifetime XP minus 200 per simulated minute. Fractional minutes count,
-including drafting time. Losses and timeouts retain their time-adjusted XP,
-with each hero's score rounded down to whole points and clamped to zero before
-averaging. Victory is recorded separately in the outcome.
+Two teams of five BASIC heroes battle to slay the enemy god. The ladder uses
+**Emmett's Glory**: each winning hero's lifetime XP divided by elapsed simulated
+minutes, rounded down to whole points. Fractional minutes and drafting time
+count. Losing teams, draws, and timeouts score zero. There is no fixed XP
+penalty per minute. Zero-duration games score zero.
 
 Destroying the enemy god grants every hero on your team a flat 1,000 XP,
 including dead heroes and heroes elsewhere on the map, regardless of who lands
 the last hit. This is awarded once on the final tick and included in lifetime XP
-before calculating scores. It offsets 5 minutes of the 200-XP-per-minute time
-penalty. Timeouts grant no god reward.
+before calculating Emmett's Glory. Finishing sooner increases the XP-per-minute
+score. Timeouts grant no god reward.
 Destroying a tower or barracks grants its killer 200 XP and 75 gold.
 Towers fire once per second, and reload continues when they lose or switch
 targets. Their homing fireballs deal damage on arrival and follow the original
@@ -53,10 +53,21 @@ The bundled `players/rusher.bas` sends all five heroes down mid together. It reg
 
 ## Drafting
 
-Every live match starts with a shared pool of ten heroes. A seeded random
-team picks first. Teams alternate, and each team's players pick in spawn
-order. Each hero can be selected once across both teams. Combat, waves,
-and the battle clock wait until all ten players have drafted.
+Every live match starts with a draft. A seeded random team picks first.
+Teams alternate, and each team's players pick in spawn order. Combat,
+waves, and the battle clock wait until all ten players have drafted.
+
+The match setting `draft_mode` selects the hero availability rules:
+
+| Mode | Setting | Picks allowed |
+| --- | --- | --- |
+| Unique Draft (default) | `unique` | Each hero class once across both teams. |
+| Team Draft | `team` | Each hero class once per team. Enemy teams may mirror picks. |
+| Open Draft | `open` | Any duplicates, including ten players using the same hero. |
+
+Local games accept `--draft-mode team` or `--draft-mode open`. The web
+player accepts `?draft-mode=team` or `?draft-mode=open`. JSON configs use
+`"draftMode": "team"` (or `draft_mode`). The replay saves this setting.
 
 Only the active player's BASIC script runs during drafting, once every
 half second. Every player, including humans, has ten simulation seconds to
@@ -68,13 +79,14 @@ Their normal movement and combat logic runs after drafting.
 
 | Data or command | Meaning |
 | --- | --- |
+| `draftMode` | Unique Draft 0, Team Draft 1, Open Draft 2. |
 | `drafting` | 1 during drafting, 0 during battle. |
 | `draftTurnId` | ID of the player picking now, or 0 after drafting. |
 | `draftPlayerCount()` | Number of players in the public roster. |
 | `draftPlayerId(i)` | Player ID at zero-based spawn index `i`, or 0 if invalid. |
 | `draftPlayerTeam(i)` | Team at spawn index `i`: Red 0, Blue 1, invalid -1. |
 | `draftedClass(id)` | Hero class picked by player ID, or -1 if unpicked or invalid. Both teams' picks are public. |
-| `heroAvailable(class)` | 1 if the class is valid and unpicked, otherwise 0. |
+| `heroAvailable(class)` | 1 if the caller's team may pick this class under the current draft mode, otherwise 0. This checks availability, not whose turn it is. |
 | `heroRole(class)` | Frontline 0, carry 1, mage 2, support 3, fighter 4, invalid -1. |
 | `draftHero(class)` | Selects a hero on your turn. Returns 1 on success, 0 on rejection. |
 
@@ -402,9 +414,10 @@ Each player's round score is the arithmetic average of their game scores.
 Standings use an exponential moving average: 15% of the new round score plus
 85% of the previous standing. The first scored round sets the initial standing.
 Higher standings rank first. Opponent ratings and win/loss Elo do not affect
-either standings or matchmaking. For example, 3,000 lifetime XP after 10.5
-simulated minutes gives a score of 900. A previous standing of 800 followed
-by a round average of 1,000 becomes 830.
+either standings or matchmaking. For example, a winning hero with 3,000
+lifetime XP after 10.5 simulated minutes scores 285. A losing hero scores zero
+regardless of XP. A previous standing of 800 followed by a round average of
+1,000 becomes 830.
 
 ## BASIC numbers and coordinates
 
@@ -447,7 +460,7 @@ Only the last-hitting unit's team receives neutral XP. Eligible living heroes
 within six tiles on the same navigation floor split the pool. An eligible hero
 last hitter receives 15% first; the other 85% is shared among all eligible
 heroes, including that hero. Otherwise the full pool is shared. Only a hero
-last hitter receives gold. XP contributes to the existing lifetime-XP score.
+last hitter receives gold. XP contributes to Emmett's Glory when the hero's team wins.
 
 Neutral objects use `objectKind(i) = 6`, `objectTeam(i) = 2`, and
 `objectClass(i) = 1`, `2`, or `3` for difficulty. Existing health, facing,

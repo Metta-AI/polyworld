@@ -2,15 +2,17 @@
 ## on the simulation.
 
 import
+  std/math,
   bassy, fixxy,
-  polyworld/[mailboxes, metrics, bodies, cli, controllers,
+  polyworld/[llms, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
+  neural/[common, richard, david, andre, fly],
   content,
   maps,
   motions,
   observations,
   sim,
-  replays,
+  replays, scores,
   terrains
 
 when defined(coworld):
@@ -45,7 +47,8 @@ type
     DataSelfDeaths,
     DataSelfRespawnTicks,
     DataDrafting,
-    DataDraftTurnId
+    DataDraftTurnId,
+    DataDraftMode
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY,
@@ -87,7 +90,8 @@ const
     "selfDeaths",
     "selfRespawnTicks",
     "drafting",
-    "draftTurnId"
+    "draftTurnId",
+    "draftMode"
   ]
 
 var
@@ -103,6 +107,8 @@ proc bindHeroData(program: Program) =
 proc heroVmLimits(): Limits =
   ## Returns independent structural and per-decision limits for a hero VM.
   result = defaultLimits()
+  result.maxStrings = 1024
+  result.maxStringLength = 64 * 1024
   result.maxStringBytes = 256 * 1024
   result.maxSourceBytes = 64 * 1024
   result.maxCodeInstructions = 20_000
@@ -117,8 +123,8 @@ proc heroVmLimits(): Limits =
   result.maxSyntaxDepth = 32
   result.maxCallDepth = 16
   result.maxMemoryBytes = 2 * 1024 * 1024
-  result.maxInstructions = 20_000
-  result.maxWorkUnits = 50_000
+  result.maxInstructions = 100_000
+  result.maxWorkUnits = 250_000
   result.maxPrintBytes = 1024
   result.maxPrintEvents = 128
 
@@ -282,9 +288,163 @@ proc sendChat*(
     if game.inboxes[recipient].push(id, text):
       inc result
 
-proc initHeroHost(heroId: int32): Host =
+proc infoFunctions(host: var Host, heroId: int32) =
+  ## Exposes ordinary scalar facts shared by BASIC and neural policies.
+  let selfInfo: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Reads self statistics and precise coordinates in world tiles.
+    let
+      world = activeGame.world
+      hero = world.heroById(heroId)
+      index = world.heroIndex(heroId)
+    case args[0].asInt
+    of 0: toValue(worldToTiles(hero.position.x, WorldScale))
+    of 1: toValue(worldToTiles(hero.position.z, WorldScale))
+    of 2: toValue(hero.xp)
+    of 3: toValue(xpForNextLevel(hero.level))
+    of 4: toValue(hero.totalXp)
+    of 5: toValue(hero.hasMoveTarget)
+    of 6: toValue(hero.class.heroRole.ord)
+    of 7: toValue(hero.inOwnSpawn)
+    of 8: toValue(world.phase != Drafting and hero.canShop)
+    of 9: toValue(hero.abilityPoints())
+    of 10:
+      toValue(score(
+        hero.totalXp,
+        int(world.tick),
+        world.gameOver and not world.draw and hero.team == world.winner
+      ))
+    of 11, 12:
+      let metric = if args[0].asInt == 11: KillsMetric else: AssistsMetric
+      toValue(
+        if world.stats == nil:
+          0
+        else:
+          int(world.stats.values[index][metric])
+      )
+    of 13: toValue(worldToTiles(hero.velocity.x, WorldScale))
+    of 14: toValue(worldToTiles(hero.velocity.z, WorldScale))
+    of 15: toValue(worldToTiles(hero.class.heroAttackRange(), WorldScale))
+    of 16: toValue(worldToTiles(hero.heroMoveSpeed(), WorldScale))
+    of 17: toValue(worldToTiles(world.forts[1 - hero.team.ord].center.x,
+      WorldScale))
+    of 18: toValue(worldToTiles(world.forts[1 - hero.team.ord].center.z,
+      WorldScale))
+    else: toValue(0)
+  let objectInfo: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Reads only objects in the same visibility-filtered decision snapshot.
+    var value: WorldObject
+    if not activeGame.world.worldObjectAt(heroId, int(args[0].asInt), value):
+      return toValue(0)
+    case args[1].asInt
+    of 0: toValue(worldToTiles(value.position.x, WorldScale))
+    of 1: toValue(worldToTiles(value.position.z, WorldScale))
+    of 2: toValue(value.maxHp)
+    of 3: toValue(value.alive)
+    of 4, 5:
+      let direction = motions.normalized(fixedVec2(
+        worldToTiles(value.facing.x, WorldScale),
+        worldToTiles(value.facing.z, WorldScale)
+      ))
+      toValue(if args[1].asInt == 4: direction.x else: direction.y)
+    of 6: toValue(worldToTiles(value.velocity.x, WorldScale))
+    of 7: toValue(worldToTiles(value.velocity.z, WorldScale))
+    else: toValue(0)
+  let abilityInfo: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Reads public ability range, casting mode, radius and effect kind.
+    let slot = args[0].asInt
+    if slot < 0 or slot > 3:
+      return toValue(0)
+    let
+      hero = activeGame.world.heroById(heroId)
+      spec = heroAbility(hero.class, HeroAbilitySlot(slot)).abilitySpec(
+        hero.abilityLevels[HeroAbilitySlot(slot)]
+      )
+    case args[1].asInt
+    of 0: toValue(worldToTiles(spec.range, WorldScale))
+    of 1: toValue(spec.casting.ord)
+    of 2: toValue(worldToTiles(spec.area.radius, WorldScale))
+    of 3: toValue(spec.kind.ord)
+    else: toValue(0)
+  let spellInfo: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Adds precise position and public effect facts to visible warnings.
+    let world = activeGame.world
+    var spell: SpellCast
+    if not world.visibleSpellAt(heroId, int(args[0].asInt), spell):
+      return toValue(0)
+    case args[1].asInt
+    of 0: toValue(worldToTiles(spell.position.x, WorldScale))
+    of 1: toValue(worldToTiles(spell.position.z, WorldScale))
+    of 2:
+      let caster = world.heroIndex(spell.heroId)
+      toValue(caster < 0 or
+        world.heroes[caster].team != world.heroById(heroId).team)
+    of 3: toValue(spell.ability.abilitySpec.kind != Strike)
+    else: toValue(0)
+  let matchInfo: HostProc = proc(args: openArray[int32]): int32 =
+    ## Reads match timing and team-remembered structure counts under fog.
+    let
+      world = activeGame.world
+      team = world.heroById(heroId).team
+    case args[0]
+    of 0: world.battleTick()
+    of 1: activeGame.config.maxTicks
+    of 2: cast[int32](activeGame.config.seed)
+    of 3: world.spawnTimerTicks
+    of 4: world.spawnIntervalTicks
+    of 5: int32(mapTiles() div 2)
+    of 6: int32(mapTiles())
+    of 7: int32(world.gameOver)
+    of 8 .. 15:
+      let
+        field = int(args[0] - 8)
+        enemy = field >= 4
+        barracks = (field mod 4) >= 2
+        all = (field mod 2) == 1
+      var count = 0'i32
+      for building in world.buildings:
+        if (building.team != team) == enemy and
+          (building.kind == BarracksBuilding) == barracks and
+          (all or (if enemy: building.knownAlive[team] else: building.hp > 0)):
+            inc count
+      count
+    else: 0'i32
+  let
+    floorProc: NumericHostProc = proc(args: openArray[Value]): Value =
+      ## Converts a numeric value to its greatest integer lower bound.
+      if args[0].kind == IntegerValue:
+        args[0]
+      else:
+        toValue(int32(args[0].asFixed) shr 16)
+    sqrtProc: NumericHostProc = proc(args: openArray[Value]): Value =
+      ## Uses Fixxy's square root for observation distances.
+      toValue(fixxy.sqrt(args[0].asFixed))
+    expProc: NumericHostProc = proc(args: openArray[Value]): Value =
+      ## Rounds the native exponential to Q16.16 with a checked result range.
+      let value = args[0].asFixed.toFloat64
+      if value > 11.0:
+        raise newException(BasicError, "exp() result is outside Q16.16")
+      let scaled = math.round(math.exp(value) * 65536.0)
+      if scaled > float64(high(int32)):
+        raise newException(BasicError, "exp() result is outside Q16.16")
+      toValue(Fixed(int32(scaled)))
+  discard host.addFunction("floor", 1, floorProc, 1)
+  discard host.addFunction("sqrt", 1, sqrtProc, 1)
+  discard host.addFunction("exp", 1, expProc, 1)
+  discard host.addFunction("selfInfo", 1, selfInfo, 4)
+  discard host.addFunction("objectInfo", 2, objectInfo, 4)
+  discard host.addFunction("abilityInfo", 2, abilityInfo, 4)
+  discard host.addFunction("spellInfo", 2, spellInfo, 4)
+  discard host.addFunction("matchInfo", 1, matchInfo, 4)
+
+proc initHeroHost(
+    heroId: int32,
+    policy: Policy = nil,
+    llm: LlmClient = nil
+): Host =
   ## Builds the bounded world-query and action interface for one hero.
   result = initHost()
+  let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
+  services.addFunctions(result)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends script text through the game's routing rules.
     let player = activeGame.world.heroIndex(heroId)
@@ -360,8 +520,8 @@ proc initHeroHost(heroId: int32): Host =
     ## Reads any player's public selection, including the opposing team.
     activeGame.world.draftedClass(arguments[0])
   let heroAvailableProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Reports whether a valid class remains in the shared draft pool.
-    int32(activeGame.world.heroAvailable(arguments[0]))
+    ## Reports whether the caller may pick this class under the draft rules.
+    int32(activeGame.world.heroAvailable(arguments[0], heroId))
   let heroRoleProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads the class role, or minus one for an invalid class.
     if arguments[0] < 0 or arguments[0] > HeroClass.high.ord:
@@ -842,6 +1002,18 @@ proc initHeroHost(heroId: int32): Host =
       32
     )
 
+  result.infoFunctions(heroId)
+  let context = NeuralContext(policy: policy)
+  result.addNeuralFunctions(
+    richardRunner(context), davidRunner(context), andreRunner(context),
+    flyRunner(context)
+  )
+
+proc neuralLimits(): Limits =
+  ## Reserves native model storage independently of ordinary BASIC limits.
+  result = heroVmLimits()
+  result.maxNativeMemoryBytes = NativeMemoryBytes
+
 proc loadBots*(
     game: Game,
     groups: openArray[BotGroup],
@@ -850,11 +1022,11 @@ proc loadBots*(
   ## Loads bot files into every hero slot except the optional human slot.
   activeGame = game
   let
-    limits = heroVmLimits()
+    limits = neuralLimits()
     schema = initHeroHost(0)
     kinds = controllerKinds(game.world.heroes.len, playerSlot)
     sources = groups.expandBotSources(kinds)
-  game.heroVms.setLen(game.world.heroes.len)
+  game.heroVms = newSeq[HeroVm](game.world.heroes.len)
   game.inboxes.setLen(game.world.heroes.len)
   for inbox in game.inboxes.mitems:
     inbox = newMailbox()
@@ -862,7 +1034,13 @@ proc loadBots*(
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
       continue
-    let source = sources[i]
+    let llm = newLlmClient(i)
+    let policy =
+      when defined(coworld):
+        loadPlayerPolicy(sources[i], int(i))
+      else:
+        loadPolicy(sources[i])
+    let source = policy.source
     let program =
       when defined(coworld):
         compilePlayer(source, schema, limits, int(i))
@@ -874,12 +1052,15 @@ proc loadBots*(
     game.heroVms[i] = HeroVm(
       runtime: initRuntime(
         program,
-        initHeroHost(game.world.heroes[i].id),
+        initHeroHost(game.world.heroes[i].id, policy, llm),
         limits
       ),
       limits: limits,
+      prepareDecision: llm.decisionCallback(),
+      pollRequests: llm.requestPoller(),
       ready: true
     )
+    llm.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
 
@@ -894,6 +1075,8 @@ proc runHeroScript(game: Game, index: int) =
     return
   try:
     vm.runtime.restart()
+    if vm.prepareDecision != nil:
+      vm.prepareDecision(game.world.tick)
     discard game.world.worldObjectCount(hero.id)
     vm.runtime.setData(heroDataIds[DataSelfId], hero.id)
     vm.runtime.setData(heroDataIds[DataSelfTeam], int32(hero.team.ord))
@@ -902,6 +1085,9 @@ proc runHeroScript(game: Game, index: int) =
     )
     vm.runtime.setData(
       heroDataIds[DataDrafting], int32(game.world.phase == Drafting)
+    )
+    vm.runtime.setData(
+      heroDataIds[DataDraftMode], int32(game.world.draftMode.ord)
     )
     vm.runtime.setData(
       heroDataIds[DataDraftTurnId], game.world.draftHeroId()
