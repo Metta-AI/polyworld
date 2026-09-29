@@ -84,6 +84,7 @@ import
   test_picking,
   test_player,
   test_profiles,
+  test_prop_batches,
   test_props,
   test_rngs,
   test_rtscameras,

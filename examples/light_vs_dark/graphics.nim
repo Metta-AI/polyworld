@@ -29,8 +29,7 @@ const
     ## One saved world every ten seconds, so a seek re-simulates at most
     ## that much.
   RebakeFrameGap = 30
-    ## Terrain is re-emitted whole, so felling trees is batched rather than
-    ## letting a busy lumber camp stutter the frame rate.
+    ## Batches nearby harvest and construction changes into one scene update.
   SelectionDragPixels = 6.0'f32
     ## Pointer travel that turns a click into a box select.
 
@@ -72,7 +71,8 @@ var
   )
   placedEditCount = 0
   placedBuildingKey = ""
-  terrainDirty = false
+  sceneDirty = false
+  edgesDirty = false
   framesSinceRebake = 0
   frameAlpha = 0.0'f32
   previousUnitPositions: Table[int32, Vec3]
@@ -280,21 +280,21 @@ proc runGraphics*() =
     run.world.treeWood, run.mapSeed, run.world.map.forestRocks
   )
   profileBlock "props":
-    grove = generateGrove(run.mapSeed, {LightTree, LightRock})
-    buildingArt = loadBuildingArt(grove, factions = playerFactions)
+    profileBlock "grove models":
+      grove = generateGrove(run.mapSeed, {LightTree, LightRock})
+    profileBlock "building models":
+      buildingArt = loadBuildingArt(grove, factions = playerFactions)
 
   proc buildingKey(): string =
-    ## A cheap fingerprint of everything that changes the prop layout, so the
-    ## terrain is only re-emitted when the scene actually differs.
+    ## Detects changes to displayed construction stages and building lifetimes.
     result = $run.world.terrainEdits.len
     for structure in run.world.buildings:
       result.add &"|{structure.id}:{structure.state.ord}"
       if structure.state == BuildingUnderConstruction:
         result.add &":{structure.constructionStage().ord}"
 
-  proc placeSceneProps() =
-    ## Rebuilds the whole prop list. `placeProp` has no removal, so the
-    ## viewer owns the desired set and re-places all of it on any change.
+  proc placeSceneProps() {.measure.} =
+    ## Submits desired placements while the renderer retains unchanged groups.
     clearProps()
     grove.plantGrove(scenery, run.world.treeWood)
     for structure in run.world.buildings:
@@ -303,36 +303,51 @@ proc runGraphics*() =
       ):
         # Baked props use the opposite yaw to the standalone outline pass.
         part.pack.placeProp(
-          part.name, part.position, -part.rotation, part.scale
+          part.name,
+          part.position,
+          -part.rotation,
+          part.scale,
+          group = structure.id
         )
 
-  proc applyTerrainEdits() =
-    ## Mirrors current wood state, including trees restored by replay seeks.
+  proc applyTerrainEdits(): bool {.measure.} =
+    ## Reports actual ground changes, including trees restored by replay seeks.
     for placement in scenery:
       if placement.kind == LightTree:
-        layers[0].tiles[placement.tile].kind =
+        let kind =
           if placement.visible(run.world.treeWood):
             TreeTile
           else:
             GrassTile
+        if layers[0].tiles[placement.tile].kind != kind:
+          layers[0].tiles[placement.tile].kind = kind
+          result = true
 
-  proc rebakeScene() =
-    ## Refreshes terrain, props, and the displayed movement blockers.
-    applyTerrainEdits()
+  proc rebakeScene(initial = false) =
+    ## Refreshes changed props and rebuilds ground only for terrain edits.
+    let groundChanged = applyTerrainEdits()
     placeSceneProps()
-    ## Walkability was computed once at map generation and structures live in
-    ## the simulation's own grids, so the renderer must never recompute it.
-    bakeTerrain(
-      rebuildWalkability = false,
-      blockers = [run.world.blocker]
-    )
+    if initial or groundChanged:
+      # Rendering never recomputes authoritative movement walkability.
+      bakeTerrain(
+        rebuildWalkability = false,
+        blockers = [run.world.blocker]
+      )
+      edgesDirty = false
+    else:
+      bakeProps()
+      edgesDirty = true
     placedEditCount = run.world.terrainEdits.len
     placedBuildingKey = buildingKey()
-    terrainDirty = false
+    sceneDirty = false
     framesSinceRebake = 0
 
   profileBlock "bake":
-    rebakeScene()
+    rebakeScene(initial = true)
+
+  proc liveWalkable(layer, x, z: int): bool {.nimcall.} =
+    ## Supplies current blockers when the optional movement grid is visible.
+    layer == 0 and run.world.tileOpen(int32(x), int32(z))
   cameraTarget = vec3(0, 0, 0)
   var
     viewingDt = 0.0'f
@@ -384,7 +399,7 @@ proc runGraphics*() =
     run.historyPlayback = true
     previousUnitPositions.clear()
     previousUnitFacings.clear()
-    terrainDirty = true
+    sceneDirty = true
     particles.clearParticles()
     while run.world.tick < wanted:
       advanceGame()
@@ -1053,7 +1068,7 @@ proc runGraphics*() =
       tint
     )
 
-  proc updateTerrainVision() =
+  proc updateTerrainVision() {.measure.} =
     ## Uploads the selected team's softened visible and explored terrain.
     if terrainVisionTick == run.world.tick and terrainVisionMode == viewMode:
       return
@@ -1285,7 +1300,7 @@ proc runGraphics*() =
       while run.world.tick < wanted and
           run.world.tick < run.maximumTicks and not run.world.over:
         advanceGame()
-      terrainDirty = true
+      sceneDirty = true
     if primaryId == NoEntity:
       for structure in run.world.buildings:
         if structure.owner == LightPlayer and
@@ -1357,11 +1372,14 @@ proc runGraphics*() =
       inc framesSinceRebake
       if run.world.terrainEdits.len != placedEditCount or
           buildingKey() != placedBuildingKey:
-        terrainDirty = true
-      if terrainDirty and
+        sceneDirty = true
+      if sceneDirty and
         (showTiles or framesSinceRebake >= RebakeFrameGap):
           profileBlock "rebake":
             rebakeScene()
+      if showTiles and edgesDirty:
+        updateTerrainEdges(liveWalkable)
+        edgesDirty = false
       feedLvdActions()
       actionCam.direct(
         cameraTarget, cameraDistance, viewingDt,
@@ -1388,7 +1406,8 @@ proc runGraphics*() =
 
         # One loop for both passes: units render into the sun's depth map
         # first, then for the camera.
-        proc drawWorldUnits() =
+        proc drawWorldUnits() {.measure.} =
+          ## Measures character drawing separately from static scenery.
           for unit in run.world.units:
             if not shownUnit(unit):
               continue
