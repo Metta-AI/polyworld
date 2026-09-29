@@ -4,8 +4,8 @@
 
 Use `player.source` for your bot and `player.policy_ref` for opponents, with
 exactly one per player. Responses contain the replay and logs only for seats
-using supplied source. Inline-only matches work; selected policy references
-return HTTP 501 until bot fetching is implemented.
+using supplied source. Submitted opponents are fetched through Observatory using the server
+credential. Downloaded BASIC sources are verified and cached locally.
 
 ## API
 

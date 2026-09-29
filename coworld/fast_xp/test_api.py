@@ -1,9 +1,15 @@
 """Exercise inline matches, seating, private references, and request validation."""
 import io
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
+from urllib.parse import parse_qs, urlsplit
 import json
 import os
 from pathlib import Path
 import socket
+import sys
 import subprocess
 import tempfile
 import time
@@ -15,7 +21,91 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "coworld/fast_xp/server"
 
 
+class PolicyService(BaseHTTPRequestHandler):
+    source = b'print "private-opponent"\nend'
+    lookups = []
+    downloads = []
+    failures = []
+    deny = False
+    hold = threading.Event()
+    entered = threading.Event()
+    hold.set()
+
+    def log_message(self, *_):
+        pass
+
+    def do_GET(self):
+        path = urlsplit(self.path)
+        if path.path == "/v2/policy-files/download":
+            ref = parse_qs(path.query)["policy_ref"][0]
+            self.lookups.append(ref)
+            if self.headers.get("Authorization") != "Bearer fake-observatory-token":
+                self.failures.append("Missing Observatory credential")
+            if self.headers.get("X-Use-Elevated-Privileges") != "true":
+                self.failures.append("Missing elevation header")
+            errors = {"missing:v1": 404, "invalid:v1": 400, "nofile:v1": 409,
+                      "denied:v1": 403, "expired:v1": 401}
+            status = 401 if self.deny else errors.get(ref, 200)
+            if ref == "lookup-redirect:v1":
+                self.send_response(302)
+                self.send_header("Location", "/must-not-follow")
+                self.end_headers()
+                return
+            self.send_response(status)
+            self.end_headers()
+            if status != 200:
+                self.wfile.write(b'{"detail":"do not expose upstream response bodies"}')
+                return
+            source = b'print "private-compile-secret"\nif\n' if ref == "broken:v1" else self.source
+            digest = hashlib.sha256(source).hexdigest()
+            if ref == "hash-mismatch:v1":
+                digest = "b" * 64
+            if ref == "bad-metadata:v1":
+                self.wfile.write(b'{"oops": true}')
+                return
+            data = {"policy_version_id": "11111111-1111-4111-8111-111111111111",
+                    "content_hash": digest, "size_bytes": len(source),
+                    "expires_in_seconds": 300,
+                    "download_url": f"http://127.0.0.1:{self.server.server_port}/artifact?ref={ref}"}
+            if ref == "size-mismatch:v1":
+                data["size_bytes"] += 1
+            if ref == "oversize:v1":
+                data["size_bytes"] = 1024 * 1024 + 1
+            if ref == "unsafe-url:v1":
+                data["download_url"] = "http://example.com/bot"
+            self.wfile.write(json.dumps(data).encode())
+        elif path.path == "/artifact":
+            ref = parse_qs(path.query)["ref"][0]
+            self.downloads.append(ref)
+            if self.headers.get("Authorization") or self.headers.get("X-Use-Elevated-Privileges"):
+                self.failures.append("Credentials leaked to artifact host")
+            self.entered.set()
+            self.hold.wait(15)
+            if ref == "slow:v1":
+                time.sleep(11)
+                return
+            if ref == "download-fails:v1":
+                self.send_response(403)
+                self.end_headers()
+                return
+            if ref == "redirect:v1":
+                self.send_response(302)
+                self.send_header("Location", "/must-not-follow")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'print "private-compile-secret"\nif\n' if ref == "broken:v1" else self.source)
+        else:
+            self.failures.append("Unexpected request: " + self.path)
+            self.send_response(404)
+            self.end_headers()
+
+
 def main():
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), PolicyService)
+    thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    thread.start()
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -23,7 +113,20 @@ def main():
     with tempfile.TemporaryDirectory(prefix="fast-xp-test-") as directory:
         environment = dict(os.environ, FAST_XP_PORT=str(port),
                            FAST_XP_HOST="127.0.0.1", FAST_XP_TOKEN="test-token",
-                           FAST_XP_WORKERS="1", TMPDIR=directory)
+                           FAST_XP_WORKERS="2", TMPDIR=directory,
+                           FAST_XP_OBSERVATORY_URL=f"http://127.0.0.1:{upstream.server_port}",
+                           FAST_XP_OBSERVATORY_TOKEN="fake-observatory-token",
+                           FAST_XP_OBSERVATORY_ELEVATED="1",
+                           FAST_XP_CACHE_DIR=str(Path(directory) / "policies"))
+        wrapper = Path(directory) / "worker"
+        real_worker = str(SERVER.with_name("gota_worker"))
+        wrapper.write_text(f"#!{sys.executable}\nimport os\n"
+                           "assert not any(k.startswith('FAST_XP_') for k in os.environ)\n"
+                           "assert 'FAKE_OTHER_SECRET' not in os.environ\n"
+                           f"os.execv({real_worker!r}, [{real_worker!r}])\n")
+        wrapper.chmod(0o700)
+        environment["FAST_XP_GOTA_WORKER"] = str(wrapper)
+        environment["FAKE_OTHER_SECRET"] = "must-not-reach-worker"
         with open(Path(directory) / "server.log", "wb") as log:
             process = subprocess.Popen([str(SERVER)], cwd=ROOT, env=environment,
                                        stdout=log, stderr=log)
@@ -79,17 +182,75 @@ def main():
                     assert call(route, invalid)[0] == 400, invalid
                 mixed = [{"player": {"source": 'print "mine"\nend'}, "slot": 0},
                          {"player": {"policy_ref": "relh:v231"}, "slot": -1}]
-                # References remain private and unresolved, even beside supplied source.
+                cache = Path(directory) / "policies"
+                digest = hashlib.sha256(PolicyService.source).hexdigest()
                 for roster in [mixed, body["roster"],
-                               [{"player": {"policy_ref": "109b99c1-3bb7-4276-b17e-378b43a97874"}}],
-                               [{"player": {"policy_ref": "my-bot:v12"}, "slot": 0},
-                                {"player": {"policy_ref": "relh:v231"}, "slot": -1}],
-                               [{"player": {"policy_ref": "relh:v231"}, "slot": i}
-                                for i in range(10)]]:
-                    status, headers, data = call(route, dict(body, roster=roster))
-                    assert status == 501, (status, data)
-                    assert headers.get_content_type() == "application/json"
-                    assert "not implemented" in json.loads(data)["error"]
+                               [{"player": {"policy_ref": "109b99c1-3bb7-4276-b17e-378b43a97874"}}]]:
+                    before = len(PolicyService.lookups)
+                    status, _, data = call(route, dict(body, roster=roster))
+                    assert status == 200, (status, data)
+                    assert len(PolicyService.lookups) == before + 1, "Repeated seats must resolve once"
+                    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                        expected = {"replay.replay"}
+                        if roster == mixed:
+                            expected.add("logs/slot-0.txt")
+                            assert "mine" in archive.read("logs/slot-0.txt").decode()
+                        assert set(archive.namelist()) == expected
+                assert len(PolicyService.downloads) == 1, "Same content must download only once"
+                assert (cache / digest).read_bytes() == PolicyService.source
+                assert (cache.stat().st_mode & 0o777) == 0o700
+                assert ((cache / digest).stat().st_mode & 0o777) == 0o600
+                # Cached source never bypasses a fresh authorization decision.
+                PolicyService.deny = True
+                assert call(route, body)[0] == 502
+                PolicyService.deny = False
+                # A damaged cache entry is fetched again and verified.
+                (cache / digest).write_bytes(b"corrupt")
+                assert call(route, body)[0] == 200
+                assert len(PolicyService.downloads) == 2
+                assert (cache / digest).read_bytes() == PolicyService.source
+                for ref, expected in [("missing:v1", 404), ("invalid:v1", 400),
+                                      ("nofile:v1", 409), ("denied:v1", 502), ("expired:v1", 502),
+                                      ("hash-mismatch:v1", 502), ("size-mismatch:v1", 502),
+                                      ("bad-metadata:v1", 502), ("unsafe-url:v1", 502),
+                                      ("oversize:v1", 502), ("download-fails:v1", 502),
+                                      ("redirect:v1", 502), ("lookup-redirect:v1", 502),
+                                      ("slow:v1", 504), ("broken:v1", 422)]:
+                    # Force a download even when the mock uses the same content hash.
+                    (cache / digest).unlink(missing_ok=True)
+                    status, _, data = call(route, dict(body, roster=[{"player": {"policy_ref": ref}}]))
+                    assert status == expected, (ref, status, data)
+                    assert b"private-compile-secret" not in data
+                    assert b"upstream response bodies" not in data
+                    assert b"fake-observatory-token" not in data
+                assert not (cache / ("b" * 64)).exists(), "Never cache failed verification"
+                assert not list(cache.glob("*.part")), "Leaked partial download"
+                # Two simultaneous cold requests share one download; excess work is refused.
+                (cache / digest).unlink(missing_ok=True)
+                PolicyService.entered.clear()
+                PolicyService.hold.clear()
+                before = len(PolicyService.downloads)
+                lookup_start = len(PolicyService.lookups)
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    first = pool.submit(call, route, body)
+                    assert PolicyService.entered.wait(5)
+                    second = pool.submit(call, route, body)
+                    try:
+                        for _ in range(100):
+                            if len(PolicyService.lookups) >= lookup_start + 2:
+                                break
+                            time.sleep(.02)
+                        assert len(PolicyService.lookups) == lookup_start + 2
+                        assert call("/healthz")[0] == 200
+                        status, headers, _ = call(route, body)
+                        assert status == 503 and headers["Retry-After"] == "1"
+                    finally:
+                        PolicyService.hold.set()
+                    assert first.result()[0] == 200
+                    assert second.result()[0] == 200
+                assert len(PolicyService.downloads) == before + 1
+                assert not PolicyService.failures, PolicyService.failures
+                assert "fake-observatory-token" not in Path(log.name).read_text()
                 def source(marker):
                     return {"source": f'print "{marker}"\nend'}
 
@@ -127,6 +288,8 @@ def main():
             finally:
                 process.terminate()
                 process.wait(timeout=10)
+                upstream.shutdown()
+                upstream.server_close()
 
 
 if __name__ == "__main__":

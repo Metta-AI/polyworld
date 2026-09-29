@@ -2,7 +2,8 @@ import
   std/[json, locks, monotimes, os, osproc, strtabs, strutils, tables,
     tempfiles, times, uri],
   mummy,
-  zippy/ziparchives
+  zippy/ziparchives,
+  policies
 
 type
   PlayerKind* = enum
@@ -20,8 +21,6 @@ type
   ResolvedPlayer = object
     source: string
     canReadLog: bool
-  RunError = object of CatchableError
-    status: int
 
 const
   SeatCount = 10
@@ -34,12 +33,6 @@ var
   activeRuns: int
 
 initLock(capacityLock)
-
-proc reject(status: int, message: string) =
-  ## Raises an HTTP failure without exposing internal process diagnostics.
-  var error = newException(RunError, message)
-  error.status = status
-  raise error
 
 proc checkFields(node: JsonNode, allowed: openArray[string]) =
   ## Rejects misspelled or unsupported request fields.
@@ -107,18 +100,13 @@ proc parseRun*(body: string): RunInput =
   if pinned.len < SeatCount and not hasOpenSeatSelector:
     reject(400, "Unfilled seats require a roster entry with slot -1")
 
-proc fetchPolicySource(policyRef: string): string =
-  ## Fetches an opponent's private BASIC source.
-  # TODO: Resolve name:vN or UUID through Observatory, download and verify the
-  # artifact, and cache immutable content by hash using a service credential.
-  reject(501, "Policy reference resolution and bot fetching are not implemented")
-
 proc resolvePlayers(input: RunInput): seq[ResolvedPlayer] =
   ## Pins explicit seats and fills the rest from open entries in roster order.
   var
     selected: array[SeatCount, int]
     openEntries: seq[int]
     nextOpen: int
+    sources: Table[string, string]
   for slot in 0 ..< SeatCount:
     selected[slot] = -1
   for index, entry in input.roster:
@@ -135,16 +123,21 @@ proc resolvePlayers(input: RunInput): seq[ResolvedPlayer] =
     of InlineSource:
       result.add ResolvedPlayer(source: entry.source, canReadLog: true)
     of PolicyReference:
-      result.add ResolvedPlayer(source: fetchPolicySource(entry.policyRef),
+      let reference = entry.policyRef.strip()
+      if reference notin sources:
+        sources[reference] = fetchPolicySource(reference)
+      result.add ResolvedPlayer(source: sources[reference],
         canReadLog: false)
 
 proc fileUri(path: string): string =
   ## Encodes an absolute staging path for the Coworld file handoff.
   "file://" & encodeUrl(path, usePlus = false).replace("%2F", "/")
 
-proc runMatch(input: RunInput): string =
+proc runMatch(input: RunInput): tuple[archive: string, fetchMs, workerMs, zipMs: int64] =
   ## Runs an isolated native game and returns only its replay and player logs.
+  let fetchStarted = getMonoTime()
   let players = resolvePlayers(input)
+  result.fetchMs = (getMonoTime() - fetchStarted).inMilliseconds
   let directory = createTempDir("fast-xp-", "")
   defer: removeDir(directory)
   var
@@ -152,8 +145,11 @@ proc runMatch(input: RunInput): string =
     config = %*{"seed": input.seed, "max_ticks": input.maxTicks,
       "players": [], "tokens": []}
     seats = %*{"schema": "coworld-player-seats/1", "seats": []}
-  for key, value in envPairs():
-    environment[key] = value
+  # The native worker needs runtime paths, not the API server's credentials.
+  for key in ["PATH", "HOME", "TMPDIR", "LD_LIBRARY_PATH", "NIX_LD",
+      "NIX_LD_LIBRARY_PATH", "SystemRoot", "WINDIR"]:
+    if existsEnv(key):
+      environment[key] = getEnv(key)
   for slot, player in players:
     let source = player.source
     let botPath = directory / "slot-" & $slot & ".bas"
@@ -172,9 +168,11 @@ proc runMatch(input: RunInput): string =
       ("COGAME_PLAYER_FAILURE_URI", "failure.json")]:
     environment[pair[0]] = fileUri(directory / pair[1])
   let worker = getEnv("FAST_XP_GOTA_WORKER", getAppDir() / "gota_worker")
+  let workerStarted = getMonoTime()
   var process = startProcess(worker, env = environment, options = {poParentStreams})
   defer: process.close()
   let exitCode = process.waitForExit(120_000)
+  result.workerMs = (getMonoTime() - workerStarted).inMilliseconds
   if exitCode == -1:
     process.terminate()
     if process.waitForExit(1000) == -1:
@@ -190,13 +188,15 @@ proc runMatch(input: RunInput): string =
     reject(422, message)
   if exitCode != 0 or not fileExists(directory / "results.json"):
     reject(500, "Game worker failed; inspect the server diagnostics")
+  let zipStarted = getMonoTime()
   var entries = initOrderedTable[string, string]()
   entries["replay.replay"] = readFile(directory / "replay.replay")
   for slot, player in players:
     if player.canReadLog:
       entries["logs/slot-" & $slot & ".txt"] =
         readFile(directory / "slot-" & $slot & ".log")
-  createZipArchive(entries)
+  result.archive = createZipArchive(entries)
+  result.zipMs = (getMonoTime() - zipStarted).inMilliseconds
 
 proc handleRequest(request: Request) {.gcsafe.} =
   ## Serves static documentation and synchronous, capacity-limited Gota runs.
@@ -233,12 +233,14 @@ proc handleRequest(request: Request) {.gcsafe.} =
         withLock capacityLock:
           dec activeRuns
       let
-        archive = runMatch(input)
+        run = runMatch(input)
         elapsed = (getMonoTime() - started).inMilliseconds
       request.respond(200, @[("Content-Type", "application/zip"),
         ("Content-Disposition", "attachment; filename=gota.zip"),
         ("Cache-Control", "no-store"),
-        ("Server-Timing", "run;dur=" & $elapsed)], archive)
+        ("Server-Timing", "run;dur=" & $elapsed &
+          ", fetch;dur=" & $run.fetchMs & ", worker;dur=" & $run.workerMs &
+          ", zip;dur=" & $run.zipMs)], run.archive)
   except RunError as error:
     var headers = @[("Content-Type", "application/json"), ("Cache-Control", "no-store")]
     if error.status == 503:

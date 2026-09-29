@@ -10,14 +10,15 @@ Use policy references for opponents:
   "seed": 743478993,
   "roster": [
     {"slot": 0, "player": {"source": "print selfId\nend"}},
-    {"slot": -1, "player": {"policy_ref": "relh:v231"}}
+    {"slot": -1, "player": {"policy_ref": "109b99c1-3bb7-4276-b17e-378b43a97874"}}
   ],
   "config": {"max_ticks": 28800}
 }
 ```
 
-**Policy fetching is still a TODO: requests selecting a `policy_ref` return
-HTTP 501 before starting a match. Inline-only rosters run locally now.**
+Policy references are resolved through Observatory using the server's credential.
+The UUID above selects Richard's public benchmark policy. Both mixed and
+inline-only rosters run locally.
 For example, `"roster": [{"player": {"source": "print selfId\nend"}}]`
 uses the supplied script in all ten seats. Supply a complete BASIC bot to play
 competitively; the short example only prints its ID.
@@ -25,7 +26,7 @@ competitively; the short example only prints its ID.
 - Each `player` requires exactly one of `source` or `policy_ref`.
 - `source`: nonempty BASIC source text, preserved as supplied. Its seat's logs
   are returned to this request; no submitted-policy ownership lookup is needed.
-- `policy_ref`: a submitted policy label such as `relh:v231`, or a policy-version
+- `policy_ref`: a submitted policy label such as `my-bot:v12`, or a policy-version
   UUID. These entries are opponents: their source, logs, and compilation details
   are private even if the caller happens to own the submitted policy.
 - `slot`: 0–9 pins a Gota seat; -1 (the default) supplies an entry for open seats.
@@ -44,13 +45,16 @@ This is a single-game endpoint, not the full XP-request target/batch interface.
 
 Supply `Authorization: Bearer <token>` when FAST_XP_TOKEN is configured. This is
 currently a server-specific shared token, not Observatory user authentication.
-Non-loopback binding requires a token. Submitted-policy fetching will use the
-runner's service credential; request-supplied source determines log visibility.
+Non-loopback binding requires a token. Submitted-policy fetching uses the server's configured
+Observatory credential (an elevated personal team token locally, or a scoped
+machine credential); request-supplied source determines log visibility.
 
 A successful response is `application/zip`, containing `replay.replay` and
 `logs/slot-N.txt` for each seat populated from inline source. No bot source files
 are included. Policy-reference seats never contribute logs to the response.
-There is no polling endpoint. `Server-Timing` reports request processing time.
+There is no polling endpoint. `Server-Timing` reports total request processing time, policy resolution/fetching,
+worker execution, and ZIP packaging in milliseconds. Fetching includes cache
+verification; worker execution includes compilation, gameplay, replay and logs.
 
 ## Errors
 
@@ -58,13 +62,20 @@ Errors use JSON `{"error": "message"}` unless noted:
 
 - 400: invalid JSON, roster, configuration, or unsupported fields.
 - 401: missing or incorrect configured bearer token.
-- 404/405: unknown route or wrong method (405 can be plain text).
+- 404: unknown route or policy version.
+- 405: wrong method (can be plain text).
+- 409: policy version has no downloadable player file.
 - 413: request exceeds the HTTP server's 4 MiB body limit, including all sources.
 - 415: content type is not application/json.
 - 422: BASIC compilation failed; details are included only for inline-source seats.
 - 500: game worker failed.
-- 501: selected policy references cannot be fetched yet. Retrying will not help.
-- 503: all workers are busy; retry after the `Retry-After` interval.
-- 504: the match exceeded its execution deadline.
+- 502: Observatory rejected the server credential, a fetch failed, or downloaded
+  bytes did not match the expected size/hash. Policy files must be BASIC source
+  of at most 1 MiB. The error message identifies the failing stage without
+  exposing credentials, source or signed URLs.
+- 503: all workers are busy, or the server has no Observatory credential for
+  reference fetching. Busy requests may retry after the `Retry-After` interval;
+  missing credentials require server configuration.
+- 504: a policy fetch timed out or the match exceeded its 120-second execution deadline.
 
 GET `/healthz` and `/docs/llms.txt` remain available.
