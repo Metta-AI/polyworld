@@ -42,7 +42,8 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 - `FAST_XP_OBSERVATORY_ELEVATED`: `1` for personal team tokens, unset for scoped machine credentials.
 - `FAST_XP_CACHE_DIR`: private artifact cache, default `$XDG_CACHE_HOME/polyworld-fast-xp/policies` (normally `~/.cache/...`).
 
-Use a trusted TLS proxy for remote access. The shared fast-XP token does not
+The hosted service binds to loopback behind Tailscale Serve and leaves
+`FAST_XP_TOKEN` unset; Tailscale controls access. Use a trusted TLS proxy for remote access. The shared fast-XP token does not
 identify Observatory users. Policy-reference seats never expose source or logs,
 even when the caller owns the policy. The worker inherits only runtime paths,
 not the server's credentials.

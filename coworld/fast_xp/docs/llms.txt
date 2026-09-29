@@ -4,13 +4,9 @@
 
 ## Make a request
 
-Send **POST `/v1/games/gota/run`** on this server, with:
-
-- `Content-Type: application/json`
-- `Authorization: Bearer <fast-xp-token>`
-
-Use the fast-XP service's shared caller token, supplied by its operator. An
-Observatory user token is not the caller token for this server.
+Connect to the Softmax Tailscale network. Send **POST `/v1/games/gota/run`**
+with `Content-Type: application/json`. No API token or Authorization header is
+needed on the Tailscale service.
 
 The JSON body contains a seed and a roster of bots. Supply your own bot as BASIC
 `source` text or a ZIP in `package_base64`. Select submitted opponents using policy-version UUIDs or
@@ -33,14 +29,13 @@ This puts your source in seat 0 and fills seats 1–9 with the referenced bot
 BASIC bot. To send a local file without hand-escaping its contents:
 
 ```sh
-# FAST_XP_URL is this server's origin; FAST_XP_TOKEN is its caller token.
+FAST_XP_URL=https://fast-xp-request.tail0f4a29.ts.net
 jq -n --rawfile source ./my-bot.bas \
   '{seed:743478993, roster:[
     {slot:0, player:{source:$source}},
     {player:{policy_ref:"109b99c1-3bb7-4276-b17e-378b43a97874"}}
   ], config:{max_ticks:28800}}' > request.json
 curl --fail-with-body --max-time 180 \
-  -H "Authorization: Bearer $FAST_XP_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @request.json "$FAST_XP_URL/v1/games/gota/run" -o result.zip
 ```
@@ -107,7 +102,6 @@ Errors normally return JSON `{"error":"message"}`. Check HTTP status before
 treating the response as a ZIP.
 
 - 400: invalid request, unsupported fields, or invalid/ambiguous policy reference.
-- 401: missing or incorrect fast-XP caller token.
 - 404: unknown route or policy version.
 - 409: selected policy has no downloadable player file.
 - 413: JSON request exceeds 224 MiB, or an uploaded package exceeds 16 MiB.

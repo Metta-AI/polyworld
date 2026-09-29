@@ -48,9 +48,8 @@ This is a single-game endpoint, not the full XP-request target/batch interface.
 
 ## Authentication and output
 
-Supply `Authorization: Bearer <token>` when FAST_XP_TOKEN is configured. This is
-currently a server-specific shared token, not Observatory user authentication.
-Non-loopback binding requires a token. Submitted-policy fetching uses the server's configured
+The hosted service uses Tailscale for access. Callers do not need an API token
+or an Authorization header. Submitted-policy fetching uses the server's configured
 Observatory credential (an elevated personal team token locally, or a scoped
 machine credential); request-supplied bots determine log visibility.
 
@@ -66,7 +65,6 @@ verification; worker execution includes compilation, gameplay, replay and logs.
 Errors use JSON `{"error": "message"}` unless noted:
 
 - 400: invalid JSON, roster, configuration, or unsupported fields.
-- 401: missing or incorrect configured bearer token.
 - 404: unknown route or policy version.
 - 405: wrong method (can be plain text).
 - 409: policy version has no downloadable player file.
