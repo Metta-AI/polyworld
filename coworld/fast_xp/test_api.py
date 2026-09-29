@@ -70,7 +70,7 @@ class PolicyService(BaseHTTPRequestHandler):
             if ref == "size-mismatch:v1":
                 data["size_bytes"] += 1
             if ref == "oversize:v1":
-                data["size_bytes"] = 1024 * 1024 + 1
+                data["size_bytes"] = 16 * 1024 * 1024 + 1
             if ref == "unsafe-url:v1":
                 data["download_url"] = "http://example.com/bot"
             self.wfile.write(json.dumps(data).encode())
@@ -251,6 +251,21 @@ def main():
                 assert len(PolicyService.downloads) == before + 1
                 assert not PolicyService.failures, PolicyService.failures
                 assert "fake-observatory-token" not in Path(log.name).read_text()
+                # Package bytes can exceed the BASIC source limit: keep resources
+                # intact and let the production loader compile only the .bas entry.
+                package = io.BytesIO()
+                with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_STORED) as archive:
+                    archive.writestr("policy.bas", "end\n")
+                    archive.writestr("model.bin", b"x" * (2 * 1024 * 1024))
+                PolicyService.source = package.getvalue()
+                package_roster = [{"slot": 0, "player": {"policy_ref": "package:v1"}},
+                                  {"player": {"source": "end"}}]
+                status, _, data = call(route, dict(body, roster=package_roster))
+                assert status == 200, (status, data)
+                assert (cache / hashlib.sha256(PolicyService.source).hexdigest()).read_bytes() == PolicyService.source
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    assert set(archive.namelist()) == {"replay.replay"} | {
+                        f"logs/slot-{slot}.txt" for slot in range(1, 10)}
                 def source(marker):
                     return {"source": f'print "{marker}"\nend'}
 

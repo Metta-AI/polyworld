@@ -17,6 +17,10 @@ Use policy references for opponents:
 ```
 
 Policy references are resolved through Observatory using the server's credential.
+References support raw BASIC and ZIP packages containing exactly one `.bas` file
+and accompanying model/resource files. The native production Gota loader handles
+the complete artifact. Packages may be up to 16 MiB; the BASIC source inside still
+has the game's 64 KiB limit. Use `policy_ref` for neural bots with bundled models.
 The UUID above selects Richard's public benchmark policy. Both mixed and
 inline-only rosters run locally.
 For example, `"roster": [{"player": {"source": "print selfId\nend"}}]`
@@ -67,11 +71,11 @@ Errors use JSON `{"error": "message"}` unless noted:
 - 409: policy version has no downloadable player file.
 - 413: request exceeds the HTTP server's 4 MiB body limit, including all sources.
 - 415: content type is not application/json.
-- 422: BASIC compilation failed; details are included only for inline-source seats.
+- 422: Policy loading or BASIC compilation failed; details are included only for inline-source seats.
 - 500: game worker failed.
 - 502: Observatory rejected the server credential, a fetch failed, or downloaded
-  bytes did not match the expected size/hash. Policy files must be BASIC source
-  of at most 1 MiB. The error message identifies the failing stage without
+  bytes did not match the expected size/hash. Policy artifacts must be raw BASIC or ZIP packages
+  of at most 16 MiB. The error message identifies the failing stage without
   exposing credentials, source or signed URLs.
 - 503: all workers are busy, or the server has no Observatory credential for
   reference fetching. Busy requests may retry after the `Retry-After` interval;

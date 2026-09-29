@@ -1,13 +1,13 @@
 import
   std/[httpclient, json, locks, net, os, strutils, tempfiles, uri],
   crunchy
+import polyworld/policies as policyPackages
 
 type
   RunError* = object of CatchableError
     status*: int
 
 const
-  MaxPolicyBytes = 1024 * 1024
   FetchTimeoutMs = 10_000
 
 var downloadLocks: array[16, Lock]
@@ -48,8 +48,8 @@ proc fetch(url: string, headers: HttpHeaders): Response =
     # HTTP exceptions can contain the signed URL, so do not forward or log them.
     reject(502, "Could not reach the policy service or download its artifact")
 
-proc fetchPolicySource*(policyRef: string): string =
-  ## Authorizes each request, then reuses verified immutable source by content hash.
+proc fetchPolicyBytes*(policyRef: string): string =
+  ## Authorizes each request, then caches the complete raw-or-ZIP artifact by hash.
   let token = getEnv("FAST_XP_OBSERVATORY_TOKEN")
   if token.len == 0:
     reject(503, "Configure FAST_XP_OBSERVATORY_TOKEN to fetch policy references")
@@ -79,8 +79,8 @@ proc fetchPolicySource*(policyRef: string): string =
   except CatchableError:
     reject(502, "Observatory returned invalid policy metadata")
   if digest.len != 64 or digest.find(AllChars - {'0'..'9', 'a'..'f'}) >= 0 or
-      size < 1 or size > MaxPolicyBytes:
-    reject(502, "Policy metadata is invalid or exceeds the 1 MiB BASIC source limit")
+      size < 1 or size > policyPackages.MaxPackageBytes:
+    reject(502, "Policy metadata is invalid or exceeds the game's 16 MiB package limit")
   validateUrl(downloadUrl)
   let
     cache = getEnv("FAST_XP_CACHE_DIR", getCacheDir() / "polyworld-fast-xp" / "policies")

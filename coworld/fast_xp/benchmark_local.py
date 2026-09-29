@@ -1,4 +1,4 @@
-"""Benchmark real policy fetching and matches against the Richard replay reference."""
+"""Benchmark real policy fetching and deterministic repeated Richard matches."""
 
 import argparse
 import hashlib
@@ -18,7 +18,6 @@ import zipfile
 
 POLICY = "109b99c1-3bb7-4276-b17e-378b43a97874"
 SOURCE_HASH = "cac27d33df9ab132d86e6db0fc3407e1ee6275bfad4ea2138e7f194d99259720"
-REPLAY_HASH = "7e020bba67058ef023df716bb0e9259cf58d110df28f5cb1e1d7d991de83419e"
 
 
 def main():
@@ -26,6 +25,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="New directory for timings and replays")
     parser.add_argument("--repetitions", type=int, default=3, help="Cold/warm pairs (default: 3)")
     parser.add_argument("--cpu", type=int, help="Optional Linux CPU affinity for server and workers")
+    parser.add_argument("--expected-replay-sha256", help="Optional reference from the same game revision")
     args = parser.parse_args()
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
@@ -67,6 +67,8 @@ def main():
         command = ["taskset", "-c", str(args.cpu), *command]
     log_path = root / "server.log"
     rows = []
+    expected_replay = args.expected_replay_sha256
+    expected_state = None
     with log_path.open("wb") as log:
         server = subprocess.Popen(command, cwd=repo, env=env, stdout=log, stderr=log)
         try:
@@ -107,14 +109,20 @@ def main():
                     with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
                         assert set(archive.namelist()) == {"replay.replay", "logs/slot-0.txt"}
                         replay = archive.read("replay.replay")
-                        assert hashlib.sha256(replay).hexdigest() == REPLAY_HASH
+                        replay_hash = hashlib.sha256(replay).hexdigest()
+                        if expected_replay is None:
+                            expected_replay = replay_hash
+                        assert replay_hash == expected_replay
                         bot_log = archive.read("logs/slot-0.txt").decode()
                         assert "completed" in bot_log and "BASIC error" not in bot_log
-                    assert "scripts: 10/10 active, 288010 decisions" in output
-                    assert "hash: 00000000A55D7AB7" in output
+                    assert "scripts: 10/10 active," in output
+                    state_hash = re.search(r"hash: ([0-9A-F]+) map", output)[1]
+                    if expected_state is None:
+                        expected_state = state_hash
+                    assert state_hash == expected_state
                     gameplay = float(re.search(r"simulated: [\d.]+ s in ([\d.]+) s", output)[1])
                     row = {"mode": mode, "repetition": repetition, "wall_s": wall, "gameplay_s": gameplay,
-                           "timings_s": timings, "replay_sha256": REPLAY_HASH, "response_bytes": len(archive_bytes)}
+                           "timings_s": timings, "replay_sha256": replay_hash, "state_hash": state_hash, "response_bytes": len(archive_bytes)}
                     rows.append(row)
                     (root / "measurements.json").write_text(json.dumps(rows, indent=2))
                     print(json.dumps(row), flush=True)

@@ -19,7 +19,7 @@ type
     seed*, maxTicks*: int
     roster*: seq[RosterEntry]
   ResolvedPlayer = object
-    source: string
+    bytes: string
     canReadLog: bool
 
 const
@@ -121,12 +121,12 @@ proc resolvePlayers(input: RunInput): seq[ResolvedPlayer] =
     let entry = input.roster[selected[slot]]
     case entry.kind
     of InlineSource:
-      result.add ResolvedPlayer(source: entry.source, canReadLog: true)
+      result.add ResolvedPlayer(bytes: entry.source, canReadLog: true)
     of PolicyReference:
       let reference = entry.policyRef.strip()
       if reference notin sources:
-        sources[reference] = fetchPolicySource(reference)
-      result.add ResolvedPlayer(source: sources[reference],
+        sources[reference] = fetchPolicyBytes(reference)
+      result.add ResolvedPlayer(bytes: sources[reference],
         canReadLog: false)
 
 proc fileUri(path: string): string =
@@ -151,13 +151,12 @@ proc runMatch(input: RunInput): tuple[archive: string, fetchMs, workerMs, zipMs:
     if existsEnv(key):
       environment[key] = getEnv(key)
   for slot, player in players:
-    let source = player.source
-    let botPath = directory / "slot-" & $slot & ".bas"
-    writeFile(botPath, source)
+    let botPath = directory / "slot-" & $slot & ".policy"
+    writeFile(botPath, player.bytes)
     config["players"].add %*{"name": "Player " & $(slot + 1)}
     config["tokens"].add %($slot)
     seats["seats"].add %*{"slot": slot, "file_uri": fileUri(botPath),
-      "size_bytes": source.len,
+      "size_bytes": player.bytes.len,
       "log_uri": fileUri(directory / "slot-" & $slot & ".log")}
   writeFile(directory / "config.json", $config)
   writeFile(directory / "seats.json", $seats)
@@ -182,7 +181,7 @@ proc runMatch(input: RunInput): tuple[archive: string, fetchMs, workerMs, zipMs:
   if fileExists(directory / "failure.json"):
     let failure = parseFile(directory / "failure.json")
     let slot = failure["failed_policy_index"].getInt()
-    var message = "BASIC compilation failed for slot " & $slot
+    var message = "Policy loading or BASIC compilation failed for slot " & $slot
     if players[slot].canReadLog:
       message.add ": " & readFile(directory / "slot-" & $slot & ".log")
     reject(422, message)

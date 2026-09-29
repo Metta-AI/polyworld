@@ -14,7 +14,8 @@ Observatory user token is not the caller token for this server.
 
 The JSON body contains a seed and a roster of bots. Supply your own bot's BASIC
 source text inline. Select submitted opponents using policy-version UUIDs or
-exact policy labels such as `my-bot:v12`. The server fetches opponents privately
+exact policy labels such as `my-bot:v12`. References can select raw BASIC files or ZIP packages containing BASIC and model
+resources. The server preserves and loads the whole package. It fetches opponents privately
 using its own Observatory credential; callers do not need their source.
 
 ```json
@@ -58,8 +59,11 @@ Only unpack `result.zip` after a successful HTTP response; errors are JSON.
   unpinned opponents A/B/C, seats 1–9 become A/B/C/A/B/C/A/B/C.
 - To fill every seat with your own bot, use one unpinned `source` entry. If all
   entries are pinned, supply all ten seats.
-- The current Gota worker accepts BASIC scripts up to 64 KiB each. Larger
-  submitted policies are not compatible with this worker.
+- BASIC source is limited to 64 KiB per bot. Referenced ZIP packages may be up
+  to 16 MiB and contain exactly one `.bas` file plus model/resource files. The
+  package limit is separate from the BASIC source limit.
+- `source` accepts BASIC text, not a ZIP or model files. To run a submitted
+  neural bot with bundled resources, use its `policy_ref`.
 - `seed` is required: a signed 32-bit integer.
 - `config` is optional. `config.max_ticks` defaults to 28800; valid values are
   1–28800. This bounds battle ticks, plus drafting. It is not wall-clock seconds.
@@ -94,9 +98,9 @@ treating the response as a ZIP.
 - 409: selected policy has no downloadable player file.
 - 413: JSON request exceeds 4 MiB, including inline source.
 - 415: incorrect content type.
-- 422: BASIC compilation failed. Only inline-source diagnostics are disclosed.
-- 502: policy lookup/download/verification failed; referenced BASIC files may be
-  at most 1 MiB. Read the error message for the failing stage.
+- 422: Policy loading or BASIC compilation failed. Only inline-source diagnostics are disclosed.
+- 502: policy lookup/download/verification failed; policy artifacts may be
+  at most 16 MiB. Read the error message for the failing stage.
 - 503: capacity is full or the server lacks its Observatory credential. For
   capacity errors, wait for `Retry-After` before retrying; configuration errors
   need the operator to fix the server.

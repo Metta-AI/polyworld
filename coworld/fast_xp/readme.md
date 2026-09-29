@@ -40,7 +40,7 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 - `FAST_XP_OBSERVATORY_URL`: API root, default `https://softmax.com/api/observatory`.
 - `FAST_XP_OBSERVATORY_TOKEN`: server-side credential for policy downloads, separate from `FAST_XP_TOKEN`.
 - `FAST_XP_OBSERVATORY_ELEVATED`: `1` for personal team tokens, unset for scoped machine credentials.
-- `FAST_XP_CACHE_DIR`: private source cache, default `$XDG_CACHE_HOME/polyworld-fast-xp/policies` (normally `~/.cache/...`).
+- `FAST_XP_CACHE_DIR`: private artifact cache, default `$XDG_CACHE_HOME/polyworld-fast-xp/policies` (normally `~/.cache/...`).
 
 Use a trusted TLS proxy for remote access. The shared fast-XP token does not
 identify Observatory users. Policy-reference seats never expose source or logs,
@@ -48,7 +48,7 @@ even when the caller owns the policy. The worker inherits only runtime paths,
 not the server's credentials.
 
 Each request resolves each distinct selected policy reference once through
-Observatory, including on warm-cache requests. Verified source bytes are cached
+Observatory, including on warm-cache requests. Verified artifact bytes are cached
 by SHA-256; no credentials, signed URLs or reference-to-source mappings are
 persisted. Cache hits are checked against the expected size and hash; corrupt
 entries are fetched again. Concurrent requests for the same content share a
@@ -56,8 +56,10 @@ download within this server process. Cache directories/files are private to the
 local user. Remove the cache directory while the server is stopped to reclaim
 space or force cold downloads; there is no automatic eviction yet.
 
-The initial adapter accepts BASIC source files up to 1 MiB, not policy packages
-or containers. HTTP fetches have a 10-second socket timeout and do not follow
+The adapter accepts raw BASIC and production ZIP policy packages up to the
+game's 16 MiB package limit. The production loader reads exactly one `.bas` file
+and its bundled resources; Gota still limits BASIC source to 64 KiB. Native neural
+runners consume the model files without a player container. HTTP fetches have a 10-second socket timeout and do not follow
 redirects. Artifact downloads never carry the Observatory authorization headers.
 
 ## Checks
@@ -71,4 +73,12 @@ Build both executables first. The API tests run a local fake Observatory/artifac
 service, so they need neither a real token nor external network access.
 
 For a real full-match cold/warm benchmark, see `benchmark_local.py --help`. It
-uses the same saved personal token and verifies the known reference replay.
+uses the same saved personal token and checks repeated replay bytes and final
+state hashes. Use `--expected-replay-sha256` to compare against a reference from
+the same game revision; older Gota versions have different replays.
+
+The worker imports the production Gota executable entry point; it shares package
+loading, neural runners and scoring rather than maintaining a separate game path.
+Build with the committed dependency versions. For an isolated build, set
+`POLYWORLD_DEPS` to a dedicated directory and run
+`nim r coworld/tools/sync_dependencies.nim` in the workspace Nix shell first.
