@@ -26,6 +26,9 @@ else:
 --define:nimTypeNames
 --define:flatty64
 
+# Compile BASIC policies to machine code on supported native targets.
+--define:bassyNative
+
 when defined(coworld):
   when defined(emscripten):
     error("Coworld servers are native. Build replay viewers without -d:coworld.")
