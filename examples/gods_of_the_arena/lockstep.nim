@@ -106,9 +106,9 @@ proc installPolicy(batch: StepBatch, lane: ptr StepLane, index: int) =
   lane.actions.add 0
   var
     host = initHeroHost(hero.id)
-    limits = heroVmLimits()
-  limits.disableFixed = true
-  limits.maxParameters = GotaFeatureCount
+    limits = neuralLimits()
+  # The same limits and fixed-point arithmetic as a deployed neural player.
+  limits.maxParameters = max(limits.maxParameters, GotaFeatureCount)
   discard host.addFunction("chooseAction", GotaFeatureCount,
     proc(values: openArray[int32]): int32 =
       for i, value in values:
