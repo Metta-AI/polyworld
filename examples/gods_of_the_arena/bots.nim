@@ -6,7 +6,7 @@ import
   bassy, fixxy,
   polyworld/[llms, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes],
-  neural/[common, richard, david, andre],
+  neural/[common, richard, david, andre, fly],
   content,
   maps,
   motions,
@@ -1003,7 +1003,8 @@ proc initHeroHost(
   result.infoFunctions(heroId)
   let context = NeuralContext(policy: policy)
   result.addNeuralFunctions(
-    richardRunner(context), davidRunner(context), andreRunner(context)
+    richardRunner(context), davidRunner(context), andreRunner(context),
+    flyRunner(context)
   )
 
 proc neuralLimits(): Limits =

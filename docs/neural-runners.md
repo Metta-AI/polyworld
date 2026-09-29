@@ -20,8 +20,8 @@ res = nn_david("weights.bin", state, data)
 ' Read res(0) through res(91) and issue ordinary game commands.
 ```
 
-`nn_richard(resource$, state, data)` and `andre_nn(resource$, state, data)` have
-the same three arguments. Inputs and outputs cross the boundary as Q16.16
+`nn_richard(resource$, state, data)`, `andre_nn(resource$, state, data)` and
+`fly_nn(resource$, state, data)` have the same three arguments. Inputs and outputs cross the boundary as Q16.16
 arrays. Integral BASIC values are converted
 with range checking. A runner can use FP32, integers or another representation
 internally. Outputs round to the nearest Q16.16 value, with ties away from zero.
@@ -272,6 +272,41 @@ Native inference is checked separately against PufferNet
 with identical rounded inputs. The training speedups in PR #75 are not required
 by this deployment interface.
 
+## Fly
+
+`fly_nn("fly.bin", state, data)` runs a connectome-constrained rate network:
+a fixed sparse wiring diagram, such as a cut of the FlyWire fruit fly
+connectome, with trained connection strengths, input projection and readout.
+It uses the same 45 inputs and 12 outputs as Andre, so the Andre glue in
+`neural/policies/andre.bas` works unchanged with the call renamed. A fly model
+can replace an Andre model behind the same hero BASIC.
+
+Each call adds a fixed drive to the recurrent potentials, then runs `steps`
+updates. Every update computes all rates first, `rate = tanh(max(x, 0))`
+written as `1 - 2 / (exp(2x) + 1)`, then for each neuron
+`x += leak * (sum(weight * rate[source]) + bias + drive - x)`. The drive is
+`bias` plus, for driven neurons, a dot product of the 45 inputs. Outputs are
+`readout * rate[read neurons] + readoutBias`. All sums run in stored order in
+FP32 without fused multiply/add. State is one FP32 potential per neuron.
+
+The binary format is little-endian:
+
+1. Magic `FLYNN1\0\0`.
+2. uint32 neurons, edges, inputs (45), driven, read, steps; FP32 leak.
+3. uint32 `offsets[neurons + 1]`: edges grouped by target neuron.
+4. uint32 `sources[edges]`, then FP32 `weights[edges]`.
+5. FP32 `bias[neurons]`.
+6. uint32 `driveNeurons[driven]`, FP32 `drive[driven * 45]`, row per neuron.
+7. uint32 `readNeurons[read]`, FP32 `readout[12 * read]`, row per output.
+8. FP32 `readoutBias[12]`.
+
+The loader accepts up to 200,000 neurons, 1.5 million edges and 16 steps, a
+leak in (0, 1], ordered offsets, in-range neuron indices, finite values and an
+exact byte length. At the limit the file is about 12 MB, and the package bytes
+plus the parsed copy stay inside the 32 MiB native allowance. The FlyWire v783
+brain without vision, keeping connections of at least five synapses, is 40,619
+neurons and 1.06 million edges: a 9.2 MB file.
+
 ## Ordinary observation getters
 
 These functions are available to every BASIC policy. Unknown fields or invalid
@@ -327,4 +362,5 @@ Native benchmark results depend on the machine and compiler: on the development
 machine David's 1407/512/92 synthetic model took approximately 1.2 ms per step;
 each small Richard network was below one microsecond. Andre's width-12,
 one-layer model took about one microsecond; width 64 with three layers took
-approximately 25 microseconds.
+approximately 25 microseconds. A fly model the size of the FlyWire cut
+(40,619 neurons, 1.06 million edges, four steps) took about 5 ms per call.
