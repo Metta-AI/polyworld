@@ -14,8 +14,7 @@ Observatory user token is not the caller token for this server.
 
 The JSON body contains a seed and a roster of bots. Supply your own bot's BASIC
 source text inline. Select submitted opponents using policy-version UUIDs or
-exact policy labels such as `my-bot:v12`. References can select raw BASIC files or ZIP packages containing BASIC and model
-resources. The server preserves and loads the whole package. It fetches opponents privately
+exact policy labels such as `my-bot:v12`. The server fetches submitted policies
 using its own Observatory credential; callers do not need their source.
 
 ```json
@@ -59,11 +58,9 @@ Only unpack `result.zip` after a successful HTTP response; errors are JSON.
   unpinned opponents A/B/C, seats 1–9 become A/B/C/A/B/C/A/B/C.
 - To fill every seat with your own bot, use one unpinned `source` entry. If all
   entries are pinned, supply all ten seats.
-- BASIC source is limited to 64 KiB per bot. Referenced ZIP packages may be up
-  to 16 MiB and contain exactly one `.bas` file plus model/resource files. The
-  package limit is separate from the BASIC source limit.
-- `source` accepts BASIC text, not a ZIP or model files. To run a submitted
-  neural bot with bundled resources, use its `policy_ref`.
+- `source`: BASIC source text, up to 64 KiB per bot.
+- `policy_ref`: a submitted policy version. The server downloads and runs its
+  uploaded artifact, up to 16 MiB.
 - `seed` is required: a signed 32-bit integer.
 - `config` is optional. `config.max_ticks` defaults to 28800; valid values are
   1–28800. This bounds battle ticks, plus drafting. It is not wall-clock seconds.

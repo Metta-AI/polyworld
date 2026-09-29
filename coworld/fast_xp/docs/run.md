@@ -17,10 +17,9 @@ Use policy references for opponents:
 ```
 
 Policy references are resolved through Observatory using the server's credential.
-References support raw BASIC and ZIP packages containing exactly one `.bas` file
-and accompanying model/resource files. The native production Gota loader handles
-the complete artifact. Packages may be up to 16 MiB; the BASIC source inside still
-has the game's 64 KiB limit. Use `policy_ref` for neural bots with bundled models.
+Use `source` to send BASIC text (up to 64 KiB per bot), or `policy_ref` to run
+a submitted policy version. The server downloads and runs the referenced
+artifact (up to 16 MiB).
 The UUID above selects Richard's public benchmark policy. Both mixed and
 inline-only rosters run locally.
 For example, `"roster": [{"player": {"source": "print selfId\nend"}}]`
