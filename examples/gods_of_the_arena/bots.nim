@@ -47,7 +47,8 @@ type
     DataSelfDeaths,
     DataSelfRespawnTicks,
     DataDrafting,
-    DataDraftTurnId
+    DataDraftTurnId,
+    DataDraftMode
   ObjectField = enum
     ObjectLevel, ObjectMana, ObjectItemId, ObjectItemCount,
     ObjectFacingX, ObjectFacingY, ObjectTarget, ObjectVelX, ObjectVelY,
@@ -89,7 +90,8 @@ const
     "selfDeaths",
     "selfRespawnTicks",
     "drafting",
-    "draftTurnId"
+    "draftTurnId",
+    "draftMode"
   ]
 
 var
@@ -518,8 +520,8 @@ proc initHeroHost(
     ## Reads any player's public selection, including the opposing team.
     activeGame.world.draftedClass(arguments[0])
   let heroAvailableProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Reports whether a valid class remains in the shared draft pool.
-    int32(activeGame.world.heroAvailable(arguments[0]))
+    ## Reports whether the caller may pick this class under the draft rules.
+    int32(activeGame.world.heroAvailable(arguments[0], heroId))
   let heroRoleProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads the class role, or minus one for an invalid class.
     if arguments[0] < 0 or arguments[0] > HeroClass.high.ord:
@@ -1083,6 +1085,9 @@ proc runHeroScript(game: Game, index: int) =
     )
     vm.runtime.setData(
       heroDataIds[DataDrafting], int32(game.world.phase == Drafting)
+    )
+    vm.runtime.setData(
+      heroDataIds[DataDraftMode], int32(game.world.draftMode.ord)
     )
     vm.runtime.setData(
       heroDataIds[DataDraftTurnId], game.world.draftHeroId()
