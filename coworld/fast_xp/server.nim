@@ -3,7 +3,7 @@ import
     tempfiles, times, uri, posix],
   mummy,
   zippy/ziparchives,
-  policies
+  policies, metrics
 import polyworld/policies as policyPackages
 
 type
@@ -49,6 +49,7 @@ const
   MaxTicks = 28800
   MaxBodyBytes = 224 * 1024 * 1024 # Ten 16 MiB artifacts encoded as base64 plus JSON.
   MaxEncodedPackageBytes = ((policyPackages.MaxPackageBytes + 2) div 3) * 4
+  Dashboard = staticRead("dashboard.html")
   Instructions = staticRead("docs/llms.txt")
   RunGuide = staticRead("docs/run.md")
 
@@ -63,6 +64,7 @@ var
   gameWorkers: array[256, Thread[int]]
   schedulerThread: Thread[int]
   shutdownThread: Thread[Server]
+  metricsThread: Thread[void]
 
 initLock(capacityLock)
 initLock(logLock)
@@ -275,6 +277,8 @@ proc executeGame(job: GameJob): GameResult =
     result.status = 500
     result.error = "Game worker failed"
   result.workerMs = (getMonoTime() - started).inMilliseconds
+  gameCompleted(job.requestId, job.index, job.seed, job.maxTicks, result.status,
+    result.activeBots, result.queueMs, result.workerMs)
   logEvent(%*{"event": "game_completed", "request_id": job.requestId,
     "game_index": job.index, "seed": job.seed, "status": result.status,
     "queue_ms": result.queueMs, "worker_ms": result.workerMs, "active_bots": result.activeBots})
@@ -311,6 +315,7 @@ proc dispatchGames(capacity: int) {.thread.} =
           job.reply[].send GameResult(index: job.index, seed: job.seed, status: 503,
             error: "Server shutting down", queueMs: elapsed,
             roster: seatPlayers(job.players, job.index))
+          gameCompleted(job.requestId, job.index, job.seed, job.maxTicks, 503, -1, elapsed, 0)
           logEvent(%*{"event": "game_completed", "request_id": job.requestId,
             "game_index": job.index, "seed": job.seed, "status": 503,
             "queue_ms": elapsed, "worker_ms": 0})
@@ -320,12 +325,26 @@ proc dispatchGames(capacity: int) {.thread.} =
       let worker = idle.pop()
       workerJobs[worker].send(job)
       if batch.len > 0: batches.addLast(batch)
+    var queued = 0
+    var oldest = getMonoTime()
+    for batch in batches:
+      queued += batch.len
+      if batch.len > 0 and batch.peekFirst().queued < oldest: oldest = batch.peekFirst().queued
+    schedulerChanged(capacity - idle.len, queued, oldest)
     # Keep receiving late submissions from already-admitted preparation handlers.
     if closing and idle.len == capacity:
       var admitted: int
       withLock capacityLock: admitted = activeRuns
       if admitted == 0: break
   for i in 0 ..< capacity: workerJobs[i].send(GameJob())
+
+proc collectMetrics() {.thread.} =
+  var total, idle: int64
+  while not stopping.load():
+    sampleHost(total, idle)
+    for _ in 0 ..< 50:
+      if stopping.load(): return
+      sleep(100)
 
 proc shutdownSignal(signal: cint) {.noconv.} =
   ## Defers all shutdown work out of the signal handler.
@@ -353,14 +372,29 @@ proc handleRequest(request: Request) {.gcsafe.} =
     inc requestSequence
     requestId = $getTime().toUnix() & "-" & $getCurrentProcessId() & "-" & $requestSequence
   var httpStatus = 200
+  var episodes = 0
+  var preparationMs, packagingMs, responseBytes: int64
+  defer:
+    if request.path == "/v1/games/gota/run":
+      requestCompleted(httpStatus, episodes, (getMonoTime() - started).inMilliseconds,
+        preparationMs, packagingMs, responseBytes)
   try:
     let methodName = if request.path == "/v1/games/gota/run": "POST" else: "GET"
-    if request.path notin ["/healthz", "/docs/llms.txt", "/docs/run.md", "/v1/games/gota/run"]:
+    if request.path notin ["/", "/v1/metrics", "/healthz", "/docs/llms.txt", "/docs/run.md", "/v1/games/gota/run"]:
       reject(404, "Not found")
     if request.httpMethod != methodName:
+      httpStatus = 405
       request.respond(405, @[("Allow", methodName), ("X-Request-ID", requestId)], "Method not allowed\n")
       return
     case request.path
+    of "/":
+      request.respond(200, @[("Content-Type", "text/html; charset=utf-8"),
+        ("Cache-Control", "no-store")], Dashboard)
+    of "/v1/metrics":
+      let value = request.queryParams["minutes"]
+      if value notin ["", "15", "60", "1440"]: reject(400, "minutes must be 15, 60 or 1440")
+      request.respond(200, @[("Content-Type", "application/json"),
+        ("Cache-Control", "no-store")], $snapshot(if value == "": 60 else: parseInt(value)))
     of "/healthz": request.respond(200, body = "ok\n")
     of "/docs/llms.txt", "/docs/run.md":
       request.respond(200, @[("Content-Type", "text/plain; charset=utf-8")],
@@ -375,18 +409,23 @@ proc handleRequest(request: Request) {.gcsafe.} =
         if stopping.load(): reject(503, "Server shutting down")
         if activeRuns >= 16: reject(429, "Request queue is full; retry later")
         inc activeRuns
+        admissionChanged(1)
       defer:
-        withLock capacityLock: dec activeRuns
+        withLock capacityLock:
+          dec activeRuns
+          admissionChanged(-1)
         if stopping.load(): schedulerEvents.send SchedulerEvent(stopping: true)
       var input = parseRun(request.body)
       request.body = ""
       let count = input.numEpisodes
+      episodes = count
       logEvent(%*{"event": "request_accepted", "request_id": requestId, "num_episodes": count})
       let directory = createTempDir("fast-xp-", "")
       defer: removeDir(directory)
       let fetchStarted = getMonoTime()
       let players = stagePlayers(input, directory)
       let fetchMs = (getMonoTime() - fetchStarted).inMilliseconds
+      preparationMs = fetchMs
       let reply = cast[ptr Channel[GameResult]](allocShared0(sizeof(Channel[GameResult])))
       reply[].open()
       defer:
@@ -435,6 +474,8 @@ proc handleRequest(request: Request) {.gcsafe.} =
       if count > 1: entries["manifest.json"] = $manifest
       let archive = createZipArchive(entries)
       let zipMs = (getMonoTime() - zipStarted).inMilliseconds
+      packagingMs = zipMs
+      responseBytes = archive.len
       let elapsed = (getMonoTime() - started).inMilliseconds
       request.respond(200, @[("Content-Type", "application/zip"),
         ("Content-Disposition", "attachment; filename=gota.zip"),
@@ -455,7 +496,7 @@ proc handleRequest(request: Request) {.gcsafe.} =
     httpStatus = 500
     request.respond(500, @[("Content-Type", "application/json"), ("X-Request-ID", requestId)],
       "{\"error\":\"Internal server error\"}")
-  if httpStatus != 200:
+  if httpStatus != 200 and request.path notin ["/", "/v1/metrics"]:
     logEvent(%*{"event": "request_failed", "request_id": requestId, "status": httpStatus,
       "total_ms": (getMonoTime() - started).inMilliseconds})
 
@@ -470,6 +511,8 @@ when isMainModule:
   if host notin ["127.0.0.1", "::1", "localhost"] and getEnv("FAST_XP_TOKEN").len == 0:
     raise newException(ValueError, "Set FAST_XP_TOKEN before binding a non-loopback address")
   if not fileExists(worker): raise newException(ValueError, "Build gota_worker first: " & worker)
+  setCapacity(capacity)
+  createThread(metricsThread, collectMetrics)
   schedulerEvents.open()
   for i in 0 ..< capacity:
     workerJobs[i].open()
@@ -483,6 +526,7 @@ when isMainModule:
   server.serve(Port(port), host)
   stopping.store(true)
   schedulerEvents.send SchedulerEvent(stopping: true)
+  joinThread(metricsThread)
   joinThread(shutdownThread)
   joinThread(schedulerThread)
   for i in 0 ..< capacity:

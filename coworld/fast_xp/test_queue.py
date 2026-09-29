@@ -65,6 +65,10 @@ path("COGAME_SAVE_REPLAY_URI").write_bytes(str(seed).encode())
                     with response:
                         return response.status, response.read()
 
+                def metrics():
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/metrics?minutes=1440", timeout=2) as response:
+                        return json.load(response)
+
                 def records():
                     return [json.loads(line) for line in log.read_text().splitlines()]
 
@@ -87,6 +91,10 @@ path("COGAME_SAVE_REPLAY_URI").write_bytes(str(seed).encode())
                     assert len((root / "started").read_text().splitlines()) == 2
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz") as response:
                         assert response.status == 200
+                    m = metrics()
+                    assert m["running"] == 2 and m["queued"] == 9, m
+                    assert m["admitted_requests"] == 2 and m["worker_limit"] == 2
+                    assert m["oldest_queue_ms"] > 0
                     gate.unlink()
                     assert first.result()[0] == second.result()[0] == 200
                 order = [int(line) for line in (root / "started").read_text().splitlines()]
@@ -100,12 +108,18 @@ path("COGAME_SAVE_REPLAY_URI").write_bytes(str(seed).encode())
                     assert "games/002/replay.replay" not in archive.namelist()
                 with ThreadPoolExecutor(max_workers=10) as pool:
                     assert all(r[0] == 200 for r in pool.map(call, range(600, 610)))
+                wait_for(lambda: metrics()["running"] == 0 and metrics()["admitted_requests"] == 0)
+                m = metrics()
+                assert m["successful_games"] == 23 and m["failed_games"] == 1, m
+                assert m["single_request"]["count"] == 11 and m["batch_request"]["count"] == 2
+                assert m["queue"]["count"] == 23 and m["worker"]["count"] == 23
                 # Exercise the real execution deadline and process termination.
                 if "--skip-deadline" not in sys.argv:
                     began = time.monotonic()
                     timeout_status, timeout_body = call(999)
                     assert timeout_status == 504, (timeout_status, timeout_body)
                     assert 120 <= time.monotonic() - began < 130
+                    assert metrics()["timeouts"] == 1
                 gate.touch()
                 before = len((root / "started").read_text().splitlines())
                 with ThreadPoolExecutor(max_workers=1) as pool:
@@ -119,6 +133,10 @@ path("COGAME_SAVE_REPLAY_URI").write_bytes(str(seed).encode())
                     with zipfile.ZipFile(io.BytesIO(data)) as archive:
                         statuses = [g["http_status"] for g in json.loads(archive.read("manifest.json"))["games"]]
                         assert statuses.count(200) == 2 and statuses.count(503) == 8, statuses
+                    m = metrics()
+                    assert m["queued"] == 0 and m["running"] == 0
+                    assert m["failed_games"] == 9 + ("--skip-deadline" not in sys.argv)
+                    assert sum(g["status"] == 503 for g in m["recent_games"]) == 8
                 exit_code = process.wait(timeout=10)
                 assert exit_code == 0, (exit_code, log.read_text())
                 assert not list(root.glob("fast-xp-*")), "Temporary results leaked"

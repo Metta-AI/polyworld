@@ -150,3 +150,10 @@ treating the response as a ZIP.
 
 GET `/healthz` returns `ok`. This document is sufficient to make a request;
 [run.md](run.md) contains additional reference details.
+
+## Server performance
+
+Open `/` for the live dashboard. `GET /v1/metrics?minutes=60` returns the same
+metrics as JSON (supported windows: 15, 60, 1440 minutes). History is held in
+memory for 24 hours and resets on restart. Request durations measure server
+processing, excluding client upload/download. No bot sources or logs are exposed.

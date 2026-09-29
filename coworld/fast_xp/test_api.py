@@ -155,6 +155,11 @@ def main():
                         time.sleep(0.1)
                 else:
                     raise AssertionError("Server did not start")
+                assert call("/")[0] == 200
+                assert b"color-scheme:dark" in call("/")[2]
+                assert call("/v1/metrics?minutes=1440")[0] == 200
+                assert call("/v1/metrics?minutes=1")[0] == 400
+                assert call("/v1/metrics", method="POST")[0] == 405
                 route = "/v1/games/gota/run"
                 assert call("/docs/llms.txt")[0] == 200
                 assert b"run.md" in call("/docs/llms.txt")[2]
@@ -246,6 +251,10 @@ def main():
                         assert call("/healthz")[0] == 200
                         status, headers, _ = call(route, body)
                         assert status == 429 and headers["Retry-After"] == "5"
+                        status, _, payload = call("/v1/metrics")
+                        assert status == 200
+                        m = json.loads(payload)
+                        assert m["admitted_requests"] == 16 and m["rejected_requests"] >= 1
                     finally:
                         PolicyService.hold.set()
                     assert all(future.result()[0] == 200 for future in futures)
@@ -362,6 +371,12 @@ def main():
                 assert "slot 0" in json.loads(data)["error"]
                 assert call("/healthz")[0] == 200
                 assert not list(Path(directory).glob("fast-xp-*")), "Leaked match files"
+                m = json.loads(call("/v1/metrics")[2])
+                assert m["cache_hits"] > 0 and m["cache_misses"] > 0
+                assert m["failed_games"] > 0
+                encoded = json.dumps(m)
+                for private in ["fake-observatory-token", "private-opponent", "download_url", "source", "policy_ref"]:
+                    assert private not in encoded
             except BaseException:
                 print(Path(log.name).read_text())
                 raise

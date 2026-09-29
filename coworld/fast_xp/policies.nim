@@ -1,6 +1,6 @@
 import
   std/[httpclient, json, locks, net, os, strutils, tempfiles, uri],
-  crunchy
+  crunchy, metrics
 import polyworld/policies as policyPackages
 
 type
@@ -94,8 +94,10 @@ proc fetchPolicyBytes*(policyRef: string): string =
       if getFileSize(path) == size:
         let cached = readFile(path)
         if sourceHash(cached) == digest:
+          cacheLookup(true)
           return cached
       removeFile(path)
+    cacheLookup(false)
     # Never forward the Observatory bearer token or elevation header to S3.
     let artifact = fetch(downloadUrl, newHttpHeaders())
     if artifact.code != Http200:

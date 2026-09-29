@@ -63,10 +63,32 @@ and its bundled resources; Gota still limits BASIC source to 64 KiB. Native neur
 runners consume the model files without a player container. HTTP fetches have a 10-second socket timeout and do not follow
 redirects. Artifact downloads never carry the Observatory authorization headers.
 
+## Dashboard
+
+Open `/` for the dark performance dashboard. `GET /v1/metrics?minutes=60`
+returns its JSON data; supported windows are 15, 60 and 1440 minutes. The hosted
+service uses Tailscale access, with no additional caller token.
+
+Counters and latency histograms use fixed one-minute buckets, and host samples
+are collected every five seconds. Both retain 24 hours in memory, resetting on
+restart; the latest 100 game outcomes are retained for at most 24 hours. Chart
+responses return at most 1441 host samples. Percentiles are approximate upper
+bounds from 25%-wide histogram buckets. Successful single-request, batch-request,
+and game durations are separate; failures and timeouts have their own counters.
+A batch returning HTTP 200 can still contain failed games.
+
+Request time excludes client upload/download. Preparation includes policy lookup,
+artifact fetching and staging. Game execution includes subprocess startup and
+artifact generation, not just simulation ticks. Memory is the service's cgroup
+usage, including child workers; CPU is host utilization. Unsupported host counters
+appear as unavailable. The dashboard does not alter worker counts or save metrics
+to disk. It exposes no policy names, bot contents, logs, credentials or artifact URLs.
+
 ## Checks
 
 ```sh
 nix develop .. --command nim check coworld/fast_xp/server.nim
+nix develop .. --command nim r coworld/fast_xp/test_metrics.nim
 nix develop .. --command python3 coworld/fast_xp/test_api.py
 nix develop .. --command python3 coworld/fast_xp/test_queue.py
 ```
