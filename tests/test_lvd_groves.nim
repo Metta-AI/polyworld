@@ -46,7 +46,7 @@ for seed in [2026, 42, 73]:
   doAssert rockTiles.len > map.forestRocks.len
   doAssert rockTiles.len <= map.forestRocks.len + 80
   doAssert map.forestRocks.len ==
-    ((treeTiles.len + map.forestRocks.len) div 2 div 10) * 2
+    (treeTiles.len + map.forestRocks.len) div 10
   doAssert wood == map.treeWood
   echo seed, ": ", treeTiles.len, " trees, ", rockTiles.len, " rocks"
 
