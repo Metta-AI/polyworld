@@ -1,7 +1,7 @@
 ## Cold/warm full-match benchmark. Credentials use the server's environment variables.
-import std/[algorithm, asyncdispatch, httpclient, json, monotimes, os, osproc,
+import std/[algorithm, json, monotimes, os, osproc,
   parseopt, sequtils, sets, strtabs, strutils, tables, times]
-import crunchy, fastxpfixtures
+import crunchy, curly, fastxpfixtures
 import ../coworld/fast_xp/policies
 
 const
@@ -15,7 +15,7 @@ proc median(values: seq[float]): float =
   let ordered = values.sorted()
   (ordered[(ordered.len - 1) div 2] + ordered[ordered.len div 2]) / 2
 
-proc run() {.async.} =
+proc run() =
   var output, expected, cpu: string
   var repetitions = 3
   for kind, key, value in getopt():
@@ -57,10 +57,10 @@ proc run() {.async.} =
   for _ in 0 ..< 100:
     doAssert process.running(), "Benchmark server exited; see server.log"
     try:
-      ready = (await call(base, "/healthz")).status == 200
+      ready = (call(base, "/healthz")).status == 200
     except CatchableError: discard
     if ready: break
-    await sleepAsync(100)
+    sleep(100)
   doAssert ready, "Server did not become ready"
   let body = %*{"seed": 743478993, "config": {"max_ticks": 28800}, "roster": [
     {"slot": 0, "player": {"source": source}}, {"player": {"policy_ref": Policy}}]}
@@ -69,7 +69,7 @@ proc run() {.async.} =
     for mode in ["cold", "warm"]:
       if mode == "cold" and dirExists(root / "policies"): removeDir(root / "policies")
       let started = getMonoTime()
-      let response = await call(base, RunRoute, body)
+      let response = call(base, RunRoute, body)
       let wall = float((getMonoTime() - started).inMicroseconds) / 1_000_000
       doAssert response.status == 200, "Benchmark request failed: HTTP " & $response.status
       let files = archiveFiles(response.body, root)
@@ -103,4 +103,4 @@ proc run() {.async.} =
   writeFile(root / "summary.json", summary.pretty())
   echo summary.pretty()
 
-waitFor run()
+run()

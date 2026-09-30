@@ -1,6 +1,6 @@
-import std/[asyncdispatch, httpclient, json, monotimes, net, os, osproc,
+import std/[json, monotimes, net, os, osproc,
   strtabs, strutils, tables, tempfiles, times]
-import zippy/ziparchives
+import curly, zippy/ziparchives
 
 type TestResponse* = object
   status*: int
@@ -37,25 +37,31 @@ proc stop*(process: Process) =
   process.close()
 
 proc call*(base, path: string, body: JsonNode = nil, token = "",
-    httpMethod = HttpGet): Future[TestResponse] {.async.} =
-  let client = newAsyncHttpClient(maxRedirects = 0,
-    headers = newHttpHeaders({"Content-Type": "application/json", "Authorization": "Bearer " & token}))
+    httpMethod = "GET"): TestResponse =
+  let client = newCurly()
   defer: client.close()
-  let request = client.request(base & path,
-    httpMethod = (if body == nil: httpMethod else: HttpPost),
-    body = (if body == nil: "" else: $body))
-  if not await request.withTimeout(150_000):
-    raise newException(IOError, "Test HTTP request timed out")
-  let response = await request
-  let content = response.body
-  if not await content.withTimeout(150_000):
-    raise newException(IOError, "Test HTTP response timed out")
-  return TestResponse(status: int(response.code), headers: response.headers, body: await content)
+  let response = client.makeRequest(
+    (if body == nil: httpMethod else: "POST"), base & path,
+    @[("Content-Type", "application/json"), ("Authorization", "Bearer " & token)],
+    (if body == nil: "" else: $body), timeout = 150)
+  TestResponse(status: response.code, headers: response.headers, body: response.body)
 
-proc metrics*(base: string): Future[JsonNode] {.async.} =
-  let response = await call(base, "/v1/metrics?minutes=1440")
+proc startCall*(base, path: string, body: JsonNode, token = ""): Curly =
+  result = newCurly()
+  result.startRequest("POST", base & path,
+    @[("Content-Type", "application/json"), ("Authorization", "Bearer " & token)],
+    $body, timeout = 150)
+
+proc finish*(client: Curly): TestResponse =
+  defer: client.close()
+  let (response, error) = client.waitForResponse()
+  if error.len > 0: raise newException(IOError, error)
+  TestResponse(status: response.code, headers: response.headers, body: response.body)
+
+proc metrics*(base: string): JsonNode =
+  let response = call(base, "/v1/metrics?minutes=1440")
   doAssert response.status == 200
-  return parseJson(response.body)
+  parseJson(response.body)
 
 proc archiveFiles*(bytes, root: string): OrderedTable[string, string] =
   let (file, path) = createTempFile("response-", ".zip", root)
@@ -79,7 +85,7 @@ template waitUntil*(condition: untyped, process: Process, log: string, timeoutMs
     while not (condition):
       doAssert process.running(), readFile(log)
       doAssert (getMonoTime() - began).inMilliseconds < timeoutMs, readFile(log)
-      await sleepAsync(20)
+      sleep(20)
 
 proc assertNoMatchFiles*(root: string) =
   for kind, path in walkDir(root):

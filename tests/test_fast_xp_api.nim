@@ -1,6 +1,6 @@
-import std/[asyncdispatch, base64, httpclient, json, locks, monotimes, os, osproc,
+import std/[base64, json, locks, monotimes, os, osproc,
   posix, sequtils, sets, strtabs, strutils, tables, tempfiles, times]
-import crunchy, mummy
+import crunchy, mummy, curly
 import neuralfixtures
 import fastxpfixtures
 
@@ -99,7 +99,7 @@ proc lineCount(path: string): int =
     for line in lines(path):
       if line.len > 0: inc result
 
-proc run() {.async.} =
+proc run() =
   let root = createTempDir("api-test-", "")
   defer: removeDir(root)
   let port = unusedPort()
@@ -127,23 +127,23 @@ proc run() {.async.} =
   waitUntil(records(log).anyIt(it["event"].getStr() == "server_started"), process, log)
   var mockReady = false
   waitUntil((block:
-    try: mockReady = (await call(mockBase, "/healthz")).status == 200
-    except IOError, OSError: discard
+    try: mockReady = (call(mockBase, "/healthz")).status == 200
+    except CatchableError: discard
     mockReady), mock, mockLog)
   proc api(path: string, body: JsonNode = nil, token = "test-token",
-      httpMethod = HttpGet): Future[TestResponse] =
+      httpMethod = "GET"): TestResponse =
     call(base, path, body, token, httpMethod)
-  doAssert (await api("/")).status == 200
-  doAssert "color-scheme:dark" in (await api("/")).body
-  doAssert (await api("/v1/metrics?minutes=1440")).status == 200
-  doAssert (await api("/v1/metrics?minutes=1")).status == 400
-  doAssert (await api("/v1/metrics", httpMethod = HttpPost)).status == 405
-  doAssert (await api("/docs/llms.txt")).status == 200
-  doAssert "run.md" in (await api("/docs/llms.txt")).body
-  doAssert "policy" in (await api("/docs/run.md")).body
-  doAssert (await api("/unknown")).status == 404
-  doAssert (await api(RunRoute)).status == 405
-  doAssert (await api(RunRoute, %*{}, token = "wrong")).status == 401
+  doAssert (api("/")).status == 200
+  doAssert "color-scheme:dark" in (api("/")).body
+  doAssert (api("/v1/metrics?minutes=1440")).status == 200
+  doAssert (api("/v1/metrics?minutes=1")).status == 400
+  doAssert (api("/v1/metrics", httpMethod = "POST")).status == 405
+  doAssert (api("/docs/llms.txt")).status == 200
+  doAssert "run.md" in (api("/docs/llms.txt")).body
+  doAssert "policy" in (api("/docs/run.md")).body
+  doAssert (api("/unknown")).status == 404
+  doAssert (api(RunRoute)).status == 405
+  doAssert (api(RunRoute, %*{}, token = "wrong")).status == 401
   let body = %*{"seed": 743478993, "config": {"max_ticks": 240},
     "roster": [{"player": {"policy_ref": "relh:v231"}, "slot": -1}]}
   var invalids: seq[JsonNode]
@@ -162,14 +162,14 @@ proc run() {.async.} =
     invalids.add body.withField("roster", %*[{"player": {"policy_ref": "x:v1"}, "slot": slot}])
   invalids.add body.withField("roster", %*[
     {"player": {"policy_ref": "x:v1"}, "slot": 0}, {"player": {"policy_ref": "x:v1"}, "slot": 0}])
-  for invalid in invalids: doAssert (await api(RunRoute, invalid)).status == 400, $invalid
+  for invalid in invalids: doAssert (api(RunRoute, invalid)).status == 400, $invalid
   let mixed = %*[{"player": source("mine"), "slot": 0},
     {"player": {"policy_ref": "relh:v231"}, "slot": -1}]
   let cache = root / "policies"
   let hash = digest(originalSource)
   for roster in [mixed, body["roster"], %*[{"player": {"policy_ref": "109b99c1-3bb7-4276-b17e-378b43a97874"}}]]:
     let before = lineCount(root / "lookups")
-    let response = await api(RunRoute, body.withField("roster", roster))
+    let response = api(RunRoute, body.withField("roster", roster))
     doAssert response.status == 200, response.body
     doAssert lineCount(root / "lookups") == before + 1
     let files = archiveFiles(response.body, root)
@@ -183,10 +183,10 @@ proc run() {.async.} =
   doAssert getFilePermissions(cache) == {fpUserRead, fpUserWrite, fpUserExec}
   doAssert getFilePermissions(cache / hash) == {fpUserRead, fpUserWrite}
   writeFile(root / "deny", "")
-  doAssert (await api(RunRoute, body)).status == 502
+  doAssert (api(RunRoute, body)).status == 502
   removeFile(root / "deny")
   writeFile(cache / hash, "corrupt")
-  doAssert (await api(RunRoute, body)).status == 200
+  doAssert (api(RunRoute, body)).status == 200
   doAssert lineCount(root / "downloads") == 2
   doAssert readFile(cache / hash) == originalSource
   for (reference, expected) in [("missing:v1", 404), ("invalid:v1", 400), ("nofile:v1", 409),
@@ -195,7 +195,7 @@ proc run() {.async.} =
       ("oversize:v1", 502), ("download-fails:v1", 502), ("redirect:v1", 502),
       ("lookup-redirect:v1", 502), ("slow:v1", 504), ("broken:v1", 422)]:
     removeFile(cache / hash)
-    let response = await api(RunRoute, body.withField("roster", %*[{"player": {"policy_ref": reference}}]))
+    let response = api(RunRoute, body.withField("roster", %*[{"player": {"policy_ref": reference}}]))
     doAssert response.status == expected, reference & ": " & $response.status & " " & response.body
     for secret in ["private-compile-secret", "upstream response bodies", "fake-observatory-token"]:
       doAssert secret notin response.body
@@ -206,19 +206,19 @@ proc run() {.async.} =
   writeFile(root / "hold", "")
   let beforeDownloads = lineCount(root / "downloads")
   let beforeLookups = lineCount(root / "lookups")
-  var pending: seq[Future[TestResponse]]
-  for _ in 0 ..< 16: pending.add api(RunRoute, body)
+  var pending: seq[Curly]
+  for _ in 0 ..< 16: pending.add startCall(base, RunRoute, body, "test-token")
   try:
     waitUntil(fileExists(root / "entered"), process, log, 5000)
     waitUntil(lineCount(root / "lookups") >= beforeLookups + 16, process, log, 5000)
     doAssert lineCount(root / "lookups") == beforeLookups + 16
-    doAssert (await api("/healthz")).status == 200
-    let overflow = await api(RunRoute, body)
+    doAssert (api("/healthz")).status == 200
+    let overflow = api(RunRoute, body)
     doAssert overflow.status == 429 and overflow.headers["Retry-After"] == "5"
-    let m = await metrics(base)
+    let m = metrics(base)
     doAssert m["admitted_requests"].getInt() == 16 and m["rejected_requests"].getInt() >= 1
   finally: removeFile(root / "hold")
-  for future in pending: doAssert (await future).status == 200
+  for request in pending: doAssert (finish(request)).status == 200
   doAssert lineCount(root / "downloads") == beforeDownloads + 1
   doAssert lineCount(root / "failures") == 0
   doAssert "fake-observatory-token" notin readFile(log)
@@ -226,7 +226,7 @@ proc run() {.async.} =
   writeFile(root / "source", package)
   let packageRoster = %*[{"slot": 0, "player": {"policy_ref": "package:v1"}},
     {"player": {"source": "end"}}]
-  let packaged = await api(RunRoute, body.withField("roster", packageRoster))
+  let packaged = api(RunRoute, body.withField("roster", packageRoster))
   doAssert packaged.status == 200, packaged.body
   doAssert readFile(cache / digest(package)) == package
   var packageNames = ["replay.replay"].toHashSet()
@@ -237,7 +237,7 @@ proc run() {.async.} =
   let uploaded = %*{"package_base64": encode(upload)}
   let uploadRoster = %*[{"slot": 0, "player": uploaded},
     {"slot": 5, "player": source("inline-seat")}, {"player": {"policy_ref": "package:v1"}}]
-  let response = await api(RunRoute, body.withField("roster", uploadRoster))
+  let response = api(RunRoute, body.withField("roster", uploadRoster))
   doAssert response.status == 200, response.body
   let files = archiveFiles(response.body, root)
   doAssert files.names() == ["replay.replay", "logs/slot-0.txt", "logs/slot-5.txt"].toHashSet()
@@ -246,21 +246,21 @@ proc run() {.async.} =
   for player in [%*{"package_base64": "!invalid!"}, %*{"package_base64": "ZW5k"},
       %*{"package_base64": 1}, %*{"package_base64": ""},
       uploaded.withField("source", %"end"), uploaded.withField("policy_ref", %"package:v1")]:
-    doAssert (await api(RunRoute, body.withField("roster", %*[{"player": player}]))).status == 400
+    doAssert (api(RunRoute, body.withField("roster", %*[{"player": player}]))).status == 400
   let tooLarge = encode("PK\x03\x04" & repeat('x', 16 * 1024 * 1024 - 3))
-  doAssert (await api(RunRoute, body.withField("roster",
+  doAssert (api(RunRoute, body.withField("roster",
     %*[{"player": {"package_base64": tooLarge}}]))).status == 413
   for files in [@[("../escape.bas", "end")], @[("a.bas", "end"), ("b.bas", "end")],
       @[("data.bin", "x")], @[("policy.bas", "if\n")]]:
     let player = %*{"package_base64": encode(zipFixture(files))}
-    doAssert (await api(RunRoute, body.withField("roster", %*[{"player": player}]))).status == 422
+    doAssert (api(RunRoute, body.withField("roster", %*[{"player": player}]))).status == 422
   let batch = body.withField("num_episodes", %3).withField("roster", %*[
     {"slot": 0, "player": source("pinned")}, {"player": source("moving")},
     {"player": {"policy_ref": "package:v1"}}])
   var hashes: seq[seq[string]]
   let before = lineCount(root / "lookups")
   for _ in 0 ..< 2:
-    let response = await api(RunRoute, batch)
+    let response = api(RunRoute, batch)
     doAssert response.status == 200, response.body
     let files = archiveFiles(response.body, root)
     let manifest = parseJson(files["manifest.json"])
@@ -294,7 +294,7 @@ proc run() {.async.} =
     {"player": source("open-a")}, {"player": source("open-b")}],
     @["open-a", "open-b", "open-a", "open-b", "open-a", "pinned", "open-b", "open-a", "open-b", "open-a"])
   for (roster, markers) in rosters:
-    let response = await api(RunRoute, body.withField("roster", roster))
+    let response = api(RunRoute, body.withField("roster", roster))
     doAssert response.status == 200, response.body
     doAssert response.headers["Content-Type"] == "application/zip"
     doAssert response.headers["Cache-Control"] == "no-store"
@@ -306,11 +306,11 @@ proc run() {.async.} =
     for slot, marker in markers:
       let output = files["logs/slot-" & $slot & ".txt"]
       doAssert marker in output and "completed" in output and "BASIC error" notin output
-  let broken = await api(RunRoute, body.withField("roster", %*[{"player": {"source": "if\n"}}]))
+  let broken = api(RunRoute, body.withField("roster", %*[{"player": {"source": "if\n"}}]))
   doAssert broken.status == 422 and "slot 0" in parseJson(broken.body)["error"].getStr()
-  doAssert (await api("/healthz")).status == 200
+  doAssert (api("/healthz")).status == 200
   assertNoMatchFiles(root)
-  let m = await metrics(base)
+  let m = metrics(base)
   doAssert m["cache_hits"].getInt() > 0 and m["cache_misses"].getInt() > 0
   doAssert m["failed_games"].getInt() > 0
   for private in ["fake-observatory-token", "private-opponent", "download_url", "source", "policy_ref"]:
@@ -321,4 +321,4 @@ if existsEnv("COGAME_CONFIG_URI"):
 elif paramCount() > 0 and paramStr(1) == "--mock":
   newServer(mockRequest, workerThreads = 24).serve(Port(parseInt(paramStr(3))), "127.0.0.1")
 else:
-  waitFor run()
+  run()
