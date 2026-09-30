@@ -1,6 +1,8 @@
-import std/[json, monotimes, os, osproc, sequtils,
-  strtabs, strutils, tables, tempfiles, times, uri]
-import curly, fastxpfixtures
+import
+  std/[json, monotimes, os, osproc, sequtils, strtabs, strutils, tables,
+    tempfiles, times, uri],
+  curly,
+  ./fastxpfixtures
 
 proc worker() =
   let root = getTempDir()

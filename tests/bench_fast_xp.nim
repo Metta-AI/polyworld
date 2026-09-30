@@ -1,8 +1,11 @@
 ## Cold/warm full-match benchmark. Credentials use the server's environment variables.
-import std/[algorithm, json, monotimes, os, osproc,
-  parseopt, sequtils, sets, strtabs, strutils, tables, times]
-import crunchy, curly, fastxpfixtures
-import ../coworld/fast_xp/policies
+import
+  std/[algorithm, json, monotimes, os, osproc, parseopt, sequtils, sets,
+    strtabs, strutils, tables, times],
+  crunchy,
+  curly,
+  ./fastxpfixtures,
+  ../coworld/fast_xp/policies
 
 const
   Policy = "109b99c1-3bb7-4276-b17e-378b43a97874"

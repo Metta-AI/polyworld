@@ -1,6 +1,7 @@
-import std/[json, monotimes, net, os, osproc,
-  strtabs, strutils, tables, tempfiles, times]
-import curly, zippy/ziparchives
+import
+  std/[json, monotimes, net, os, osproc, strtabs, strutils, tables, tempfiles, times],
+  curly,
+  zippy/ziparchives
 
 type TestResponse* = object
   status*: int

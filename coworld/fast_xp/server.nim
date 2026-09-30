@@ -3,8 +3,8 @@ import
     tempfiles, times, uri, posix],
   mummy,
   zippy/ziparchives,
-  policies, metrics
-import polyworld/policies as policyPackages
+  polyworld/policies as policyPackages,
+  ./[policies, metrics]
 
 type
   PlayerKind* = enum

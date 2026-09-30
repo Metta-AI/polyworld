@@ -1,7 +1,8 @@
 import
   std/[httpclient, json, locks, net, os, strutils, tempfiles, uri],
-  crunchy, metrics
-import polyworld/policies as policyPackages
+  crunchy,
+  polyworld/policies as policyPackages,
+  ./metrics
 
 type
   RunError* = object of CatchableError

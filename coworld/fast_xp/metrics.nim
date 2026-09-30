@@ -1,4 +1,5 @@
-import std/[json, locks, math, monotimes, os, posix, strutils, times]
+import
+  std/[json, locks, math, monotimes, os, posix, strutils, times]
 
 type
   Histogram = array[96, uint64]
