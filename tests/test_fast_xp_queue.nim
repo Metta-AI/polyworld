@@ -13,7 +13,11 @@ proc worker() =
   started.writeLine(seed)
   started.close()
   while fileExists(root / "gate"): sleep(10)
-  if seed == 999: sleep(180_000)
+  if seed == 998: quit(2)
+  if seed == 999:
+    let child = startProcess(findExe("sleep"), args = @["180"], options = {})
+    writeFile(root / "descendant", $child.processID)
+    sleep(180_000)
   sleep(100)
   stdout.writeLine(repeat('x', 100_000))
   let seats = parseJson(readFile(path("COGAME_PLAYER_SEATS_URI")))
@@ -32,13 +36,14 @@ proc run() =
   let base = "http://127.0.0.1:" & $port
   let env = environment(root, port)
   env["FAST_XP_GOTA_WORKER"] = getAppFilename()
+  env["FAST_XP_PAINTBOT_WORKER"] = getAppFilename()
   let log = root / "server.log"
   let process = launch(ServerPath, log, env)
   defer:
     removeFile(root / "gate")
     stop(process)
   proc game(seed: int, count = 1): Curly =
-    startCall(base, RunRoute, %*{"seed": seed, "num_episodes": count,
+    startCall(base, "/v1/games/" & getEnv("FAST_XP_GAME", "gota") & "/run", %*{"seed": seed, "num_episodes": count,
       "roster": [{"player": {"source": "end"}}]})
   proc started(): seq[int] =
     if fileExists(root / "started"):
@@ -77,8 +82,15 @@ proc run() =
   let began = getMonoTime()
   let timedOut = finish(game(999))
   doAssert timedOut.status == 504, timedOut.body
-  doAssert (getMonoTime() - began).inMilliseconds in 120_000 ..< 130_000
+  let deadline = parseInt(getEnv("FAST_XP_EXECUTION_SECONDS", "120")) * 1000
+  doAssert (getMonoTime() - began).inMilliseconds in deadline ..< deadline + 10_000
+  let child = parseInt(readFile(root / "descendant"))
+  let stat = "/proc/" & $child & "/stat"
+  doAssert not fileExists(stat) or readFile(stat).split(')')[1].strip().startsWith("Z"),
+    "Timed-out worker left a running descendant"
   doAssert (metrics(base))["timeouts"].getInt() == 1
+  doAssert finish(game(998)).status == 500
+  doAssert finish(game(997)).status == 200
   writeFile(root / "gate", "")
   let before = started().len
   let pending = game(700, 10)
@@ -93,7 +105,7 @@ proc run() =
   doAssert statuses.count(200) == 2 and statuses.count(503) == 8, $statuses
   m = metrics(base)
   doAssert m["queued"].getInt() == 0 and m["running"].getInt() == 0
-  doAssert m["failed_games"].getInt() == 10
+  doAssert m["failed_games"].getInt() == 11
   doAssert toSeq(m["recent_games"].items).countIt(it["status"].getInt() == 503) == 8
   doAssert process.waitForExit(10_000) == 0, readFile(log)
   assertNoMatchFiles(root)

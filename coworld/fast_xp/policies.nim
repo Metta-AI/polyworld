@@ -1,8 +1,7 @@
 import
   std/[httpclient, json, locks, net, os, strutils, tempfiles, uri],
   crunchy,
-  polyworld/policies as policyPackages,
-  ./metrics
+  ./[metrics, games]
 
 type
   RunError* = object of CatchableError
@@ -80,8 +79,8 @@ proc fetchPolicyBytes*(policyRef: string): string =
   except CatchableError:
     reject(502, "Observatory returned invalid policy metadata")
   if digest.len != 64 or digest.find(AllChars - {'0'..'9', 'a'..'f'}) >= 0 or
-      size < 1 or size > policyPackages.MaxPackageBytes:
-    reject(502, "Policy metadata is invalid or exceeds the game's 16 MiB package limit")
+      size < 1 or size > packageLimit():
+    reject(502, "Policy metadata is invalid or exceeds the selected game package limit")
   validateUrl(downloadUrl)
   let
     cache = getEnv("FAST_XP_CACHE_DIR", getCacheDir() / "polyworld-fast-xp" / "policies")

@@ -1,6 +1,6 @@
 # Fast XP server
 
-A synchronous Mummy API for Gota. Send `player.source` for BASIC text, `player.package_base64` for a ZIP upload,
+A synchronous Mummy API for Gota or Paintbot. Send `player.source` for BASIC text, `player.package_base64` for a ZIP upload,
 and `player.policy_ref` for submitted opponents (exact `name:vN` or version UUID).
 The native worker returns a replay and logs only for uploaded seats.
 
@@ -32,6 +32,10 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 - `FAST_XP_WORKERS`: simultaneous game processes, default `2`, range 1–256; the hosted VM uses six. Up to 16 requests may be admitted, using 24 HTTP threads.
 - `FAST_XP_TOKEN`: bearer token for callers of this server; required for non-loopback binding.
 - `FAST_XP_GOTA_WORKER`: executable path, default `gota_worker` beside server.
+- `FAST_XP_GAME`: `gota` (default) or `paintbot-pw`. Enables that game's route and documentation.
+- `FAST_XP_PAINTBOT_WORKER`: Paintbot executable path, default `paintbot_worker` beside server.
+- `FAST_XP_EXECUTION_SECONDS`: per-game deadline excluding queue time, default 120 for Gota or 300 for Paintbot; range 1–3600.
+- `FAST_XP_BUILD_REVISION`: release identifier shown in dashboard metadata and startup logs.
 - `FAST_XP_OBSERVATORY_URL`: API root, default `https://softmax.com/api/observatory`.
 - `FAST_XP_OBSERVATORY_TOKEN`: server-side credential for policy downloads, separate from `FAST_XP_TOKEN`.
 - `FAST_XP_OBSERVATORY_ELEVATED`: `1` for personal team tokens, unset for scoped machine credentials.
@@ -108,6 +112,41 @@ loading, neural runners and scoring rather than maintaining a separate game path
 Build with the committed dependency versions. For an isolated build, set
 `POLYWORLD_DEPS` to a dedicated directory and run
 `nim r coworld/tools/sync_dependencies.nim` in the workspace Nix shell first.
+
+## Paintbot
+
+Build `coworld/paintbot/paintbot_worker.nim` in the separate `paintbot-pw`
+checkout using that repository's pinned dependencies. Its ZIP reader requires
+libarchive development headers and libraries (included in the workspace Nix shell).
+Do not point both builds at a dependency directory whose revisions differ.
+
+```sh
+# In paintbot-pw, with its dependencies selected:
+nim c coworld/paintbot/paintbot_worker.nim
+nim c coworld/paintbot/replay_check.nim
+# In polyworld:
+nim c coworld/fast_xp/server.nim
+FAST_XP_GAME=paintbot-pw FAST_XP_PAINTBOT_WORKER=../paintbot-pw/coworld/paintbot/paintbot_worker coworld/fast_xp/server
+```
+
+Paintbot uses 16 interleaved team seats, 14,400 ticks by default and a 300-second
+execution deadline. It runs without the hosted Python bridge or a container.
+Oracle calls are unavailable. Raw BASIC and neural ZIPs use Paintbot's own limits
+and native validation; initialization failures forfeit that seat. The API retains
+the same batch, queue and private-log rules. See [Paintbot requests](docs/paintbot-llms.txt).
+
+The staging deployment starts with two workers on a c8a.xlarge. Its memory limit
+is 6 GiB; its systemd stop timeout is 360 seconds so active games can drain.
+`gameplay` in Server-Timing measures the Paintbot tick loop, including bot
+execution and replay-frame recording. It excludes initialization and final artifact
+writing. The JSON game log and batch manifest expose the same `gameplay_ms` count.
+
+`nim r tests/bench_paintbot.nim --output:NEW_DIRECTORY` compares a direct native
+match with three local API runs. It checks replay bytes and every recorded state
+hash. Add `--url:https://SERVER` to benchmark a deployed server, `--package:FILE`
+for a neural ZIP, or `--opponent:POLICY_VERSION_UUID` for a submitted opponent.
+The results directory contains inputs, timings and response ZIPs. These commands
+require the two Paintbot executables above and use the sibling checkout by default.
 
 ## Batches, queue and logs
 

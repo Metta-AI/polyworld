@@ -4,7 +4,7 @@ import
   mummy,
   zippy/ziparchives,
   polyworld/policies as policyPackages,
-  ./[policies, metrics]
+  ./[policies, metrics, games]
 
 type
   PlayerKind* = enum
@@ -29,7 +29,7 @@ type
   GameResult = object
     index, seed, status, activeBots: int
     directory, error: string
-    queueMs, workerMs: int64
+    queueMs, workerMs, gameplayMs: int64
     roster: seq[int]
   GameJob = object
     requestId, directory: string
@@ -45,13 +45,12 @@ type
     stopping: bool
 
 const
-  SeatCount = 10
   MaxTicks = 28800
-  MaxBodyBytes = 224 * 1024 * 1024 # Ten 16 MiB artifacts encoded as base64 plus JSON.
-  MaxEncodedPackageBytes = ((policyPackages.MaxPackageBytes + 2) div 3) * 4
   Dashboard = staticRead("dashboard.html")
   Instructions = staticRead("docs/llms.txt")
   RunGuide = staticRead("docs/run.md")
+  PaintbotInstructions = staticRead("docs/paintbot-llms.txt")
+  PaintbotGuide = staticRead("docs/paintbot-run.md")
 
 var
   capacityLock: Lock
@@ -106,15 +105,15 @@ proc parseRun*(body: string): RunInput =
     else: 1
   if int64(result.seed) + result.numEpisodes - 1 > int32.high:
     reject(400, "Batch seeds exceed the signed 32-bit range")
-  result.maxTicks = MaxTicks
+  result.maxTicks = defaultTicks()
   if node.hasKey("config"):
     checkFields(node["config"], ["max_ticks"])
     if node["config"].hasKey("max_ticks"):
       result.maxTicks = integer(node["config"], "max_ticks", 1, MaxTicks)
   if not node.hasKey("roster") or node["roster"].kind != JArray or
-      node["roster"].len == 0 or node["roster"].len > SeatCount:
-    reject(400, "roster must contain 1–10 entries")
-  var pinned: set[0 .. SeatCount - 1]
+      node["roster"].len == 0 or node["roster"].len > seatCount():
+    reject(400, "roster exceeds the selected game seat count")
+  var pinned: set[0 .. 15]
   var hasOpenSeatSelector = false
   for entry in node["roster"]:
     checkFields(entry, ["player", "slot"])
@@ -133,7 +132,7 @@ proc parseRun*(body: string): RunInput =
     if value.strip().len == 0 or '\0' in value:
       reject(400, field & " must be nonempty and contain no NUL characters")
     let slot = if entry.hasKey("slot"):
-        integer(entry, "slot", -1, SeatCount - 1)
+        integer(entry, "slot", -1, seatCount() - 1)
       else: -1
     if slot >= 0:
       if slot in pinned:
@@ -143,17 +142,18 @@ proc parseRun*(body: string): RunInput =
       hasOpenSeatSelector = true
     case field
     of "source":
+      if value.len > sourceLimit(): reject(413, "BASIC source exceeds the game source limit")
       result.roster.add RosterEntry(kind: InlineSource, source: value, slot: slot)
     of "package_base64":
-      if value.len > MaxEncodedPackageBytes:
-        reject(413, "Uploaded package exceeds 16 MiB")
+      if value.len > ((packageLimit() + 2) div 3) * 4:
+        reject(413, "Uploaded package exceeds the game package limit")
       var bytes: string
       try:
         bytes = decode(value)
       except ValueError:
         reject(400, "package_base64 must be standard padded base64 without whitespace")
-      if bytes.len > policyPackages.MaxPackageBytes:
-        reject(413, "Uploaded package exceeds 16 MiB")
+      if bytes.len > packageLimit():
+        reject(413, "Uploaded package exceeds the game package limit")
       if encode(bytes) != value:
         reject(400, "package_base64 must be standard padded base64 without whitespace")
       if not policyPackages.isPackage(bytes):
@@ -161,7 +161,7 @@ proc parseRun*(body: string): RunInput =
       result.roster.add RosterEntry(kind: UploadedPackage, packageBytes: bytes, slot: slot)
     else:
       result.roster.add RosterEntry(kind: PolicyReference, policyRef: value, slot: slot)
-  if pinned.len < SeatCount and not hasOpenSeatSelector:
+  if pinned.len < seatCount() and not hasOpenSeatSelector:
     reject(400, "Unfilled seats require a roster entry with slot -1")
 
 proc stagePlayers(input: RunInput, directory: string): seq[StagedPlayer] =
@@ -184,13 +184,13 @@ proc stagePlayers(input: RunInput, directory: string): seq[StagedPlayer] =
 
 proc seatPlayers(players: seq[StagedPlayer], index: int): seq[int] =
   ## Matches Observatory's per-episode rotation of unpinned entries.
-  result = newSeq[int](SeatCount)
-  for slot in 0 ..< SeatCount: result[slot] = -1
+  result = newSeq[int](seatCount())
+  for slot in 0 ..< seatCount(): result[slot] = -1
   var openEntries, openSlots: seq[int]
   for i, player in players:
     if player.slot >= 0: result[player.slot] = i
     else: openEntries.add i
-  for slot in 0 ..< SeatCount:
+  for slot in 0 ..< seatCount():
     if result[slot] < 0: openSlots.add slot
   if openSlots.len > 0:
     let shift = index mod openSlots.len
@@ -214,7 +214,7 @@ proc waitForGame(process: Process, timeoutMs: int): int =
 proc executeGame(job: GameJob): GameResult =
   ## Runs one game; artifacts remain private until its request packages results.
   result = GameResult(index: job.index, seed: job.seed, status: 200,
-    directory: job.directory, activeBots: -1, roster: seatPlayers(job.players, job.index),
+    directory: job.directory, activeBots: -1, gameplayMs: -1, roster: seatPlayers(job.players, job.index),
     queueMs: (getMonoTime() - job.queued).inMilliseconds)
   let started = getMonoTime()
   try:
@@ -234,6 +234,12 @@ proc executeGame(job: GameJob): GameResult =
       seats["seats"].add %*{"slot": slot, "file_uri": fileUri(player.path),
         "size_bytes": player.size,
         "log_uri": fileUri(job.directory / "slot-" & $slot & ".log")}
+    if SelectedGame == Paintbot:
+      config["glory"] = %*{"behind_cogs": 10, "behind_lives": 5}
+      config["slots"] = newJArray()
+      for slot in 0 ..< seatCount():
+        config["slots"].add %*{"team": (if slot mod 2 == 0: "red" else: "blue")}
+      environment["COGAME_ORACLE"] = "off"
     writeFile(job.directory / "config.json", $config)
     writeFile(job.directory / "seats.json", $seats)
     for pair in [("COGAME_CONFIG_URI", "config.json"),
@@ -242,20 +248,22 @@ proc executeGame(job: GameJob): GameResult =
         ("COGAME_SAVE_REPLAY_URI", "replay.replay"),
         ("COGAME_PLAYER_FAILURE_URI", "failure.json")]:
       environment[pair[0]] = fileUri(job.directory / pair[1])
-    let worker = getEnv("FAST_XP_GOTA_WORKER", getAppDir() / "gota_worker")
+    let worker = workerPath()
     # exec preserves the PID for deadlines. Discard public worker chatter without
     # pipe backpressure, interleaved journal lines, or a growing transcript file.
     var process = startProcess("/bin/sh", args = @["-c",
       "exec \"$1\" >/dev/null 2>&1", "fast-xp-worker", worker],
-      env = environment, options = {})
+      env = environment, options = {poDaemon})
     defer: process.close()
-    let exitCode = waitForGame(process, 120_000)
+    defer:
+      discard posix.kill(-Pid(process.processID), SIGKILL)
+    let exitCode = waitForGame(process, executionSeconds() * 1000)
     if exitCode == -1:
-      process.terminate()
+      discard posix.kill(-Pid(process.processID), SIGTERM)
       if waitForGame(process, 1000) == -1:
-        process.kill()
+        discard posix.kill(-Pid(process.processID), SIGKILL)
         discard process.waitForExit()
-      reject(504, "Match exceeded the 120-second execution deadline")
+      reject(504, "Match exceeded the " & $executionSeconds() & "-second execution deadline")
     if fileExists(job.directory / "failure.json"):
       let failure = parseFile(job.directory / "failure.json")
       let slot = failure["failed_policy_index"].getInt()
@@ -270,6 +278,8 @@ proc executeGame(job: GameJob): GameResult =
       result.activeBots = 0
       for player in parseFile(job.directory / "player-status.json")["players"]:
         if player["exit_code"].getInt() == 0: inc result.activeBots
+    if fileExists(job.directory / "timings.json"):
+      result.gameplayMs = parseFile(job.directory / "timings.json")["gameplay_ms"].getBiggestInt()
   except RunError as error:
     result.status = error.status
     result.error = error.msg
@@ -281,7 +291,8 @@ proc executeGame(job: GameJob): GameResult =
     result.activeBots, result.queueMs, result.workerMs)
   logEvent(%*{"event": "game_completed", "request_id": job.requestId,
     "game_index": job.index, "seed": job.seed, "status": result.status,
-    "queue_ms": result.queueMs, "worker_ms": result.workerMs, "active_bots": result.activeBots})
+    "queue_ms": result.queueMs, "worker_ms": result.workerMs,
+    "gameplay_ms": result.gameplayMs, "active_bots": result.activeBots})
 
 proc gameWorker(index: int) {.thread.} =
   ## Executes only dispatcher-assigned games, with channel-owned messages.
@@ -313,7 +324,7 @@ proc dispatchGames(capacity: int) {.thread.} =
         for job in batch:
           let elapsed = (getMonoTime() - job.queued).inMilliseconds
           job.reply[].send GameResult(index: job.index, seed: job.seed, status: 503,
-            error: "Server shutting down", queueMs: elapsed,
+            error: "Server shutting down", queueMs: elapsed, gameplayMs: -1,
             roster: seatPlayers(job.players, job.index))
           gameCompleted(job.requestId, job.index, job.seed, job.maxTicks, 503, -1, elapsed, 0)
           logEvent(%*{"event": "game_completed", "request_id": job.requestId,
@@ -375,12 +386,12 @@ proc handleRequest(request: Request) {.gcsafe.} =
   var episodes = 0
   var preparationMs, packagingMs, responseBytes: int64
   defer:
-    if request.path == "/v1/games/gota/run":
+    if request.path == runPath():
       requestCompleted(httpStatus, episodes, (getMonoTime() - started).inMilliseconds,
         preparationMs, packagingMs, responseBytes)
   try:
-    let methodName = if request.path == "/v1/games/gota/run": "POST" else: "GET"
-    if request.path notin ["/", "/v1/metrics", "/healthz", "/docs/llms.txt", "/docs/run.md", "/v1/games/gota/run"]:
+    let methodName = if request.path == runPath(): "POST" else: "GET"
+    if request.path notin ["/", "/v1/metrics", "/healthz", "/docs/llms.txt", "/docs/run.md", runPath()]:
       reject(404, "Not found")
     if request.httpMethod != methodName:
       httpStatus = 405
@@ -393,12 +404,18 @@ proc handleRequest(request: Request) {.gcsafe.} =
     of "/v1/metrics":
       let value = request.queryParams["minutes"]
       if value notin ["", "15", "60", "1440"]: reject(400, "minutes must be 15, 60 or 1440")
+      let data = snapshot(if value == "": 60 else: parseInt(value))
+      data["game"] = %gameName()
+      data["build_revision"] = %getEnv("FAST_XP_BUILD_REVISION", "local")
       request.respond(200, @[("Content-Type", "application/json"),
-        ("Cache-Control", "no-store")], $snapshot(if value == "": 60 else: parseInt(value)))
+        ("Cache-Control", "no-store")], $data)
     of "/healthz": request.respond(200, body = "ok\n")
     of "/docs/llms.txt", "/docs/run.md":
       request.respond(200, @[("Content-Type", "text/plain; charset=utf-8")],
-        if request.path == "/docs/llms.txt": Instructions else: RunGuide)
+        if SelectedGame == Paintbot:
+          (if request.path == "/docs/llms.txt": PaintbotInstructions else: PaintbotGuide)
+        else:
+          (if request.path == "/docs/llms.txt": Instructions else: RunGuide))
     else:
       let token = getEnv("FAST_XP_TOKEN")
       if token.len > 0 and request.headers["Authorization"] != "Bearer " & token:
@@ -447,16 +464,20 @@ proc handleRequest(request: Request) {.gcsafe.} =
       let zipStarted = getMonoTime()
       var entries = initOrderedTable[string, string]()
       var manifest = %*{"request_id": requestId, "fetch_ms": fetchMs, "games": []}
-      var queueMs, workerMs: int64
+      var queueMs, workerMs, gameplayMs: int64
+      var hasGameplay = true
       var failures = 0
       for game in results:
         queueMs += game.queueMs
         workerMs += game.workerMs
+        if game.gameplayMs >= 0: gameplayMs += game.gameplayMs
+        else: hasGameplay = false
         var record = %*{"index": game.index, "seed": game.seed,
           "status": (if game.status == 200: "completed" else: "failed"),
           "http_status": game.status, "roster_entries_by_slot": game.roster,
           "queue_ms": game.queueMs, "worker_ms": game.workerMs,
           "active_bots": game.activeBots, "artifacts": []}
+        if game.gameplayMs >= 0: record["gameplay_ms"] = %game.gameplayMs
         if game.status == 200:
           let prefix = if count == 1: "" else: "games/" & align($game.index, 3, '0') & "/"
           let replay = prefix & "replay.replay"
@@ -478,10 +499,11 @@ proc handleRequest(request: Request) {.gcsafe.} =
       responseBytes = archive.len
       let elapsed = (getMonoTime() - started).inMilliseconds
       request.respond(200, @[("Content-Type", "application/zip"),
-        ("Content-Disposition", "attachment; filename=gota.zip"),
+        ("Content-Disposition", "attachment; filename=" & gameName() & ".zip"),
         ("Cache-Control", "no-store"), ("X-Request-ID", requestId),
         ("Server-Timing", "run;dur=" & $elapsed & ", fetch;dur=" & $fetchMs &
-          ", queue;dur=" & $queueMs & ", worker;dur=" & $workerMs & ", zip;dur=" & $zipMs)], archive)
+          ", queue;dur=" & $queueMs & ", worker;dur=" & $workerMs & ", zip;dur=" & $zipMs &
+          (if hasGameplay: ", gameplay;dur=" & $gameplayMs else: ""))], archive)
       logEvent(%*{"event": "request_completed", "request_id": requestId,
         "status": 200, "num_episodes": count, "failed_games": failures,
         "fetch_ms": fetchMs, "queue_ms_sum": queueMs, "worker_ms_sum": workerMs,
@@ -505,12 +527,13 @@ when isMainModule:
     host = getEnv("FAST_XP_HOST", "127.0.0.1")
     port = parseInt(getEnv("FAST_XP_PORT", "8080"))
     capacity = parseInt(getEnv("FAST_XP_WORKERS", "2"))
-    worker = getEnv("FAST_XP_GOTA_WORKER", getAppDir() / "gota_worker")
+    worker = workerPath()
   if port < 1 or port > 65535 or capacity < 1 or capacity > 256:
     raise newException(ValueError, "Invalid FAST_XP_PORT or FAST_XP_WORKERS")
   if host notin ["127.0.0.1", "::1", "localhost"] and getEnv("FAST_XP_TOKEN").len == 0:
     raise newException(ValueError, "Set FAST_XP_TOKEN before binding a non-loopback address")
-  if not fileExists(worker): raise newException(ValueError, "Build gota_worker first: " & worker)
+  if not fileExists(worker): raise newException(ValueError, "Build the selected game worker first: " & worker)
+  discard executionSeconds()
   setCapacity(capacity)
   createThread(metricsThread, collectMetrics)
   schedulerEvents.open()
@@ -518,11 +541,13 @@ when isMainModule:
     workerJobs[i].open()
     createThread(gameWorkers[i], gameWorker, i)
   createThread(schedulerThread, dispatchGames, capacity)
-  let server = newServer(handleRequest, workerThreads = 24, maxBodyLen = MaxBodyBytes)
+  let server = newServer(handleRequest, workerThreads = 24, maxBodyLen = bodyLimit())
   discard posix.signal(SIGTERM, shutdownSignal)
   discard posix.signal(SIGINT, shutdownSignal)
   createThread(shutdownThread, shutdownMonitor, server)
-  logEvent(%*{"event": "server_started", "workers": capacity, "request_limit": 16})
+  logEvent(%*{"event": "server_started", "workers": capacity, "request_limit": 16,
+    "game": gameName(), "build_revision": getEnv("FAST_XP_BUILD_REVISION", "local"),
+    "execution_seconds": executionSeconds()})
   server.serve(Port(port), host)
   stopping.store(true)
   schedulerEvents.send SchedulerEvent(stopping: true)
