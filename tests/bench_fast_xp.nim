@@ -2,8 +2,7 @@
 import
   std/[algorithm, json, monotimes, os, osproc, parseopt, sequtils, sets,
     strtabs, strutils, tables, times],
-  crunchy,
-  curly,
+  crunchy, curly,
   ./fastxpfixtures,
   ../coworld/fast_xp/policies
 

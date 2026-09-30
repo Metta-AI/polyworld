@@ -1,9 +1,7 @@
 import
   std/[base64, json, locks, monotimes, os, osproc, posix, sequtils, sets,
     strtabs, strutils, tables, tempfiles, times],
-  crunchy,
-  curly,
-  mummy,
+  crunchy, curly, mummy,
   ./[neuralfixtures, fastxpfixtures]
 
 var mockLock: Lock
