@@ -2,17 +2,19 @@
 ## This module deliberately has no game state, graphics or random dependency.
 import std/[math, strutils]
 import vmath
+import awmplacement
+export awmplacement
 
 type
-  MultiplayerCamera* = object
-    ## An absolute camera on P1's side (+Z), like the duel's: eye height,
-    ## eye distance from the ring center, and radians below the horizon.
-    height*, distance*, pitch*: float32
+  MultiplayerCamera* = Placement
+    ## An absolute camera on P1's side (+Z), like the duel's.
   MultiplayerView* = object
     ## Camera and hands. P1's hand is near; every other balcony's is far.
+    ## The hands are balcony-local, and their pitch is added to the tilt that
+    ## faces the camera.
     camera*: MultiplayerCamera
-    nearHandHeight*, nearHandDistance*, farHandHeight*, farHandDistance*,
-      handRoll*: float32
+    nearHand*, farHand*: Placement
+    handRoll*: float32
   PlayerBalcony* = object
     playerIndex*: int
     center*: Vec3
@@ -102,37 +104,56 @@ proc fittedCamera*(layout: MultiplayerLayout, aspect: float32,
   ## The auto-fitted view as absolute values, a starting point for tuning.
   let eye = layout.cameraEye(aspect, verticalFov)
   let toTarget = layout.cameraTarget - eye
-  MultiplayerCamera(height: eye.y, distance: eye.z,
+  MultiplayerCamera(lateral: eye.x, height: eye.y, distance: eye.z,
     pitch: arctan2(-toTarget.y, -toTarget.z))
-
-proc eye*(camera: MultiplayerCamera): Vec3 =
-  vec3(0, camera.height, camera.distance)
-
-proc target*(camera: MultiplayerCamera): Vec3 =
-  camera.eye + vec3(0, -sin(camera.pitch), -cos(camera.pitch))
 
 const TunedViews: array[3 .. 7, MultiplayerView] = [
   # Hand-tuned for 3 and 7 seats in a 16:10 window; 4-6 interpolate them.
-  3: MultiplayerView(camera: MultiplayerCamera(height: 23.67, distance: 18.11,
-    pitch: 0.9638), # 55.2 deg down
-    nearHandHeight: 1.25, nearHandDistance: 1.95,
-    farHandHeight: 1.25, farHandDistance: 1.95, handRoll: 0),
-  4: MultiplayerView(camera: MultiplayerCamera(height: 25.05, distance: 20.64,
-    pitch: 0.9319), # 53.4 deg down
-    nearHandHeight: 1.25, nearHandDistance: 1.95,
-    farHandHeight: 1.35, farHandDistance: 2.13, handRoll: 0),
-  5: MultiplayerView(camera: MultiplayerCamera(height: 26.44, distance: 23.18,
-    pitch: 0.8999), # 51.6 deg down
-    nearHandHeight: 1.25, nearHandDistance: 1.95,
-    farHandHeight: 1.46, farHandDistance: 2.30, handRoll: 0),
-  6: MultiplayerView(camera: MultiplayerCamera(height: 27.82, distance: 25.71,
-    pitch: 0.8680), # 49.7 deg down
-    nearHandHeight: 1.25, nearHandDistance: 1.95,
-    farHandHeight: 1.56, farHandDistance: 2.48, handRoll: 0),
-  7: MultiplayerView(camera: MultiplayerCamera(height: 29.20, distance: 28.24,
-    pitch: 0.8360), # 47.9 deg down
-    nearHandHeight: 1.25, nearHandDistance: 1.95,
-    farHandHeight: 1.66, farHandDistance: 2.65, handRoll: 0)]
+  3: MultiplayerView(
+    camera: Placement(lateral: 4.00, height: 25.72, distance: 18.56,
+      pitch: 0.9638, # 55.2 deg down, yaw 0.0 deg
+      yaw: 0.0000),
+    nearHand: Placement(lateral: 1.10, height: 9.61, distance: 5.30),
+    farHand: Placement(lateral: 0.00, height: 1.66, distance: 3.36,
+      pitch: 1.7693, # 101.4 deg down, yaw 1.1 deg
+      yaw: 0.0199),
+    handRoll: 0.0000),
+  4: MultiplayerView(
+    camera: Placement(lateral: 4.35, height: 27.28, distance: 21.21,
+      pitch: 0.9318, # 53.4 deg down, yaw 0.0 deg
+      yaw: 0.0000),
+    nearHand: Placement(lateral: 1.39, height: 10.79, distance: 6.10),
+    farHand: Placement(lateral: 0.00, height: 1.66, distance: 3.36,
+      pitch: 1.7693, # 101.4 deg down, yaw 1.1 deg
+      yaw: 0.0199),
+    handRoll: 0.0000),
+  5: MultiplayerView(
+    camera: Placement(lateral: 4.70, height: 28.84, distance: 23.85,
+      pitch: 0.8999, # 51.6 deg down, yaw 0.0 deg
+      yaw: 0.0000),
+    nearHand: Placement(lateral: 1.68, height: 11.96, distance: 6.91),
+    farHand: Placement(lateral: 0.00, height: 1.66, distance: 3.36,
+      pitch: 1.7693, # 101.4 deg down, yaw 1.1 deg
+      yaw: 0.0199),
+    handRoll: 0.0000),
+  6: MultiplayerView(
+    camera: Placement(lateral: 5.04, height: 30.39, distance: 26.50,
+      pitch: 0.8679, # 49.7 deg down, yaw 0.0 deg
+      yaw: 0.0000),
+    nearHand: Placement(lateral: 1.96, height: 13.14, distance: 7.71),
+    farHand: Placement(lateral: 0.00, height: 1.66, distance: 3.36,
+      pitch: 1.7693, # 101.4 deg down, yaw 1.1 deg
+      yaw: 0.0199),
+    handRoll: 0.0000),
+  7: MultiplayerView(
+    camera: Placement(lateral: 5.39, height: 31.95, distance: 29.15,
+      pitch: 0.8360, # 47.9 deg down, yaw 0.0 deg
+      yaw: 0.0000),
+    nearHand: Placement(lateral: 2.25, height: 14.32, distance: 8.52),
+    farHand: Placement(lateral: 0.00, height: 1.66, distance: 3.36,
+      pitch: 1.7693, # 101.4 deg down, yaw 1.1 deg
+      yaw: 0.0199),
+    handRoll: 0.0000)]
 
 proc multiplayerView*(layout: MultiplayerLayout, aspect: float32): MultiplayerView =
   ## The tuned view for 3-7 seats. Larger rings keep the 7-seat hands and
@@ -144,14 +165,46 @@ proc multiplayerView*(layout: MultiplayerLayout, aspect: float32): MultiplayerVi
 
 proc tunedRow*(view: MultiplayerView, playerCount: int): string =
   ## One TunedViews row, ready to paste back into the table.
-  proc f(value: float32, digits: int): string =
-    formatFloat(value, ffDecimal, digits)
-  $playerCount & ": MultiplayerView(camera: MultiplayerCamera(height: " &
-    f(view.camera.height, 2) & ", distance: " & f(view.camera.distance, 2) &
-    ",\n    pitch: " & f(view.camera.pitch, 4) & "), # " &
-    f(radToDeg(view.camera.pitch), 1) & " deg down\n" &
-    "    nearHandHeight: " & f(view.nearHandHeight, 2) &
-    ", nearHandDistance: " & f(view.nearHandDistance, 2) & ",\n" &
-    "    farHandHeight: " & f(view.farHandHeight, 2) &
-    ", farHandDistance: " & f(view.farHandDistance, 2) &
-    ", handRoll: " & f(view.handRoll, 4) & "),"
+  "  " & $playerCount & ": MultiplayerView(\n" &
+    "    camera: " & view.camera.literal() & ",\n" &
+    "    nearHand: " & view.nearHand.literal() & ",\n" &
+    "    farHand: " & view.farHand.literal() & ",\n" &
+    "    handRoll: " & formatFloat(view.handRoll, ffDecimal, 4) & "),"
+
+const
+  SeatSwitchSeconds* = 0.9'f32
+    ## How long the ring takes to turn the next balcony to the camera.
+
+type
+  SeatOrbit* = object
+    ## The yaw of the balcony in front of the camera, eased toward the
+    ## watched one. The ring turns by -yaw (see stageRotation).
+    yaw*: float32
+    fromYaw, toYaw, elapsed: float32
+
+proc initSeatOrbit*(yaw: float32): SeatOrbit =
+  SeatOrbit(yaw: yaw, fromYaw: yaw, toYaw: yaw, elapsed: SeatSwitchSeconds)
+
+proc aimAt*(orbit: var SeatOrbit, yaw: float32) =
+  ## Turn from wherever the ring is now, the short way around.
+  orbit.fromYaw = orbit.yaw
+  orbit.toYaw = orbit.yaw +
+    floorMod(yaw - orbit.yaw + PI.float32, Tau) - PI.float32
+  orbit.elapsed = 0
+
+proc advance*(orbit: var SeatOrbit, dt: float32) =
+  orbit.elapsed = min(orbit.elapsed + dt, SeatSwitchSeconds)
+  let
+    t = orbit.elapsed / SeatSwitchSeconds
+    eased = t * t * (3 - 2 * t)
+  orbit.yaw = orbit.fromYaw + (orbit.toYaw - orbit.fromYaw) * eased
+
+proc stageRotation*(yaw: float32): Mat4 =
+  ## Turns the whole ring so the balcony at this yaw sits where P1's does,
+  ## in front of a fixed camera: the same as rotateSeat(point, -yaw).
+  let (s, c) = (sin(yaw), cos(yaw))
+  mat4(
+    c, 0, -s, 0,
+    0, 1, 0, 0,
+    s, 0, c, 0,
+    0, 0, 0, 1)

@@ -15,6 +15,9 @@ type
   CourtyardMesh* = object
     vertices*: seq[CourtyardVertex]
     commonCount*, backdropCount*, pavingCount*: int
+    centerCount*: int
+      ## Multiplayer: the static center island, at the start of the common
+      ## range; the balconies after it can turn (see stageRotation).
 
 const
   Stone = 0.0'f32
@@ -488,6 +491,7 @@ proc buildMultiplayerCourtyardMesh*(layout: MultiplayerLayout): CourtyardMesh =
       center + direction * reach, center, Brass * 0.82'f32, Metal)
     result.triangle(center, center + direction * reach,
       center + across * 0.16'f32, Brass * 1.08'f32, Metal)
+  result.centerCount = result.vertices.len
 
   for balcony in layout.balconies:
     var piece: CourtyardMesh
@@ -633,7 +637,7 @@ when not defined(headless):
       skyViewLocation, skyEyeLocation, skyTimeLocation: GLint
       shadows: array[2, GLuint]
       lightMatrices: array[2, Mat4]
-      commonCount, backdropCount: int
+      commonCount, backdropCount, centerCount: int
       playerCount: int
       arenaRadius, balconyLampRadius, balconyLampHalfAngle: float32
       viewLocation, lightLocation, eyeLocation, timeLocation, sideLocation,
@@ -641,7 +645,7 @@ when not defined(headless):
         normalStrengthLocation, normalsOnlyLocation, normalViewLocation,
         slopeBroadLocation, scaleBroadLocation, lampLocation,
         playerCountLocation, arenaRadiusLocation, lampRadiusLocation,
-        lampAngleLocation: GLint
+        lampAngleLocation, stageYawLocation: GLint
 
   const
     ShadowSize = 2048
@@ -729,6 +733,7 @@ when not defined(headless):
       mesh = buildCourtyardMesh()
     result.commonCount = mesh.commonCount
     result.backdropCount = mesh.backdropCount
+    result.centerCount = mesh.centerCount
     result.program = program(VertexSource, FragmentSource)
     let textureRoot = artworkRoot() / "battlefield/textures"
     result.normalMap = loadNormalTexture(textureRoot / "stone-slab-normal.png")
@@ -770,7 +775,8 @@ when not defined(headless):
         ("slopeBroad", result.slopeBroadLocation.addr),
         ("scaleBroad", result.scaleBroadLocation.addr),
         ("normalsOnly", result.normalsOnlyLocation.addr),
-        ("normalView", result.normalViewLocation.addr)]:
+        ("normalView", result.normalViewLocation.addr),
+        ("stageYaw", result.stageYawLocation.addr)]:
       destination[] = glGetUniformLocation(result.program, name.cstring)
 
     # Bake the static sun shadows for both camera directions once. No scene
@@ -860,7 +866,10 @@ void main() {}
 
   proc draw*(renderer: CourtyardRenderer, viewProjection: Mat4,
       cameraEye: Vec3, time, cameraSide: float32,
-      normalsOnly = false, normalView = mat4()) =
+      normalsOnly = false, normalView = mat4(), stageYaw = 0'f32) =
+    ## stageYaw turns the multiplayer balconies (see stageRotation) while
+    ## the center island stays put. Lighting and baked shadows live in the
+    ## balconies' own frame, so their lamps and key light turn with them.
     let seat = if cameraSide > 0: 0 else: 1
     glEnable(GL_DEPTH_TEST)
     glDepthMask(if normalsOnly: GL_FALSE else: GL_TRUE)
@@ -891,7 +900,21 @@ void main() {}
     glBindTexture(GL_TEXTURE_2D, renderer.normalMap)
     glUniform1i(renderer.normalLocation, 1)
     glBindVertexArray(renderer.vao)
-    glDrawArrays(GL_TRIANGLES, 0, renderer.commonCount.GLsizei)
+    # The center island, in the world frame: its lamp light comes from the
+    # turned balconies.
+    glUniform1f(renderer.stageYawLocation, stageYaw)
+    glDrawArrays(GL_TRIANGLES, 0, renderer.centerCount.GLsizei)
+    # Everything else, drawn through the stage turn in its own frame.
+    let
+      stage = stageRotation(stageYaw)
+      stageEye = (stage.inverse * vec4(cameraEye.x, cameraEye.y,
+        cameraEye.z, 1)).xyz
+    matrix(renderer.viewLocation, viewProjection * stage)
+    matrix(renderer.normalViewLocation, normalView * stage)
+    glUniform3f(renderer.eyeLocation, stageEye.x, stageEye.y, stageEye.z)
+    glUniform1f(renderer.stageYawLocation, 0)
+    glDrawArrays(GL_TRIANGLES, renderer.centerCount.GLint,
+      (renderer.commonCount - renderer.centerCount).GLsizei)
     glDrawArrays(GL_TRIANGLES,
       (renderer.commonCount + seat * renderer.backdropCount).GLint,
       renderer.backdropCount.GLsizei)

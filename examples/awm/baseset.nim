@@ -34,7 +34,7 @@ let archer = [
     rules: rules(
       damage(
         1,
-        game.board.choose(kind: Minion, owner: Opponent),
+        game.board.choose(kind: Minion, owner: AllOpponents),
         vfx = ManyArrowsVfx
       )
     )

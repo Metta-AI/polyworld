@@ -20,6 +20,8 @@ uniform mat4 normalView;
 uniform vec3 cameraEye;
 uniform float cameraSide;
 uniform float time;
+// The balconies' turn relative to this surface: lamps ride on the balconies.
+uniform float stageYaw;
 out vec4 outputColor;
 
 vec2 stoneSlope(vec2 uv) {
@@ -136,9 +138,13 @@ void main() {
         // Six nearest lamps keep cost fixed as more islands are added. Their
         // radial positions exactly match the reused lantern meshes, without
         // imposing a uniform-array limit on the number of player balconies.
+        // Lamps are placed in the balconies' frame, turned by stageYaw.
+        float c = cos(stageYaw), s = sin(stageYaw);
+        vec3 lp = vec3(p.x * c - p.z * s, p.y, p.x * s + p.z * c);
+        vec3 ln = vec3(n.x * c - n.z * s, n.y, n.x * s + n.z * c);
         float count = float(playerCount);
         float stepAngle = 6.28318530718 / count;
-        float nearest = floor(atan(-p.x, p.z + 0.00001) / stepAngle + 0.5);
+        float nearest = floor(atan(-lp.x, lp.z + 0.00001) / stepAngle + 0.5);
         for (int offset = -1; offset <= 1; offset++) {
             float seat = mod(nearest + float(offset), count);
             float yaw = seat * stepAngle;
@@ -146,7 +152,7 @@ void main() {
                 float angle = float(end) * balconyLampHalfAngle - yaw;
                 vec3 source = vec3(sin(angle) * balconyLampRadius, 1.25,
                                    cos(angle) * balconyLampRadius);
-                lighting += lamp(p, n, source, seat * 2.0 + float(end));
+                lighting += lamp(lp, ln, source, seat * 2.0 + float(end));
             }
         }
     } else {

@@ -36,12 +36,12 @@ fascia, parapet and end pieces are built in separate curved courses; the ring
 expands with player count while preserving card sizes and usable balcony depth.
 Lanterns, ivy and hanging banners use the original courtyard materials and props.
 
-Build with `-d:awmLayoutTuning` to tune the camera and opponent hand live:
-Q/A raise/lower the opponent hand, S/W push it away/pull it closer, Y/H raise/lower
-your hand, U/J push it away/pull it closer, I/K turn cards in hand about their
-long axis, E/D raise/lower
-the camera, R/F move it in/out, T/G pitch it down/up, and Enter prints the values
-to paste into `awm.nim`.
+Build with `-d:awmLayoutTuning` to tune the camera and the hands live, in the
+duel and in the multiplayer preview. Z/X pick what moves — your hand, the
+opponent's hand, the camera, or (in the duel) the spot a played spell floats
+in, printed to the console — WASD move it forward,
+left, back and right, Q/E raise and lower it, T/G pitch it down and up, F/H yaw
+it left and right, and Enter prints the values to paste back as defaults.
 
 ### Screen effects
 
