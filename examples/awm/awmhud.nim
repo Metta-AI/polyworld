@@ -357,7 +357,7 @@ proc drawMatchResult(sk: Silky, window: Window, play: TablePlay,
       else:
         &"PLAYER {game.winner + 1} WINS!"
     winnerDetail =
-      &"Turn {game.turnNumber} — " &
+      &"Turn {game.turnNumber}: " &
       game.players[game.winner].heroClass.className() &
       " is victorious."
     overlay = UiRect(
@@ -382,3 +382,23 @@ proc drawMatchResult(sk: Silky, window: Window, play: TablePlay,
     "Default",
     CenterAlign
   )
+
+proc drawPileTooltip(sk: Silky, window: Window,
+    pile: tuple[found: bool, player: int, discarded: bool, count: int,
+      anchor: Vec3],
+    viewProjection: Mat4, avoid = UiRect(), avoiding = false) =
+  ## How many cards the hovered deck or discard pile holds, above the pile.
+  ## Nothing is drawn where it would lie across `avoid` (the inspector),
+  ## rather than leaving a cropped fragment beside the card.
+  if not pile.found:
+    return
+  let origin = screenPosition(window, pile.anchor, viewProjection) /
+    hudScale(window) + vec2(-77, -22)
+  if avoiding and origin.x < avoid.origin.x + avoid.size.x and
+      origin.x + 154 > avoid.origin.x and
+      origin.y < avoid.origin.y + avoid.size.y and
+      origin.y + 44 > avoid.origin.y:
+    return
+  sk.hudSprite("pile-label", origin, vec2(154, 44))
+  sk.drawLabel((if pile.discarded: "DISCARD " else: "DECK ") & $pile.count,
+    origin + vec2(5, 0), vec2(144, 44), HudIvory, "Small", CenterAlign)

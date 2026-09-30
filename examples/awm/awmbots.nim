@@ -22,8 +22,8 @@ type
 
   BotVm* = ref object
     runtime*: Runtime
-    failed*: bool
-    lastError*: string
+    failed*: bool  ## The script didn't compile: every decision fails.
+    lastError*: string  ## Why the last decision (or the compile) failed.
     played: bool
 
 const
@@ -256,12 +256,18 @@ proc loadBots*(sources: openArray[string]): seq[BotVm] =
       continue
     let limits = botLimits()
     let schema = buildBotHost(0)
-    let program = compile(source = sources[player], host = schema, limits = limits)
-    if not bound:
-      bindDataIds(program)
-      bound = true
-    result[player] = BotVm(
-      runtime: initRuntime(program, buildBotHost(player), limits))
+    try:
+      let program = compile(source = sources[player], host = schema,
+        limits = limits)
+      if not bound:
+        bindDataIds(program)
+        bound = true
+      result[player] = BotVm(
+        runtime: initRuntime(program, buildBotHost(player), limits))
+    except BasicError as error:
+      # A script that doesn't compile still holds its seat: it passes every
+      # turn instead of stopping the match.
+      result[player] = BotVm(failed: true, lastError: error.msg)
 
 type
   BotDecision* = enum
@@ -298,7 +304,7 @@ proc runDecision*(vm: BotVm, game: var GameState): BotDecision =
   try:
     discard vm.runtime.run()
   except BasicError as error:
-    vm.failed = true
+    # One bad decision doesn't retire the script: it runs again next time.
     vm.lastError = error.msg
     activeGame = nil
     return BotFailed

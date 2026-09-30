@@ -1418,15 +1418,40 @@ type
     ## Paces bot decisions so the table can follow them.
     wait*: float32  ## Time left before the next bot decision.
     plays*: int  ## Cards the current bot played this turn.
+    scriptFailed*: bool  ## The last turn change was a failing script passing.
 
 const BotThinkSeconds* = 1.2'f32
 
 proc initBotClock*(): BotClock =
   BotClock(wait: BotThinkSeconds)
 
-proc botTurnStatus(bots: openArray[BotVm], player: int): string =
-  if player < bots.len and bots[player] != nil: "Bot is thinking..."
+proc botTurnStatus(bots: openArray[BotVm], player: int, name: string): string =
+  if player < bots.len and bots[player] != nil: name & " is thinking..."
   else: "Your turn. Select a card to play."
+
+proc answerForBot(game: var GameState): bool =
+  ## The acting bot answers a waiting discard or trigger. If its answer is
+  ## refused, the match goes on anyway: it discards its first cards, or
+  ## declines the trigger's targets, or takes the first legal ones.
+  if game.applyBotAction(game.nextBotAction()):
+    return true
+  if game.waitingToss:
+    var first: seq[int]
+    for index in 0 ..< game.pendingToss.count:
+      first.add index
+    return game.resolvePendingToss(first)
+  if game.waitingTrigger:
+    let count = game.waitingTriggerRules().rules.targetCount()
+    var declined = newSeq[Choice](count)
+    for pick in declined.mitems:
+      pick = NoTarget
+    if game.resolvePendingTrigger(declined):
+      return true
+    var picks: seq[Choice]
+    for _ in 0 ..< count:
+      let choices = game.triggerChoices(picks)
+      picks.add(if choices.len > 0: choices[0] else: NoTarget)
+    return game.resolvePendingTrigger(picks)
 
 proc updateBots*(
     play: var TablePlay,
@@ -1435,13 +1460,21 @@ proc updateBots*(
     bots: openArray[BotVm],
     clock: var BotClock,
     humanActs: proc(): bool,
-    dt: float32
+    dt: float32,
+    botName: proc(player: int): string = nil
 ): bool =
   ## Plays the seats that have a bot, one decision at a time once the table
   ## is still: answers their discards and triggers, plays their cards, and
   ## at the end of their turn attacks the next living player's hero with
   ## every ready minion. A waiting discard or trigger of the human's starts
-  ## their choice instead. True on the frame a bot's turn ended.
+  ## their choice instead. A script that fails passes its turn. `botName`
+  ## names a seat in the status line (default: "Bot"). True on the frame a
+  ## bot's turn ended.
+  proc name(player: int): string =
+    if botName.isNil: "Bot" else: botName(player)
+  proc lowerName(player: int): string =
+    if botName.isNil: "the bot" else: botName(player)
+
   if game.waitingToss and not play.tossPicking and
       not play.pendingTargeting and play.presentationIdle(game) and
       not play.attackActive and not game.gameOver:
@@ -1451,8 +1484,9 @@ proc updateBots*(
     else:
       clock.wait -= dt
       if clock.wait <= 0:
-        if game.applyBotAction(game.nextBotAction()):
-          play.statusMessage = &"{pending.source}: the bot discards."
+        if game.answerForBot():
+          play.statusMessage =
+            &"{pending.source}: {lowerName(pending.player)} discards."
         clock.wait = BotThinkSeconds
 
   if game.waitingTrigger and
@@ -1466,7 +1500,7 @@ proc updateBots*(
       clock.wait -= dt
       if clock.wait <= 0:
         let before = game.copyGameState()
-        if game.applyBotAction(game.nextBotAction()):
+        if game.answerForBot():
           play.animateTransition(layout, before, game)
           play.statusMessage = &"{waiting.card.name}'s trigger resolves."
         clock.wait = BotThinkSeconds
@@ -1480,27 +1514,36 @@ proc updateBots*(
       let current = game.currentPlayer
       discard game.takeVisualEvents()
       let before = game.copyGameState()
+      clock.scriptFailed = false
       let decision = bots[current].runDecision(game)
       case decision
       of BotPlayedCard:
         play.animateTransition(layout, before, game)
         inc clock.plays
-        play.statusMessage = "Bot is playing..."
+        play.statusMessage = name(current) & " is playing..."
       of BotEndedTurn:
         let attackers = game.eligibleAttackers()
         if attackers.len > 0:
           play.startAttack(game, layout, attackers,
             heroChoice(game.nextPlayer(game.currentPlayer)),
             finishTurn = true)
-          play.statusMessage = "Bot is attacking..."
+          play.statusMessage = name(current) & " is attacking..."
         else:
           game.finishTurn()
           play.animateTransition(layout, before, game)
           clock.plays = 0
-          play.statusMessage = bots.botTurnStatus(game.currentPlayer)
+          play.statusMessage = bots.botTurnStatus(game.currentPlayer,
+            name(game.currentPlayer))
           result = true
       of BotFailed:
-        play.statusMessage = "Bot error: " & bots[current].lastError
+        # A failing script passes the turn, so the match goes on.
+        stderr.writeLine name(current) & " script error: " &
+          bots[current].lastError
+        game.finishTurn()
+        clock.plays = 0
+        clock.scriptFailed = true
+        play.statusMessage = name(current) & " script error: turn passed."
+        result = true
       clock.wait = BotThinkSeconds
 
   if play.advanceAttack(game, dt):
@@ -1510,5 +1553,33 @@ proc updateBots*(
       play.animateTransition(layout, before, game)
       clock.plays = 0
       clock.wait = BotThinkSeconds
-      play.statusMessage = bots.botTurnStatus(game.currentPlayer)
+      play.statusMessage = bots.botTurnStatus(game.currentPlayer,
+        name(game.currentPlayer))
       result = true
+
+proc hoveredPile*(
+    window: Window,
+    viewProjection: Mat4,
+    game: GameState,
+    play: TablePlay,
+    layout: TableLayout
+): tuple[found: bool, player: int, discarded: bool, count: int, anchor: Vec3] =
+  ## The deck or discard pile under the mouse, with how many cards it shows
+  ## and a point just above it for a label.
+  for player in 0 ..< game.playerCount:
+    for discarded in [false, true]:
+      let
+        base =
+          if discarded: layout.discardPose(player) else: layout.deckPose(player)
+        count =
+          if discarded:
+            max(0, game.players[player].discardPile.len -
+              play.queuedTosses(player) -
+              play.animations.discardCardsSuppressed(player) -
+              play.discardFlights.discardCardsSuppressed(player) -
+              play.dyingDiscards(player) - play.spellDiscards(player))
+          else: game.players[player].deck.len
+      # An empty pile is still its pad: hover where the first card would be.
+      if mouseHitsCard(window, viewProjection, stackTopPose(base, max(1, count))):
+        return (true, player, discarded, count,
+          base.position + vec3(0, 0.28'f32, 0))

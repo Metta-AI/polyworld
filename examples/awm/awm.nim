@@ -270,34 +270,6 @@ when not defined(headless):
     sk.drawCardReading(window, inspected.card, inspected.power,
       inspected.toughness, inspected.lost)
 
-  proc drawDeckLabels(
-      sk: Silky,
-      window: Window,
-      game: GameState,
-      viewProjection: Mat4,
-      inspectingCard: bool
-  ) =
-    for playerIndex in 0 ..< PlayerCount:
-      for discarded in [false, true]:
-        let
-          pose = if discarded: discardPose(playerIndex) else: deckPose(playerIndex)
-          screen = screenPosition(window,
-            pose.position + vec3(0, 0.28'f32, 0), viewProjection) / hudScale(window)
-          count = if discarded: game.players[playerIndex].discardPile.len
-            else: game.players[playerIndex].deck.len
-          origin = screen + vec2(-77, -22)
-          inspector = cardReadingRect(window)
-        # Hide a whole label when the inspector covers it, rather than
-        # leaving a cropped fragment beside the card.
-        if inspectingCard and origin.x < inspector.origin.x + inspector.size.x and
-            origin.x + 154 > inspector.origin.x and
-            origin.y < inspector.origin.y + inspector.size.y and
-            origin.y + 44 > inspector.origin.y:
-          continue
-        sk.hudSprite("pile-label", origin, vec2(154, 44))
-        sk.drawLabel((if discarded: "DISCARD " else: "DECK ") & $count,
-          origin + vec2(5, 0), vec2(144, 44), HudIvory, "Small", CenterAlign)
-
   static:
     # Lists the compile-time (-d:) flags while this build compiles.
     proc onOff(on: bool): string = (if on: "ON" else: "OFF")
@@ -314,14 +286,18 @@ when not defined(headless):
   proc printHelp() =
     echo "AWM — Archers Warriors Mages\n" &
       "Options (--key value or --key=value):\n" &
-      "  --players N      Player count (2). 2 plays the usual game; above 2\n" &
-      "                   starts a multiplayer match (turns are mocked).\n" &
+      "  --players N      Player count (2). 2 plays a duel; 3 to 7 play a\n" &
+      "                   multiplayer match: the last player alive wins.\n" &
       "  --seed INTEGER   Match seed (random when omitted)\n" &
-      "  --class CLASS    Your hero class: archer, warrior or mage (archer)\n" &
-      "  --opponent CLASS Opponent hero class: archer, warrior or mage (mage)\n" &
+      "  --class CLASS    Your hero class: archer, warrior or mage (archer).\n" &
+      "                   Duel only: in multiplayer you pick it on screen.\n" &
+      "  --opponent CLASS Opponent hero class: archer, warrior or mage (mage).\n" &
+      "                   Duel only: multiplayer opponents get random classes.\n" &
       "  --bot PATH       Bot program (.bas), repeatable up to " & $PlayerCount &
-        " times. One bot plays\n" &
-      "                   both seats; with --human it plays the opponent.\n" &
+        " times.\n" &
+      "                   Duel: one bot plays both seats; with --human it\n" &
+      "                   plays the opponent. Multiplayer: the bots take\n" &
+      "                   every seat but yours, in turn.\n" &
       "                   Defaults to players/base.bas.\n" &
       "  --human          Play seat 0 yourself instead of watching bots\n" &
       "  -h, --help       Show this help and exit"
@@ -594,8 +570,14 @@ when not defined(headless):
         if not choosingClasses:
           # The bots play their seats, the same way they play the duel.
           if play.updateBots(match.game, table, match.bots, botClock,
-              proc(): bool = match.humanActs, previewDt):
+              proc(): bool = match.humanActs, previewDt,
+              proc(player: int): string = "Player " & $(player + 1)):
+            # The status shows whose turn it is now, unless a script just
+            # failed: its error line stays up.
+            let message = play.statusMessage
             turnPassed()
+            if botClock.scriptFailed:
+              play.statusMessage = message
           if play.presentationIdle(match.game) and not play.attackActive and
               match.skipDeadTurn():
             turnPassed()
@@ -873,6 +855,8 @@ when not defined(headless):
           sk.drawTossPrompt(window, play, match.game, centerX)
           sk.drawTargetPrompt(window, play, match.game, centerX)
           sk.drawCombatPrompt(window, play, match.game, centerX)
+          sk.drawPileTooltip(window, hoveredPile(window, stageVp, match.game,
+            play, table), stageVp)
           if not play.attackActive:
             sk.drawMatchResult(window, play, match.game, match.humanSeat,
               centerX)
@@ -887,7 +871,7 @@ when not defined(headless):
               not openingDraw
           if drawEndTurnButton(sk, window,
               (if match.game.gameOver: "MATCH ENDED"
-               elif yourTurn: "END TURN" else: "OPPONENT"), canFinish):
+               elif yourTurn: "END TURN" else: "WAITING"), canFinish):
             play.stopTargeting()
             play.selectedAttacker = 0
             if match.endTurn():
@@ -1519,7 +1503,9 @@ when not defined(headless):
           false,
           handOwner = if play.tossPicking: game.pendingToss.player else: -1
         )
-        drawDeckLabels(sk, window, game, viewProjection, inspectingCard)
+        sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,
+          play, duelLayout), viewProjection,
+          avoid = cardReadingRect(window), avoiding = inspectingCard)
         sk.drawLabel(
           play.playHelp(sessionOptions.human),
           vec2(32, hudSize(window).y - 66),

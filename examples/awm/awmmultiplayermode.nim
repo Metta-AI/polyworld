@@ -137,10 +137,15 @@ when not defined(headless):
         if near: arctan2(camera.z - hand.distance, camera.y - hand.height) +
           hand.pitch
         else: MultiplayerHandPitch + hand.pitch
-      # Half a turn about each card's long axis: same place, other side up.
-      roll = if near: view.handRoll else: view.handRoll + PI.float32
-    for pose in fanPoses(count, vec3(hand.lateral, hand.height, hand.distance),
-        pitch, 1, hand.yaw, roll, HandSpread):
+    for fanned in fanPoses(count, vec3(hand.lateral, hand.height,
+        hand.distance), pitch, 1, hand.yaw, view.handRoll, HandSpread):
+      var pose = fanned
+      if not near:
+        # Same place, other side up, so the table sees only backs. Written
+        # as a half turn flat on the table plus the tilt, not as a roll, so
+        # a card flying in from the deck turns around without flipping over.
+        pose.pitch = fanned.pitch - PI.float32
+        pose.yaw = -fanned.yaw - PI.float32
       result.add balcony.place(pose)
 
   proc seatTable*(layout: MultiplayerLayout, view: MultiplayerView,
