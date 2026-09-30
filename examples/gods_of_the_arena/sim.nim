@@ -70,6 +70,11 @@ type
     prepareDecision*: proc(tick: int32) {.closure.}
     pollRequests*: proc(): bool {.closure.}
     runtime*: Runtime
+    structured*: bool
+    legacyHeroData*: bool
+    structureGlobals*: seq[GlobalView]
+    structureFields*: seq[bool]
+    structureArrays*: seq[ArrayView]
     limits*: Limits
     ready*: bool
     failed*: bool
@@ -336,6 +341,8 @@ type
     replayMode*: bool
     recordingError*: string
     heroVms*: seq[HeroVm]
+    structuredBots*: bool
+    structureCounts*: array[Team, array[8, int32]]
     inboxes*: seq[Mailbox]
     nextFootmen: seq[Footman]
     nextHeroes: seq[Hero]
@@ -2344,6 +2351,13 @@ proc worldObjectAt*(
     return false
   value = world.scriptObjects[team][index]
   true
+
+iterator scriptObjects*(world: World, heroId: int32): lent WorldObject =
+  ## Borrows the existing visibility-filtered frame without copying objects.
+  if world.heroIndex(heroId) >= 0:
+    let team = world.ensureScriptObjects(heroId)
+    for value in world.scriptObjects[team]:
+      yield value
 
 proc scriptObject*(
     world: World,
