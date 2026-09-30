@@ -1036,7 +1036,7 @@ proc initHeroHost(
   let context = NeuralContext(policy: policy)
   result.addNeuralFunctions(
     richardRunner(context), davidRunner(context), andreRunner(context),
-    flyRunner(context)
+    flyRunner(context), context
   )
 
 proc neuralLimits(): Limits =
