@@ -8,7 +8,7 @@ type TestResponse* = object
   body*: string
 
 const
-  FastXpDirectory* = currentSourcePath().parentDir
+  FastXpDirectory* = currentSourcePath().parentDir.parentDir / "coworld" / "fast_xp"
   ServerPath* = FastXpDirectory / "server"
   RunRoute* = "/v1/games/gota/run"
 

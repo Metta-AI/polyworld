@@ -1,4 +1,4 @@
-include metrics
+include ../coworld/fast_xp/metrics
 
 doAssert sizeof(MetricsState) < 10 * 1024 * 1024
 

@@ -1,6 +1,6 @@
 import std/[asyncdispatch, json, monotimes, os, osproc, sequtils,
   strtabs, strutils, tables, tempfiles, times, uri]
-import test_support
+import fastxpfixtures
 
 proc worker() =
   let root = getTempDir()

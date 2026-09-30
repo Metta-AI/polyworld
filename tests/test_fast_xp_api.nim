@@ -1,8 +1,8 @@
 import std/[asyncdispatch, base64, httpclient, json, locks, monotimes, os, osproc,
   posix, sequtils, sets, strtabs, strutils, tables, tempfiles, times]
 import crunchy, mummy
-import ../../tests/neuralfixtures
-import test_support
+import neuralfixtures
+import fastxpfixtures
 
 var mockLock: Lock
 initLock(mockLock)

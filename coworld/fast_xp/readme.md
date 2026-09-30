@@ -11,21 +11,16 @@ From the Polyworld repository, with pinned dependencies present:
 ```sh
 nix develop .. --command nim c coworld/fast_xp/gota_worker.nim
 nix develop .. --command nim c coworld/fast_xp/server.nim
-/path/to/metta/.venv/bin/python coworld/fast_xp/run_local.py
+nix develop .. --command ./coworld/fast_xp/server
 ```
 
-The Python interpreter for `run_local.py` must have the Softmax CLI installed.
-The launch script uses `softmax.auth.load_user_token` to load your saved personal
-credential for `https://softmax.com/api`, enables team elevation, and starts the
-server. It does not print the token or select a player credential. Sign in with
-your user account using the Softmax CLI first. The server binds to localhost by
-default. The Nix development shell must include OpenSSL development libraries
+The server binds to localhost by default. To fetch submitted policies, supply
+`FAST_XP_OBSERVATORY_TOKEN` in the server environment. Personal team tokens also
+need `FAST_XP_OBSERVATORY_ELEVATED=1`; scoped machine credentials do not. Uploaded
+bots and the dashboard work without an Observatory credential. The server does
+not automatically load the Softmax CLI's saved credentials.
+The Nix development shell must include OpenSSL development libraries
 (`openssl` in its packages) for the server's HTTPS client.
-
-Alternatively, supply `FAST_XP_OBSERVATORY_TOKEN` in the server environment and
-start `coworld/fast_xp/server` directly. Personal team tokens also need
-`FAST_XP_OBSERVATORY_ELEVATED=1`; scoped machine credentials do not. The launcher
-preserves explicitly supplied token/elevation settings.
 
 Open `/docs/llms.txt` for the agent documentation entry point, or read the
 [run guide](docs/run.md). `GET /healthz` returns `ok`.
@@ -92,18 +87,21 @@ to disk. It exposes no policy names, bot contents, logs, credentials or artifact
 
 ```sh
 nix develop .. --command nim check coworld/fast_xp/server.nim
-nix develop .. --command nim r coworld/fast_xp/test_metrics.nim
-nix develop .. --command nim r coworld/fast_xp/test_api.nim
-nix develop .. --command nim r coworld/fast_xp/test_queue.nim
+nix develop .. --command nim r tests/test_fast_xp_metrics.nim
+nix develop .. --command nim r tests/test_fast_xp_api.nim
+nix develop .. --command nim r tests/test_fast_xp_queue.nim
 ```
 
 Build both executables first. The Nim API tests run a local mock Observatory/artifact
 service, so they need neither a real token nor external network access. The queue
 tests use a Nim worker fixture and exercise the real 120-second execution deadline.
 
-For a real full-match cold/warm benchmark, see `benchmark_local.py --help`. It
-uses the same saved personal token and checks repeated replay bytes. Use `--expected-replay-sha256` to compare against a reference from
-the same game revision; older Gota versions have different replays.
+For a real full-match cold/warm benchmark, run
+`nim r tests/bench_fast_xp.nim --output:/path/to/new-results` inside the Nix
+shell, with the same credential environment variables as the server. It runs
+three cold/warm pairs and checks repeated replay bytes. Options include
+`--repetitions:3`, `--cpu:0`, and `--expected-replay-sha256:HASH` to compare against
+a reference from the same game revision; older Gota versions have different replays.
 
 The worker imports the production Gota executable entry point; it shares package
 loading, neural runners and scoring rather than maintaining a separate game path.
