@@ -1,5 +1,5 @@
 import
-  std/[atomics, base64, deques, json, locks, monotimes, os, osproc, strtabs, strutils, tables,
+  std/[atomics, base64, cpuinfo, deques, json, locks, monotimes, os, osproc, strtabs, strutils, tables,
     tempfiles, times, uri, posix],
   mummy,
   zippy/ziparchives,
@@ -252,7 +252,7 @@ proc executeGame(job: GameJob): GameResult =
     # exec preserves the PID for deadlines. Discard public worker chatter without
     # pipe backpressure, interleaved journal lines, or a growing transcript file.
     var process = startProcess("/bin/sh", args = @["-c",
-      "exec \"$1\" >/dev/null 2>&1", "fast-xp-worker", worker],
+      "exec nice -n 10 \"$1\" >/dev/null 2>&1", "fast-xp-worker", worker],
       env = environment, options = {poDaemon})
     defer: process.close()
     defer:
@@ -526,7 +526,7 @@ when isMainModule:
   let
     host = getEnv("FAST_XP_HOST", "127.0.0.1")
     port = parseInt(getEnv("FAST_XP_PORT", "8080"))
-    capacity = parseInt(getEnv("FAST_XP_WORKERS", "2"))
+    capacity = parseInt(getEnv("FAST_XP_WORKERS", $clamp(cpuinfo.countProcessors(), 1, 256)))
     worker = workerPath()
   if port < 1 or port > 65535 or capacity < 1 or capacity > 256:
     raise newException(ValueError, "Invalid FAST_XP_PORT or FAST_XP_WORKERS")

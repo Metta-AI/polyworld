@@ -29,7 +29,7 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 
 - `FAST_XP_HOST`: bind address, default `127.0.0.1`.
 - `FAST_XP_PORT`: port, default `8080`.
-- `FAST_XP_WORKERS`: simultaneous game processes, default `2`, range 1–256; the hosted VM uses six. Up to 16 requests may be admitted, using 24 HTTP threads.
+- `FAST_XP_WORKERS`: optional override for simultaneous game processes, range 1–256. By default the server detects available logical CPUs at startup, capped at 256. Every game worker runs at nice +10; the API keeps its normal priority. Up to 16 requests may be admitted, using 24 HTTP threads.
 - `FAST_XP_TOKEN`: bearer token for callers of this server; required for non-loopback binding.
 - `FAST_XP_GOTA_WORKER`: executable path, default `gota_worker` beside server.
 - `FAST_XP_GAME`: `gota` (default) or `paintbot-pw`. Enables that game's route and documentation.
@@ -135,9 +135,9 @@ Oracle calls are unavailable. Raw BASIC and neural ZIPs use Paintbot's own limit
 and native validation; initialization failures forfeit that seat. The API retains
 the same batch, queue and private-log rules. See [Paintbot requests](docs/paintbot-llms.txt).
 
-The staging deployment uses four workers on a c8a.xlarge, with game processes at
-nice +10 and the API at normal priority. Its memory limit
-is 6 GiB; its systemd stop timeout is 360 seconds so active games can drain.
+Staging leaves `FAST_XP_WORKERS` unset, so restarting after an instance resize
+automatically picks up the CPU count. Its systemd stop timeout is 360 seconds so
+active games can drain.
 `gameplay` in Server-Timing measures the Paintbot tick loop, including bot
 execution and replay-frame recording. It excludes initialization and final artifact
 writing. The JSON game log and batch manifest expose the same `gameplay_ms` count.

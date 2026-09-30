@@ -1,10 +1,12 @@
 import
-  std/[json, monotimes, os, osproc, sequtils, strtabs, strutils, tables,
+  std/[cpuinfo, json, monotimes, os, osproc, sequtils, strtabs, strutils, tables,
     tempfiles, times, uri],
   curly,
   ./fastxpfixtures
 
 proc worker() =
+  doAssert readFile("/proc/self/stat").split(')')[1].splitWhitespace()[16] == "10",
+    "Game worker must run at nice +10"
   let root = getTempDir()
   proc path(key: string): string = decodeUrl(parseUri(getEnv(key)).path)
   let config = parseJson(readFile(path("COGAME_CONFIG_URI")))
@@ -110,6 +112,12 @@ proc run() =
   doAssert process.waitForExit(10_000) == 0, readFile(log)
   assertNoMatchFiles(root)
   doAssert "xxxx" notin readFile(log) and getFileSize(log) < 100_000
+  env.del("FAST_XP_WORKERS")
+  let automaticLog = root / "automatic.log"
+  let automatic = launch(ServerPath, automaticLog, env)
+  defer: stop(automatic)
+  waitUntil(records(automaticLog).anyIt(it["event"].getStr() == "server_started"), automatic, automaticLog)
+  doAssert metrics(base)["worker_limit"].getInt() == clamp(cpuinfo.countProcessors(), 1, 256)
 
 if existsEnv("COGAME_CONFIG_URI"):
   worker()
