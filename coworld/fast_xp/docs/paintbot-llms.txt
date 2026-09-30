@@ -35,7 +35,7 @@ uploaded seats. Batches contain manifest.json and games/000/, games/001/, etc.
 Check each game's status in the manifest: HTTP 200 batches can contain failures.
 There is no polling or stored result endpoint. Save the response before exiting.
 
-Staging runs two games concurrently; accepted games queue. Each game has a
+The dashboard shows the current worker capacity; accepted games queue. Each game has a
 300-second execution deadline, excluding queueing. Use a long HTTP timeout for
 batches; a batch can wait behind other requests. 429 means request admission is
 full; honor Retry-After. X-Request-ID correlates with server logs. Server-Timing

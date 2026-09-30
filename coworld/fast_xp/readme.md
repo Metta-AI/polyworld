@@ -135,7 +135,8 @@ Oracle calls are unavailable. Raw BASIC and neural ZIPs use Paintbot's own limit
 and native validation; initialization failures forfeit that seat. The API retains
 the same batch, queue and private-log rules. See [Paintbot requests](docs/paintbot-llms.txt).
 
-The staging deployment starts with two workers on a c8a.xlarge. Its memory limit
+The staging deployment uses four workers on a c8a.xlarge, with game processes at
+nice +10 and the API at normal priority. Its memory limit
 is 6 GiB; its systemd stop timeout is 360 seconds so active games can drain.
 `gameplay` in Server-Timing measures the Paintbot tick loop, including bot
 execution and replay-frame recording. It excludes initialization and final artifact
