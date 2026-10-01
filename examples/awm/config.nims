@@ -17,6 +17,13 @@ for dependency in [
   let d = awmDependenciesDir / dependency
   switch("path", if dirExists(d / "src"): d / "src" else: d)
 
+# The sources live in src/, but the game and its server are built into the
+# project folder, next to players/ and web/.
+if projectName() == "awm":
+  switch("out", awmProjectDir / "awm")
+elif projectName() == "server":
+  switch("out", awmProjectDir / "awmserver")
+
 --define:nimTypeNames
 --define:flatty64
 

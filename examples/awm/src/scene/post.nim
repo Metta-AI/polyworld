@@ -30,7 +30,7 @@ const
   PostLayerControls* {.booldefine: "awmPostLayers".} = false
     ## Compiles the layer views: the window can show any PostLayer.
   PostPanelControls* {.booldefine: "awmPostPanel".} = false
-    ## Compiles the tuning window in awmpostpanel.nim.
+    ## Compiles the tuning window in postpanel.nim.
 
 type
   PostLayer* = enum

@@ -3,7 +3,7 @@
 
 import std/[options, tables]
 import chroma, opengl, pixie, shady, silky, vmath
-import awmcore, baseset, cardfaces
+import ../core/core, ../core/baseset, ../ui/cardfaces
 
 type CardRenderer* = object
   program, vertexArray, vertexBuffer: GLuint

@@ -2,10 +2,35 @@
 
 Card-game prototype in Nim + Polyworld. Native and browser.
 
+## Layout
+
+```
+src/awm.nim          reads the command line and starts a game mode
+src/app.nim          what every mode shares: window, renderers, heroes
+src/play.nim         playing on a table: targeting, attacks, bots, beats
+src/core/            the game itself: no window, no graphics
+  core.nim           cards, rules and the rules DSL
+  sim.nim            the match: players, turns, effects, deaths
+  baseset.nim        the cards and decks
+  sessions.nim       saved games and the built-in bot
+  bots.nim           BASIC bot scripts
+src/modes/           game modes, clients of the core
+  duel.nim           two players
+  multiplayer.nim    three to seven players around the ring
+src/scene/           the 3D world: cards and piles, the courtyard and the
+                     ring, heroes, camera placements, post-processing
+src/vfx/             card and combat effects
+src/ui/              the HUD, card faces, and developer panels
+src/net/             the browser server and its client side
+```
+
+`nim c src/awm.nim` writes `./awm` and `nim c src/net/server.nim` writes
+`./awmserver` (see `config.nims`), next to `players/` and `web/`.
+
 ## Native
 
 ```sh
-nim c -o:awm awm.nim
+nim c src/awm.nim                            # builds ./awm
 ./awm                                        # bot vs bot, random classes
 ./awm --human --class warrior --opponent mage # play against a bot
 ./awm --seed 42                              # fixed deal
@@ -31,7 +56,7 @@ turns and card interaction are not implemented yet. Omitting `--players`, or
 using `--players=2`, keeps the existing two-player game. Counts below two and
 invalid counts are rejected. F8 toggles the same screen effects as the game.
 
-Balcony zones and the camera fit live in `awmmultiplayer.nim`. The stone floor,
+Balcony zones and the camera fit live in `src/scene/ring.nim`. The stone floor,
 fascia, parapet and end pieces are built in separate curved courses; the ring
 expands with player count while preserving card sizes and usable balcony depth.
 Lanterns, ivy and hanging banners use the original courtyard materials and props.
@@ -45,7 +70,7 @@ it left and right, and Enter prints the values to paste back as defaults.
 
 ### Screen effects
 
-`awmpost.nim` renders the 3D scene offscreen and adds screen-space ambient
+`src/scene/post.nim` renders the 3D scene offscreen and adds screen-space ambient
 occlusion (before the VFX), bloom from the light the VFX add, FXAA, a light
 grade and a vignette. The HUD is not affected. F8 toggles all of it.
 
@@ -65,7 +90,7 @@ source, 0 bloom. `AWM_POST_LAYER=N` starts on layer N (for screenshots).
 Build with `-d:awmPostPanel` for a draggable tuning window with every setting,
 grouped by layer (F9 shows or hides it; with `-d:awmPostLayers` it also picks
 the layer). "Print settings" writes the values as Nim for
-`defaultPostSettings` in `awmpost.nim`. Clicks over the window don't reach
+`defaultPostSettings` in `src/scene/post.nim`. Clicks over the window don't reach
 the board.
 
 ### Night courtyard materials

@@ -1,7 +1,7 @@
 ## Deterministic AWM simulation shared by native, browser and server builds.
 import std/[algorithm, random]
-import awmcore, baseset
-export awmcore, baseset
+import core, baseset
+export core, baseset
 
 const
   PlayerCount* = 2

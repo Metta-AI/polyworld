@@ -2,8 +2,8 @@
 ## This module deliberately has no game state, graphics or random dependency.
 import std/[math, strutils]
 import vmath
-import awmplacement
-export awmplacement
+import placement
+export placement
 
 type
   MultiplayerCamera* = Placement

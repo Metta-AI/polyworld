@@ -2,7 +2,8 @@ import
   std/os,
   polyworld/common
 
-const SourceRepo = currentSourcePath().parentDir.parentDir.parentDir
+# This file is in examples/awm/src: the repository is three folders up.
+const SourceRepo = currentSourcePath().parentDir.parentDir.parentDir.parentDir
 
 proc artworkRoot*(): string =
   ## Locate AWM artwork in the shared Polyworld data folder.

@@ -5,7 +5,7 @@ import
   std/[algorithm, os, sets, tables],
   jsony,
   polyworld/[characters, chargen],
-  awmcore
+  ../core/core
 
 const
   HeroRoster = ChargenLibrary & "/lvd.json"

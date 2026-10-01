@@ -1,17 +1,56 @@
-## Screen-space HUD only. Included after hudSize; no world or camera state.
+## The screen-space HUD every game mode draws with: panels, the turn header,
+## prompts, buttons, the card inspector and the pile tooltip. No world or
+## camera state.
+import std/[math, os, strformat, tables]
+import chroma, pixie, silky, vmath, windy
+import ../core/sim, cardfaces, ../scene/cardrenderer, ../play, ../scene/table,
+  ../vfx/vfxrenderer
+import polyworld/[assets, chrome, viewers]
 
 const
-  HudIvory = rgbx(244, 228, 192, 255)
-  HudMuted = rgbx(178, 177, 161, 255)
-  HudGold = rgbx(215, 181, 112, 255)
-  HudHelperY = 324'f32
-  HudClassInk: array[HeroClass, ColorRGBX] = [
+  PlayerPanelWidth* = 680.0'f32
+  PlayerPanelHeight* = 140.0'f32
+
+type
+  UiRect* = object
+    origin*: Vec2
+    size*: Vec2
+
+proc contains*(rect: UiRect, point: Vec2): bool =
+  point.x >= rect.origin.x and
+    point.y >= rect.origin.y and
+    point.x <= rect.origin.x + rect.size.x and
+    point.y <= rect.origin.y + rect.size.y
+
+proc classUiColor*(heroClass: HeroClass): ColorRGBX =
+  case heroClass
+  of Archer:
+    rgbx(70, 205, 102, 255)
+  of Warrior:
+    rgbx(226, 74, 61, 255)
+  of Mage:
+    rgbx(76, 121, 236, 255)
+
+proc hudScale*(window: Window): float32 =
+  let density = when defined(emscripten): window.contentScale else: 1.0'f32
+  min(density, min(window.size.x.float32 / 2400.0'f32,
+    window.size.y.float32 / 1500.0'f32))
+
+proc hudSize*(window: Window): Vec2 =
+  window.size.vec2 / max(hudScale(window), 0.01'f32)
+
+const
+  HudIvory* = rgbx(244, 228, 192, 255)
+  HudMuted* = rgbx(178, 177, 161, 255)
+  HudGold* = rgbx(215, 181, 112, 255)
+  HudHelperY* = 324'f32
+  HudClassInk*: array[HeroClass, ColorRGBX] = [
     rgbx(142, 199, 146, 255), rgbx(227, 127, 104, 255),
     rgbx(156, 175, 234, 255)]
-  HudClassIcon: array[HeroClass, string] = [
+  HudClassIcon*: array[HeroClass, string] = [
     "class-archer", "class-warrior", "class-mage"]
 
-proc addAwmHudAssets(builder: AtlasBuilder, cardRoot: string) =
+proc addAwmHudAssets*(builder: AtlasBuilder, cardRoot: string) =
   let hudRoot = cardRoot.parentDir / "ui/hud"
   for name in ["player-panel", "class-archer", "class-warrior", "class-mage",
       "life-heart", "energy-gem", "energy-glow", "energy-ready", "energy-spent", "energy-locked",
@@ -28,7 +67,7 @@ proc addAwmHudAssets(builder: AtlasBuilder, cardRoot: string) =
   builder.addFont(heading, "Number", 48)
   builder.addFont(heading, "Action", 48)
 
-proc hudSprite(sk: Silky, name: string, origin, size: Vec2,
+proc hudSprite*(sk: Silky, name: string, origin, size: Vec2,
     tint = rgbx(255, 255, 255, 255), flipX = false) =
   let entry = sk.atlas.entries["hud/" & name]
   let
@@ -37,11 +76,11 @@ proc hudSprite(sk: Silky, name: string, origin, size: Vec2,
   sk.drawQuad(origin, size, vec2(uvX.float32, entry.y.float32),
     vec2(uvWidth.float32, entry.height.float32), tint)
 
-proc finishRect(window: Window): UiRect =
+proc finishRect*(window: Window): UiRect =
   UiRect(origin: vec2(hudSize(window).x - 496, hudSize(window).y - 194),
     size: vec2(460, 126))
 
-proc drawButton(sk: Silky, window: Window, rect: UiRect, label: string,
+proc drawButton*(sk: Silky, window: Window, rect: UiRect, label: string,
     enabled = true): bool =
   let hovered = rect.contains(sk.mousePos)
   sk.hudSprite(if not enabled: "button-disabled"
@@ -50,7 +89,7 @@ proc drawButton(sk: Silky, window: Window, rect: UiRect, label: string,
     if enabled: HudIvory else: HudMuted, "Action", CenterAlign)
   enabled and hovered and window.buttonPressed[MouseLeft]
 
-proc drawEndTurnButton(sk: Silky, window: Window, label: string,
+proc drawEndTurnButton*(sk: Silky, window: Window, label: string,
     enabled: bool): bool =
   ## The end-turn button, with Enter as its shortcut while it is enabled.
   ## True when the turn should end this frame.
@@ -64,12 +103,12 @@ proc drawEndTurnButton(sk: Silky, window: Window, label: string,
     HudMuted, "Small", CenterAlign)
   clicked or (enabled and shortcut)
 
-proc cardReadingRect(window: Window): UiRect =
+proc cardReadingRect*(window: Window): UiRect =
   let height = max(120'f32, min(850'f32, hudSize(window).y - 360))
   UiRect(origin: vec2(28, 198),
     size: vec2(height * CardFaceWidth.float32 / CardFaceHeight.float32, height))
 
-proc drawCardReading(sk: Silky, rect: UiRect, card: Card, power = -1,
+proc drawCardReading*(sk: Silky, rect: UiRect, card: Card, power = -1,
     toughness = -1, lost: set[Keyword] = {}): bool =
   ## The large preview of the inspected card, in `rect`. A minion in play
   ## passes its live stats (toughness >= 0). True when the preview is shown.
@@ -81,15 +120,15 @@ proc drawCardReading(sk: Silky, rect: UiRect, card: Card, power = -1,
     sk.drawMinionOverlays(card, power, toughness, lost, rect.origin, rect.size)
   true
 
-proc drawCardReading(sk: Silky, window: Window, card: Card, power = -1,
+proc drawCardReading*(sk: Silky, window: Window, card: Card, power = -1,
     toughness = -1, lost: set[Keyword] = {}): bool =
   ## The duel's preview, on the left of the screen.
   sk.drawCardReading(cardReadingRect(window), card, power, toughness, lost)
 
-proc drawHudNotice(sk: Silky, rect: UiRect) =
+proc drawHudNotice*(sk: Silky, rect: UiRect) =
   sk.hudSprite("notice", rect.origin, rect.size)
 
-proc drawPlayerPanel(sk: Silky, origin: Vec2, player: PlayerState,
+proc drawPlayerPanel*(sk: Silky, origin: Vec2, player: PlayerState,
     name: string, active, mirrored: bool, time: float32) =
   ## One player's class, life and energy. The mirrored version reads from
   ## the right edge of the screen.
@@ -135,7 +174,7 @@ proc drawPlayerPanel(sk: Silky, origin: Vec2, player: PlayerState,
         sk.hudSprite("energy-glow", dot - vec2(11), vec2(40), glow)
       sk.hudSprite(sprite, dot, vec2(18))
 
-proc drawPlayerPanel(sk: Silky, window: Window, game: GameState,
+proc drawPlayerPanel*(sk: Silky, window: Window, game: GameState,
     playerIndex: int, human: bool, time: float32) =
   ## The duel's two panels, in the top corners.
   sk.drawPlayerPanel(
@@ -146,11 +185,11 @@ proc drawPlayerPanel(sk: Silky, window: Window, game: GameState,
       else: "PLAYER " & $(playerIndex + 1),
     playerIndex == game.currentPlayer, playerIndex == 1, time)
 
-proc playerPanelColumnX(window: Window): float32 =
+proc playerPanelColumnX*(window: Window): float32 =
   ## The left edge of the right-hand column of player panels.
   hudSize(window).x - PlayerPanelWidth - 24
 
-proc playerPanelColumnRect(window: Window, count, index: int,
+proc playerPanelColumnRect*(window: Window, count, index: int,
     bottom: float32): UiRect =
   ## Panel `index` of `count`, down the right edge of the screen: a fixed
   ## gap apart, the column centered between the top and `bottom`.
@@ -165,7 +204,7 @@ proc playerPanelColumnRect(window: Window, count, index: int,
       top + index.float32 * (PlayerPanelHeight + Gap)),
     size: vec2(PlayerPanelWidth, PlayerPanelHeight))
 
-proc cardReadingColumnRect(window: Window, bottom: float32): UiRect =
+proc cardReadingColumnRect*(window: Window, bottom: float32): UiRect =
   ## The preview over the right-hand column of player panels: the same size
   ## as the duel's, flush with the panels' right edge and centered on the
   ## column's space between the top and `bottom`.
@@ -176,7 +215,7 @@ proc cardReadingColumnRect(window: Window, bottom: float32): UiRect =
       max(Margin, Margin + (bottom - Margin - size.y) * 0.5'f32)),
     size: size)
 
-proc drawPlayerPanelColumn(sk: Silky, window: Window,
+proc drawPlayerPanelColumn*(sk: Silky, window: Window,
     players: openArray[PlayerState], current, human: int, bottom: float32,
     time: float32) =
   ## Any number of players, in the right-hand version of the panel, down the
@@ -187,7 +226,7 @@ proc drawPlayerPanelColumn(sk: Silky, window: Window,
       if i == human: "YOU" else: "PLAYER " & $(i + 1),
       i == current, true, time)
 
-proc drawTurnHeader(sk: Silky, centerX, statusWidth: float32,
+proc drawTurnHeader*(sk: Silky, centerX, statusWidth: float32,
     turnNumber: int, label: string, active: bool, status: string) =
   ## The turn plaque and status line, centered on `centerX`. `active`
   ## lights the plaque for the human's own turn.
@@ -208,7 +247,7 @@ proc drawTurnHeader(sk: Silky, centerX, statusWidth: float32,
     vec2(centerX - statusWidth * 0.5'f32, 266),
     vec2(statusWidth, 34), HudIvory, "Small", CenterAlign)
 
-proc drawTurnHeader(sk: Silky, window: Window, game: GameState,
+proc drawTurnHeader*(sk: Silky, window: Window, game: GameState,
     human: bool, status: string) =
   ## The duel's header, centered between its two corner panels.
   let yourTurn = human and game.currentPlayer == 0
@@ -220,7 +259,7 @@ proc drawTurnHeader(sk: Silky, window: Window, game: GameState,
       else: "PLAYER " & $(game.currentPlayer + 1) & "'S TURN",
     yourTurn and not game.gameOver, status)
 
-proc drawTossPrompt(sk: Silky, window: Window, play: TablePlay,
+proc drawTossPrompt*(sk: Silky, window: Window, play: TablePlay,
     game: GameState, centerX = hudSize(window).x * 0.5'f32) =
   ## What to discard, while the human is choosing.
   if not play.tossPicking:
@@ -246,7 +285,7 @@ proc drawTossPrompt(sk: Silky, window: Window, play: TablePlay,
     banner.origin + vec2(22, 76), vec2(banner.size.x - 44, 28),
     HudMuted, "Small", CenterAlign)
 
-proc drawTargetPrompt(sk: Silky, window: Window, play: TablePlay,
+proc drawTargetPrompt*(sk: Silky, window: Window, play: TablePlay,
     game: GameState, centerX = hudSize(window).x * 0.5'f32) =
   ## What to target, while the human is choosing: the rule's own words.
   if not play.pendingTargeting:
@@ -305,7 +344,7 @@ proc drawTargetPrompt(sk: Silky, window: Window, play: TablePlay,
     CenterAlign
   )
 
-proc drawCombatPrompt(sk: Silky, window: Window, play: TablePlay,
+proc drawCombatPrompt*(sk: Silky, window: Window, play: TablePlay,
     game: GameState, centerX = hudSize(window).x * 0.5'f32) =
   ## What to attack, while the human's attacker is selected.
   if play.selectedAttacker == 0 or play.pendingTargeting:
@@ -341,7 +380,7 @@ proc drawCombatPrompt(sk: Silky, window: Window, play: TablePlay,
     CenterAlign
   )
 
-proc drawMatchResult(sk: Silky, window: Window, play: TablePlay,
+proc drawMatchResult*(sk: Silky, window: Window, play: TablePlay,
     game: GameState, humanSeat: int,
     centerX = hudSize(window).x * 0.5'f32) =
   ## Who won, once the match is over and the table has settled. `humanSeat`
@@ -383,7 +422,7 @@ proc drawMatchResult(sk: Silky, window: Window, play: TablePlay,
     CenterAlign
   )
 
-proc drawPileTooltip(sk: Silky, window: Window,
+proc drawPileTooltip*(sk: Silky, window: Window,
     pile: tuple[found: bool, player: int, discarded: bool, count: int,
       anchor: Vec3],
     viewProjection: Mat4, avoid = UiRect(), avoiding = false) =
@@ -402,3 +441,15 @@ proc drawPileTooltip(sk: Silky, window: Window,
   sk.hudSprite("pile-label", origin, vec2(154, 44))
   sk.drawLabel((if pile.discarded: "DISCARD " else: "DECK ") & $pile.count,
     origin + vec2(5, 0), vec2(144, 44), HudIvory, "Small", CenterAlign)
+
+proc addHudHalo*(renderer: var VfxRenderer, window: Window, rect: UiRect,
+    time: float32) =
+  ## The hovered card's glow (addCardGlow) around a HUD rectangle. Draw it
+  ## before post.present, so it blooms the same.
+  const HudPixelsPerUnit = 75'f32
+    ## The glow reaches as far around a panel as around a card in hand.
+  let
+    scale = hudScale(window)
+    pulse = 0.88'f32 + 0.12'f32 * sin(time * 5)
+  renderer.addHudHalo(rect.origin * scale, rect.size * scale,
+    HudPixelsPerUnit * scale, HoverGold, pulse * 0.2875'f32)

@@ -3,7 +3,7 @@
 ## from them. It knows nothing about seats, cameras or turns.
 import std/[math, options]
 import opengl, shady, silky, vmath, windy
-import awmsim, cardrenderer
+import ../core/sim, cardrenderer
 
 const
   CardWidth* = 1.45'f32

@@ -72,5 +72,5 @@ fi
 
 cd "$project_dir"
 POLYWORLD_REPO="$polyworld_repo" AWM_WEB_DIR="$web_dir" \
-  "$nim_command" c -d:emscripten "$@" awm.nim
+  "$nim_command" c -d:emscripten "$@" src/awm.nim
 echo "Browser game built: $web_dir/awm.html"

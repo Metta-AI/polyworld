@@ -4,7 +4,7 @@
 ## seat only, so the spectator's reverse camera never looks through a wall.
 import std/[math, random]
 import vmath
-import awmmultiplayer
+import ring
 
 type
   CourtyardVertex* = object
@@ -619,7 +619,7 @@ proc buildMultiplayerCourtyardMesh*(playerCount: int): CourtyardMesh =
 when not defined(headless):
   import std/os
   import opengl, pixie
-  import paths
+  import ../paths
 
   type
     CourtyardMaterial* = object

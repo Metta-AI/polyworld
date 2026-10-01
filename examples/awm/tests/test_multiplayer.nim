@@ -1,7 +1,8 @@
 ## The multiplayer preview is a scene harness: these checks need no window.
 import std/[math, random, unittest]
 import vmath
-import ../[awmcourtyard, awmmultiplayermode, awmsim, awmsessions, awmbots]
+import ../src/scene/courtyard, ../src/modes/multiplayer, ../src/core/sim,
+  ../src/core/sessions, ../src/core/bots
 
 const Tolerance = 0.0002'f32
 

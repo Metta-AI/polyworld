@@ -3,7 +3,7 @@
 ## Each invocation plays at most one card; the game loop calls repeatedly
 ## until the bot ends its turn.
 import bassy
-import awmsim
+import sim
 
 type
   BotDataSlot = enum

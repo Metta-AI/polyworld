@@ -1,7 +1,7 @@
 ## Browser feeds for the global spectator and player WebSocket connections.
 import std/[json, options, times]
 import windy
-import awmsessions
+import ../core/sessions
 
 when defined(emscripten):
   import std/strutils

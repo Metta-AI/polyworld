@@ -2,7 +2,7 @@
 
 import
   std/[options, strutils],
-  awmcore
+  core
 
 const
   DeckSize* = 40

@@ -1,8 +1,8 @@
 ## Shared browser/server session options, deterministic bots and snapshot codec.
 ## Card programs stay in the base set; the wire format contains stable card IDs.
 import std/[algorithm, json, sets, strutils]
-import awmsim
-export awmsim
+import sim
+export sim
 
 const
   DefaultSessionSeed* = 20260910'i64

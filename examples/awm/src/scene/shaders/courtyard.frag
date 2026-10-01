@@ -69,7 +69,7 @@ float visibility(vec3 n, vec3 light) {
                                          p.z - bias));
     return sum / 9.0;
 }
-// Key light, ambient and lamp color mirror awmcourtyard's Courtyard*
+// Key light, ambient and lamp color mirror courtyard.nim's Courtyard*
 // constants, which light the heroes the same way.
 vec3 lamp(vec3 p, vec3 n, vec3 source, float phase) {
     vec3 delta = source - p;

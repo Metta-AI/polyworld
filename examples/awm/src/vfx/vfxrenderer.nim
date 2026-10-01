@@ -2,7 +2,7 @@
 ## World-space effects respect scene depth and never write into it.
 import std/[math, os]
 import opengl, pixie, shady, vmath
-import awmcore
+import ../core/core
 
 type
   ActiveVfx* = object

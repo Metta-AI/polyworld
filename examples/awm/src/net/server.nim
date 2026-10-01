@@ -2,7 +2,7 @@
 ## WebSocket connections for players and spectators, and HTTP asset serving.
 import std/[asynchttpserver, asyncdispatch, httpcore, json, os,
   strutils, times, uri, sysrand]
-import awmsessions, awmwebsocket
+import ../core/sessions, websocket
 
 type
   SeatKind = enum HumanSeat, BotSeat

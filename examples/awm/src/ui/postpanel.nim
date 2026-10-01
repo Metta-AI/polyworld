@@ -6,7 +6,7 @@
 import
   std/strutils,
   silky, vmath, windy,
-  awmcourtyard, awmpost
+  ../scene/courtyard, ../scene/post
 
 when PostPanelControls:
   const

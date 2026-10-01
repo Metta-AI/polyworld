@@ -5,7 +5,7 @@
 import std/[os, options, strutils, tables]
 import pixie
 import pixie/fileformats/svg
-import awmcore, paths
+import ../core/core, ../paths
 
 const
   CardFaceWidth* = 600

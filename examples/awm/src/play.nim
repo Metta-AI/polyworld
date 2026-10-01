@@ -4,8 +4,8 @@
 ## with a TableLayout; the rules stay in the core.
 import std/[math, options, random, strformat]
 import chroma, silky, vmath, windy
-import awmsim, awmtable, awmheroes, awmbots, awmsessions, cardrenderer,
-  vfxrenderer
+import core/sim, scene/table, scene/heroes, core/bots, core/sessions,
+  scene/cardrenderer, vfx/vfxrenderer
 
 type
   TableLayout* = object

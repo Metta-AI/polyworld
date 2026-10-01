@@ -2,8 +2,8 @@
 ## camera, either hand or the played spell around with the keyboard, then
 ## print the values to paste back as defaults. Shared by every game mode.
 import windy
-import awmplacement
-export awmplacement
+import ../scene/placement
+export placement
 
 type
   TuningTarget* = object

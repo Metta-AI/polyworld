@@ -45,7 +45,7 @@ class BrowserServerTests(unittest.TestCase):
             subprocess.run(
                 [os.environ.get("NIM", "nim"), "c", "--hints:off",
                  f"--nimcache:{cls.root / 'nimcache'}",
-                 f"--out:{cls.binary}", "awmserver.nim"],
+                 f"--out:{cls.binary}", "src/net/server.nim"],
                 cwd=PROJECT, check=True,
             )
 
