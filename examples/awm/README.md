@@ -34,7 +34,7 @@ nim c src/awm.nim                            # builds ./awm
 ./awm                                        # bot vs bot, random classes
 ./awm --human --class warrior --opponent mage # play against a bot
 ./awm --seed 42                              # fixed deal
-./awm --players=4                            # multiplayer battlefield preview
+./awm --players=4 --human                    # multiplayer: you and 3 bots
 ```
 
 | Flag | Default |
@@ -48,11 +48,12 @@ nim c src/awm.nim                            # builds ./awm
 
 Bot vs bot ignores `--class`/`--opponent` and picks randomly.
 
-`--players=3` (or `--players 3`) and larger counts open the multiplayer scene
-harness: a small circular center surrounded by one modular balcony per player.
-Each balcony has its own hero, deck, cards in play, discard pile and hand. The
-camera fits all balconies in the view. This is a visual preview; multiplayer
-turns and card interaction are not implemented yet. Omitting `--players`, or
+`--players=3` (or `--players 3`) and larger counts play a multiplayer match:
+a small circular center surrounded by one modular balcony per player. Each
+balcony has its own hero, deck, cards in play, discard pile and hand. The
+camera fits all balconies in the view. With `--human` you pick your class on
+screen and play seat 1; bots with random classes play the others, and the last
+player alive wins. Without it, bots play every seat. Omitting `--players`, or
 using `--players=2`, keeps the existing two-player game. Counts below two and
 invalid counts are rejected. F8 toggles the same screen effects as the game.
 
@@ -137,8 +138,26 @@ repeatable material comparisons without the card inspector.
 AWM_SKIP_WEB_BUILD=1 ./tools/serve.sh       # serve existing build
 ```
 
-- Spectator: <http://127.0.0.1:8080/client/global>
-- Player: <http://127.0.0.1:8080/client/player?class=warrior&opponent=mage&seed=42>
+The page takes the native flags as URL parameters:
+
+- Bots: <http://127.0.0.1:8080/awm.html>
+- Duel: <http://127.0.0.1:8080/awm.html?human=1&class=warrior&opponent=mage&seed=42>
+- Multiplayer, bots: <http://127.0.0.1:8080/awm.html?players=5>
+- Multiplayer, you and 3 bots: <http://127.0.0.1:8080/awm.html?players=4&human=1>
+
+| Parameter | Native flag |
+|---|---|
+| `human=1` | `--human` |
+| `class`, `opponent` | `--class`, `--opponent` |
+| `players` | `--players` |
+| `seed` | `--seed` |
+| `bot=URL` (repeatable) | `--bot` |
+
+### Match server
+
+`nim c src/net/server.nim` builds `./awmserver`, which serves `build/web` and
+runs one shared duel. It prints the spectator and player links. The browser
+client doesn't follow the server's match yet: those pages play a local game.
 
 | Server flag | Default |
 |---|---|
@@ -151,6 +170,7 @@ AWM_SKIP_WEB_BUILD=1 ./tools/serve.sh       # serve existing build
 | `--player1 human\|bot` | `bot` |
 | `--class CLASS` | chosen at connect |
 | `--opponent CLASS` | chosen at connect |
+| `--web-dir PATH` | `build/web` beside `awmserver` |
 
 ## Tests
 

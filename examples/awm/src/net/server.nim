@@ -49,7 +49,8 @@ proc generateToken(): string =
 
 proc serverOptions(): ServerOptions =
   result = ServerOptions(host: "127.0.0.1", port: 8080, stepMs: 2500,
-    maxTurns: 60, webDir: getAppDir() / "web", seed: DefaultSessionSeed,
+    maxTurns: 60, webDir: getAppDir() / "build" / "web",
+    seed: DefaultSessionSeed,
     seatKinds: [HumanSeat, BotSeat],
     classes: [Archer, Mage], classFixed: [false, false],
     connectTimeout: 180)
@@ -60,7 +61,7 @@ proc serverOptions(): ServerOptions =
       echo "AWM browser server\n" &
         "  --host ADDRESS       Bind address (127.0.0.1)\n" &
         "  --port PORT          HTTP port (8080)\n" &
-        "  --web-dir PATH       Built browser assets (web beside executable)\n" &
+        "  --web-dir PATH       Built browser assets (build/web beside executable)\n" &
         "  --step-ms NUMBER     Milliseconds between bot actions (2500)\n" &
         "  --max-turns NUMBER   Restart after this many turns (60)\n" &
         "  --seed INTEGER       Match seed\n" &

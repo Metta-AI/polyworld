@@ -591,8 +591,22 @@ when not defined(headless):
           if match.endTurn():
             turnPassed()
       when defined(emscripten):
-        publishStatus((&"Multiplayer match: {layout.playerCount} players. " &
-          play.statusMessage).cstring)
+        # The same summary as the duel's, one line per seat.
+        var summary = &"Multiplayer match: {layout.playerCount} players. " &
+          (if match.humanSeat >= 0 or choosingClasses and
+            sessionOptions.human: "Human player. " else: "Bot match. ") &
+          play.statusMessage
+        if not choosingClasses:
+          template game: untyped = match.game
+          summary.add &" Turn {match.turnNumber}. Active player {match.current + 1}."
+          for seat, player in game.players:
+            summary.add &" Player {seat + 1} {player.heroClass.className()}" &
+              (if game.dead(seat): ": dead." else:
+                &": life {player.life}, energy {player.energy}/{player.totalEnergy}, hand {player.hand.len}, board {player.board.len}, deck {player.deck.len}, discard {player.discardPile.len}.")
+          if match.humanTurn and not play.pendingTargeting and
+              play.presentationIdle(game):
+            summary.add " Ready for your action."
+        publishStatus(summary.cstring)
       when PostPanelControls:
         drawPostPanel(sk, window, post, courtyard)
       sk.endUi()
