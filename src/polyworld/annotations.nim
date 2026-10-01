@@ -2,8 +2,9 @@
 import std/[json, math, os, tables], bassy, jsony
 
 const
-  AnnotationEventLimit* = 16 * 1024
-  AnnotationFileLimit* = 64 * 1024 * 1024
+  AnnotationEventLimit* = 2 * 1024
+  AnnotationFileLimit* = 2 * 1024 * 1024
+  AnnotationCountLimit* = 1000
 
 type
   AnnotationStatus* = enum
@@ -13,6 +14,7 @@ type
     path: string
     file: File
     bytes: int
+    events: int
     failed: bool
     status: AnnotationStatus
 
@@ -26,8 +28,8 @@ proc annotationMessage*(status: AnnotationStatus): string =
   of AnnotationAccepted: ""
   of AnnotationDisabled: "No annotation destination"
   of AnnotationInvalid: "Invalid annotation: expected numeric time, kind, function and a JSON object"
-  of AnnotationTooLarge: "Annotation exceeds 16 KiB"
-  of AnnotationBudgetExceeded: "Annotations exceed 64 MiB per seat"
+  of AnnotationTooLarge: "Annotation exceeds 2 KiB"
+  of AnnotationBudgetExceeded: "Annotations exceed 1000 events or 2 MiB per seat"
   of AnnotationWriteFailed: "Annotation output could not be written"
 
 proc flushOutput(file: File): cint {.importc: "fflush", header: "<stdio.h>".}
@@ -92,7 +94,7 @@ proc annotate*(sink: AnnotationSink, time: int32, kind, function, args: string):
     ",\"args\":" & $parameters & "}\n"
   if line.len > AnnotationEventLimit:
     sink.status = AnnotationTooLarge
-  elif sink.bytes + line.len > AnnotationFileLimit:
+  elif sink.events >= AnnotationCountLimit or sink.bytes + line.len > AnnotationFileLimit:
     sink.status = AnnotationBudgetExceeded
   else:
     try:
@@ -101,6 +103,7 @@ proc annotate*(sink: AnnotationSink, time: int32, kind, function, args: string):
         sink.file = open(sink.path, fmWrite)
       sink.file.write(line)
       sink.bytes += line.len
+      inc sink.events
       sink.status = AnnotationAccepted
     except IOError, OSError:
       sink.failed = true

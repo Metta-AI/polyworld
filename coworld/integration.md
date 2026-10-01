@@ -86,8 +86,8 @@ Heartleaf does not yet have a Coworld output integration.
 | 0 | Written to the buffered file (not yet guaranteed durable) |
 | 1 | No destination; disabled |
 | 2 | Invalid arguments or JSON object |
-| 3 | Event exceeds 16 KiB |
-| 4 | Seat exceeds 64 MiB per episode |
+| 3 | Event exceeds 2 KiB |
+| 4 | Seat exceeds 1000 annotations or 2 MiB per episode |
 | 5 | Output write failed |
 
 Limits include serialized JSON and the trailing newline. Kind and function are

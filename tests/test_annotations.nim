@@ -72,23 +72,13 @@ after = 42
   doAssert readFile(directory / "events.jsonl").count('\n') == 1
   echo "Invalid input and event limit do not disable the VM or poison later events"
 
-block:
+for payloadSize in [0, 1900]:
   let directory = createTempDir("annotation-budget-", "")
   defer: removeDir(directory)
   let sink = newAnnotationSink(directory / "events.jsonl")
-  let args = "{\"payload\":\"" & repeat('x', 16000) & "\"}"
-  var accepted = 0
-  while true:
-    case sink.annotate(0, "intent", "f", args)
-    of AnnotationAccepted: inc accepted
-    of AnnotationBudgetExceeded: break
-    else: doAssert false
-  # Exhaust the remaining space with small events before exercising the VM.
-  while true:
-    case sink.annotate(123, "intent", "selectTarget", "{\"target\":7}")
-    of AnnotationAccepted: discard
-    of AnnotationBudgetExceeded: break
-    else: doAssert false
+  let args = "{\"payload\":\"" & repeat('x', payloadSize) & "\"}"
+  for tick in 0 ..< AnnotationCountLimit:
+    doAssert sink.annotate(int32(tick), "intent", "f", args) == AnnotationAccepted
   var host = initHost()
   host.addAnnotationFunctions(sink)
   var runtime = initRuntime(compile(Source, host), host)
@@ -97,8 +87,8 @@ block:
   doAssert runtime.getGlobal("after") == 42
   doAssert sink.close() == AnnotationAccepted
   doAssert getFileSize(directory / "events.jsonl") <= AnnotationFileLimit
-  doAssert accepted > 4000
-  echo "64 MiB budget rejects events without stopping the policy"
+  doAssert readFile(directory / "events.jsonl").count('\n') == AnnotationCountLimit
+  echo "1000-event budget preserves accepted events without stopping the policy"
 
 block:
   let directory = createTempDir("annotation-io-", "")
