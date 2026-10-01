@@ -482,13 +482,12 @@ proc dyingDiscards*(play: TablePlay, owner: int): int =
 
 proc resetTable*(play: var TablePlay) =
   ## A new game: nothing from the last one is still on its way.
-  play.dyingMinions.setLen(0)
-  play.castSpell = none(CastSpell)
-  play.queuedEvents.setLen(0)
-  play.heroDeaths.setLen(0)
-  play.deathDiscard.setLen(0)
-  play.tossPicking = false
-  play.discardFlights.setLen(0)
+  play = TablePlay(
+    pendingCardIndex: -1,
+    attackTarget: Canceled,
+    attackForward: true,
+    visualRng: play.visualRng
+  )
 
 proc inspectedCard*(
     window: Window,

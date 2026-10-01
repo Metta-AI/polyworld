@@ -193,6 +193,7 @@ when not defined(headless):
     let layout = buildMultiplayerLayout(sessionOptions.playerCount)
     var
       previewTime = 0.0'f32
+      hudTime = 0.0'f
       previewLastFrame = epochTime()
       seatRng =
         if sessionOptions.seedGiven or defined(takeScreenshot):
@@ -265,6 +266,7 @@ when not defined(headless):
         tuningTarget("camera", previewView.camera)])
     window.onFrame = proc() =
       var previewDt = frameDelta(previewLastFrame)
+      hudTime += previewDt
       if app.replay != nil:
         previewDt *= app.replay.timeScale
       previewTime += previewDt
@@ -558,7 +560,7 @@ when not defined(headless):
           # panels and their glow hide while the inspector is open.
           vfx.clear()
           vfx.addHudHalo(window, playerPanelColumnRect(window,
-            match.seats.len, match.current, panelsBottom), previewTime)
+            match.seats.len, match.current, panelsBottom), hudTime)
           vfx.draw(hudHaloProjection(window.size.vec2), depthTest = false)
       elif classHover.isSome:
         vfx.draw(vp)
@@ -584,7 +586,7 @@ when not defined(headless):
             inspected.power, inspected.toughness, inspected.lost)
         else:
           sk.drawPlayerPanelColumn(window, match.seats, match.current,
-            match.humanSeat, panelsBottom, previewTime)
+            match.humanSeat, panelsBottom, hudTime)
         # The turn header and prompts center on the space left of the
         # panels.
         let

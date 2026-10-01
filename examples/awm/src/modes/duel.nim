@@ -184,6 +184,7 @@ proc runDuel*(app: App) =
     else:
       initTablePlay()
     animationTime = 0.0'f32
+    hudTime = 0.0'f
     lastFrameTime = epochTime()
     botClock = initBotClock()
     botClassWait = 1.5'f32
@@ -527,6 +528,7 @@ proc runDuel*(app: App) =
 
   window.onFrame = proc() =
     var dt = frameDelta(lastFrameTime)
+    hudTime += dt
     if app.replay != nil:
       dt *= app.replay.timeScale
     when defined(awmLayoutTuning):
@@ -792,8 +794,8 @@ proc runDuel*(app: App) =
         else:
           play.statusMessage = "Your opponent is thinking..."
     else:
-      drawPlayerPanel(sk, window, game, 0, sessionOptions.human, animationTime)
-      drawPlayerPanel(sk, window, game, 1, sessionOptions.human, animationTime)
+      drawPlayerPanel(sk, window, game, 0, sessionOptions.human, hudTime)
+      drawPlayerPanel(sk, window, game, 1, sessionOptions.human, hudTime)
       drawTurnHeader(sk, window, game, sessionOptions.human, play.statusMessage)
       let inspectingCard = drawCardReadingView(
         sk,
