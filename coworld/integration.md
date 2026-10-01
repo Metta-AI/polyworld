@@ -78,36 +78,32 @@ and return disabled when there is no destination; they do not save files yet.
 This includes GoTA, Light vs Dark, Call to Adventure, AWM and Heartleaf hosts.
 Heartleaf does not yet have a Coworld output integration.
 
-`ANNOTATE` returns a status instead of raising a BASIC error. `ANNOTATE_STATUS()`
-reports the last status, including asynchronous write failures, and
-`ANNOTATE_ERROR$()` returns its explanation:
+`ANNOTATE` returns a status instead of raising a BASIC error.
+`ANNOTATE_ERROR$()` explains the most recent call:
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Accepted into the queue (not yet guaranteed durable) |
+| 0 | Written to the buffered file (not yet guaranteed durable) |
 | 1 | No destination; disabled |
 | 2 | Invalid arguments or JSON object |
 | 3 | Event exceeds 16 KiB |
 | 4 | Seat exceeds 64 MiB per episode |
-| 5 | Queue full; event not accepted |
-| 6 | Output write failed |
-| 7 | Output closed |
+| 5 | Output write failed |
 
 Limits include serialized JSON and the trailing newline. Kind and function are
 limited to 128 and 256 bytes; JSON nesting is limited to 64 levels and numbers must
 be finite. These errors reject the event without disabling the VM. Calls still
 consume the VM's normal instruction/work budget, like other host functions.
 
-Each episode has one writer thread and a queue of at most 256 events (at most
-4 MiB of queued JSON, plus metadata). The policy validates and tries to enqueue;
-it never waits for disk or queue capacity. The worker keeps files open and flushes
-batches. A full queue rejects the event rather than stalling the action. File errors
-are returned through status and summarized in the policy log during cleanup.
+Each seat has one lazily opened, buffered file handle, like PRINT. Calls append
+records synchronously and in order. There is no background worker or shared queue,
+so one seat cannot exhaust queue capacity for another seat.
 
-The writer drains and closes alongside existing player-log cleanup, before the
-completion marker. This does not add a platform finalization phase. Cleanup can
-wait for storage; policy execution does not. Abrupt process termination can lose
-queued events, just as it can lose buffered logs.
+Existing player-output cleanup flushes and closes the files before the completion
+marker. Write errors return a status; cleanup errors are summarized in the policy
+log. Buffer flushes can block on storage, just as PRINT can. Accepted records are
+not guaranteed durable before flushing; abrupt termination can lose buffered data.
+No new platform finalization phase is introduced.
 
 No calls means no file. Accepted events produce UTF-8 JSON Lines:
 
@@ -122,9 +118,9 @@ uploads the files after the episode.
 ## Verification
 
 `nim r tests/test_annotations.nim` checks the portable API, seat isolation, limits,
-nonfatal input and storage errors, and queue saturation while storage is blocked.
-The same test with `-d:coworld` covers hosted registration; the disabled surface
-also runs under Emscripten without threads. It is included in the normal CI suite.
+nonfatal input and storage errors, and ordered output from multi-seat bursts.
+The same test with `-d:coworld` covers hosted registration; file output also runs
+under Emscripten without threads. It is included in the normal CI suite.
 
 `nim r coworld/tools/verify_native.nim` checks all desktop, headless and Coworld
 entrypoints, recording regression tests, and full replay verification. First record

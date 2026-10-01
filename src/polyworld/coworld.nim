@@ -55,7 +55,6 @@ var
   seats*: CoworldSeats
   config*: GameConfig
   logs: seq[PlayerLog]
-  annotationWriter: AnnotationWriter
   annotationSinks: seq[AnnotationSink]
   server: Server
   serverThread: Thread[ServerAddress]
@@ -175,13 +174,11 @@ proc playerError*(slot: int, message: string) =
   playerLog(slot, "\nBASIC error: " & message & "\n")
 
 proc closePlayerOutputs*() =
-  ## Drains annotations and closes seat logs before episode completion.
-  if annotationWriter != nil:
-    annotationWriter.close()
-    annotationWriter = nil
-    for slot, sink in annotationSinks:
-      if sink.annotationStatus == AnnotationWriteFailed:
-        playerLog(slot, "\n[Annotations: " & AnnotationWriteFailed.annotationMessage & ".]\n")
+  ## Flushes and closes private outputs before episode completion.
+  for slot, sink in annotationSinks:
+    if sink.close() == AnnotationWriteFailed:
+      playerLog(slot, "\n[Annotations: " & AnnotationWriteFailed.annotationMessage & ".]\n")
+  annotationSinks.setLen(0)
   for log in logs.mitems:
     if log.file != nil:
       try:
@@ -334,9 +331,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
   annotationSinks = newSeq[AnnotationSink](slotCount)
   for slot, seat in seats.seats:
     if seat.annotationsUri.len > 0:
-      if annotationWriter == nil:
-        annotationWriter = newAnnotationWriter()
-      annotationSinks[slot] = annotationWriter.newAnnotationSink(localPath(seat.annotationsUri))
+      annotationSinks[slot] = newAnnotationSink(localPath(seat.annotationsUri))
   when not defined(fastXpWorker):
     var port: int
     try:
