@@ -1,12 +1,12 @@
 ## Animated replay completion, looping, and seeks during attacks.
 import
   std/sequtils,
+  polyworld/player,
   ../src/[replayer, play],
   ../src/core/[bots, match, replays, sim],
   ../src/modes/multiplayer,
   ../src/scene/table,
-  ../src/vfx/vfxrenderer,
-  polyworld/player
+  ../src/vfx/vfxrenderer
 
 const BaseBot = staticRead("../players/base.bas")
 
@@ -88,14 +88,13 @@ for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
     replay.advance(play, game, layout, view, time, seconds)
   doAssert replay.tick == data.actions.len.int32
 
-  echo "Backward seek keeps its destination and clears dead heroes"
-  replay.seek(play, game, layout, view, time, 5)
-  doAssert play.heroDeaths.len == 0
-  replay.seek(play, game, layout, view, time, 0)
-  doAssert play.heroDeaths.len == 0
+  echo "Restored living heroes ignore death times from the previous game"
+  let restored = replay.newReplayGame()
+  for seat in 0 ..< restored.playerCount:
+    doAssert play.deathClock(restored, seat, time) == -1
 
   echo "Explicit looping resets all presentation state"
-  replay.seek(play, game, layout, view, time, data.actions.len.int32)
+  doAssert play.heroDeaths.anyIt(it >= 0)
   replay.transport.repeating = true
   replay.transport.playing = true
   for i in 0 ..< 100:
@@ -106,6 +105,17 @@ for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
   doAssert play.heroDeaths.len == 0
   doAssert not play.attackActive
   doAssert not game.gameOver
+  for seat in 0 ..< game.playerCount:
+    doAssert not game.dead(seat)
+    doAssert play.deathClock(game, seat, time) == -1
+
+  echo "Backward seek keeps its destination and clears dead heroes"
+  replay.transport.repeating = false
+  replay.seek(play, game, layout, view, time, data.actions.len.int32)
+  replay.seek(play, game, layout, view, time, 5)
+  doAssert play.heroDeaths.len == 0
+  replay.seek(play, game, layout, view, time, 0)
+  doAssert play.heroDeaths.len == 0
 
 for forward in [false, true]:
   echo "Seeking during a lunge, forward = ", forward

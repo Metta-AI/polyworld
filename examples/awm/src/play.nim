@@ -930,6 +930,8 @@ proc deathClock*(play: TablePlay, game: GameState, player: int,
   ## How long a hero has been dying, for its death animation; -1 while it
   ## is shown alive. A death whose beat never played (a restored game)
   ## shows its end.
+  if not game.dead(player):
+    return -1
   if player < play.heroDeaths.len and play.heroDeaths[player] >= 0:
     return time - play.heroDeaths[player]
   result = -1
