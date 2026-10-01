@@ -106,7 +106,8 @@ proc episode(
     ticks = 240,
     waitForLlm = false,
     expectedOutput = "",
-    expectedRuntimeError = ""
+    expectedRuntimeError = "",
+    annotations = true
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
   doAssert scripts.len == count
@@ -145,6 +146,8 @@ proc episode(
       "log_uri": (directory / ("player-" & $slot & ".log")).fileUri(),
       "artifact_uri": (directory / ("player-" & $slot & ".zip")).fileUri()
     }
+    if annotations:
+      seats[slot]["annotations_uri"] = %(directory / ("player-" & $slot & ".jsonl")).fileUri()
     boundedLog = boundedLog or (source.len > 7000 and not source.isPackage)
     instructionFailure = instructionFailure or source.contains("WHILE")
   let seatDocument = %*{
@@ -193,6 +196,21 @@ proc episode(
   var logs: seq[string]
   for slot in 0 ..< count:
     logs.add readFile(directory / ("player-" & $slot & ".log"))
+  for slot, source in scripts:
+    let path = directory / ("player-" & $slot & ".jsonl")
+    if annotations and source.contains("ANNOTATE"):
+      let lines = readFile(path).strip().splitLines()
+      doAssert lines.len > 0
+      for line in lines:
+        let event = line.fromJson(JsonNode)
+        doAssert event["schema_version"].getInt() == 1
+        doAssert event["time"].getInt() == 123
+        doAssert event["kind"].getStr() == "intent"
+        doAssert event["function"].getStr() == "selectTarget"
+        doAssert event["args"]["target"].getInt() == slot
+      doAssert not logs[slot].contains("selectTarget")
+    else:
+      doAssert not fileExists(path)
   if expectedOutput.len > 0:
     for private in logs:
       doAssert private.contains(expectedOutput), private
@@ -268,6 +286,10 @@ for (game, count) in Games:
   for slot in 0 ..< count:
     scripts.add "PRINT \"PRIVATE-" & $slot & "\", 1.5\nEND\n"
   episode(game, count, scripts)
+  for slot in 0 ..< count:
+    scripts[slot] = "ANNOTATE(123, \"intent\", \"selectTarget\", \"{\"\"target\"\":" & $slot & "}\")\nEND\n"
+  episode(game, count, scripts)
+  episode(game, count, scripts, annotations = false)
   episode(game, count, newSeq[string](count))
   for slot in 0 ..< scripts.len:
     scripts[slot] = "END\n"

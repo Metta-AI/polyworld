@@ -56,6 +56,34 @@ status message and exact Ping/Pong. Gameplay uses files. `/healthz` is live;
 `/client/global` and other legacy clients show a static page. Unimplemented routes
 return HTTP 501. No player artifact ZIP is produced.
 
+## Policy annotations
+
+Hosted policies can call `ANNOTATE(time, kind$, function$, args$)`:
+
+```basic
+ANNOTATE(123, "intent", "selectTarget", "{""target"":7}")
+```
+
+`time` is an integer in the game's existing replay time convention. `kind` describes
+the purpose, and `function` names the operation. `args` must be a single-line JSON
+object. The shared compiler binds each policy's callback to its own seat's optional
+`annotations_uri`. The policy cannot select another seat or an output path. Games
+continue to construct their existing runtime hosts without registering this callback.
+
+Each call appends and closes one UTF-8 JSON Lines record:
+
+```json
+{"schema_version":1,"time":123,"kind":"intent","function":"selectTarget","args":{"target":7}}
+```
+
+No destination means a no-op. No calls means no file. Records are limited to 16 KiB
+and each seat's file to 64 MiB. Kind and function are limited to 128 and 256 bytes.
+Violating these limits or including a literal newline in `args` raises a BASIC error.
+JSON arguments pass through unchanged; the platform validates the complete file
+before upload and rejects malformed files. Annotations never enter PRINT logs or
+the replay. Existing platform output collection uploads the files after the episode;
+there is no additional game finalization step.
+
 ## Verification
 
 `nim r coworld/tools/verify_native.nim` checks all desktop, headless and Coworld
@@ -63,7 +91,8 @@ entrypoints, recording regression tests, and full replay verification. First rec
 full matches into `tmp/coworld/{gota,lvd,cta}.replay` with the headless binaries and
 `--record PATH`. Run `nim r coworld/tools/test_runtime.nim` from the repository root.
 It uses the binaries in `tmp/coworld` to check
-extensionless and empty sources, slot-specific print output, compilation failure,
+extensionless and empty sources, slot-specific print and annotation output, optional
+annotation destinations, compilation failure,
 disabled VMs, health/Ping/Pong, completion ordering and the 10 MiB log bound.
 
 `nim r coworld/tools/test_tools.nim` checks concurrent build subprocesses,
