@@ -1,40 +1,29 @@
-# Paintbot run API
+# Paintbot
 
-Start with [/docs/llms.txt](/docs/llms.txt) for the complete request and response
-contract. POST /v1/games/paintbot-pw/run runs the native Paintbot teams game with
-16 interleaved red/blue seats, glory behind_cogs=10 and behind_lives=5, the
-default map and vision, and no external oracle.
+POST `/v1/games/paintbot-pw/run` to run a 16-player match.
 
-## Packages
+```json
+{
+  "seed": 2026,
+  "roster": [{"player": {"source": "end\n"}}],
+  "config": {"max_ticks": 240}
+}
+```
 
-Use the same files you submit to Paintbot: raw BASIC or a ZIP containing exactly
-manifest.json, policy.bas and model.bin. The production neural manifest schemas
-paintbot-neural-basic/1 and paintbot-neural-basic/2 are supported. Contracts,
-hashes, decoder settings and models are validated by Paintbot's production runner.
+Replace `end\n` with your bot's BASIC script. This example uses it in all 16
+seats. Save the response ZIP for the replay and your bots' logs.
 
-Limits are 128 KiB source, 16 MiB model and 8 KiB manifest, with 4 KiB additional
-ZIP overhead. The complete package limit is 16920576 bytes; base64 encoding is
-additional. JSON bodies are limited to 352 MiB. Encrypted, duplicate, extra,
-oversized or corrupt ZIP entries are rejected. Archive paths are never extracted.
+- `slot`: 0–15. Even seats are red; odd seats are blue.
+- `config.max_ticks`: 1–28800; default 14400.
+- Matches use the default map and game settings. External LLM calls are unavailable.
+- BASIC source limit: 128 KiB.
 
-The production host validates and stages packages. Its player-failure marker
-causes fast-XP to fail that game with 422; uploaded-seat diagnostics are included.
-BASIC compilation failures also fail that game. Referenced seats' diagnostics are never returned. No response includes
-bot source files, model files, credentials or artifact download URLs.
+For `package_base64`, upload the ZIP you submit to Paintbot. It must contain
+exactly `manifest.json`, `policy.bas` and `model.bin`. Supported manifest schemas
+are `paintbot-neural-basic/1` and `paintbot-neural-basic/2`.
 
-## Errors and timing
+Limits: 128 KiB BASIC source, 16 MiB model, 8 KiB manifest, and 16920576 bytes for
+the complete ZIP before base64 encoding.
 
-Errors use {"error":"message"}. 400 means invalid input, 404 an unknown route or
-policy, 409 a policy without a downloadable file, 413 an oversized request or
-upload, 415 the wrong content type, and 422 a policy compilation failure. 500
-means the worker failed; 502 an upstream authorization/download/integrity failure;
-503 means shutdown or missing server credentials; 504 means a fetch or game
-execution timeout. 429 includes Retry-After when all 16 request admissions are used.
-
-Each batch resolves its references once and caches verified artifacts by hash.
-The worker duration includes process startup, staging, simulation and artifact
-writing. It is not pure simulation time. Total server time excludes client
-upload/download. Accepted work finishes even if the caller disconnects.
-
-There are no automatic retries. Successful games in a batch remain available
-when another game fails. Temporary files are removed after packaging.
+See [/docs/llms.txt](/docs/llms.txt) for policy references, ZIP uploads,
+batches, response files and errors.
