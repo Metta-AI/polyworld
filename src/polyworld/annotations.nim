@@ -30,17 +30,18 @@ proc annotationMessage*(status: AnnotationStatus): string =
   of AnnotationBudgetExceeded: "Annotations exceed 64 MiB per seat"
   of AnnotationWriteFailed: "Annotation output could not be written"
 
+proc flushOutput(file: File): cint {.importc: "fflush", header: "<stdio.h>".}
+proc closeOutput(file: File): cint {.importc: "fclose", header: "<stdio.h>".}
+
 proc close*(sink: AnnotationSink): AnnotationStatus =
   ## Flushes and closes during existing output cleanup; reports storage errors.
   if sink == nil:
     return AnnotationDisabled
   if sink.file != nil:
-    try:
-      try:
-        sink.file.flushFile()
-      finally:
-        sink.file.close()
-    except IOError:
+    # Nim flushFile/close discard stdio errors; preserve them for cleanup reporting.
+    if flushOutput(sink.file) != 0:
+      sink.failed = true
+    if closeOutput(sink.file) != 0:
       sink.failed = true
     sink.file = nil
   sink.path = ""
