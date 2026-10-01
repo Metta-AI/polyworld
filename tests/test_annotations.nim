@@ -11,6 +11,11 @@ block:
     CoworldSeat(annotationsUri: "file://" & first),
     CoworldSeat(annotationsUri: "file://" & second)
   ])
+  let outsideRoster = newLlmClient(seats.seats.len)
+  let roster = seats
+  seats = CoworldSeats()
+  let beforeOptions = newLlmClient(0)
+  seats = roster
   var schema = initHost()
   newLlmClient(0, LlmConfig()).addFunctions(schema)
   let program = compile("""
@@ -18,6 +23,11 @@ block:
   """, schema)
   var fallback = initRuntime(program, schema)
   discard fallback.run()
+  for client in [outsideRoster, beforeOptions]:
+    var host = initHost()
+    client.addFunctions(host)
+    var runtime = initRuntime(program, host)
+    discard runtime.run()
   doAssert not fileExists(first)
   for slot in 0 .. 1:
     var host = initHost()

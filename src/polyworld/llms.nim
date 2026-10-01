@@ -158,7 +158,8 @@ proc newLlmClient*(slot: int): LlmClient =
   ## Reads host settings once when constructing a player's LLM client.
   result = newLlmClient(slot, llmConfig())
   when defined(coworld):
-    result.annotationsUri = seats.seats[slot].annotationsUri
+    if slot < seats.seats.len:
+      result.annotationsUri = seats.seats[slot].annotationsUri
   result.oracle.enabled = getEnv("COGAME_ORACLE").toLowerAscii != "off"
 
 proc close*(client: LlmClient) {.raises: [].} =
