@@ -10,6 +10,9 @@ const
   MaxHeaderBytes = 16 * 1024
   DefaultOracleModel* = "typesafe/jev-1.13"
 
+when defined(coworld):
+  import coworld
+
 when NativeRequests:
   import curly
 
@@ -42,6 +45,8 @@ type
     oracle*: Oracle
     config*: LlmConfig
     slot*: int
+    when defined(coworld):
+      annotationsUri: string
     tick, lastAsk, nextId, pending: int32
     asked: bool
     when NativeRequests:
@@ -152,6 +157,8 @@ proc newLlmClient*(slot: int, config: LlmConfig): LlmClient =
 proc newLlmClient*(slot: int): LlmClient =
   ## Reads host settings once when constructing a player's LLM client.
   result = newLlmClient(slot, llmConfig())
+  when defined(coworld):
+    result.annotationsUri = seats.seats[slot].annotationsUri
   result.oracle.enabled = getEnv("COGAME_ORACLE").toLowerAscii != "off"
 
 proc close*(client: LlmClient) {.raises: [].} =
@@ -421,6 +428,10 @@ proc jsonGet(document: JsonNode, path: string): string =
 
 proc addFunctions*(client: LlmClient, host: var Host) =
   ## Registers the BASIC calls directly on this player's LLM client.
+  when defined(coworld):
+    # Schema clients retain an empty destination; only seat clients can write.
+    discard host.addFunction("ANNOTATE", 4, playerAnnotator(client.annotationsUri),
+      workUnits = 1024)
   template register(name: string, arity: int, operation: untyped) =
     ## Shares BASIC value conversion and error handling between callbacks.
     block:

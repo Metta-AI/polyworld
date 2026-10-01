@@ -58,17 +58,19 @@ return HTTP 501. No player artifact ZIP is produced.
 
 ## Policy annotations
 
-Hosted policies can call `ANNOTATE(time, kind$, function$, args$)`:
+Hosted GoTA, Light vs Dark, and Call to Adventure policies can call `ANNOTATE(time, kind$, function$, args$)`:
 
 ```basic
 ANNOTATE(123, "intent", "selectTarget", "{""target"":7}")
 ```
 
 `time` is an integer in the game's existing replay time convention. `kind` describes
-the purpose, and `function` names the operation. `args` must be a single-line JSON
-object. The shared compiler binds each policy's callback to its own seat's optional
-`annotations_uri`. The policy cannot select another seat or an output path. Games
-continue to construct their existing runtime hosts without registering this callback.
+the purpose, and `function` names the operation. `args` must encode a JSON
+object. The shared LLM client's `addFunctions` binds each seat client's callback to
+its optional `annotations_uri`. Schema clients register the same function with no
+output destination. The policy cannot select another seat or an output path. Games
+continue to construct their existing runtime hosts without annotation-specific code.
+This requires no VM changes; AWM is outside this integration.
 
 Each call appends and closes one UTF-8 JSON Lines record:
 
@@ -78,13 +80,17 @@ Each call appends and closes one UTF-8 JSON Lines record:
 
 No destination means a no-op. No calls means no file. Records are limited to 16 KiB
 and each seat's file to 64 MiB. Kind and function are limited to 128 and 256 bytes.
-Violating these limits or including a literal newline in `args` raises a BASIC error.
-JSON arguments pass through unchanged; the platform validates the complete file
-before upload and rejects malformed files. Annotations never enter PRINT logs or
+Violating these limits or supplying malformed/non-object JSON raises a BASIC error
+in that policy's log before writing a record. Parsed arguments are serialized as
+single-line JSON; earlier valid events survive a later bad call. The platform also
+validates the complete file before upload and reports rejection in the policy log. Annotations never enter PRINT logs or
 the replay. Existing platform output collection uploads the files after the episode;
 there is no additional game finalization step.
 
 ## Verification
+
+`nim r -d:coworld tests/test_annotations.nim` checks schema-client isolation and
+sharing a compiled program across distinct seat destinations.
 
 `nim r coworld/tools/verify_native.nim` checks all desktop, headless and Coworld
 entrypoints, recording regression tests, and full replay verification. First record

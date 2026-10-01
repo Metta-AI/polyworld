@@ -1,5 +1,5 @@
 import
-  std/[os, posix, strutils, times, uri],
+  std/[json, os, posix, strutils, times, uri],
   jsony, mummy,
   bassy,
   cli, policies
@@ -221,7 +221,7 @@ proc loadPlayerPolicy*(bytes: string, slot: int): Policy =
   except PolicyError as error:
     rejectPlayer(slot, error.msg)
 
-proc playerAnnotator(destination: string): ContextHostProc =
+proc playerAnnotator*(destination: string): ContextHostProc =
   ## Captures one private output path and its byte budget.
   let path = if destination.len > 0: localPath(destination) else: ""
   var bytesWritten = 0
@@ -236,13 +236,18 @@ proc playerAnnotator(destination: string): ContextHostProc =
       args = runtime.getString(arguments[3])
     if kind.len == 0 or kind.len > 128 or function.len == 0 or function.len > 256:
       raise newException(BasicError, "ANNOTATE requires a kind and function within their size limits")
-    if '\n' in args or '\r' in args:
-      raise newException(BasicError, "ANNOTATE arguments must be single-line JSON")
-    # JSON arguments pass through as data. The platform validates the complete
-    # file before publication; malformed JSON cannot escape this seat's file.
+    if args.len > 16 * 1024:
+      raise newException(BasicError, "Episode annotation size limit exceeded")
+    var parameters: JsonNode
+    try:
+      parameters = parseJson(args)
+    except JsonParsingError:
+      raise newException(BasicError, "ANNOTATE args must be a JSON object")
+    if parameters.kind != JObject:
+      raise newException(BasicError, "ANNOTATE args must be a JSON object")
     let line = "{\"schema_version\":1,\"time\":" & $tick &
       ",\"kind\":" & kind.toJson() & ",\"function\":" & function.toJson() &
-      ",\"args\":" & args & "}\n"
+      ",\"args\":" & $parameters & "}\n"
     if line.len > 16 * 1024 or bytesWritten + line.len > 64 * 1024 * 1024:
       raise newException(BasicError, "Episode annotation size limit exceeded")
     createDir(path.parentDir)
@@ -259,10 +264,7 @@ proc compilePlayer*(
 ): Program =
   ## Compiles a staged BASIC player and reports terminal failures privately.
   try:
-    var policyHost = host
-    discard policyHost.addFunction("ANNOTATE", 4, playerAnnotator(seats.seats[slot].annotationsUri),
-      workUnits = 1024, bindAtCompile = true)
-    result = compile(source, policyHost, limits)
+    result = compile(source, host, limits)
   except BasicError as error:
     rejectPlayer(slot, error.msg)
 
@@ -309,7 +311,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     config = bytes.fromJson(GameConfig)
     tokens = bytes.fromJson(CoworldTokens)
     seats = readLocal(getEnv("COGAME_PLAYER_SEATS_URI")).fromJson(CoworldSeats)
-  except JsonError as error:
+  except jsony.JsonError as error:
     raise newException(CoworldError,
       "Invalid Coworld configuration: " & error.msg)
   let slotCount =

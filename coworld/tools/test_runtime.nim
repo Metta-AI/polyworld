@@ -290,6 +290,14 @@ for (game, count) in Games:
     scripts[slot] = "ANNOTATE(123, \"intent\", \"selectTarget\", \"{\"\"target\"\":" & $slot & "}\")\nEND\n"
   episode(game, count, scripts)
   episode(game, count, scripts, annotations = false)
+  for invalid in ["[1,2]", "5", "{}}", "{", "{\"x\":}"]:
+    let valid = scripts[0]
+    scripts[0] = valid.replace("END\n", "") &
+      "ANNOTATE(123, \"intent\", \"invalid\", \"" &
+      invalid.replace("\"", "\"\"") & "\")\nEND\n"
+    episode(game, count, scripts,
+      expectedRuntimeError = "ANNOTATE args must be a JSON object")
+    scripts[0] = valid
   episode(game, count, newSeq[string](count))
   for slot in 0 ..< scripts.len:
     scripts[slot] = "END\n"
