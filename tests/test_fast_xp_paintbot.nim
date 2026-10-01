@@ -59,8 +59,8 @@ proc run() =
   doAssert gota.status == 200, gota.body
   doAssert archiveFiles(gota.body, root).len == 11
   doAssert call(base, "/docs/llms.txt").body.contains("/v1/games/gota/run")
-  doAssert call(base, "/docs/paintbot-pw/llms.txt").body.contains(Route)
-  doAssert call(base, "/docs/gota/llms.txt").body.contains("/v1/games/gota/run")
+  doAssert call(base, "/docs/paintbot-pw/run.md").body.contains(Route)
+  doAssert call(base, "/docs/gota/run.md").body.contains("/v1/games/gota/run")
   var body = %*{"seed": 2026, "config": {"max_ticks": 240}, "roster": [
     {"slot": 0, "player": {"source": "print \"uploaded-paintbot-log\"\nidle = 1\n"}},
     {"player": {"policy_ref": "fixture:v1"}}]}

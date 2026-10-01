@@ -51,8 +51,8 @@ const
   Dashboard = staticRead("dashboard.html")
   Instructions = staticRead("docs/llms.txt")
   RunGuide = staticRead("docs/run.md")
-  PaintbotInstructions = staticRead("docs/paintbot-llms.txt")
   PaintbotGuide = staticRead("docs/paintbot-run.md")
+  AwmGuide = staticRead("docs/awm-run.md")
 
 var
   capacityLock: Lock
@@ -431,7 +431,7 @@ proc handleRequest(request: Request) {.gcsafe.} =
   try:
     let methodName = if isRun: "POST" else: "GET"
     if not isRun and request.path notin ["/", "/v1/metrics", "/healthz", "/docs/llms.txt", "/docs/run.md",
-        "/docs/gota/run.md", "/docs/gota/llms.txt", "/docs/paintbot-pw/run.md", "/docs/paintbot-pw/llms.txt"]:
+        "/docs/gota/run.md", "/docs/paintbot-pw/run.md", "/docs/awm/run.md"]:
       reject(404, "Not found")
     if request.httpMethod != methodName:
       httpStatus = 405
@@ -452,23 +452,17 @@ proc handleRequest(request: Request) {.gcsafe.} =
       request.respond(200, @[("Content-Type", "application/json"),
         ("Cache-Control", "no-store")], $data)
     of "/healthz": request.respond(200, body = "ok\n")
-    of "/docs/llms.txt", "/docs/run.md", "/docs/gota/run.md", "/docs/gota/llms.txt",
-        "/docs/paintbot-pw/run.md", "/docs/paintbot-pw/llms.txt":
-      let paintbot = "/paintbot-pw/" in request.path
-      if (paintbot and not EnabledGames[Paintbot]) or
-          ("/gota/" in request.path and not EnabledGames[Gota]): reject(404, "Game is not installed")
+    of "/docs/llms.txt":
+      request.respond(200, @[("Content-Type", "text/plain; charset=utf-8")], Instructions)
+    of "/docs/run.md", "/docs/gota/run.md", "/docs/paintbot-pw/run.md", "/docs/awm/run.md":
       var document: string
-      if request.path in ["/docs/llms.txt", "/docs/run.md"]:
-        for candidate in Game:
-          if EnabledGames[candidate]:
-            if request.path.endsWith("llms.txt"):
-              document.add (if candidate == Paintbot: PaintbotInstructions else: Instructions) & "\n\n"
-            else:
-              document.add (if candidate == Paintbot: PaintbotGuide else: RunGuide) & "\n\n"
-      else:
-        document = if paintbot:
-            (if request.path.endsWith("llms.txt"): PaintbotInstructions else: PaintbotGuide)
-          else: (if request.path.endsWith("llms.txt"): Instructions else: RunGuide)
+      let index = request.path == "/docs/run.md"
+      for candidate in Game:
+        if index or ("/" & gameName(candidate) & "/") in request.path:
+          if not EnabledGames[candidate]:
+            if not index: reject(404, "Game is not installed")
+            continue
+          document.add [RunGuide, PaintbotGuide, AwmGuide][candidate.ord] & "\n\n"
       request.respond(200, @[("Content-Type", "text/plain; charset=utf-8")],
         document)
     else:

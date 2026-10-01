@@ -1,6 +1,6 @@
 # Paintbot run API
 
-Start with [/docs/paintbot-pw/llms.txt](/docs/paintbot-pw/llms.txt) for the complete request and response
+Start with [/docs/llms.txt](/docs/llms.txt) for the complete request and response
 contract. POST /v1/games/paintbot-pw/run runs the native Paintbot teams game with
 16 interleaved red/blue seats, glory behind_cogs=10 and behind_lives=5, the
 default map and vision, and no external oracle.

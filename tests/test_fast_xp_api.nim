@@ -1,6 +1,6 @@
 import
   std/[base64, json, locks, monotimes, os, osproc, posix, sequtils, sets,
-    strtabs, strutils, tables, tempfiles, times],
+    strtabs, strutils, tables, tempfiles, times, uri],
   crunchy, curly, mummy,
   ./[neuralfixtures, fastxpfixtures]
 
@@ -78,7 +78,8 @@ proc mockRequest(request: mummy.Request) {.gcsafe.} =
 proc checkWorkerEnvironment() =
   for key, _ in envPairs(): doAssert not key.startsWith("FAST_XP_")
   doAssert not existsEnv("FAKE_OTHER_SECRET")
-  let worker = readFile(getTempDir() / "real-worker")
+  let root = decodeUrl(parseUri(getEnv("COGAME_CONFIG_URI")).path).parentDir.parentDir.parentDir
+  let worker = readFile(root / "real-worker")
   let args = allocCStringArray([worker])
   discard execv(worker.cstring, args)
   deallocCStringArray(args)

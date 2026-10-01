@@ -20,7 +20,8 @@ Policy references are resolved through Observatory using the server's credential
 Use `source` for BASIC text (up to 64 KiB), `package_base64` for an uploaded ZIP
 (up to 16 MiB before base64 encoding), or `policy_ref` for a submitted policy version.
 `package_base64` uses standard padded base64 without whitespace and Gota’s normal
-policy format. The roster accepts 1–10 entries; the JSON request limit is 224 MiB.
+policy format. The roster accepts 1–10 entries; the JSON request limit is 224 MiB, or 352 MiB
+when Paintbot is installed on the same server.
 The server downloads and runs referenced artifacts (up to 16 MiB).
 The UUID above selects Richard's public benchmark policy. Both mixed and
 inline-only rosters run locally.
@@ -68,7 +69,7 @@ Batch completion returns HTTP 200 even if games failed. Shared validation or
 fetch failures return an HTTP error before execution.
 
 There is no polling or later retrieval. The response's `X-Request-ID` identifies
-server log records. Ready batches share six hosted execution workers, with at
+server log records. Ready batches share the server's configured execution workers, with at
 most 16 admitted requests. Additional games wait rather than fail when workers
 are busy. The execution deadline remains 120 seconds per game, excluding queue
 wait. Use a client timeout of at least 900 seconds for batches; queueing adds to

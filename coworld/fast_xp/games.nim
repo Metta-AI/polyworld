@@ -2,19 +2,28 @@ import
   std/[json, os, strutils]
 
 type Game* = enum
-  Gota, Paintbot
+  Gota, Paintbot, Awm
 
 proc gameName*(game = Gota): string =
   ## Returns the public game identifier.
-  if game == Paintbot: "paintbot-pw" else: "gota"
+  case game
+  of Gota: "gota"
+  of Paintbot: "paintbot-pw"
+  of Awm: "awm"
 
 proc seatCount*(game = Gota): int =
   ## Returns the league roster size.
-  if game == Paintbot: 16 else: 10
+  case game
+  of Gota: 10
+  of Paintbot: 16
+  of Awm: 5
 
 proc sourceLimit*(game = Gota): int =
   ## Returns the game's BASIC source limit in bytes.
-  if game == Paintbot: 128 * 1024 else: 64 * 1024
+  case game
+  of Gota: 64 * 1024
+  of Paintbot: 128 * 1024
+  of Awm: 256 * 1024
 
 proc packageLimit*(game = Gota): int =
   ## Bounds the complete production package.
@@ -26,7 +35,11 @@ proc defaultTicks*(game = Gota): int =
 
 proc workerCommand*(game: Game): seq[string] =
   ## Reads an argument array without interpreting caller-controlled shell text.
-  let value = getEnv(if game == Paintbot: "FAST_XP_PAINTBOT_COMMAND" else: "FAST_XP_GOTA_COMMAND")
+  let key = case game
+    of Gota: "FAST_XP_GOTA_COMMAND"
+    of Paintbot: "FAST_XP_PAINTBOT_COMMAND"
+    of Awm: "FAST_XP_AWM_COMMAND"
+  let value = getEnv(key)
   if value.len > 0:
     let command = parseJson(value)
     if command.kind != JArray or command.len == 0:
@@ -38,6 +51,8 @@ proc workerCommand*(game: Game): seq[string] =
     if result[0].len == 0: raise newException(ValueError, "Game executable must not be empty")
   elif game == Gota:
     result = @[getEnv("FAST_XP_GOTA_WORKER", getAppDir() / "gota_worker")]
+  elif game == Awm:
+    result = @[getAppDir() / "awm"]
 
 proc commandInstalled(game: Game): bool =
   ## Checks the executable before accepting requests for this game.
@@ -59,7 +74,7 @@ proc configuredGames(): array[Game, bool] =
           result[game] = true
           found = true
       if not found: raise newException(ValueError, "Unknown FAST_XP_GAMES entry: " & name)
-  if not result[Gota] and not result[Paintbot]:
+  if result == default(array[Game, bool]):
     raise newException(ValueError, "Install a game executable or configure a game command")
 
 let EnabledGames* = configuredGames()

@@ -1,8 +1,8 @@
 # Fast XP server
 
-A synchronous Mummy API for Gota or Paintbot. Send `player.source` for BASIC text, `player.package_base64` for a ZIP upload,
+A synchronous Mummy API for Gota, Paintbot and Archers Warriors Mages. Send `player.source` for BASIC text, `player.package_base64` for a ZIP upload,
 and `player.policy_ref` for submitted opponents (exact `name:vN` or version UUID).
-The native worker returns a replay and logs only for uploaded seats.
+The server returns a replay and logs only for uploaded seats.
 
 ## Run locally
 
@@ -32,9 +32,10 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 - `FAST_XP_WORKERS`: optional override for simultaneous game processes, range 1–256. By default the server detects available logical CPUs at startup, capped at 256. Every game worker runs at nice +10; the API keeps its normal priority. Up to 16 requests may be admitted, using 24 HTTP threads.
 - `FAST_XP_TOKEN`: bearer token for callers of this server; required for non-loopback binding.
 - `FAST_XP_GOTA_WORKER`: executable path, default `gota_worker` beside server.
-- `FAST_XP_GAMES`: optional comma-separated list, `gota,paintbot-pw`. By default all installed game commands are enabled. Both routes share the same worker pool and admission limit.
+- `FAST_XP_GAMES`: optional comma-separated list, `gota,paintbot-pw,awm`. By default all installed game commands are enabled. All routes share the same worker pool and admission limit.
 - `FAST_XP_GOTA_COMMAND`: optional JSON argument array for a production Gota runner; overrides `FAST_XP_GOTA_WORKER`.
 - `FAST_XP_PAINTBOT_COMMAND`: JSON argument array for Paintbot's unmodified production host and engine. No custom Paintbot worker is needed.
+- `FAST_XP_AWM_COMMAND`: optional JSON argument array for the unmodified AWM Coworld executable; defaults to `awm` beside server.
 - `FAST_XP_EXECUTION_SECONDS`: per-game deadline excluding queue time, default 120 for Gota or 300 for Paintbot; range 1–3600.
 - `FAST_XP_BUILD_REVISION`: release identifier shown in dashboard metadata and startup logs.
 - `FAST_XP_OBSERVATORY_URL`: API root, default `https://softmax.com/api/observatory`.
@@ -141,7 +142,7 @@ request directory and are removed on completion or timeout.
 
 Install `gota_worker` beside the server as usual to serve both games.
 `GET /docs/llms.txt` describes every enabled game; per-game references are at
-`/docs/gota/llms.txt` and `/docs/paintbot-pw/llms.txt`. Metrics report installed
+`/docs/gota/run.md`, `/docs/paintbot-pw/run.md` and `/docs/awm/run.md`. Metrics report installed
 games and identify each recent game with its name and seat count.
 
 For the Paintbot integration test, also compile the stock headless executable
@@ -152,3 +153,20 @@ replays and every replay tick hash. Use `nim r tests/bench_paintbot.nim
 --source:/path/to/base.bas --output:/path/to/new-results` for three full requests
 through the configured production runner. Pure simulation timing is reported
 only when the game itself supplies it; Paintbot's stock runner does not.
+
+## Archers Warriors Mages
+
+Build the stock Coworld executable, as `coworld/awm/compose.yaml` does:
+
+```sh
+nim c -d:coworld -o:coworld/fast_xp/awm examples/awm/src/awm.nim
+```
+
+It is detected beside the server, or can be selected with `FAST_XP_AWM_COMMAND`.
+The API uses the linked league's Competition variant: five players, seeded
+classes, 28,800 actions maximum. No game source changes or adapter executable
+are required. Build the ordinary headless executable for replay verification,
+set `FAST_XP_AWM_REPLAY`, and run `nim r tests/test_fast_xp_awm.nim` with all three
+game commands installed. That check covers production rosters, uploaded ZIPs,
+private-policy log filtering, deterministic repeats, ten-game batches and every
+replay action hash.
