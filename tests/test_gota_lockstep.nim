@@ -1,6 +1,16 @@
 include ../examples/gods_of_the_arena/lockstep
+import std/[os, tempfiles]
 
 let policy = "dim f(" & $GotaFeatureCount & ")\n" & """
+if drafting then
+  for candidate = 0 to 9
+    if heroAvailable(candidate) then
+      draftHero(candidate)
+      end
+    end if
+  next candidate
+  end
+end if
 f(0) = 100
 f(1) = selfTeam * 100
 f(2) = selfClass * 10
@@ -54,6 +64,51 @@ echo "Testing agent counts"
 doAssert newStepBatch(config, bot, bot, policy, 3, 240, 24, false).agentCount == 15
 doAssert newStepBatch(config, bot, bot, policy, 3, 240, 24, true).agentCount == 30
 
+echo "Testing ordinary draft, battle clock and frozen-action trajectories"
+block:
+  let directory = createTempDir("gota-lockstep-", "")
+  let player = directory / "policy.bas"
+  defer:
+    removeFile(player)
+    removeDir(directory)
+  writeFile(player, policy.replace("' METTA_DECISION", "decision = 0"))
+  for seed in [0, 7]:
+    let batch = newStepBatch(config, bot, bot, policy, 1, 240, 24, false)
+    batch.reset(seed)
+    let trained = batch.lanes[0].game
+    let preset = loadConfig(config)
+    let ordinary = newGame(generateMap(int32(seed), preset.mapPreset),
+      preset.spawnIntervalTicks, 10, false, ReplayData())
+    let groups =
+      if batch.lanes[0].team == RedTeam:
+        @[BotGroup(path: player, count: 5), BotGroup(path: bot, count: 5)]
+      else:
+        @[BotGroup(path: bot, count: 5), BotGroup(path: player, count: 5)]
+    loadBots(ordinary, groups)
+    ordinary.replayData = initReplayData(currentSetup(ordinary, 240), preset.mapPreset)
+    while ordinary.world.phase == Drafting:
+      activeGame = ordinary
+      tickWorld(ordinary, proc() = runBotDecisions(ordinary))
+    doAssert trained.world.drafting
+    doAssert trained.world.draftTicks > 0
+    doAssert trained.world.battleTick() == 0
+    doAssert trained.stateHash() == ordinary.stateHash()
+    var
+      actions = newSeq[int32](batch.agentCount)
+      rewards = newSeq[float32](batch.agentCount)
+      terminals = newSeq[uint8](batch.agentCount)
+      stats = newSeq[LaneStats](1)
+    for frame in 0 ..< 10:
+      batch.step(actions, rewards, terminals, stats)
+      for tick in 0 ..< 24:
+        activeGame = ordinary
+        tickWorld(ordinary, proc() = runBotDecisions(ordinary))
+      doAssert trained.stateHash() == ordinary.stateHash()
+      doAssert stats[0].finished == int32(frame == 9)
+    doAssert stats[0].tick == 240
+    doAssert stats[0].draftTicks == trained.world.draftTicks
+    doAssert trained.finished() and ordinary.finished()
+
 echo "Testing observations and seats"
 let played = run(true, XpReward, 2400, 20)
 for agent in 0 ..< played.seats.len:
@@ -87,7 +142,7 @@ for (ended, draw, winner) in [
     batch = newStepBatch(config, bot, bot, policy, 1, 28800, 24,
       true, LeaderboardReward)
     world = batch.lanes[0].game.world
-  world.tick = if ended: 15120 else: 28800
+  world.tick = if ended: 15120 else: 28920
   world.draftTicks = 120
   world.gameOver = ended
   world.draw = draw
