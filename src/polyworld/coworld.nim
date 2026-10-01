@@ -1,8 +1,8 @@
 import
-  std/[json, os, posix, strutils, times, uri],
+  std/[os, posix, strutils, times, uri],
   jsony, mummy,
   bassy,
-  cli, policies
+  annotations, cli, policies
 
 const
   PlayerLogLimit* = 10 * 1024 * 1024
@@ -55,6 +55,8 @@ var
   seats*: CoworldSeats
   config*: GameConfig
   logs: seq[PlayerLog]
+  annotationWriter: AnnotationWriter
+  annotationSinks: seq[AnnotationSink]
   server: Server
   serverThread: Thread[ServerAddress]
   resultsPath, replayPath, failurePath: string
@@ -172,8 +174,14 @@ proc playerError*(slot: int, message: string) =
   logs[slot].failed = true
   playerLog(slot, "\nBASIC error: " & message & "\n")
 
-proc closePlayerLogs*() =
-  ## Flushes and closes all seat logs before publishing episode completion.
+proc closePlayerOutputs*() =
+  ## Drains annotations and closes seat logs before episode completion.
+  if annotationWriter != nil:
+    annotationWriter.close()
+    annotationWriter = nil
+    for slot, sink in annotationSinks:
+      if sink.annotationStatus == AnnotationWriteFailed:
+        playerLog(slot, "\n[Annotations: " & AnnotationWriteFailed.annotationMessage & ".]\n")
   for log in logs.mitems:
     if log.file != nil:
       try:
@@ -205,7 +213,7 @@ proc waitForCollection*() =
 proc rejectPlayer(slot: int, message: string) {.noreturn.} =
   ## Reports package and compilation failures through the same seat boundary.
   playerError(slot, message)
-  closePlayerLogs()
+  closePlayerOutputs()
   writePlayerStatus()
   writeAtomic(failurePath, PlayerFailure(
     message: "Policy loading failed for player slot " & $slot,
@@ -221,40 +229,10 @@ proc loadPlayerPolicy*(bytes: string, slot: int): Policy =
   except PolicyError as error:
     rejectPlayer(slot, error.msg)
 
-proc playerAnnotator*(destination: string): ContextHostProc =
-  ## Captures one private output path and its byte budget.
-  let path = if destination.len > 0: localPath(destination) else: ""
-  var bytesWritten = 0
-  result = proc(runtime: Runtime, arguments: openArray[Value]): Value =
-    result = Value(0)
-    if path.len == 0:
-      return
-    let
-      tick = arguments[0].asInt
-      kind = runtime.getString(arguments[1])
-      function = runtime.getString(arguments[2])
-      args = runtime.getString(arguments[3])
-    if kind.len == 0 or kind.len > 128 or function.len == 0 or function.len > 256:
-      raise newException(BasicError, "ANNOTATE requires a kind and function within their size limits")
-    if args.len > 16 * 1024:
-      raise newException(BasicError, "Episode annotation size limit exceeded")
-    var parameters: JsonNode
-    try:
-      parameters = parseJson(args)
-    except JsonParsingError:
-      raise newException(BasicError, "ANNOTATE args must be a JSON object")
-    if parameters.kind != JObject:
-      raise newException(BasicError, "ANNOTATE args must be a JSON object")
-    let line = "{\"schema_version\":1,\"time\":" & $tick &
-      ",\"kind\":" & kind.toJson() & ",\"function\":" & function.toJson() &
-      ",\"args\":" & $parameters & "}\n"
-    if line.len > 16 * 1024 or bytesWritten + line.len > 64 * 1024 * 1024:
-      raise newException(BasicError, "Episode annotation size limit exceeded")
-    createDir(path.parentDir)
-    let output = open(path, if bytesWritten == 0: fmWrite else: fmAppend)
-    defer: output.close()
-    output.write(line)
-    bytesWritten += line.len
+proc playerAnnotations*(slot: int): AnnotationSink =
+  ## Returns only the seat's existing destination; schema/local hosts have none.
+  if slot >= 0 and slot < annotationSinks.len:
+    result = annotationSinks[slot]
 
 proc compilePlayer*(
     source: string,
@@ -311,7 +289,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     config = bytes.fromJson(GameConfig)
     tokens = bytes.fromJson(CoworldTokens)
     seats = readLocal(getEnv("COGAME_PLAYER_SEATS_URI")).fromJson(CoworldSeats)
-  except jsony.JsonError as error:
+  except JsonError as error:
     raise newException(CoworldError,
       "Invalid Coworld configuration: " & error.msg)
   let slotCount =
@@ -348,11 +326,17 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
       createDir(logPath.parentDir)
       logs[slot].file = open(logPath, fmWrite)
     except IOError, OSError:
-      closePlayerLogs()
+      closePlayerOutputs()
       raise newException(CoworldError,
         "Cannot open player files: " & getCurrentExceptionMsg())
     result.botGroups.add BotGroup(path: path, count: 1)
     playerLog(slot, "Player slot " & $slot & " started.\n")
+  annotationSinks = newSeq[AnnotationSink](slotCount)
+  for slot, seat in seats.seats:
+    if seat.annotationsUri.len > 0:
+      if annotationWriter == nil:
+        annotationWriter = newAnnotationWriter()
+      annotationSinks[slot] = annotationWriter.newAnnotationSink(localPath(seat.annotationsUri))
   when not defined(fastXpWorker):
     var port: int
     try:
@@ -380,7 +364,7 @@ proc finishCoworld*(results: CoworldResults, totalXp: seq[int] = @[]) =
     raise newException(CoworldError, "XP results do not match the roster")
   for slot in 0 ..< logs.len:
     playerLog(slot, "\nPlayer slot " & $slot & " completed.\n")
-  closePlayerLogs()
+  closePlayerOutputs()
   writePlayerStatus()
   echo "Coworld episode completed after ", results.ticks, " ticks."
   try:

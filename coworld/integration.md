@@ -60,39 +60,71 @@ return HTTP 501. No player artifact ZIP is produced.
 
 ## Policy annotations
 
-Hosted GoTA, Light vs Dark, and Call to Adventure policies can call `ANNOTATE(time, kind$, function$, args$)`:
+All Polyworld policy hosts register the same annotation API through
+`polyworld/policyhosts.initPolicyHost`. Game builders add their game-specific
+functions to that host. Schema hosts omit the seat; live hosts supply their policy
+slot. Annotation registration is independent of the LLM client and Bassy is unchanged.
 
 ```basic
-ANNOTATE(123, "intent", "selectTarget", "{""target"":7}")
+status = ANNOTATE(123, "intent", "selectTarget", "{""target"":7}")
+if status <> 0 then print ANNOTATE_ERROR$()
 ```
 
-`time` is an integer in the game's existing replay time convention. `kind` describes
-the purpose, and `function` names the operation. `args` must encode a JSON
-object. The shared LLM client's `addFunctions` binds each seat client's callback to
-its optional `annotations_uri`. Schema clients register the same function with no
-output destination. The policy cannot select another seat or an output path. Games
-continue to construct their existing runtime hosts without annotation-specific code.
-This requires no VM changes; AWM is outside this integration.
+`time` is an integer in the game's replay time convention. `kind` describes the
+purpose, `function` names the operation, and `args` must encode a JSON object.
+The policy cannot select a seat or filesystem path. Coworld binds its optional
+`annotations_uri` to each seat. Desktop and WASM hosts expose the same functions
+and return disabled when there is no destination; they do not save files yet.
+This includes GoTA, Light vs Dark, Call to Adventure, AWM and Heartleaf hosts.
+Heartleaf does not yet have a Coworld output integration.
 
-Each call appends and closes one UTF-8 JSON Lines record:
+`ANNOTATE` returns a status instead of raising a BASIC error. `ANNOTATE_STATUS()`
+reports the last status, including asynchronous write failures, and
+`ANNOTATE_ERROR$()` returns its explanation:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Accepted into the queue (not yet guaranteed durable) |
+| 1 | No destination; disabled |
+| 2 | Invalid arguments or JSON object |
+| 3 | Event exceeds 16 KiB |
+| 4 | Seat exceeds 64 MiB per episode |
+| 5 | Queue full; event not accepted |
+| 6 | Output write failed |
+| 7 | Output closed |
+
+Limits include serialized JSON and the trailing newline. Kind and function are
+limited to 128 and 256 bytes; JSON nesting is limited to 64 levels and numbers must
+be finite. These errors reject the event without disabling the VM. Calls still
+consume the VM's normal instruction/work budget, like other host functions.
+
+Each episode has one writer thread and a queue of at most 256 events (at most
+4 MiB of queued JSON, plus metadata). The policy validates and tries to enqueue;
+it never waits for disk or queue capacity. The worker keeps files open and flushes
+batches. A full queue rejects the event rather than stalling the action. File errors
+are returned through status and summarized in the policy log during cleanup.
+
+The writer drains and closes alongside existing player-log cleanup, before the
+completion marker. This does not add a platform finalization phase. Cleanup can
+wait for storage; policy execution does not. Abrupt process termination can lose
+queued events, just as it can lose buffered logs.
+
+No calls means no file. Accepted events produce UTF-8 JSON Lines:
 
 ```json
 {"schema_version":1,"time":123,"kind":"intent","function":"selectTarget","args":{"target":7}}
 ```
 
-No destination means a no-op. No calls means no file. Records are limited to 16 KiB
-and each seat's file to 64 MiB. Kind and function are limited to 128 and 256 bytes.
-Violating these limits or supplying malformed/non-object JSON raises a BASIC error
-in that policy's log before writing a record. Parsed arguments are serialized as
-single-line JSON; earlier valid events survive a later bad call. The platform also
-validates the complete file before upload and reports rejection in the policy log. Annotations never enter PRINT logs or
-the replay. Existing platform output collection uploads the files after the episode;
-there is no additional game finalization step.
+The platform validates each file before upload and reports rejection in the policy
+log. Annotations never enter PRINT logs or the replay. Existing output collection
+uploads the files after the episode.
 
 ## Verification
 
-`nim r -d:coworld tests/test_annotations.nim` checks schema-client isolation and
-sharing a compiled program across distinct seat destinations.
+`nim r tests/test_annotations.nim` checks the portable API, seat isolation, limits,
+nonfatal input and storage errors, and queue saturation while storage is blocked.
+The same test with `-d:coworld` covers hosted registration; the disabled surface
+also runs under Emscripten without threads. It is included in the normal CI suite.
 
 `nim r coworld/tools/verify_native.nim` checks all desktop, headless and Coworld
 entrypoints, recording regression tests, and full replay verification. First record

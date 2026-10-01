@@ -3,6 +3,7 @@
 ## Each invocation plays at most one card; the game loop calls repeatedly
 ## until the bot ends its turn.
 import bassy
+import polyworld/policyhosts
 import polyworld/mailboxes
 import sim
 export bassy
@@ -75,8 +76,8 @@ proc botLimits*(): Limits =
   result.maxInstructions = 500_000
   result.maxWorkUnits = 500_000
 
-proc buildBotHost(playerId: int32): Host =
-  result = initHost()
+proc buildBotHost(playerId: int32, policySlot = -1): Host =
+  result = initPolicyHost(policySlot)
   for name in DataSlotNames:
     discard result.addData(name)
 
@@ -300,7 +301,7 @@ proc newBotVm*(program: Program, player: int32,
     output: PrintProc = nil): BotVm =
   ## A seat's bot from a script compiled against `botSchema`.
   bindDataIds(program)
-  BotVm(runtime: initRuntime(program, buildBotHost(player), botLimits()),
+  BotVm(runtime: initRuntime(program, buildBotHost(player, int(player)), botLimits()),
     output: output, playedHand: -1)
 
 proc loadBot*(source: string, player: int32): BotVm =
@@ -323,7 +324,7 @@ proc loadBots*(sources: openArray[string]): seq[BotVm] =
         bindDataIds(program)
         bound = true
       result[player] = BotVm(
-        runtime: initRuntime(program, buildBotHost(player), limits))
+        runtime: initRuntime(program, buildBotHost(player, int(player)), limits))
     except BasicError as error:
       # A script that doesn't compile still holds its seat: it passes every
       # turn instead of stopping the match.

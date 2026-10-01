@@ -212,6 +212,9 @@ proc episode(
       doAssert not logs[slot].contains("selectTarget")
     else:
       doAssert not fileExists(path)
+  if expectedOutput == "ANNOTATION-CONTINUED":
+    for log in logs:
+      doAssert not log.contains("BASIC error:")
   if expectedOutput.len > 0:
     for private in logs:
       doAssert private.contains(expectedOutput), private
@@ -295,19 +298,21 @@ for (game, count) in Games:
   for slot in 0 ..< count:
     scripts.add "PRINT \"PRIVATE-" & $slot & "\", 1.5\nEND\n"
   episode(game, count, scripts)
-  if game in ["gota", "lvd", "cta"]:
-    for slot in 0 ..< count:
-      scripts[slot] = "ANNOTATE(123, \"intent\", \"selectTarget\", \"{\"\"target\"\":" & $slot & "}\")\nEND\n"
-    episode(game, count, scripts)
-    episode(game, count, scripts, annotations = false)
-    for invalid in ["[1,2]", "5", "{}}", "{", "{\"x\":}"]:
-      let valid = scripts[0]
-      scripts[0] = valid.replace("END\n", "") &
-        "ANNOTATE(123, \"intent\", \"invalid\", \"" &
-        invalid.replace("\"", "\"\"") & "\")\nEND\n"
-      episode(game, count, scripts,
-        expectedRuntimeError = "ANNOTATE args must be a JSON object")
-      scripts[0] = valid
+  for slot in 0 ..< count:
+    scripts[slot] = "ANNOTATE(123, \"intent\", \"selectTarget\", \"{\"\"target\"\":" & $slot & "}\")\nEND\n"
+  episode(game, count, scripts)
+  episode(game, count, scripts, annotations = false)
+  let annotationScripts = scripts
+  for invalid in ["[1,2]", "5", "{}}", "{", "{\"x\":}"]:
+    let valid = scripts[0]
+    scripts[0] = valid.replace("END\n", "") &
+      "ANNOTATE(123, \"intent\", \"invalid\", \"" &
+      invalid.replace("\"", "\"\"") & "\")\nPRINT \"ANNOTATION-CONTINUED\"\nEND\n"
+    for slot in 1 ..< count:
+      scripts[slot] = scripts[slot].replace("END\n", "PRINT \"ANNOTATION-CONTINUED\"\nEND\n")
+    episode(game, count, scripts,
+      expectedOutput = "ANNOTATION-CONTINUED")
+    scripts = annotationScripts
   episode(game, count, newSeq[string](count))
   for slot in 0 ..< scripts.len:
     scripts[slot] = "END\n"

@@ -11,6 +11,8 @@ import
   test_chrome,
   test_characters,
   test_cli,
+  test_annotations,
+  test_policy_hosts,
   test_clickmarks,
   test_controllers,
   test_cta_maps,
