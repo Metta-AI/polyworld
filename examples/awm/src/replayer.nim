@@ -24,9 +24,11 @@ type
     follow: bool
 
 proc newReplayer*(data: ReplayData): Replayer =
-  Replayer(data: data,
+  ## Creates a viewer that plays one recorded game without looping.
+  result = Replayer(data: data,
     transport: initPlayer(live = false, durationTicks = data.hashes.len.int32),
     actionCam: initActionCam(), attackTick: -1)
+  result.transport.repeating = false
 
 proc timeScale*(replayer: Replayer): float32 =
   ## How fast the table runs: the selected speed, cards and lunges included.
@@ -99,36 +101,33 @@ proc update*(replayer: Replayer, play: var TablePlay, game: var GameState,
   ## the caller can re-aim anything it keeps.
   let total = replayer.data.actions.len.int32
   template transport: untyped = replayer.transport
-  if play.advanceAttack(game, dt) and replayer.attackTick >= 0:
-    replayer.checkTick(game, replayer.attackTick)
-    replayer.attackTick = -1
-  transport.sync(replayer.tick, total, over = replayer.tick >= total)
   let restore = transport.takeRestore()
-  if restore >= 0:
-    game = replayer.newReplayGame()
-    replayer.tick = 0
-    replayer.check = ReplayHashCheck()
-    result = true
-  if transport.targetTick >= 0:
-    # Seek at full speed, yielding now and then so the bar keeps moving.
-    if replayer.attackTick >= 0:
-      replayer.attackTick = -1
-      play.attackActive = false
+  if restore >= 0 or
+    (transport.targetTick >= 0 and replayer.attackTick >= 0):
+      # An unfinished lunge has not applied its recorded damage yet.
+      # Rebuild it from the tape before seeking in either direction.
+      game = replayer.newReplayGame()
+      replayer.tick = 0
+      replayer.check = ReplayHashCheck()
+  if transport.targetTick >= 0 or restore >= 0:
+    # Restore before syncing: the old tick can otherwise clear the target.
+    play.resetTable()
+    replayer.attackTick = -1
     let frameStart = epochTime()
     while transport.targetTick >= 0 and replayer.tick < total and
         replayer.tick < transport.targetTick and
         epochTime() - frameStart < CatchUpSeconds:
       replayer.applyInstantly(game)
     transport.sync(replayer.tick, total, over = replayer.tick >= total)
-    if transport.targetTick >= 0 and replayer.tick >= transport.targetTick:
-      transport.targetTick = -1
-    play.resetTable()
-    play.animations.setLen(0)
     play.statusMessage =
       if game.gameOver: ""
       else: replayer.playerName(game.currentPlayer) & "'s turn."
     replayer.wait = ReplayStepSeconds
     return true
+  if play.advanceAttack(game, dt) and replayer.attackTick >= 0:
+    replayer.checkTick(game, replayer.attackTick)
+    replayer.attackTick = -1
+  transport.sync(replayer.tick, total, over = replayer.tick >= total)
   if not transport.playing:
     return
   if replayer.tick >= total:

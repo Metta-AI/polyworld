@@ -6,7 +6,7 @@
 
 import
   bassy,
-  polyworld/[llms, mailboxes, bodies, metrics, cli, controllers,
+  polyworld/[policyhosts, llms, mailboxes, bodies, metrics, cli, controllers,
     pathing, profiles],
   content,
   sim,
@@ -127,9 +127,9 @@ proc sendChat*(
     if distance in 0 .. 16 and game.inboxes[recipient].push(-2, text):
       inc result
 
-proc buildHeroHost(heroId: int32, llm: LlmClient = nil): Host =
+proc buildHeroHost(heroId: int32, llm: LlmClient = nil, policySlot = -1): Host =
   ## Builds the world-query and high-level action API for one hero.
-  result = initHost()
+  result = initPolicyHost(policySlot)
   let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
   services.addFunctions(result)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
@@ -296,7 +296,7 @@ proc loadBots*(
     game.heroVms[slot] = HeroVm(
       runtime: initRuntime(
         program,
-        buildHeroHost(int32(100 + slot), llm),
+        buildHeroHost(int32(100 + slot), llm, int(slot)),
         limits
       ),
       ready: true,

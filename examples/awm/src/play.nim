@@ -482,13 +482,12 @@ proc dyingDiscards*(play: TablePlay, owner: int): int =
 
 proc resetTable*(play: var TablePlay) =
   ## A new game: nothing from the last one is still on its way.
-  play.dyingMinions.setLen(0)
-  play.castSpell = none(CastSpell)
-  play.queuedEvents.setLen(0)
-  play.heroDeaths.setLen(0)
-  play.deathDiscard.setLen(0)
-  play.tossPicking = false
-  play.discardFlights.setLen(0)
+  play = TablePlay(
+    pendingCardIndex: -1,
+    attackTarget: Canceled,
+    attackForward: true,
+    visualRng: play.visualRng
+  )
 
 proc inspectedCard*(
     window: Window,
@@ -931,6 +930,8 @@ proc deathClock*(play: TablePlay, game: GameState, player: int,
   ## How long a hero has been dying, for its death animation; -1 while it
   ## is shown alive. A death whose beat never played (a restored game)
   ## shows its end.
+  if not game.dead(player):
+    return -1
   if player < play.heroDeaths.len and play.heroDeaths[player] >= 0:
     return time - play.heroDeaths[player]
   result = -1
