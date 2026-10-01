@@ -137,6 +137,8 @@ proc run() =
   doAssert (api("/")).status == 200
   doAssert "color-scheme:dark" in (api("/")).body
   doAssert (api("/v1/metrics?minutes=1440")).status == 200
+  doAssert (api("/v1/metrics?minutes=10")).status == 200
+  doAssert parseJson(api("/v1/metrics?minutes=10").body)["bucket_minutes"].getInt == 1
   doAssert (api("/v1/metrics?minutes=1")).status == 400
   doAssert (api("/v1/metrics", httpMethod = "POST")).status == 405
   doAssert (api("/docs/llms.txt")).status == 200

@@ -1,6 +1,6 @@
 include ../coworld/fast_xp/metrics
 
-doAssert sizeof(MetricsState) < 10 * 1024 * 1024
+doAssert sizeof(MetricsState) < 20 * 1024 * 1024
 
 let empty = snapshot(60)
 doAssert empty["single_request"]["median_ms"].kind == JNull
@@ -44,3 +44,45 @@ let bounded = snapshotAt(1440, 99995)
 doAssert bounded["samples"].len <= 1441
 doAssert bounded["samples"][0]["cpu_percent"].kind == JNull
 doAssert bounded["samples"][0]["service_memory_bytes"].kind == JNull
+
+state = default(MetricsState)
+for i in 0 ..< 95:
+  gameCompleted("awm-fast", i, i, 28800, 200, 5, 20, 50, "awm", 5)
+for i in 0 ..< 5:
+  gameCompleted("paintbot", i, i, 14400, 200, 16, 100, 5000, "paintbot-pw", 16)
+gameCompleted("paintbot-timeout", 0, 10, 14400, 504, -1, 200, 120000, "paintbot-pw", 16)
+gameCompleted("gota", 0, 1, 28800, 200, 10, 30, 500)
+var later = Bucket(minute: 7, games: 10)
+later.byGame[1].games = 10
+for i in 0 ..< 10:
+  later.worker.observe(50000)
+  later.queue.observe(1000)
+  later.byGame[1].worker.observe(50000)
+  later.byGame[1].queue.observe(1000)
+state.buckets[7] = later
+schedulerChanged(3, 4, getMonoTime(), [1, 2, 0], [0, 1, 3])
+var total, idle: int64
+sampleHost(total, idle)
+let grouped = snapshotAt(1440, 8 * 60)
+doAssert grouped["bucket_minutes"].getInt == 15
+doAssert grouped["timeline"].len == 1
+doAssert grouped["timeline"][0]["games"].getInt == 111
+doAssert grouped["timeline"][0]["failed_games"].getInt == 1
+doAssert grouped["by_game"][2]["successful_games"].getInt == 95
+doAssert grouped["by_game"][1]["successful_games"].getInt == 15
+doAssert grouped["by_game"][1]["failed_games"].getInt == 1
+doAssert grouped["by_game"][1]["timeouts"].getInt == 1
+doAssert grouped["by_game"][1]["worker"]["count"].getInt == 15
+let paintbotMedian = grouped["by_game"][1]["worker"]["median_ms"].getFloat
+let awmP95 = grouped["by_game"][2]["worker"]["p95_ms"].getFloat
+doAssert paintbotMedian >= 50000 and paintbotMedian < 62500
+doAssert awmP95 >= 50 and awmP95 < 62.5
+doAssert grouped["timeline"][0]["by_game"][1]["worker"] == grouped["by_game"][1]["worker"]
+doAssert grouped["samples"][0]["by_game"][1]["running"].getInt == 2
+doAssert grouped["samples"][0]["by_game"][2]["queued"].getInt == 3
+let short = snapshotAt(10, 12 * 60)
+doAssert short["bucket_minutes"].getInt == 1
+doAssert short["timeline"].len == 1 and short["timeline"][0]["games"].getInt == 10
+doAssert short["by_game"][2]["successful_games"].getInt == 0
+doAssert short["recent_games"].len == 0
+doAssert snapshotAt(1440, 90000)["by_game"][1]["successful_games"].getInt == 0

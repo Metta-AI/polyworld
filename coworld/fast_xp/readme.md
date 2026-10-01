@@ -67,7 +67,10 @@ redirects. Artifact downloads never carry the Observatory authorization headers.
 ## Dashboard
 
 Open `/` for the dark performance dashboard. `GET /v1/metrics?minutes=60`
-returns its JSON data; supported windows are 15, 60 and 1440 minutes. The hosted
+returns its JSON data; dashboard windows are 10, 60 and 1440 minutes (15 remains
+accepted by the API). Activity and completion charts distinguish games and show
+failures. Execution and queue percentiles include successful games; 24-hour
+charts combine histogram counts into 15-minute buckets. The hosted
 service uses Tailscale access, with no additional caller token.
 
 Counters and latency histograms use fixed one-minute buckets, and host samples

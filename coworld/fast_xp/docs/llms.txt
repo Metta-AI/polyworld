@@ -100,5 +100,8 @@ bot diagnostics are disclosed. 429 means all 16 request admissions are used;
 honor Retry-After before retrying. There are no automatic retries.
 
 GET / shows the performance dashboard. GET /healthz returns ok.
-GET /v1/metrics?minutes=60 returns dashboard data; windows are 15, 60 or 1440.
+GET /v1/metrics?minutes=60 returns dashboard data; windows are 10, 60 or 1440
+minutes (15 remains accepted). History includes per-game activity, completions,
+failures and successful queue/execution timings. The 24-hour chart combines
+minute histograms into 15-minute buckets before computing percentiles.
 History stays in memory for 24 hours and resets on restart.

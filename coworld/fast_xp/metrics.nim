@@ -1,12 +1,16 @@
 import
-  std/[json, locks, math, monotimes, os, posix, strutils, times]
+  std/[algorithm, json, locks, math, monotimes, os, posix, strutils, times]
 
 type
   Histogram = array[96, uint64]
+  GameBucket = object
+    queue, worker: Histogram
+    games, failedGames, timeouts: uint64
   Bucket = object
     minute: int64
     singles, batches, queue, worker, preparation, zip: Histogram
     games, failedGames, timeouts, requests, failedRequests, rejected, hits, misses, bytes: uint64
+    byGame: array[3, GameBucket]
   RecentGame = object
     id: array[64, char]
     name: array[32, char]
@@ -18,14 +22,18 @@ type
     cpu: float
     memory, temporaryFree, cacheFree: int64
     running, queued, admitted: int
+    runningByGame, queuedByGame: array[3, int]
   MetricsState = object
     buckets: array[1440, Bucket]
     samples: array[17280, Sample]
     recent: array[100, RecentGame]
     sampleCount, recentCount: int
     running, queued, admitted, capacity: int
+    runningByGame, queuedByGame: array[3, int]
     oldest: int64
     instanceType: array[64, char]
+
+const GameNames = ["gota", "paintbot-pw", "awm"]
 
 var
   metricsLock: Lock
@@ -75,10 +83,14 @@ proc setCapacity*(capacity: int) =
 proc admissionChanged*(delta: int) =
   withLock metricsLock: state.admitted += delta
 
-proc schedulerChanged*(running, queued: int, oldest: MonoTime) =
+proc schedulerChanged*(running, queued: int, oldest: MonoTime,
+    runningByGame: array[3, int] = default(array[3, int]),
+    queuedByGame: array[3, int] = default(array[3, int])) =
   withLock metricsLock:
     state.running = running
     state.queued = queued
+    state.runningByGame = runningByGame
+    state.queuedByGame = queuedByGame
     state.oldest = if queued == 0: 0 else: oldest.ticks
 
 proc cacheLookup*(hit: bool) =
@@ -108,13 +120,22 @@ proc gameCompleted*(id: string, index, seed, ticks, status, active: int, queueMs
   for i in 0 ..< min(name.len, record.name.len): record.name[i] = name[i]
   withLock metricsLock:
     let bucket = currentBucket()
+    let gameIndex = GameNames.find(name)
+    doAssert gameIndex >= 0
+    let game = addr bucket.byGame[gameIndex]
     if status == 200:
       inc bucket.games
       bucket.queue.observe(queueMs)
       bucket.worker.observe(workerMs)
+      inc game.games
+      game.queue.observe(queueMs)
+      game.worker.observe(workerMs)
     else:
       inc bucket.failedGames
-      if status == 504: inc bucket.timeouts
+      inc game.failedGames
+      if status == 504:
+        inc bucket.timeouts
+        inc game.timeouts
     state.recent[state.recentCount mod 100] = record
     inc state.recentCount
 
@@ -153,11 +174,51 @@ proc sampleHost*(previousTotal, previousIdle: var int64) =
     sample.running = state.running
     sample.queued = state.queued
     sample.admitted = state.admitted
+    sample.runningByGame = state.runningByGame
+    sample.queuedByGame = state.queuedByGame
     state.samples[state.sampleCount mod state.samples.len] = sample
     inc state.sampleCount
 
 proc nullable(value: int64): JsonNode =
   if value < 0: newJNull() else: %value
+
+proc add(target: var Bucket, source: Bucket) =
+  for i in 0 ..< 96:
+    target.singles[i] += source.singles[i]
+    target.batches[i] += source.batches[i]
+    target.queue[i] += source.queue[i]
+    target.worker[i] += source.worker[i]
+    target.preparation[i] += source.preparation[i]
+    target.zip[i] += source.zip[i]
+    for game in 0 ..< GameNames.len:
+      target.byGame[game].queue[i] += source.byGame[game].queue[i]
+      target.byGame[game].worker[i] += source.byGame[game].worker[i]
+  target.games += source.games
+  target.failedGames += source.failedGames
+  target.timeouts += source.timeouts
+  target.requests += source.requests
+  target.failedRequests += source.failedRequests
+  target.rejected += source.rejected
+  target.hits += source.hits
+  target.misses += source.misses
+  target.bytes += source.bytes
+  for game in 0 ..< GameNames.len:
+    target.byGame[game].games += source.byGame[game].games
+    target.byGame[game].failedGames += source.byGame[game].failedGames
+    target.byGame[game].timeouts += source.byGame[game].timeouts
+
+proc gameJson(games: array[3, GameBucket]): JsonNode =
+  result = newJArray()
+  for index, game in games:
+    result.add %*{"game": GameNames[index], "successful_games": game.games,
+      "failed_games": game.failedGames, "timeouts": game.timeouts,
+      "queue": histogramJson(game.queue), "worker": histogramJson(game.worker)}
+
+proc timelineJson(bucket: Bucket): JsonNode =
+  %*{"timestamp": epoch + bucket.minute * 60,
+    "games": bucket.games, "failed_games": bucket.failedGames,
+    "queue": histogramJson(bucket.queue), "worker": histogramJson(bucket.worker),
+    "by_game": gameJson(bucket.byGame)}
 
 proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
   let minutes = clamp(windowMinutes, 1, 1440)
@@ -176,43 +237,39 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
     oldest = state.oldest
     instanceType = state.instanceType
     for bucket in state.buckets:
-      if bucket.minute >= max(0'i64, now div 60 - minutes + 1): buckets.add bucket
+      if bucket.minute >= max(0'i64, now div 60 - minutes + 1) and
+          bucket.minute <= now div 60 and bucket.games + bucket.failedGames + bucket.requests > 0:
+        buckets.add bucket
     for i in max(0, state.sampleCount - state.samples.len) ..< state.sampleCount:
       let sample = state.samples[i mod state.samples.len]
       if sample.elapsed >= now - int64(minutes * 60): samples.add sample
     for i in countdown(state.recentCount - 1, max(0, state.recentCount - 100)):
-      if state.recent[i mod 100].timestamp >= epoch + now - 86400:
+      if state.recent[i mod 100].timestamp >= epoch + now - int64(minutes * 60):
         recent.add state.recent[i mod 100]
   var aggregate: Bucket
   var timeline = newJArray()
-  # Minute buckets are fixed-size and may be visited in ring order.
+  let interval = if minutes == 1440: 15 else: 1
+  buckets.sort(proc(a, b: Bucket): int = cmp(a.minute, b.minute))
+  var group: Bucket
+  var hasGroup = false
   for bucket in buckets:
-    for i in 0 ..< 96:
-      aggregate.singles[i] += bucket.singles[i]
-      aggregate.batches[i] += bucket.batches[i]
-      aggregate.queue[i] += bucket.queue[i]
-      aggregate.worker[i] += bucket.worker[i]
-      aggregate.preparation[i] += bucket.preparation[i]
-      aggregate.zip[i] += bucket.zip[i]
-    aggregate.games += bucket.games
-    aggregate.failedGames += bucket.failedGames
-    aggregate.timeouts += bucket.timeouts
-    aggregate.requests += bucket.requests
-    aggregate.failedRequests += bucket.failedRequests
-    aggregate.rejected += bucket.rejected
-    aggregate.hits += bucket.hits
-    aggregate.misses += bucket.misses
-    aggregate.bytes += bucket.bytes
-    if bucket.games + bucket.failedGames + bucket.requests > 0:
-      timeline.add %*{"timestamp": epoch + bucket.minute * 60,
-        "games": bucket.games, "failed_games": bucket.failedGames,
-        "queue": histogramJson(bucket.queue), "worker": histogramJson(bucket.worker)}
+    aggregate.add(bucket)
+    let minute = bucket.minute div interval * interval
+    if hasGroup and minute != group.minute:
+      timeline.add timelineJson(group)
+      hasGroup = false
+    if not hasGroup:
+      group = Bucket(minute: minute)
+      hasGroup = true
+    group.add(bucket)
+  if hasGroup: timeline.add timelineJson(group)
   var instanceName = ""
   for ch in instanceType:
     if ch == '\0': break
     instanceName.add ch
   result = %*{"instance_type": (if instanceName.len == 0: newJNull() else: %instanceName),
     "timestamp": epoch + now, "uptime_seconds": now, "window_minutes": minutes,
+    "bucket_minutes": interval, "by_game": gameJson(aggregate.byGame),
     "running": running, "queued": queued, "admitted_requests": admitted,
     "worker_limit": capacity, "request_limit": 16,
     "oldest_queue_ms": (if queued == 0: 0'i64 else: max(0'i64, (getMonoTime().ticks - oldest) div 1_000_000)),
@@ -233,6 +290,10 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
       "service_memory_bytes": nullable(sample.memory),
       "temporary_free_bytes": nullable(sample.temporaryFree), "cache_free_bytes": nullable(sample.cacheFree),
       "running": sample.running, "queued": sample.queued, "admitted_requests": sample.admitted}
+    result["samples"][^1]["by_game"] = newJArray()
+    for game in 0 ..< GameNames.len:
+      result["samples"][^1]["by_game"].add %*{"game": GameNames[game],
+        "running": sample.runningByGame[game], "queued": sample.queuedByGame[game]}
   for game in recent:
     var id = ""
     var name = ""

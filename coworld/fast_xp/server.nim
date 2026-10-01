@@ -338,6 +338,7 @@ proc dispatchGames(capacity: int) {.thread.} =
   ## Owns the ready ring; each batch gets one turn per available worker.
   var batches: Deque[Deque[GameJob]]
   var idle: seq[int]
+  var runningGames = newSeq[Game](capacity)
   var closing = false
   for i in 0 ..< capacity: idle.add i
   while true:
@@ -367,14 +368,19 @@ proc dispatchGames(capacity: int) {.thread.} =
       var batch = batches.popFirst()
       let job = batch.popFirst()
       let worker = idle.pop()
+      runningGames[worker] = job.game
       workerJobs[worker].send(job)
       if batch.len > 0: batches.addLast(batch)
     var queued = 0
+    var runningByGame, queuedByGame: array[3, int]
+    for worker, game in runningGames:
+      if worker notin idle: inc runningByGame[ord(game)]
     var oldest = getMonoTime()
     for batch in batches:
       queued += batch.len
+      for job in batch: inc queuedByGame[ord(job.game)]
       if batch.len > 0 and batch.peekFirst().queued < oldest: oldest = batch.peekFirst().queued
-    schedulerChanged(capacity - idle.len, queued, oldest)
+    schedulerChanged(capacity - idle.len, queued, oldest, runningByGame, queuedByGame)
     # Keep receiving late submissions from already-admitted preparation handlers.
     if closing and idle.len == capacity:
       var admitted: int
@@ -443,7 +449,7 @@ proc handleRequest(request: Request) {.gcsafe.} =
         ("Cache-Control", "no-store")], Dashboard)
     of "/v1/metrics":
       let value = request.queryParams["minutes"]
-      if value notin ["", "15", "60", "1440"]: reject(400, "minutes must be 15, 60 or 1440")
+      if value notin ["", "10", "15", "60", "1440"]: reject(400, "minutes must be 10, 15, 60 or 1440")
       let data = snapshot(if value == "": 60 else: parseInt(value))
       data["games"] = newJArray()
       for candidate in Game:

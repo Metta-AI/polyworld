@@ -68,6 +68,12 @@ proc run() =
   doAssert m["running"].getInt() == 2 and m["queued"].getInt() == 9, $m
   doAssert m["admitted_requests"].getInt() == 2 and m["worker_limit"].getInt() == 2
   doAssert m["oldest_queue_ms"].getInt() > 0
+  waitUntil((block:
+    m = metrics(base)
+    m["samples"].len > 0 and m["samples"][^1]["queued"].getInt() == 9), process, log)
+  let activity = m["samples"][^1]["by_game"]
+  doAssert activity[0]["running"].getInt() == 2 and activity[0]["queued"].getInt() == 8
+  doAssert activity[1]["running"].getInt() == 0 and activity[1]["queued"].getInt() == 1
   removeFile(root / "gate")
   doAssert (finish(first)).status == 200 and (finish(second)).status == 200
   doAssert started().find(500) <= 4, $started()
@@ -86,6 +92,9 @@ proc run() =
   doAssert m["successful_games"].getInt() == 23 and m["failed_games"].getInt() == 1
   doAssert m["single_request"]["count"].getInt() == 11 and m["batch_request"]["count"].getInt() == 2
   doAssert m["queue"]["count"].getInt() == 23 and m["worker"]["count"].getInt() == 23
+  doAssert m["by_game"][0]["successful_games"].getInt() == 22
+  doAssert m["by_game"][1]["successful_games"].getInt() == 1
+  doAssert m["by_game"][0]["failed_games"].getInt() == 1
   let began = getMonoTime()
   let timedOut = finish(game(999))
   doAssert timedOut.status == 504, timedOut.body
