@@ -6,6 +6,9 @@ let empty = snapshot(60)
 doAssert empty["single_request"]["median_ms"].kind == JNull
 doAssert empty["recent_games"].len == 0
 setCapacity(6)
+doAssert snapshot(60)["request_limit"].getInt == 512
+setCapacity(6, 32)
+doAssert snapshot(60)["request_limit"].getInt == 32
 admissionChanged(1)
 schedulerChanged(2, 8, getMonoTime())
 requestCompleted(200, 1, 1000, 10, 2, 100)

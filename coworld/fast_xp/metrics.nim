@@ -28,7 +28,7 @@ type
     samples: array[17280, Sample]
     recent: array[100, RecentGame]
     sampleCount, recentCount: int
-    running, queued, admitted, capacity: int
+    running, queued, admitted, capacity, requestLimit: int
     runningByGame, queuedByGame: array[3, int]
     oldest: int64
     instanceType: array[64, char]
@@ -69,7 +69,7 @@ proc histogramJson(hist: Histogram): JsonNode =
         result[item[0]] = %(if i == 0: 0.0 else: pow(1.25, float(i - 1)))
         break
 
-proc setCapacity*(capacity: int) =
+proc setCapacity*(capacity: int, requestLimit = 512) =
   var instanceType: array[64, char]
   try:
     if readFile("/sys/devices/virtual/dmi/id/sys_vendor").strip() == "Amazon EC2":
@@ -78,6 +78,7 @@ proc setCapacity*(capacity: int) =
   except CatchableError: discard
   withLock metricsLock:
     state.capacity = capacity
+    state.requestLimit = requestLimit
     state.instanceType = instanceType
 
 proc admissionChanged*(delta: int) =
@@ -226,7 +227,7 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
     buckets: seq[Bucket]
     samples: seq[Sample]
     recent: seq[RecentGame]
-    running, queued, admitted, capacity: int
+    running, queued, admitted, capacity, requestLimit: int
     oldest: int64
     instanceType: array[64, char]
   withLock metricsLock:
@@ -234,6 +235,7 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
     queued = state.queued
     admitted = state.admitted
     capacity = state.capacity
+    requestLimit = state.requestLimit
     oldest = state.oldest
     instanceType = state.instanceType
     for bucket in state.buckets:
@@ -271,7 +273,7 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
     "timestamp": epoch + now, "uptime_seconds": now, "window_minutes": minutes,
     "bucket_minutes": interval, "by_game": gameJson(aggregate.byGame),
     "running": running, "queued": queued, "admitted_requests": admitted,
-    "worker_limit": capacity, "request_limit": 16,
+    "worker_limit": capacity, "request_limit": requestLimit,
     "oldest_queue_ms": (if queued == 0: 0'i64 else: max(0'i64, (getMonoTime().ticks - oldest) div 1_000_000)),
     "successful_games": aggregate.games, "failed_games": aggregate.failedGames,
     "timeouts": aggregate.timeouts, "requests": aggregate.requests,

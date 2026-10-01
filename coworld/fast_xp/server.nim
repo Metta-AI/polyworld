@@ -53,10 +53,13 @@ const
   RunGuide = staticRead("docs/run.md")
   PaintbotGuide = staticRead("docs/paintbot-run.md")
   AwmGuide = staticRead("docs/awm-run.md")
+  HttpHeadroom = 8
+  GameCount = ord(high(Game)) + 1
 
 var
   capacityLock: Lock
   activeRuns: int
+  requestLimit: int
   requestSequence: uint64
   logLock: Lock
   stopping: Atomic[bool]
@@ -335,10 +338,12 @@ proc gameWorker(index: int) {.thread.} =
     schedulerEvents.send SchedulerEvent(worker: index, completed: completed, reply: job.reply)
 
 proc dispatchGames(capacity: int) {.thread.} =
-  ## Owns the ready ring; each batch gets one turn per available worker.
-  var batches: Deque[Deque[GameJob]]
+  ## Shares workers between ready games and rotates batches within each game.
+  var batches: array[Game, Deque[Deque[GameJob]]]
   var idle: seq[int]
   var runningGames = newSeq[Game](capacity)
+  var runningByGame: array[3, int]
+  var nextGame = 0
   var closing = false
   for i in 0 ..< capacity: idle.add i
   while true:
@@ -346,40 +351,51 @@ proc dispatchGames(capacity: int) {.thread.} =
     if event.stopping: closing = true
     if event.reply != nil:
       event.reply[].send(event.completed)
+      dec runningByGame[ord(runningGames[event.worker])]
       idle.add event.worker
     if event.jobs.len > 0:
       var batch: Deque[GameJob]
       for job in event.jobs: batch.addLast job
-      batches.addLast batch
+      batches[event.jobs[0].game].addLast batch
     if closing:
-      while batches.len > 0:
-        let batch = batches.popFirst()
-        for job in batch:
-          let elapsed = (getMonoTime() - job.queued).inMilliseconds
-          job.reply[].send GameResult(index: job.index, seed: job.seed, status: 503,
-            error: "Server shutting down", queueMs: elapsed, gameplayMs: -1,
-            roster: seatPlayers(job.players, job.index, job.game))
-          gameCompleted(job.requestId, job.index, job.seed, job.maxTicks, 503, -1, elapsed, 0,
-            gameName(job.game), seatCount(job.game))
-          logEvent(%*{"event": "game_completed", "request_id": job.requestId,
-            "game": gameName(job.game), "game_index": job.index, "seed": job.seed, "status": 503,
-            "queue_ms": elapsed, "worker_ms": 0})
-    while not closing and idle.len > 0 and batches.len > 0:
-      var batch = batches.popFirst()
+      for game in Game:
+        while batches[game].len > 0:
+          let batch = batches[game].popFirst()
+          for job in batch:
+            let elapsed = (getMonoTime() - job.queued).inMilliseconds
+            job.reply[].send GameResult(index: job.index, seed: job.seed, status: 503,
+              error: "Server shutting down", queueMs: elapsed, gameplayMs: -1,
+              roster: seatPlayers(job.players, job.index, job.game))
+            gameCompleted(job.requestId, job.index, job.seed, job.maxTicks, 503, -1, elapsed, 0,
+              gameName(job.game), seatCount(job.game))
+            logEvent(%*{"event": "game_completed", "request_id": job.requestId,
+              "game": gameName(job.game), "game_index": job.index, "seed": job.seed, "status": 503,
+              "queue_ms": elapsed, "worker_ms": 0})
+    while not closing and idle.len > 0:
+      var selected = -1
+      for offset in 0 ..< GameCount:
+        let index = (nextGame + offset) mod GameCount
+        if batches[Game(index)].len > 0 and
+            (selected < 0 or runningByGame[index] < runningByGame[selected]):
+          selected = index
+      if selected < 0: break
+      nextGame = (selected + 1) mod GameCount
+      let game = Game(selected)
+      var batch = batches[game].popFirst()
       let job = batch.popFirst()
       let worker = idle.pop()
       runningGames[worker] = job.game
+      inc runningByGame[selected]
       workerJobs[worker].send(job)
-      if batch.len > 0: batches.addLast(batch)
+      if batch.len > 0: batches[game].addLast(batch)
     var queued = 0
-    var runningByGame, queuedByGame: array[3, int]
-    for worker, game in runningGames:
-      if worker notin idle: inc runningByGame[ord(game)]
+    var queuedByGame: array[3, int]
     var oldest = getMonoTime()
-    for batch in batches:
-      queued += batch.len
-      for job in batch: inc queuedByGame[ord(job.game)]
-      if batch.len > 0 and batch.peekFirst().queued < oldest: oldest = batch.peekFirst().queued
+    for game in Game:
+      for batch in batches[game]:
+        queued += batch.len
+        queuedByGame[ord(game)] += batch.len
+        if batch.len > 0 and batch.peekFirst().queued < oldest: oldest = batch.peekFirst().queued
     schedulerChanged(capacity - idle.len, queued, oldest, runningByGame, queuedByGame)
     # Keep receiving late submissions from already-admitted preparation handlers.
     if closing and idle.len == capacity:
@@ -479,7 +495,7 @@ proc handleRequest(request: Request) {.gcsafe.} =
         reject(415, "Content-Type must be application/json")
       withLock capacityLock:
         if stopping.load(): reject(503, "Server shutting down")
-        if activeRuns >= 16: reject(429, "Request queue is full; retry later")
+        if activeRuns >= requestLimit: reject(429, "Request queue is full; retry later")
         inc activeRuns
         admissionChanged(1)
       defer:
@@ -584,8 +600,11 @@ when isMainModule:
     host = getEnv("FAST_XP_HOST", "127.0.0.1")
     port = parseInt(getEnv("FAST_XP_PORT", "8080"))
     capacity = parseInt(getEnv("FAST_XP_WORKERS", $clamp(cpuinfo.countProcessors(), 1, 256)))
+  requestLimit = parseInt(getEnv("FAST_XP_REQUEST_LIMIT", "512"))
   if port < 1 or port > 65535 or capacity < 1 or capacity > 256:
     raise newException(ValueError, "Invalid FAST_XP_PORT or FAST_XP_WORKERS")
+  if requestLimit < 1 or requestLimit > 1024:
+    raise newException(ValueError, "FAST_XP_REQUEST_LIMIT must be between 1 and 1024")
   if host notin ["127.0.0.1", "::1", "localhost"] and getEnv("FAST_XP_TOKEN").len == 0:
     raise newException(ValueError, "Set FAST_XP_TOKEN before binding a non-loopback address")
   var installed = newJArray()
@@ -593,18 +612,18 @@ when isMainModule:
     if EnabledGames[game]:
       installed.add %gameName(game)
       discard executionSeconds(game)
-  setCapacity(capacity)
+  setCapacity(capacity, requestLimit)
   createThread(metricsThread, collectMetrics)
   schedulerEvents.open()
   for i in 0 ..< capacity:
     workerJobs[i].open()
     createThread(gameWorkers[i], gameWorker, i)
   createThread(schedulerThread, dispatchGames, capacity)
-  let server = newServer(handleRequest, workerThreads = 24, maxBodyLen = bodyLimit())
+  let server = newServer(handleRequest, workerThreads = requestLimit + HttpHeadroom, maxBodyLen = bodyLimit())
   discard posix.signal(SIGTERM, shutdownSignal)
   discard posix.signal(SIGINT, shutdownSignal)
   createThread(shutdownThread, shutdownMonitor, server)
-  logEvent(%*{"event": "server_started", "workers": capacity, "request_limit": 16,
+  logEvent(%*{"event": "server_started", "workers": capacity, "request_limit": requestLimit,
     "games": installed, "build_revision": getEnv("FAST_XP_BUILD_REVISION", "local")})
   server.serve(Port(port), host)
   stopping.store(true)

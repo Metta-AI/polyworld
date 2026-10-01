@@ -29,7 +29,8 @@ Open `/docs/llms.txt` for the agent documentation entry point, or read the
 
 - `FAST_XP_HOST`: bind address, default `127.0.0.1`.
 - `FAST_XP_PORT`: port, default `8080`.
-- `FAST_XP_WORKERS`: optional override for simultaneous game processes, range 1–256. By default the server detects available logical CPUs at startup, capped at 256. Every game worker runs at nice +10; the API keeps its normal priority. Up to 16 requests may be admitted, using 24 HTTP threads.
+- `FAST_XP_WORKERS`: optional override for simultaneous game processes, range 1–256. By default the server detects available logical CPUs at startup, capped at 256. Every game worker runs at nice +10; the API keeps its normal priority.
+- `FAST_XP_REQUEST_LIMIT`: maximum admitted requests, default 512, range 1–1024. Each may contain up to ten matches. HTTP threads follow this limit with eight extra threads for health, dashboard and overload responses. Game concurrency stays at `FAST_XP_WORKERS` regardless of queue size.
 - `FAST_XP_TOKEN`: bearer token for callers of this server; required for non-loopback binding.
 - `FAST_XP_GOTA_WORKER`: executable path, default `gota_worker` beside server.
 - `FAST_XP_GAMES`: optional comma-separated list, `gota,paintbot-pw,awm`. By default all installed game commands are enabled. All routes share the same worker pool and admission limit.
@@ -48,6 +49,13 @@ The hosted service binds to loopback behind Tailscale Serve and leaves
 identify Observatory users. Policy-reference seats never expose source or logs,
 even when the caller owns the policy. The worker inherits only runtime paths,
 not the server's credentials.
+
+When multiple games have queued work, the next free worker goes to the game with
+the fewest running matches. Ties rotate between games, and batches rotate within
+each game. If only one game has work, it can use every worker. Running matches
+are never interrupted to make space; a newly queued game waits for a worker to
+finish. HTTP 429 means the admitted request limit was reached, not that the game
+workers are busy.
 
 Each request resolves each distinct selected policy reference once through
 Observatory, including on warm-cache requests. Verified artifact bytes are cached

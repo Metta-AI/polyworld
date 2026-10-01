@@ -23,8 +23,8 @@ proc worker() =
   if seed == 997:
     let child = startProcess(findExe("sleep"), args = @["180"], options = {})
     writeFile(root / "completed-descendant", $child.processID)
-  sleep(100)
-  stdout.writeLine(repeat('x', 100_000))
+  sleep(if seed >= 3000: 5 else: 100)
+  stdout.writeLine(repeat('x', if seed >= 3000: 1000 else: 100_000))
   let seats = parseJson(readFile(path("COGAME_PLAYER_SEATS_URI")))
   for seat in seats["seats"]:
     writeFile(decodeUrl(parseUri(seat["log_uri"].getStr()).path), "completed\n")
@@ -43,7 +43,9 @@ proc run() =
   let env = environment(root, port)
   env["FAST_XP_GOTA_WORKER"] = getAppFilename()
   env["FAST_XP_PAINTBOT_COMMAND"] = $(%*[getAppFilename()])
-  env["FAST_XP_GAMES"] = "gota,paintbot-pw"
+  env["FAST_XP_AWM_COMMAND"] = $(%*[getAppFilename()])
+  env["FAST_XP_GAMES"] = "gota,paintbot-pw,awm"
+  env.del("FAST_XP_REQUEST_LIMIT")
   let log = root / "server.log"
   let process = launch(ServerPath, log, env)
   defer:
@@ -67,6 +69,7 @@ proc run() =
   var m = metrics(base)
   doAssert m["running"].getInt() == 2 and m["queued"].getInt() == 9, $m
   doAssert m["admitted_requests"].getInt() == 2 and m["worker_limit"].getInt() == 2
+  doAssert m["request_limit"].getInt() == 512
   doAssert m["oldest_queue_ms"].getInt() > 0
   waitUntil((block:
     m = metrics(base)
@@ -111,6 +114,60 @@ proc run() =
   let completedStat = "/proc/" & $completedChild & "/stat"
   doAssert not fileExists(completedStat) or readFile(completedStat).split(')')[1].strip().startsWith("Z"),
     "Completed worker left a running descendant"
+  waitUntil(metrics(base)["admitted_requests"].getInt() == 0, process, log)
+  let fairStarted = started().len
+  writeFile(root / "gate", "")
+  var paints: seq[Curly]
+  for index in 0 ..< 24: paints.add game(8000 + index * 10, 10, "paintbot-pw")
+  waitUntil(metrics(base)["queued"].getInt() == 238, process, log)
+  let shortGame = game(9000, name = "awm")
+  let gotaBatch = game(10000, 10)
+  waitUntil(metrics(base)["queued"].getInt() == 249, process, log)
+  doAssert started().len == fairStarted + 2
+  removeFile(root / "gate")
+  doAssert finish(shortGame).status == 200
+  doAssert finish(gotaBatch).status == 200
+  for pending in paints: doAssert finish(pending).status == 200
+  let fairOrder = started()[fairStarted .. ^1]
+  doAssert fairOrder.find(9000) in 2 .. 3, $fairOrder
+  doAssert fairOrder.find(10000) in 2 .. 3, $fairOrder
+  waitUntil(metrics(base)["admitted_requests"].getInt() == 0, process, log)
+  writeFile(root / "gate", "")
+  let burst = newCurly(maxInFlight = 300)
+  defer: burst.close()
+  for index in 0 ..< 300:
+    burst.startRequest("POST", base & RunRoute, @[("Content-Type", "application/json")],
+      $(%*{"seed": 3000 + index * 10, "num_episodes": 10,
+        "roster": [{"player": {"source": "end"}}]}), timeout = 150, tag = $index)
+  waitUntil((block:
+    m = metrics(base)
+    m["admitted_requests"].getInt() == 300 and m["queued"].getInt() == 2998),
+    process, log, 30_000)
+  doAssert m["running"].getInt() == 2
+  doAssert call(base, "/healthz").status == 200
+  doAssert call(base, "/").status == 200
+  removeFile(root / "gate")
+  var received: set[0 .. 299]
+  for _ in 0 ..< 300:
+    let (response, error) = burst.waitForResponse()
+    doAssert error.len == 0, error
+    doAssert response.code == 200, response.body
+    let index = parseInt(response.request.tag)
+    doAssert index notin received
+    received.incl index
+    let files = archiveFiles(response.body, root)
+    let games = parseJson(files["manifest.json"])["games"]
+    doAssert games.len == 10
+    for episode in 0 ..< 10:
+      doAssert games[episode]["http_status"].getInt() == 200
+      doAssert files["games/" & align($episode, 3, '0') & "/replay.replay"] ==
+        $(3000 + index * 10 + episode)
+  doAssert received.len == 300
+  waitUntil((block:
+    m = metrics(base)
+    m["running"].getInt() == 0 and m["queued"].getInt() == 0 and
+      m["admitted_requests"].getInt() == 0), process, log)
+  doAssert m["rejected_requests"].getInt() == 0
   writeFile(root / "gate", "")
   let before = started().len
   let pending = game(700, 10)
@@ -129,7 +186,7 @@ proc run() =
   doAssert toSeq(m["recent_games"].items).countIt(it["status"].getInt() == 503) == 8
   doAssert process.waitForExit(10_000) == 0, readFile(log)
   assertNoMatchFiles(root)
-  doAssert "xxxx" notin readFile(log) and getFileSize(log) < 100_000
+  doAssert "xxxx" notin readFile(log) and getFileSize(log) < 2 * 1024 * 1024
   env.del("FAST_XP_WORKERS")
   let automaticLog = root / "automatic.log"
   let automatic = launch(ServerPath, automaticLog, env)

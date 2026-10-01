@@ -111,6 +111,7 @@ proc run() =
   writeFile(root / "source", originalSource)
   writeFile(root / "real-worker", FastXpDirectory / "gota_worker")
   let env = environment(root, port)
+  env["FAST_XP_REQUEST_LIMIT"] = "16"
   env["FAST_XP_TOKEN"] = "test-token"
   env["FAST_XP_OBSERVATORY_URL"] = mockBase
   env["FAST_XP_OBSERVATORY_TOKEN"] = "fake-observatory-token"

@@ -91,8 +91,9 @@ A disconnected request continues running, but its response cannot be recovered.
 ## Retry and errors
 
 On HTTP 429, wait for the number of seconds in Retry-After, then retry the same
-request. Use a limited number of concurrent requests; sending hundreds at once
-will cause rejections. Use num_episodes for up to ten matches in one request.
+request. The server queues requests while workers are busy, returning 429 only
+when its request limit is reached. Use num_episodes for up to ten matches in one
+request, and limit concurrency to avoid long waits.
 Retries are the caller's responsibility.
 
 Errors return JSON {"error":"message"}:
