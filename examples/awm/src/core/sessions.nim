@@ -16,6 +16,7 @@ type
     playerCount*: int  ## Above two selects the multiplayer scene preview.
     human*: bool
     botPaths*: seq[string]
+    replayPath*: string  ## A recorded match to watch instead of playing.
 
   BotActionKind* = enum
     PlayCardAction, EndTurnAction, ResolveTriggerAction, TossAction
@@ -53,7 +54,8 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
   while index < args.len:
     let separator = args[index].find('=')
     let key = if separator >= 0: args[index][0 ..< separator] else: args[index]
-    if key notin ["--seed", "--class", "--opponent", "--players", "--bot", "--human"]:
+    if key notin ["--seed", "--class", "--opponent", "--players", "--bot",
+        "--human", "--replay"]:
       raise newException(ValueError, "Unknown session option: " & key)
     if key == "--human":
       if separator >= 0:
@@ -98,6 +100,7 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
         raise newException(ValueError, "Too many --bot arguments (max " &
           $PlayerCount & ")")
       result.botPaths.add value
+    of "--replay": result.replayPath = value
     else: discard
     inc index
 

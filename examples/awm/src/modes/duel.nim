@@ -8,7 +8,7 @@ import ../core/sim, ../core/sessions, ../core/bots
 import ../app, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel,
   ../scene/courtyard, ../scene/heroes, ../net/web, ../scene/placement,
-  ../ui/tuning
+  ../ui/tuning, ../replayer
 import polyworld/[assets, characters, chrome, common, viewers]
 
 const
@@ -177,7 +177,6 @@ proc runDuel*(app: App) =
   bindApp(app)
   var
     phase = ChooseClasses
-    selectedClass: HeroClass
     game: GameState
     # Captures can replay a cast from its visual seed.
     play = when defined(takeScreenshot):
@@ -276,6 +275,13 @@ proc runDuel*(app: App) =
     play.addOpeningHands(game, duelLayout)
     play.statusMessage =
       &"Player {game.currentPlayer + 1} begins."
+  if app.replay != nil:
+    # A recorded match: its classes and deal, played back on the table.
+    game = app.replay.newReplayGame()
+    phase = PlayGame
+    play.addOpeningHands(game, duelLayout)
+    play.statusMessage =
+      app.replay.playerName(game.currentPlayer) & " begins."
   when defined(takeScreenshot):
     if getEnv("AWM_DEMO_BOARD") == "1":
       play.animations.setLen(0)
@@ -520,7 +526,9 @@ proc runDuel*(app: App) =
     tuner.announce(duelTuningTargets())
 
   window.onFrame = proc() =
-    let dt = frameDelta(lastFrameTime)
+    var dt = frameDelta(lastFrameTime)
+    if app.replay != nil:
+      dt *= app.replay.timeScale
     when defined(awmLayoutTuning):
       # Provisional controls for dialing in the camera and the hands.
       tuner.tune(window, dt, duelTuningTargets())
@@ -534,18 +542,12 @@ proc runDuel*(app: App) =
     play.animations.advanceAnimations(dt)
     play.discardFlights.advanceAnimations(dt)
     play.activeVfx.advance(dt)
-    sk.uiScale = hudScale(window)
-    sk.mousePos = window.mousePos.vec2 / sk.uiScale
-    when PostPanelControls:
-      uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
-
     if phase == ChooseClasses and not sessionOptions.human:
       botClassWait -= dt
       if botClassWait <= 0:
         let
           playerClass = play.visualRng.rand(HeroClass)
           opponentClass = play.visualRng.rand(HeroClass)
-        selectedClass = playerClass
         game = newGame(playerClass, opponentClass, gameSeed())
         play.resetTable()
         phase = PlayGame
@@ -554,9 +556,18 @@ proc runDuel*(app: App) =
         botClock.plays = 0
         play.statusMessage = "Watching bot match..."
 
+    sk.uiScale = if phase == ChooseClasses: classSelectionScale()
+      else: hudScale(window)
+    sk.mousePos = window.mousePos.vec2 / sk.uiScale
+    when PostPanelControls:
+      uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
+
     if phase == PlayGame:
-      discard play.updateBots(game, duelLayout, botVms, botClock, humanActs,
-        dt)
+      if app.replay != nil:
+        discard app.replay.update(play, game, duelLayout, dt)
+      else:
+        discard play.updateBots(game, duelLayout, botVms, botClock, humanActs,
+          dt)
 
     let
       aspect = window.size.x.float32 / max(window.size.y.float32, 1)
@@ -567,7 +578,7 @@ proc runDuel*(app: App) =
           1.0'f32
       cameraEye =
         if phase == ChooseClasses:
-          classChoiceEye
+          classChoiceEye(aspect)
         else:
           duelCamera.seatEye(currentSide)
       cameraTarget =
@@ -578,6 +589,9 @@ proc runDuel*(app: App) =
       view = lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
       projection = perspective(42.0'f32, aspect, CameraNear, CameraFar)
       viewProjection = projection * view
+      classHover = if phase == ChooseClasses and sessionOptions.human and
+          not uiCapturesMouse: classSelectionHover(viewProjection)
+        else: none(HeroClass)
 
     var
       hoverIndex = -1
@@ -656,9 +670,7 @@ proc runDuel*(app: App) =
     solid.clear()
     cardSurfaces.clear()
     vfx.clear()
-    if phase == ChooseClasses:
-      addClassStage()
-    else:
+    if phase == PlayGame:
       addTableCards(solid, cardSurfaces, vfx, sk, play, game, duelLayout,
         animationTime, cameraPlayer(), hoverIndex, hoveredBoard,
         humanTurn(), attackChoices, play.selectedAttacker,
@@ -685,6 +697,10 @@ proc runDuel*(app: App) =
     if phase == PlayGame:
       courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide)
       courtyard.drawSky(viewProjection, cameraEye, environmentTime)
+    else:
+      selectionStage.draw(viewProjection, cameraEye, environmentTime, 1)
+      selectionStage.drawSky(viewProjection, cameraEye, environmentTime,
+        brightness = 0.22)
     solid.draw(viewProjection)
     cardSurfaces.draw(sk, viewProjection)
 
@@ -694,7 +710,7 @@ proc runDuel*(app: App) =
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
     glStencilFunc(GL_ALWAYS, 0, 0xff)
     if phase == ChooseClasses:
-      drawClassHeroes(selectedClass, animationTime)
+      drawClassHeroes(classHover, animationTime, cameraEye)
     else:
       for playerIndex in 0 ..< PlayerCount:
         let
@@ -719,9 +735,13 @@ proc runDuel*(app: App) =
         )
     finishCharacters(scene)
     glDisable(GL_STENCIL_TEST)
-    if phase == PlayGame and post.beginMaterialNormals():
-      courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide,
-        normalsOnly = true, normalView = view)
+    if post.beginMaterialNormals():
+      if phase == PlayGame:
+        courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide,
+          normalsOnly = true, normalView = view)
+      else:
+        selectionStage.draw(viewProjection, cameraEye, environmentTime, 1,
+          normalsOnly = true, normalView = view)
       post.endMaterialNormals()
     post.applyOcclusion(projection)
     if phase == PlayGame:
@@ -730,6 +750,8 @@ proc runDuel*(app: App) =
           play.activeVfx.flashStrength(heroChoice(playerIndex)))
       vfx.addAttackRing(play, cameraEye)
       vfx.addEffects(play.activeVfx, cameraEye)
+      vfx.draw(viewProjection)
+    elif classHover.isSome:
       vfx.draw(viewProjection)
     post.present(window.size)
 
@@ -752,26 +774,23 @@ proc runDuel*(app: App) =
           HudIvory, "Small")
 
     if phase == ChooseClasses:
-      drawClassHeader(sessionOptions.human)
-      if sessionOptions.human:
-        let picked = classButtons()
-        if picked.isSome:
-          let heroClass = picked.get
-          selectedClass = heroClass
-          game = newGame(
-            heroClass,
-            sessionOptions.opponentClass,
-            gameSeed()
-          )
-          play.resetTable()
-          phase = PlayGame
-          play.addOpeningHands(game, duelLayout)
-          botClock.wait = 1.2'f32
-          botClock.plays = 0
-          if game.currentPlayer == 0:
-            play.statusMessage = "Your turn. Select a card to play."
-          else:
-            play.statusMessage = "Your opponent is thinking..."
+      let picked = classSelection(viewProjection, sessionOptions.human, not uiCapturesMouse)
+      if picked.isSome:
+        let heroClass = picked.get
+        game = newGame(
+          heroClass,
+          sessionOptions.opponentClass,
+          gameSeed()
+        )
+        play.resetTable()
+        phase = PlayGame
+        play.addOpeningHands(game, duelLayout)
+        botClock.wait = 1.2'f32
+        botClock.plays = 0
+        if game.currentPlayer == 0:
+          play.statusMessage = "Your turn. Select a card to play."
+        else:
+          play.statusMessage = "Your opponent is thinking..."
     else:
       drawPlayerPanel(sk, window, game, 0, sessionOptions.human, animationTime)
       drawPlayerPanel(sk, window, game, 1, sessionOptions.human, animationTime)
@@ -790,28 +809,29 @@ proc runDuel*(app: App) =
       sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,
         play, duelLayout), viewProjection,
         avoid = cardReadingRect(window), avoiding = inspectingCard)
-      sk.drawLabel(
-        play.playHelp(sessionOptions.human),
-        vec2(32, hudSize(window).y - 66),
-        vec2(820, 42),
-        HudMuted,
-        "Small"
-      )
-      let canFinish = humanTurn() and not game.waitingChoice and
-        not play.pendingTargeting and not play.attackActive and not game.gameOver and
-        play.presentationIdle(game)
-      if drawEndTurnButton(sk, window,
-          (if game.gameOver: "MATCH ENDED"
-           elif not humanTurn(): "OPPONENT"
-           else: "END TURN"), canFinish):
-        play.selectedAttacker = 0
-        game.finishTurn()
-        botClock.wait = 1.2'f32
-        botClock.plays = 0
-        play.statusMessage = "Your opponent is thinking..."
-        play.pendingTargeting = false
-        play.pendingCardIndex = -1
-        play.pendingChoices.setLen(0)
+      if app.replay == nil:
+        sk.drawLabel(
+          play.playHelp(sessionOptions.human),
+          vec2(32, hudSize(window).y - 66),
+          vec2(820, 42),
+          HudMuted,
+          "Small"
+        )
+        let canFinish = humanTurn() and not game.waitingChoice and
+          not play.pendingTargeting and not play.attackActive and not game.gameOver and
+          play.presentationIdle(game)
+        if drawEndTurnButton(sk, window,
+            (if game.gameOver: "MATCH ENDED"
+             elif not humanTurn(): "OPPONENT"
+             else: "END TURN"), canFinish):
+          play.selectedAttacker = 0
+          game.finishTurn()
+          botClock.wait = 1.2'f32
+          botClock.plays = 0
+          play.statusMessage = "Your opponent is thinking..."
+          play.pendingTargeting = false
+          play.pendingCardIndex = -1
+          play.pendingChoices.setLen(0)
 
       sk.drawTossPrompt(window, play, game)
       sk.drawTargetPrompt(window, play, game)
@@ -823,7 +843,10 @@ proc runDuel*(app: App) =
           if sessionOptions.human: 0 else: -1)
 
     when defined(emscripten):
-      let role = if sessionOptions.human: "Human player" else: "Bot match"
+      let role =
+        if app.replay != nil: "Replay"
+        elif sessionOptions.human: "Human player"
+        else: "Bot match"
       var summary = role & ". " & play.statusMessage
       if phase == PlayGame:
         summary.add &" Turn {game.turnNumber}. Active player {game.currentPlayer + 1}."
@@ -834,6 +857,8 @@ proc runDuel*(app: App) =
           summary.add " Ready for your action."
       publishStatus(summary.cstring)
 
+    if app.replay != nil and phase == PlayGame:
+      app.replay.drawTransport(sk, window)
     when PostPanelControls:
       drawPostPanel(sk, window, post, courtyard)
     sk.endUi()
@@ -860,6 +885,9 @@ proc runDuel*(app: App) =
           appDir / "awm_shot.png"
         )
     window.swapBuffers()
+    if app.replay != nil:
+      app.replay.reportFrame()
 
   while not window.closeRequested:
     pollEvents()
+    waitForDisplay()

@@ -115,6 +115,8 @@ proc addBaseCardImages*(builder: AtlasBuilder) =
       raise newException(IOError, "Card images do not fit the UI atlas")
   for card in baseCards:
     builder.add(card.cardImageKey(), card.renderCardFace())
+  # Pack the large back before small overlays fragment the remaining space.
+  builder.add(CardBackKey, renderCardBack())
   for slot in StatSlot:
     for ink in StatInk:
       for value in 0 .. MaxBakedStat:
@@ -122,7 +124,6 @@ proc addBaseCardImages*(builder: AtlasBuilder) =
           renderStat(value, ink, slot))
   for lost in keywordSets():
     builder.add(lostKeywordsKey(lost), renderLostKeywords(lost))
-  builder.add(CardBackKey, renderCardBack())
 
 proc bakedCardImage*(sk: Silky, card: Card): string =
   ## Never packs at runtime (see addBaseCardImages). A face that was not baked

@@ -101,6 +101,7 @@ when not defined(headless):
     ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel, ../scene/courtyard,
     ../scene/heroes, ../net/web, ../ui/tuning
   import polyworld/[characters, chrome, viewers]
+  import ../replayer
 
   proc place(balcony: PlayerBalcony, local: CardPose): CardPose =
     ## A pose on a balcony, given in its local frame.
@@ -200,7 +201,6 @@ when not defined(headless):
       match: MultiplayerMatch
       play = initTablePlay()
       choosingClasses = true
-      chosenClass = sessionOptions.playerClass
       botClassWait = 1.5'f32
       orbit = initSeatOrbit(layout.balconies[0].yaw)
       openingDraw = false  ## Every seat's opening hand should fly in.
@@ -220,7 +220,6 @@ when not defined(headless):
         classes[seat] = seatRng.rand(HeroClass)
       if humanClass.isSome:
         classes[0] = humanClass.get
-      chosenClass = classes[0]
       choosingClasses = false
       match = newMultiplayerMatch(classes,
         humanSeat = if humanClass.isSome: 0 else: -1,
@@ -242,6 +241,16 @@ when not defined(headless):
     if getEnv("AWM_AUTOSTART") == "1":
       startMatch(if sessionOptions.human: some(sessionOptions.playerClass)
         else: none(HeroClass))
+    if app.replay != nil:
+      # A recorded match: its classes and deal, played back on the ring.
+      choosingClasses = false
+      match = MultiplayerMatch(game: app.replay.newReplayGame(),
+        humanSeat: -1)
+      orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
+      play.resetTable()
+      play.statusMessage =
+        app.replay.playerName(match.current) & " begins."
+      openingDraw = true
     when defined(takeScreenshot):
       var previewScreenshotFrame = 0
     when defined(awmLayoutTuning):
@@ -255,15 +264,13 @@ when not defined(headless):
         tuningTarget("opponent's hand", previewView.farHand),
         tuningTarget("camera", previewView.camera)])
     window.onFrame = proc() =
-      let previewDt = frameDelta(previewLastFrame)
+      var previewDt = frameDelta(previewLastFrame)
+      if app.replay != nil:
+        previewDt *= app.replay.timeScale
       previewTime += previewDt
       play.animations.advanceAnimations(previewDt)
       play.discardFlights.advanceAnimations(previewDt)
       play.activeVfx.advance(previewDt)
-      sk.uiScale = hudScale(window)
-      sk.mousePos = window.mousePos.vec2 / max(sk.uiScale, 0.01'f32)
-      when PostPanelControls:
-        uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
       let aspect = window.size.x.float32 / max(window.size.y.float32, 1)
       when defined(awmLayoutTuning):
         tuner.tune(window, previewDt,
@@ -279,9 +286,21 @@ when not defined(headless):
           botClassWait -= previewDt
           if botClassWait <= 0:
             startMatch(none(HeroClass))
+      sk.uiScale = if choosingClasses: classSelectionScale()
+        else: hudScale(window)
+      sk.mousePos = window.mousePos.vec2 / max(sk.uiScale, 0.01'f32)
+      when PostPanelControls:
+        uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
       let table = seatTable(layout, previewView, match.viewedSeat,
         match.humanSeat)
-      if not choosingClasses:
+      if not choosingClasses and app.replay != nil:
+        # The recording plays every seat; the ring turns to whoever acts.
+        let viewed = match.viewedSeat
+        if app.replay.update(play, match.game, table, previewDt) or
+            match.viewedSeat != viewed:
+          orbit.aimAt(layout.balconies[match.viewedSeat].yaw)
+        orbit.advance(previewDt)
+      elif not choosingClasses:
         # The bots play their seats, the same way they play the duel.
         if play.updateBots(match.game, table, match.bots, botClock,
             proc(): bool = match.humanActs, previewDt,
@@ -367,7 +386,7 @@ when not defined(headless):
       let
         camera = previewView.camera
         eye =
-          if choosingClasses: classChoiceEye
+          if choosingClasses: classChoiceEye(aspect)
           else: camera.eye
         target =
           if choosingClasses: classChoiceTarget
@@ -376,6 +395,9 @@ when not defined(headless):
         farPlane = max(CameraFar, length(eye) * 3)
         projection = perspective(42.0'f32, aspect, CameraNear, farPlane)
         vp = projection * view
+        classHover = if choosingClasses and sessionOptions.human and
+            not uiCapturesMouse: classSelectionHover(vp)
+          else: none(HeroClass)
         # The balconies, their cards and heroes render through the stage
         # turn; the center island and the sky stay put.
         stageYaw = if choosingClasses: 0'f32 else: orbit.yaw
@@ -472,8 +494,8 @@ when not defined(headless):
       cardSurfaces.clear()
       vfx.clear()
       if choosingClasses:
-        addClassStage()
-        solid.draw(vp)
+        selectionStage.draw(vp, eye, environmentTime, 1)
+        selectionStage.drawSky(vp, eye, environmentTime, brightness = 0.22)
       else:
         courtyard.draw(vp, eye, environmentTime, 1, stageYaw = stageYaw)
         courtyard.drawSky(vp, eye, environmentTime)
@@ -488,7 +510,7 @@ when not defined(headless):
       beginCharacters(scene, window, stageView, projection, stageEye)
       scene.lightLikeCourtyard(1)
       if choosingClasses:
-        drawClassHeroes(chosenClass, previewTime)
+        drawClassHeroes(classHover, previewTime, eye)
       else:
         glEnable(GL_STENCIL_TEST)
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
@@ -511,13 +533,18 @@ when not defined(headless):
             tint = look.tint, sizeFactor = look.sizeFactor)
       finishCharacters(scene)
       glDisable(GL_STENCIL_TEST)
-      if not choosingClasses and post.beginMaterialNormals():
-        courtyard.draw(vp, eye, environmentTime, 1,
-          normalsOnly = true, normalView = view, stageYaw = stageYaw)
+      if post.beginMaterialNormals():
+        if choosingClasses:
+          selectionStage.draw(vp, eye, environmentTime, 1,
+            normalsOnly = true, normalView = view)
+        else:
+          courtyard.draw(vp, eye, environmentTime, 1,
+            normalsOnly = true, normalView = view, stageYaw = stageYaw)
         post.endMaterialNormals()
       post.applyOcclusion(projection)
       let panelsBottom =
         if match.humanSeat >= 0: finishRect(window).origin.y - 18
+        elif app.replay != nil: hudSize(window).y - ReplayBarHeight - 18
         else: hudSize(window).y - 18
       if not choosingClasses:
         for seat in 0 ..< match.seats.len:
@@ -533,6 +560,8 @@ when not defined(headless):
           vfx.addHudHalo(window, playerPanelColumnRect(window,
             match.seats.len, match.current, panelsBottom), previewTime)
           vfx.draw(hudHaloProjection(window.size.vec2), depthTest = false)
+      elif classHover.isSome:
+        vfx.draw(vp)
       post.present(window.size)
 
       glDisable(GL_DEPTH_TEST)
@@ -544,11 +573,9 @@ when not defined(headless):
       glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
       sk.beginUi(window, window.size)
       if choosingClasses:
-        drawClassHeader(sessionOptions.human)
-        if sessionOptions.human:
-          let picked = classButtons()
-          if picked.isSome:
-            startMatch(picked)
+        let picked = classSelection(vp, sessionOptions.human, not uiCapturesMouse)
+        if picked.isSome:
+          startMatch(picked)
       else:
         # The inspector takes the panels' place while it is open.
         if inspected.found:
@@ -574,8 +601,10 @@ when not defined(headless):
         if not play.attackActive:
           sk.drawMatchResult(window, play, match.game, match.humanSeat,
             centerX)
-        sk.drawLabel(play.playHelp(match.humanSeat >= 0),
-          vec2(32, hudSize(window).y - 66), vec2(820, 42), HudMuted, "Small")
+        if app.replay == nil:
+          sk.drawLabel(play.playHelp(match.humanSeat >= 0),
+            vec2(32, hudSize(window).y - 66), vec2(820, 42), HudMuted,
+            "Small")
       if not choosingClasses and match.humanSeat >= 0:
         let
           yourTurn = match.humanTurn
@@ -593,9 +622,14 @@ when not defined(headless):
       when defined(emscripten):
         # The same summary as the duel's, one line per seat.
         var summary = &"Multiplayer match: {layout.playerCount} players. " &
-          (if match.humanSeat >= 0 or choosingClasses and
-            sessionOptions.human: "Human player. " else: "Bot match. ") &
-          play.statusMessage
+          (if app.replay != nil: "Replay. "
+           elif (if choosingClasses: sessionOptions.human
+                 else: match.humanSeat >= 0): "Human player. "
+           else: "Bot match. ") &
+          (if choosingClasses:
+            (if sessionOptions.human: "Choose your class."
+             else: "Bots are choosing classes...")
+           else: play.statusMessage)
         if not choosingClasses:
           template game: untyped = match.game
           summary.add &" Turn {match.turnNumber}. Active player {match.current + 1}."
@@ -607,6 +641,8 @@ when not defined(headless):
               play.presentationIdle(game):
             summary.add " Ready for your action."
         publishStatus(summary.cstring)
+      if app.replay != nil and not choosingClasses:
+        app.replay.drawTransport(sk, window)
       when PostPanelControls:
         drawPostPanel(sk, window, post, courtyard)
       sk.endUi()
@@ -615,6 +651,9 @@ when not defined(headless):
           max(1, parseInt(getEnv("AWM_CAPTURE_FRAME", "20"))),
           appDir / &"awm_multiplayer_{layout.playerCount}.png")
       window.swapBuffers()
+      if app.replay != nil:
+        app.replay.reportFrame()
     while not window.closeRequested:
       pollEvents()
+      waitForDisplay()
     return

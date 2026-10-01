@@ -62,7 +62,7 @@ proc turn(p: Vec3, yaw: float32): Vec3 =
   vec3(p.x * cos(yaw) - p.z * sin(yaw), p.y,
     p.x * sin(yaw) + p.z * cos(yaw))
 
-proc stoneSlab(m: var CourtyardMesh, footprint: openArray[Vec2],
+proc stoneSlab*(m: var CourtyardMesh, footprint: openArray[Vec2],
     bottom, top: float32, color: Vec3, bevel = 0.045'f32,
     material = Stone) =
   ## Chamfered polygon prism, with a real bevel catching the evening light.
@@ -86,7 +86,7 @@ proc stoneSlab(m: var CourtyardMesh, footprint: openArray[Vec2],
     m.quad(a1, a2, b2, b1, color * 1.08'f32, material)
     m.triangle(vec3(center.x, top, center.y), b2, a2, color, material)
 
-proc addBlock(m: var CourtyardMesh, center, size, color: Vec3,
+proc addBlock*(m: var CourtyardMesh, center, size, color: Vec3,
     yaw = 0.0'f32, bevel = 0.06'f32, material = Stone) =
   let
     h = size * 0.5'f32
@@ -101,7 +101,7 @@ proc addBlock(m: var CourtyardMesh, center, size, color: Vec3,
   m.stoneSlab(footprint, center.y - h.y, center.y + h.y,
     color, bevel, material)
 
-proc beam(m: var CourtyardMesh, a, b: Vec3, width: float32,
+proc beam*(m: var CourtyardMesh, a, b: Vec3, width: float32,
     color: Vec3, material = Metal) =
   let
     direction = normalize(b - a)
@@ -135,7 +135,7 @@ proc leaf(m: var CourtyardMesh, center, along, across: Vec3, color: Vec3) =
   m.triangle(center + along, center + across, ridge, color * 1.10'f32, Leaf)
   m.triangle(center + across, center - along, ridge, color, Leaf)
 
-proc ivy(m: var CourtyardMesh, rng: var Rand, base: Vec3, height: float32) =
+proc ivy*(m: var CourtyardMesh, rng: var Rand, base: Vec3, height: float32) =
   let steps = max(2, int(height / 0.16'f32))
   var previous = base
   for j in 0 .. steps:
@@ -215,21 +215,23 @@ proc arch(m: var CourtyardMesh, rng: var Rand, origin: Vec3,
       m.triangle(origin + vec3(center.x, center.y, -0.43),
         backQ, backP, color * 0.8'f32)
 
-proc banner(m: var CourtyardMesh, center: Vec3) =
+proc banner*(m: var CourtyardMesh, center: Vec3,
+    clothColor = vec3(0.105, 0.17, 0.23), scale = 1.0'f32) =
   ## A subdivided cloth surface, animated on the GPU. UVs also describe the
   ## woven fabric, stitched border and neutral four-point crossroads crest.
   let iron = vec3(0.20, 0.16, 0.105)
-  m.beam(center + vec3(-0.84, 0.06, 0), center + vec3(0.84, 0.06, 0),
-    0.075, iron)
+  m.beam(center + vec3(-0.84, 0.06, 0) * scale,
+    center + vec3(0.84, 0.06, 0) * scale, 0.075 * scale, iron)
   for x in [-0.83'f32, 0.83'f32]:
-    m.addBlock(center + vec3(x, 0.06, 0), vec3(0.13), Brass, bevel = 0.02,
+    m.addBlock(center + vec3(x, 0.06, 0) * scale, vec3(0.13) * scale,
+      Brass, bevel = 0.02,
       material = Metal)
   const nx = 16
   const ny = 22
   proc at(u, v: float32): Vec3 =
     center + vec3((u - 0.5'f32) * 1.48'f32,
       -v * (1.93'f32 + 0.32'f32 * (1 - abs(u - 0.5'f32) * 2)),
-      sin(u * 15) * 0.075'f32 * v + 0.05'f32)
+      sin(u * 15) * 0.075'f32 * v + 0.05'f32) * scale
   for y in 0 ..< ny:
     for x in 0 ..< nx:
       let
@@ -241,11 +243,10 @@ proc banner(m: var CourtyardMesh, center: Vec3) =
         b = at(u1, v)
         c = at(u1, v1)
         d = at(u, v1)
-        color = vec3(0.105, 0.17, 0.23)
-      m.triangle(a, d, c, color, Cloth, vec2(u, v), vec2(u, v1), vec2(u1, v1))
-      m.triangle(a, c, b, color, Cloth, vec2(u, v), vec2(u1, v1), vec2(u1, v))
+      m.triangle(a, d, c, clothColor, Cloth, vec2(u, v), vec2(u, v1), vec2(u1, v1))
+      m.triangle(a, c, b, clothColor, Cloth, vec2(u, v), vec2(u1, v1), vec2(u1, v))
 
-proc lantern(m: var CourtyardMesh, center: Vec3) =
+proc lantern*(m: var CourtyardMesh, center: Vec3) =
   let iron = vec3(0.16, 0.115, 0.06)
   m.addBlock(center + vec3(0, -0.51, 0), vec3(0.80, 0.16, 0.65), Sandstone)
   m.addBlock(center + vec3(0, -0.33, 0), vec3(0.43, 0.10, 0.37), iron,
@@ -631,10 +632,11 @@ when not defined(headless):
 
     CourtyardRenderer* = object
       material*: CourtyardMaterial
+      lamps*: array[2, Vec3] ## Positions for a two-lamp stage; Z follows cameraSide.
       program, vao, vbo: GLuint
       normalMap: GLuint
       skyProgram: GLuint
-      skyViewLocation, skyEyeLocation, skyTimeLocation: GLint
+      skyViewLocation, skyEyeLocation, skyTimeLocation, skyBrightnessLocation: GLint
       shadows: array[2, GLuint]
       lightMatrices: array[2, Mat4]
       commonCount, backdropCount, centerCount: int
@@ -646,6 +648,7 @@ when not defined(headless):
         slopeBroadLocation, scaleBroadLocation, lampLocation,
         playerCountLocation, arenaRadiusLocation, lampRadiusLocation,
         lampAngleLocation, stageYawLocation: GLint
+      lampLocations: array[2, GLint]
 
   const
     ShadowSize = 2048
@@ -720,17 +723,15 @@ when not defined(headless):
       scaleBroad: 6.0
     )
 
-  proc initCourtyardRenderer*(playerCount = 2): CourtyardRenderer =
-    var mesh: CourtyardMesh
+  proc initCourtyardRenderer*(mesh: CourtyardMesh, playerCount = 2,
+      arenaRadius = 0.0'f32, balconyLampRadius = 0.0'f32,
+      balconyLampHalfAngle = 0.0'f32): CourtyardRenderer =
+    ## A shared material/sky pipeline for the arena and its selection terrace.
     result.playerCount = playerCount
-    if playerCount > 2:
-      let layout = buildMultiplayerLayout(playerCount)
-      mesh = buildMultiplayerCourtyardMesh(layout)
-      result.arenaRadius = layout.outerRadius
-      result.balconyLampRadius = layout.lampRadius
-      result.balconyLampHalfAngle = layout.lampHalfAngle
-    else:
-      mesh = buildCourtyardMesh()
+    result.arenaRadius = arenaRadius
+    result.balconyLampRadius = balconyLampRadius
+    result.balconyLampHalfAngle = balconyLampHalfAngle
+    result.lamps = [vec3(-6.75, 1.25, -6.32), vec3(6.75, 1.25, -6.32)]
     result.commonCount = mesh.commonCount
     result.backdropCount = mesh.backdropCount
     result.centerCount = mesh.centerCount
@@ -742,6 +743,7 @@ when not defined(headless):
     result.skyViewLocation = glGetUniformLocation(result.skyProgram, "inverseViewProjection")
     result.skyEyeLocation = glGetUniformLocation(result.skyProgram, "cameraEye")
     result.skyTimeLocation = glGetUniformLocation(result.skyProgram, "time")
+    result.skyBrightnessLocation = glGetUniformLocation(result.skyProgram, "skyBrightness")
     glGenVertexArrays(1, result.vao.addr)
     glBindVertexArray(result.vao)
     glGenBuffers(1, result.vbo.addr)
@@ -776,7 +778,9 @@ when not defined(headless):
         ("scaleBroad", result.scaleBroadLocation.addr),
         ("normalsOnly", result.normalsOnlyLocation.addr),
         ("normalView", result.normalViewLocation.addr),
-        ("stageYaw", result.stageYawLocation.addr)]:
+        ("stageYaw", result.stageYawLocation.addr),
+        ("firstLamp", result.lampLocations[0].addr),
+        ("secondLamp", result.lampLocations[1].addr)]:
       destination[] = glGetUniformLocation(result.program, name.cstring)
 
     # Bake the static sun shadows for both camera directions once. No scene
@@ -843,8 +847,16 @@ void main() {}
     glBindVertexArray(0)
     glDeleteProgram(depthProgram)
 
+  proc initCourtyardRenderer*(playerCount = 2): CourtyardRenderer =
+    if playerCount > 2:
+      let layout = buildMultiplayerLayout(playerCount)
+      result = initCourtyardRenderer(buildMultiplayerCourtyardMesh(layout),
+        playerCount, layout.outerRadius, layout.lampRadius, layout.lampHalfAngle)
+    else:
+      result = initCourtyardRenderer(buildCourtyardMesh(), playerCount)
+
   proc drawSky*(renderer: CourtyardRenderer, viewProjection: Mat4,
-      cameraEye: Vec3, time: float32) =
+      cameraEye: Vec3, time: float32, brightness = 1.0'f32) =
     # The sky never writes depth: SSAO sees the clear depth of 1.0, and all
     # opaque objects and VFX can occlude it without treating it as a wall.
     glEnable(GL_DEPTH_TEST)
@@ -857,6 +869,7 @@ void main() {}
     matrix(renderer.skyViewLocation, viewProjection.inverse)
     glUniform3f(renderer.skyEyeLocation, cameraEye.x, cameraEye.y, cameraEye.z)
     glUniform1f(renderer.skyTimeLocation, time)
+    glUniform1f(renderer.skyBrightnessLocation, brightness)
     glBindVertexArray(renderer.vao)
     glDrawArrays(GL_TRIANGLES, 0, 3)
     glBindVertexArray(0)
@@ -885,6 +898,8 @@ void main() {}
     glUniform1f(renderer.normalStrengthLocation,
       renderer.material.normalStrength)
     glUniform1f(renderer.lampLocation, renderer.material.lampIntensity)
+    for i, lamp in renderer.lamps:
+      glUniform3f(renderer.lampLocations[i], lamp.x, lamp.y, lamp.z * cameraSide)
     glUniform1i(renderer.playerCountLocation, renderer.playerCount.GLint)
     glUniform1f(renderer.arenaRadiusLocation, renderer.arenaRadius)
     glUniform1f(renderer.lampRadiusLocation, renderer.balconyLampRadius)

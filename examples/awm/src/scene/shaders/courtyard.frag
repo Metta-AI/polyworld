@@ -11,6 +11,8 @@ uniform float normalStrength;
 uniform float slopeBroad;
 uniform float scaleBroad;
 uniform float lampIntensity;
+uniform vec3 firstLamp;
+uniform vec3 secondLamp;
 uniform int playerCount;
 uniform float arenaRadius;
 uniform float balconyLampRadius;
@@ -156,8 +158,8 @@ void main() {
             }
         }
     } else {
-        lighting += lamp(p, n, vec3(-6.75, 1.25, -6.32 * cameraSide), 0.0);
-        lighting += lamp(p, n, vec3(6.75, 1.25, -6.32 * cameraSide), 2.0);
+        lighting += lamp(p, n, firstLamp, 0.0);
+        lighting += lamp(p, n, secondLamp, 2.0);
     }
     vec3 result = base * lighting;
     if (material > 0.5 && material < 1.5) {

@@ -5,7 +5,8 @@ export sim
 
 when not defined(headless):
   import std/os
-  import core/sessions, app, scene/post, modes/duel, modes/multiplayer
+  import core/[sessions, replays], app, replayer, scene/post, modes/duel,
+    modes/multiplayer
 
   static:
     # Lists the compile-time (-d:) flags while this build compiles.
@@ -37,13 +38,23 @@ when not defined(headless):
       "                   every seat but yours, in turn.\n" &
       "                   Defaults to players/base.bas.\n" &
       "  --human          Play seat 0 yourself instead of watching bots\n" &
+      "  --replay PATH    Watch a recorded match (see --record in the\n" &
+      "                   headless build)\n" &
       "  -h, --help       Show this help and exit"
 
   proc runAwm*() =
     if "--help" in commandLineParams() or "-h" in commandLineParams():
       printHelp()
       return
-    let app = initApp(parseSessionOptions(commandLineParams()))
+    var options = parseSessionOptions(commandLineParams())
+    var replay: Replayer
+    if options.replayPath.len > 0:
+      # Before initApp, which moves to the Polyworld folder.
+      replay = newReplayer(loadReplay(options.replayPath))
+      options.playerCount = replay.classes.len
+      options.human = false
+    let app = initApp(options)
+    app.replay = replay
     if app.options.playerCount > PlayerCount:
       app.runMultiplayer()
     else:
@@ -53,5 +64,9 @@ when not defined(headless):
     runAwm()
 
 when defined(headless):
+  import modes/headless
   when isMainModule:
-    echo "AWM headless module loaded."
+    when defined(coworld):
+      runCoworld()
+    else:
+      runHeadless()

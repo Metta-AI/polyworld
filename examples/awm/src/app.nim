@@ -5,15 +5,14 @@ import std/[math, options, os]
 import chroma, opengl, pixie, silky, vmath, windy
 import core/sim, core/sessions, ui/cardfaces, scene/cardrenderer,
   vfx/vfxrenderer, scene/post, scene/table, scene/courtyard, scene/heroes,
-  ui/hud, paths
+  ui/hud, ui/heroselect, scene/heroselectstage, paths, replayer
 import polyworld/[assets, characters, chargen, chrome, common, viewers]
 
 const
   WindowTitle = "AWM — Archers Warriors Mages"
   CameraNear* = 0.1'f32
   CameraFar* = 100.0'f32
-  ClassChoiceEye* = vec3(0, 6.2, 13.5)
-  ClassChoiceTarget* = vec3(0, 1.0, 0)
+  ClassChoiceTarget* = HeroSelectCameraTarget
 
 when PostLayerControls:
   const PostLayerKeys*: array[PostLayer, Button] =
@@ -31,10 +30,12 @@ type
     vfx*: VfxRenderer
     post*: PostFx
     courtyard*: CourtyardRenderer
+    selectionStage*: HeroSelectStage
     scene*: CharacterScene
     models*: array[HeroSeats, array[HeroClass, CharacterModel]]
     idleClips*: array[HeroSeats, array[HeroClass, int]]
     deathClips*: array[HeroSeats, array[HeroClass, int]]
+    replay*: Replayer  ## Set when watching a recorded match.
 
 proc polyworldRoot(): string =
   var candidates: seq[string]
@@ -127,6 +128,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
     vfx = initVfxRenderer(cardAssets.parentDir / "vfx" / "textures")
     post = initPostFx()
   var courtyard = initCourtyardRenderer(sessionOptions.playerCount)
+  let selectionStage = initHeroSelectStage()
   let scene = newCharacterScene(window)
   # AWM lights heroes with the courtyard's own night rig, not the shared
   # toon ramp: see lightLikeCourtyard.
@@ -148,7 +150,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
         models[seat][heroClass].clipIndex(HeroDeathClip)
   App(options: sessionOptions, appDir: appDir, window: window, sk: sk,
     solid: solid, cards: cardSurfaces, vfx: vfx, post: post,
-    courtyard: courtyard, scene: scene, models: models,
+    courtyard: courtyard, selectionStage: selectionStage, scene: scene, models: models,
     idleClips: idleClips, deathClips: deathClips)
 
 proc heroClip*(app: App, model: int, heroClass: HeroClass,
@@ -162,91 +164,27 @@ proc heroClip*(app: App, model: int, heroClass: HeroClass,
     (clip, min(dying,
       app.models[model][heroClass].clipDuration(clip) - 0.001'f32))
 
-# The class choice, shared by every mode.
+proc selectionCamera*(aspect: float32): Vec3 =
+  HeroSelectCameraTarget + (HeroSelectCameraEye - HeroSelectCameraTarget) *
+    max(1'f32, 1.35'f32 / max(0.1'f32, aspect))
 
-proc addClassStage*(app: App) =
-  app.solid.addBox(
-    vec3(0, -0.3, 0),
-    vec3(15, 0.55, 7),
-    vec4(0.20, 0.24, 0.30, 1),
-    sideFactor = 0.5
-  )
+proc drawSelectionHeroes*(app: App, hovered: Option[HeroClass],
+    time: float32, cameraEye: Vec3) =
   for heroClass in HeroClass:
-    let x = (heroClass.ord.float32 - 1.0'f32) * 4.2'f32
-    app.solid.addBox(
-      vec3(x, 0.05, 0),
-      vec3(3.0, 0.18, 3.0),
-      heroClass.classColor().darker(0.72),
-      sideFactor = 0.55
-    )
-
-proc drawClassHeroes*(app: App, selected: HeroClass, time: float32) =
-  for heroClass in HeroClass:
-    let
-      x = (heroClass.ord.float32 - 1.0'f32) * 4.2'f32
-      chosen = selected == heroClass
-    drawCharacter(
-      app.scene,
-      app.models[0][heroClass],
-      vec3(x, 0.15, 0),
-      0,
-      app.idleClips[0][heroClass],
-      time,
-      tint =
-        if chosen:
-          color(1.08, 1.08, 1.08, 1)
-        else:
-          color(1, 1, 1, 1),
-      sizeFactor = if chosen: 1.06'f32 else: 1.0'f32
-    )
-
-proc drawClassHeader*(app: App, human: bool) =
-  let (sk, window) = (app.sk, app.window)
-  sk.drawRect(
-    vec2(0),
-    vec2(hudSize(window).x, 180),
-    rgbx(14, 17, 24, 238)
-  )
-  sk.drawLabel(
-    "ARCHERS | WARRIORS | MAGES",
-    vec2(0, 15),
-    vec2(hudSize(window).x, 78),
-    rgbx(243, 218, 153, 255),
-    "H1",
-    CenterAlign
-  )
-  sk.drawLabel(
-    (if human: "CHOOSE YOUR CLASS"
-     else: "BOTS ARE CHOOSING CLASSES..."),
-    vec2(0, 104),
-    vec2(hudSize(window).x, 48),
-    rgbx(221, 225, 233, 255),
-    "Default",
-    CenterAlign
-  )
-
-proc classButtons*(app: App): Option[HeroClass] =
-  ## The human's class buttons; returns the class clicked this frame.
-  let (sk, window) = (app.sk, app.window)
-  for heroClass in HeroClass:
-    let
-      x = hudSize(window).x * 0.5'f32 +
-        (heroClass.ord.float32 - 1.0'f32) * 400.0'f32
-      rect = UiRect(
-        origin: vec2(x - 140, hudSize(window).y - 180),
-        size: vec2(280, 84)
-      )
-    if drawButton(
-        sk,
-        window,
-        rect,
-        heroClass.className()
-    ):
-      result = some(heroClass)
+    let active = hovered == some(heroClass)
+    drawCharacter(app.scene, app.models[0][heroClass],
+      HeroSelectPositions[heroClass.ord], 0,
+      app.idleClips[0][heroClass], time,
+      tint = if active: color(1.18, 1.14, 1.05, 1) else: color(1.05, 1.05, 1.05, 1),
+      sizeFactor = SelectionHeroScale * (if active: 1.025'f32 else: 1'f32))
+    if active:
+      app.vfx.addTargetRing(HeroSelectPositions[heroClass.ord] + vec3(0, 0.03, 0),
+        cameraEye, 1.5, 0.8)
 
 template bindApp*(app: App) {.dirty.} =
   ## Names a mode's loop uses for the shared app, so it reads like the rest
   ## of its code: `window`, `sk`, `solid`, `vfx`, `post`...
+  bind heroSelectScale, drawHeroSelect, hoveredSelectionHero, selectionCamera
   let
     window = app.window
     sk = app.sk
@@ -258,15 +196,18 @@ template bindApp*(app: App) {.dirty.} =
   template vfx: untyped = app.vfx
   template post: untyped = app.post
   template courtyard: untyped = app.courtyard
+  template selectionStage: untyped = app.selectionStage
   template models: untyped = app.models
   const
-    classChoiceEye = ClassChoiceEye
     classChoiceTarget = ClassChoiceTarget
+  proc classChoiceEye(aspect: float32): Vec3 = selectionCamera(aspect)
   proc heroClip(model: int, heroClass: HeroClass,
       dying, idleTime: float32): tuple[clip: int, time: float32] =
     app.heroClip(model, heroClass, dying, idleTime)
-  proc addClassStage() = app.addClassStage()
-  proc drawClassHeroes(selected: HeroClass, time: float32) =
-    app.drawClassHeroes(selected, time)
-  proc drawClassHeader(human: bool) = app.drawClassHeader(human)
-  proc classButtons(): Option[HeroClass] = app.classButtons()
+  proc classSelectionScale(): float32 = heroSelectScale(window)
+  proc classSelectionHover(vp: Mat4): Option[HeroClass] =
+    hoveredSelectionHero(window, sk.mousePos, vp)
+  proc drawClassHeroes(hovered: Option[HeroClass], time: float32, eye: Vec3) =
+    app.drawSelectionHeroes(hovered, time, eye)
+  proc classSelection(vp: Mat4, human: bool, inputEnabled = true): Option[HeroClass] =
+    drawHeroSelect(sk, window, vp, human, inputEnabled)

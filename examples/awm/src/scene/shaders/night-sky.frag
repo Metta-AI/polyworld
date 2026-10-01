@@ -2,6 +2,7 @@ in vec2 skyUv;
 uniform mat4 inverseViewProjection;
 uniform vec3 cameraEye;
 uniform float time;
+uniform float skyBrightness;
 out vec4 outputColor;
 const float PI = 3.14159265359;
 
@@ -102,5 +103,5 @@ void main() {
     sky += stars(uv, 420.0, 0.32, 0.68, 0.0);
     sky += stars(uv, 210.0, 0.22, 1.00, 1.0);
     sky += stars(uv, 85.0, 0.15, 1.45, 2.0);
-    outputColor = vec4(sky, 1.0);
+    outputColor = vec4(sky * skyBrightness, 1.0);
 }
