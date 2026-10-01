@@ -147,14 +147,16 @@ for the most banked gold receive 1; every other hero receives 0. Light vs Dark
 also emits binary scores. GotA emits Emmett's Glory: lifetime XP per elapsed
 minute for the winning team, rounded down to integers, and zero for losses,
 draws, or timeouts, in zero-based platform slot order.
-GotA uses random pairings and averages scores within each round, then updates
-standings with 15% of the new round average and 85% of the previous standing.
+GotA standings use team win/loss Elo MMR, starting at 1,500 with K=32 and
+no score-margin scaling. Emmett's Glory remains in game results for analysis.
 Its league scheduler must preserve `strategy: "team_n"`, `team_count: 2`,
-`team_layout: "blocks"`, `matchmaking: "random"`, and
+`team_layout: "blocks"`, `matchmaking: "elo_softmax"`,
+`matchmaking_temperature: 100`, and
 `distinct_teammates: true`. With ten eligible policies, each controls one hero
 in a mixed five-versus-five match. Omitting `distinct_teammates` instead clones
 one policy across each team's five seats. Keep this league setting intact
-when publishing releases or changing scoring.
+when publishing releases or changing scoring. The Competition variant uses
+`draft_mode: "open"`, allowing any hero to be picked multiple times.
 
 ## Release acceptance
 
