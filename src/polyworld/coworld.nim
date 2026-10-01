@@ -55,7 +55,6 @@ var
   seats*: CoworldSeats
   config*: GameConfig
   logs: seq[PlayerLog]
-  annotationBytes: seq[int]
   server: Server
   serverThread: Thread[ServerAddress]
   resultsPath, replayPath, failurePath: string
@@ -222,12 +221,13 @@ proc loadPlayerPolicy*(bytes: string, slot: int): Policy =
   except PolicyError as error:
     rejectPlayer(slot, error.msg)
 
-proc playerAnnotator(slot: int): ContextHostProc =
-  ## Binds a policy to its private optional output, never a caller-chosen path.
+proc playerAnnotator(destination: string): ContextHostProc =
+  ## Captures one private output path and its byte budget.
+  let path = if destination.len > 0: localPath(destination) else: ""
+  var bytesWritten = 0
   result = proc(runtime: Runtime, arguments: openArray[Value]): Value =
     result = Value(0)
-    let destination = seats.seats[slot].annotationsUri
-    if destination.len == 0:
+    if path.len == 0:
       return
     let
       tick = arguments[0].asInt
@@ -243,14 +243,13 @@ proc playerAnnotator(slot: int): ContextHostProc =
     let line = "{\"schema_version\":1,\"time\":" & $tick &
       ",\"kind\":" & kind.toJson() & ",\"function\":" & function.toJson() &
       ",\"args\":" & args & "}\n"
-    if line.len > 16 * 1024 or annotationBytes[slot] + line.len > 64 * 1024 * 1024:
+    if line.len > 16 * 1024 or bytesWritten + line.len > 64 * 1024 * 1024:
       raise newException(BasicError, "Episode annotation size limit exceeded")
-    let path = localPath(destination)
     createDir(path.parentDir)
-    let output = open(path, if annotationBytes[slot] == 0: fmWrite else: fmAppend)
+    let output = open(path, if bytesWritten == 0: fmWrite else: fmAppend)
     defer: output.close()
     output.write(line)
-    annotationBytes[slot] += line.len
+    bytesWritten += line.len
 
 proc compilePlayer*(
     source: string,
@@ -261,7 +260,7 @@ proc compilePlayer*(
   ## Compiles a staged BASIC player and reports terminal failures privately.
   try:
     var policyHost = host
-    discard policyHost.addFunction("ANNOTATE", 4, playerAnnotator(slot),
+    discard policyHost.addFunction("ANNOTATE", 4, playerAnnotator(seats.seats[slot].annotationsUri),
       workUnits = 1024, bindAtCompile = true)
     result = compile(source, policyHost, limits)
   except BasicError as error:
@@ -336,7 +335,6 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     speed: 1
   )
   logs.setLen(slotCount)
-  annotationBytes = newSeq[int](slotCount)
   for slot, seat in seats.seats:
     if seat.slot != slot:
       raise newException(CoworldError, "Coworld seats must be in slot order")
