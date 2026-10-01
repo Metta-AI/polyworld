@@ -70,10 +70,15 @@ proc sendChat*(sender, target: int, text: openArray[char]): int32 =
       inc result
 
 proc botLimits*(): Limits =
+  ## Returns AWM's BASIC bot resource budgets.
   result = defaultLimits()
   result.maxSourceBytes = 256 * 1024
-  result.maxInstructions = 500_000
-  result.maxWorkUnits = 500_000
+  result.maxInstructions = 5_000_000
+  result.maxWorkUnits = 5_000_000
+  result.maxMemoryBytes *= 10
+  result.maxNativeMemoryBytes *= 10
+  result.maxArrayElements *= 10
+  result.maxStringBytes *= 10
 
 proc buildBotHost(playerId: int32): Host =
   result = initHost()
