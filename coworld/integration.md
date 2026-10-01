@@ -5,9 +5,9 @@ Coworld builds. Desktop, ordinary headless, and WASM builds do not import Mummy.
 `-d:emscripten -d:replayViewer` selects the static replay bootstrap and enables
 looping. Each game retains its simulation, BASIC resource limits and early endings.
 
-The packages are `coworld/gota`, `coworld/lvd`, and `coworld/cta`. Each contains a
-manifest template, Compose definition, unchanged BASIC baseline, game guide and
-executable viewer build hook. Generated packages and test outputs are ignored.
+The packages are `coworld/gota`, `coworld/lvd`, `coworld/cta`, and `coworld/awm`.
+Each contains a manifest template, Compose definition, unchanged BASIC baseline,
+game guide and executable viewer build hook. Generated packages and test outputs are ignored.
 
 ## Build
 
@@ -22,6 +22,7 @@ export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
 coworld build --project coworld/gota --version 2026.9.9.3
 coworld build --project coworld/lvd --version 2026.9.9.3
 coworld build --project coworld/cta --version 2026.9.9.3
+coworld build --project coworld/awm --version VERSION
 ```
 
 `nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
@@ -41,7 +42,8 @@ The runner supplies local `file://` URIs through `COGAME_CONFIG_URI`,
 `COGAME_PLAYER_SEATS_URI`, `COGAME_RESULTS_URI`, `COGAME_SAVE_REPLAY_URI`, and
 `COGAME_PLAYER_FAILURE_URI`. Configurations require matching tokens and players
 arrays. GotA has ten seats, CTA has four, and LvD supports variable rosters with
-six-player FFA in Competition. Staged policy filenames may have no extension.
+six-player FFA in Competition. AWM takes two to seven seats: two play a duel,
+more a free-for-all; its turn-based tick is one game action. Staged policy filenames may have no extension.
 Raw BASIC source is read with bounded reads and compiled with the game limits.
 
 Every seat log is created before compilation. PRINT and BASIC diagnostics stay in
@@ -96,6 +98,7 @@ sharing a compiled program across distinct seat destinations.
 entrypoints, recording regression tests, and full replay verification. First record
 full matches into `tmp/coworld/{gota,lvd,cta}.replay` with the headless binaries and
 `--record PATH`. Run `nim r coworld/tools/test_runtime.nim` from the repository root.
+Pass a game name, such as `awm`, to check only that game.
 It uses the binaries in `tmp/coworld` to check
 extensionless and empty sources, slot-specific print and annotation output, optional
 annotation destinations, compilation failure,
