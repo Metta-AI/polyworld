@@ -1,55 +1,79 @@
 import
-  std/[os, strutils]
+  std/[json, os, strutils]
 
 type Game* = enum
   Gota, Paintbot
 
-proc configuredGame(): Game =
-  ## Selects one game for this server process.
-  case getEnv("FAST_XP_GAME", "gota")
-  of "gota": Gota
-  of "paintbot-pw": Paintbot
-  else: raise newException(ValueError, "FAST_XP_GAME must be gota or paintbot-pw")
+proc gameName*(game = Gota): string =
+  ## Returns the public game identifier.
+  if game == Paintbot: "paintbot-pw" else: "gota"
 
-let SelectedGame* = configuredGame()
-
-proc gameName*(): string =
-  ## Returns the selected public game identifier.
-  if SelectedGame == Paintbot: "paintbot-pw" else: "gota"
-
-proc seatCount*(): int =
+proc seatCount*(game = Gota): int =
   ## Returns the league roster size.
-  if SelectedGame == Paintbot: 16 else: 10
+  if game == Paintbot: 16 else: 10
 
-proc sourceLimit*(): int =
+proc sourceLimit*(game = Gota): int =
   ## Returns the game's BASIC source limit in bytes.
-  if SelectedGame == Paintbot: 128 * 1024 else: 64 * 1024
+  if game == Paintbot: 128 * 1024 else: 64 * 1024
 
-proc packageLimit*(): int =
-  ## Includes the complete production package, not only its model.
-  16 * 1024 * 1024 + (if SelectedGame == Paintbot: 128 * 1024 + 8192 + 4096 else: 0)
+proc packageLimit*(game = Gota): int =
+  ## Bounds the complete production package.
+  16 * 1024 * 1024 + (if game == Paintbot: 128 * 1024 + 8192 + 4096 else: 0)
+
+proc defaultTicks*(game = Gota): int =
+  ## Uses the game's league duration.
+  if game == Paintbot: 14400 else: 28800
+
+proc workerCommand*(game: Game): seq[string] =
+  ## Reads an argument array without interpreting caller-controlled shell text.
+  let value = getEnv(if game == Paintbot: "FAST_XP_PAINTBOT_COMMAND" else: "FAST_XP_GOTA_COMMAND")
+  if value.len > 0:
+    let command = parseJson(value)
+    if command.kind != JArray or command.len == 0:
+      raise newException(ValueError, "Game command must be a nonempty JSON argument array")
+    for argument in command:
+      if argument.kind != JString or '\0' in argument.getStr():
+        raise newException(ValueError, "Game command arguments must be strings without NUL characters")
+      result.add argument.getStr()
+    if result[0].len == 0: raise newException(ValueError, "Game executable must not be empty")
+  elif game == Gota:
+    result = @[getEnv("FAST_XP_GOTA_WORKER", getAppDir() / "gota_worker")]
+
+proc commandInstalled(game: Game): bool =
+  ## Checks the executable before accepting requests for this game.
+  let command = workerCommand(game)
+  command.len > 0 and (fileExists(command[0]) or findExe(command[0]).len > 0)
+
+proc configuredGames(): array[Game, bool] =
+  ## Detects installed games or validates an explicit deployment selection.
+  let selection = getEnv("FAST_XP_GAMES")
+  if selection.len == 0:
+    for game in Game: result[game] = commandInstalled(game)
+  else:
+    for name in selection.split(','):
+      var found = false
+      for game in Game:
+        if name.strip() == gameName(game):
+          if not commandInstalled(game):
+            raise newException(ValueError, "Game command is not installed: " & name)
+          result[game] = true
+          found = true
+      if not found: raise newException(ValueError, "Unknown FAST_XP_GAMES entry: " & name)
+  if not result[Gota] and not result[Paintbot]:
+    raise newException(ValueError, "Install a game executable or configure a game command")
+
+let EnabledGames* = configuredGames()
 
 proc bodyLimit*(): int =
-  ## Bounds a complete base64 roster plus JSON overhead.
-  if SelectedGame == Paintbot: 352 * 1024 * 1024 else: 224 * 1024 * 1024
+  ## Bounds the largest enabled game's base64 roster and JSON overhead.
+  if EnabledGames[Paintbot]: 352 * 1024 * 1024 else: 224 * 1024 * 1024
 
-proc defaultTicks*(): int =
-  ## Uses the selected league's default duration.
-  if SelectedGame == Paintbot: 14400 else: 28800
-
-proc workerPath*(): string =
-  ## Resolves the selected game's native executable.
-  if SelectedGame == Paintbot:
-    getEnv("FAST_XP_PAINTBOT_WORKER", getAppDir() / "paintbot_worker")
-  else:
-    getEnv("FAST_XP_GOTA_WORKER", getAppDir() / "gota_worker")
-
-proc executionSeconds*(): int =
-  ## Bounds game execution independently of queue time.
-  result = parseInt(getEnv("FAST_XP_EXECUTION_SECONDS", if SelectedGame == Paintbot: "300" else: "120"))
+proc executionSeconds*(game = Gota): int =
+  ## Bounds execution independently of queue time.
+  result = parseInt(getEnv("FAST_XP_EXECUTION_SECONDS", if game == Paintbot: "300" else: "120"))
   if result < 1 or result > 3600:
     raise newException(ValueError, "FAST_XP_EXECUTION_SECONDS must be 1–3600")
 
-proc runPath*(): string =
-  ## Returns the enabled run endpoint.
-  "/v1/games/" & gameName() & "/run"
+proc runPath*(game = Gota): string =
+  ## Returns the game's run endpoint.
+  "/v1/games/" & gameName(game) & "/run"

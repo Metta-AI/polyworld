@@ -9,6 +9,8 @@ type
     games, failedGames, timeouts, requests, failedRequests, rejected, hits, misses, bytes: uint64
   RecentGame = object
     id: array[64, char]
+    name: array[32, char]
+    seats: int
     index, seed, ticks, status, active: int
     timestamp, queueMs, workerMs: int64
   Sample = object
@@ -98,10 +100,12 @@ proc requestCompleted*(status, episodes: int, totalMs, preparationMs, zipMs, byt
       bucket.zip.observe(zipMs)
       bucket.bytes += uint64(bytes)
 
-proc gameCompleted*(id: string, index, seed, ticks, status, active: int, queueMs, workerMs: int64) =
+proc gameCompleted*(id: string, index, seed, ticks, status, active: int, queueMs, workerMs: int64,
+    name = "gota", seats = 10) =
   var record = RecentGame(index: index, seed: seed, ticks: ticks, status: status,
-    active: active, timestamp: epoch + elapsedSeconds(), queueMs: queueMs, workerMs: workerMs)
+    active: active, seats: seats, timestamp: epoch + elapsedSeconds(), queueMs: queueMs, workerMs: workerMs)
   for i in 0 ..< min(id.len, record.id.len): record.id[i] = id[i]
+  for i in 0 ..< min(name.len, record.name.len): record.name[i] = name[i]
   withLock metricsLock:
     let bucket = currentBucket()
     if status == 200:
@@ -231,10 +235,15 @@ proc snapshotAt(windowMinutes: int, now: int64): JsonNode =
       "running": sample.running, "queued": sample.queued, "admitted_requests": sample.admitted}
   for game in recent:
     var id = ""
+    var name = ""
+    for ch in game.name:
+      if ch == '\0': break
+      name.add ch
     for ch in game.id:
       if ch == '\0': break
       id.add ch
     result["recent_games"].add %*{"request_id": id, "index": game.index, "seed": game.seed,
+      "game": name, "seats": game.seats,
       "max_ticks": game.ticks, "status": game.status, "active_bots": game.active,
       "timestamp": game.timestamp, "queue_ms": game.queueMs, "worker_ms": game.workerMs}
 

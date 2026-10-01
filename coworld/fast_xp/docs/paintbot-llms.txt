@@ -39,10 +39,11 @@ The dashboard shows the current worker capacity; accepted games queue. Each game
 300-second execution deadline, excluding queueing. Use a long HTTP timeout for
 batches; a batch can wait behind other requests. 429 means request admission is
 full; honor Retry-After. X-Request-ID correlates with server logs. Server-Timing
-reports preparation (fetch), queue, worker, gameplay, ZIP, and total server
-milliseconds. Gameplay includes bots and replay-frame recording within the tick
-loop; worker also includes initialization and final artifact writing. Queue,
-worker, and gameplay timings sum across games rather than measuring batch wall time.
+reports preparation (fetch), queue, worker, ZIP, and total server milliseconds.
+Worker time includes the production host, engine startup, simulation, artifact
+writing and collection. Pure gameplay timing is unavailable from the stock
+Paintbot runner. Queue and worker timings sum across games rather than measuring
+batch wall time.
 
 GET / shows the dashboard. GET /healthz checks availability.
-GET /docs/run.md explains packages, errors, and failure handling.
+GET /docs/paintbot-pw/run.md explains packages, errors, and failure handling.

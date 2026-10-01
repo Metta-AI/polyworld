@@ -138,7 +138,7 @@ treating the response as a ZIP.
 - 400: invalid request, unsupported fields, or invalid/ambiguous policy reference.
 - 404: unknown route or policy version.
 - 409: selected policy has no downloadable player file.
-- 413: JSON request exceeds 224 MiB, or an uploaded package exceeds 16 MiB.
+- 413: JSON request exceeds the server body limit (224 MiB for Gota-only deployments, 352 MiB when Paintbot is installed), or an uploaded package exceeds 16 MiB.
 - 415: incorrect content type.
 - 422: Policy loading or BASIC compilation failed. Only uploaded-bot diagnostics are disclosed.
 - 502: policy lookup/download/verification failed; policy artifacts may be
@@ -149,7 +149,7 @@ treating the response as a ZIP.
 - 500: game worker failed; the operator can inspect server diagnostics.
 
 GET `/healthz` returns `ok`. This document is sufficient to make a request;
-[run.md](run.md) contains additional reference details.
+[Gota run guide](/docs/gota/run.md) contains additional reference details.
 
 ## Server performance
 

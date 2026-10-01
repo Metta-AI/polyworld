@@ -1,6 +1,6 @@
 # Paintbot run API
 
-Start with [/docs/llms.txt](/docs/llms.txt) for the complete request and response
+Start with [/docs/paintbot-pw/llms.txt](/docs/paintbot-pw/llms.txt) for the complete request and response
 contract. POST /v1/games/paintbot-pw/run runs the native Paintbot teams game with
 16 interleaved red/blue seats, glory behind_cogs=10 and behind_lives=5, the
 default map and vision, and no external oracle.
@@ -10,16 +10,16 @@ default map and vision, and no external oracle.
 Use the same files you submit to Paintbot: raw BASIC or a ZIP containing exactly
 manifest.json, policy.bas and model.bin. The production neural manifest schemas
 paintbot-neural-basic/1 and paintbot-neural-basic/2 are supported. Contracts,
-hashes, decoder settings and models are validated by the worker.
+hashes, decoder settings and models are validated by Paintbot's production runner.
 
 Limits are 128 KiB source, 16 MiB model and 8 KiB manifest, with 4 KiB additional
 ZIP overhead. The complete package limit is 16920576 bytes; base64 encoding is
 additional. JSON bodies are limited to 352 MiB. Encrypted, duplicate, extra,
 oversized or corrupt ZIP entries are rejected. Archive paths are never extracted.
 
-Initialization failures follow Paintbot's seat-forfeit behavior; check your
-uploaded seat logs. BASIC compilation failures and worker failures fail that
-game. Referenced seats' diagnostics are never returned. No response includes
+The production host validates and stages packages. Its player-failure marker
+causes fast-XP to fail that game with 422; uploaded-seat diagnostics are included.
+BASIC compilation failures also fail that game. Referenced seats' diagnostics are never returned. No response includes
 bot source files, model files, credentials or artifact download URLs.
 
 ## Errors and timing

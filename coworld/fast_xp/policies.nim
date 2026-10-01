@@ -48,7 +48,7 @@ proc fetch(url: string, headers: HttpHeaders): Response =
     # HTTP exceptions can contain the signed URL, so do not forward or log them.
     reject(502, "Could not reach the policy service or download its artifact")
 
-proc fetchPolicyBytes*(policyRef: string): string =
+proc fetchPolicyBytes*(policyRef: string, game = Gota): string =
   ## Authorizes each request, then caches the complete raw-or-ZIP artifact by hash.
   let token = getEnv("FAST_XP_OBSERVATORY_TOKEN")
   if token.len == 0:
@@ -79,7 +79,7 @@ proc fetchPolicyBytes*(policyRef: string): string =
   except CatchableError:
     reject(502, "Observatory returned invalid policy metadata")
   if digest.len != 64 or digest.find(AllChars - {'0'..'9', 'a'..'f'}) >= 0 or
-      size < 1 or size > packageLimit():
+      size < 1 or size > packageLimit(game):
     reject(502, "Policy metadata is invalid or exceeds the selected game package limit")
   validateUrl(downloadUrl)
   let

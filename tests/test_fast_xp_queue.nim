@@ -7,8 +7,8 @@ import
 proc worker() =
   doAssert readFile("/proc/self/stat").split(')')[1].splitWhitespace()[16] == "10",
     "Game worker must run at nice +10"
-  let root = getTempDir()
   proc path(key: string): string = decodeUrl(parseUri(getEnv(key)).path)
+  let root = path("COGAME_CONFIG_URI").parentDir.parentDir.parentDir
   let config = parseJson(readFile(path("COGAME_CONFIG_URI")))
   let seed = config["seed"].getInt()
   let started = open(root / "started", fmAppend)
@@ -20,6 +20,9 @@ proc worker() =
     let child = startProcess(findExe("sleep"), args = @["180"], options = {})
     writeFile(root / "descendant", $child.processID)
     sleep(180_000)
+  if seed == 997:
+    let child = startProcess(findExe("sleep"), args = @["180"], options = {})
+    writeFile(root / "completed-descendant", $child.processID)
   sleep(100)
   stdout.writeLine(repeat('x', 100_000))
   let seats = parseJson(readFile(path("COGAME_PLAYER_SEATS_URI")))
@@ -30,6 +33,7 @@ proc worker() =
     quit(1)
   writeFile(path("COGAME_RESULTS_URI"), "{}")
   writeFile(path("COGAME_SAVE_REPLAY_URI"), $seed)
+  if seed == 997: sleep(180_000)
 
 proc run() =
   let root = createTempDir("queue-test-", "")
@@ -38,14 +42,15 @@ proc run() =
   let base = "http://127.0.0.1:" & $port
   let env = environment(root, port)
   env["FAST_XP_GOTA_WORKER"] = getAppFilename()
-  env["FAST_XP_PAINTBOT_WORKER"] = getAppFilename()
+  env["FAST_XP_PAINTBOT_COMMAND"] = $(%*[getAppFilename()])
+  env["FAST_XP_GAMES"] = "gota,paintbot-pw"
   let log = root / "server.log"
   let process = launch(ServerPath, log, env)
   defer:
     removeFile(root / "gate")
     stop(process)
-  proc game(seed: int, count = 1): Curly =
-    startCall(base, "/v1/games/" & getEnv("FAST_XP_GAME", "gota") & "/run", %*{"seed": seed, "num_episodes": count,
+  proc game(seed: int, count = 1, name = "gota"): Curly =
+    startCall(base, "/v1/games/" & name & "/run", %*{"seed": seed, "num_episodes": count,
       "roster": [{"player": {"source": "end"}}]})
   proc started(): seq[int] =
     if fileExists(root / "started"):
@@ -54,7 +59,7 @@ proc run() =
   writeFile(root / "gate", "")
   let first = game(100, 10)
   waitUntil(started().len == 2, process, log)
-  let second = game(500)
+  let second = game(500, name = "paintbot-pw")
   waitUntil(records(log).countIt(it["event"].getStr() == "request_accepted") == 2, process, log)
   sleep(200)
   doAssert started().len == 2
@@ -93,6 +98,10 @@ proc run() =
   doAssert (metrics(base))["timeouts"].getInt() == 1
   doAssert finish(game(998)).status == 500
   doAssert finish(game(997)).status == 200
+  let completedChild = parseInt(readFile(root / "completed-descendant"))
+  let completedStat = "/proc/" & $completedChild & "/stat"
+  doAssert not fileExists(completedStat) or readFile(completedStat).split(')')[1].strip().startsWith("Z"),
+    "Completed worker left a running descendant"
   writeFile(root / "gate", "")
   let before = started().len
   let pending = game(700, 10)

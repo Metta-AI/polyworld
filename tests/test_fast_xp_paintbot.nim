@@ -4,7 +4,6 @@ import
   ./fastxpfixtures
 
 const
-  PaintbotRoot = currentSourcePath().parentDir.parentDir.parentDir / "paintbot-pw"
   Route = "/v1/games/paintbot-pw/run"
 
 proc digest(data: string): string =
@@ -28,7 +27,7 @@ proc verify(files: OrderedTable[string, string], root: string) =
     if name.endsWith(".replay"):
       let path = root / name.replace('/', '-')
       writeFile(path, bytes)
-      let result = execCmdEx(quoteShell(PaintbotRoot / "coworld/paintbot/replay_check") &
+      let result = execCmdEx(quoteShell(getEnv("FAST_XP_PAINTBOT_REPLAY")) &
         " --replay " & quoteShell(path))
       doAssert result.exitCode == 0, result.output
 
@@ -42,8 +41,8 @@ proc run() =
     base = "http://127.0.0.1:" & $port
     env = environment(root, port)
     log = root / "server.log"
-  env["FAST_XP_GAME"] = "paintbot-pw"
-  env["FAST_XP_PAINTBOT_WORKER"] = PaintbotRoot / "coworld/paintbot/paintbot_worker"
+  env["FAST_XP_GAMES"] = "gota,paintbot-pw"
+  doAssert env["FAST_XP_PAINTBOT_COMMAND"].len > 0, "Configure the stock Paintbot runner command"
   env["FAST_XP_OBSERVATORY_TOKEN"] = "fixture"
   env["FAST_XP_OBSERVATORY_URL"] = "http://127.0.0.1:" & $mockPort
   let upstream = launch(getAppFilename(), root / "mock.log", env, @["--mock", $mockPort])
@@ -52,8 +51,16 @@ proc run() =
   defer: stop(server)
   waitUntil(records(log).anyIt(it["event"].getStr == "server_started"), server, log)
   doAssert call(base, "/docs/llms.txt").body.contains(Route)
-  doAssert call(base, "/v1/games/gota/run").status == 404
-  doAssert metrics(base)["game"].getStr == "paintbot-pw"
+  doAssert call(base, "/v1/games/gota/run").status == 405
+  doAssert metrics(base)["games"].len == 2
+  let gotaBody = %*{"seed": 2026, "config": {"max_ticks": 24},
+    "roster": [{"player": {"source": "end\n"}}]}
+  let gota = call(base, "/v1/games/gota/run", gotaBody)
+  doAssert gota.status == 200, gota.body
+  doAssert archiveFiles(gota.body, root).len == 11
+  doAssert call(base, "/docs/llms.txt").body.contains("/v1/games/gota/run")
+  doAssert call(base, "/docs/paintbot-pw/llms.txt").body.contains(Route)
+  doAssert call(base, "/docs/gota/llms.txt").body.contains("/v1/games/gota/run")
   var body = %*{"seed": 2026, "config": {"max_ticks": 240}, "roster": [
     {"slot": 0, "player": {"source": "print \"uploaded-paintbot-log\"\nidle = 1\n"}},
     {"player": {"policy_ref": "fixture:v1"}}]}
@@ -73,6 +80,16 @@ proc run() =
   let neuralFiles = archiveFiles(neural.body, root)
   doAssert "failed" notin neuralFiles["logs/slot-0.txt"].toLowerAscii
   verify(neuralFiles, root)
+  let paintbotRequest = startCall(base, Route, body)
+  let gotaRequest = startCall(base, "/v1/games/gota/run", gotaBody)
+  let paintbotResponse = finish(paintbotRequest)
+  let gotaResponse = finish(gotaRequest)
+  doAssert paintbotResponse.status == 200, paintbotResponse.body
+  doAssert gotaResponse.status == 200, gotaResponse.body
+  verify(archiveFiles(paintbotResponse.body, root), root)
+  let recent = metrics(base)["recent_games"]
+  doAssert recent.anyIt(it["game"].getStr == "gota" and it["seats"].getInt == 10)
+  doAssert recent.anyIt(it["game"].getStr == "paintbot-pw" and it["seats"].getInt == 16)
   body["num_episodes"] = %10
   body["config"]["max_ticks"] = %24
   let batch = call(base, Route, body)
@@ -92,8 +109,7 @@ proc run() =
   body["num_episodes"] = %1
   body["roster"][0]["player"] = %*{"package_base64": encode("PK\x03\x04broken")}
   let bad = call(base, Route, body)
-  doAssert bad.status == 200, bad.body
-  doAssert "Policy initialization failed" in archiveFiles(bad.body, root)["logs/slot-0.txt"]
+  doAssert bad.status == 422, bad.body
   body["roster"][0]["player"] = %*{"source": "if\n"}
   doAssert call(base, Route, body).status == 422
   body["roster"][0]["player"] = %*{"source": "idle = 1\n"}
