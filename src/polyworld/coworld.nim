@@ -204,8 +204,7 @@ proc writePlayerStatus() =
 
 proc waitForCollection*() =
   ## Keeps health and contract stubs alive until the runner stops the process.
-  when not defined(fastXpWorker):
-    joinThread(serverThread)
+  joinThread(serverThread)
 
 proc rejectPlayer(slot: int, message: string) {.noreturn.} =
   ## Reports package and compilation failures through the same seat boundary.
@@ -332,20 +331,19 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
   for slot, seat in seats.seats:
     if seat.annotationsUri.len > 0:
       annotationSinks[slot] = newAnnotationSink(localPath(seat.annotationsUri))
-  when not defined(fastXpWorker):
-    var port: int
-    try:
-      port = parseInt(getEnv("COGAME_PORT", "8080"))
-    except ValueError:
-      raise newException(CoworldError, "COGAME_PORT must be an integer")
-    if port < 1 or port > 65535:
-      raise newException(CoworldError, "COGAME_PORT is out of range")
-    server = newServer(requestHandler, websocketHandler, workerThreads = 2)
-    createThread(serverThread, serve, ServerAddress(
-      server: server,
-      host: getEnv("COGAME_HOST", "0.0.0.0"),
-      port: Port(port)
-    ))
+  var port: int
+  try:
+    port = parseInt(getEnv("COGAME_PORT", "8080"))
+  except ValueError:
+    raise newException(CoworldError, "COGAME_PORT must be an integer")
+  if port < 1 or port > 65535:
+    raise newException(CoworldError, "COGAME_PORT is out of range")
+  server = newServer(requestHandler, websocketHandler, workerThreads = 2)
+  createThread(serverThread, serve, ServerAddress(
+    server: server,
+    host: getEnv("COGAME_HOST", "0.0.0.0"),
+    port: Port(port)
+  ))
 
 proc completedSignal(signal: cint) {.noconv.} =
   ## Exits successfully when the runner terminates a completed episode.
