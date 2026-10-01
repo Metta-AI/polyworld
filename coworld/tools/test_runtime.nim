@@ -11,7 +11,8 @@ const
   Root = currentSourcePath().parentDir.parentDir.parentDir
   LogLimit = 10 * 1024 * 1024
   SocketTimeout = 5000
-  Games = [("gota", 10), ("lvd", 6), ("cta", 4)]
+  Games = [("gota", 10), ("lvd", 6), ("cta", 4),
+    ("awm", 2), ("awm", 7)]
 
 proc fileUri(path: string): string =
   ## Encodes one absolute path for the runner's local file handoff.
@@ -263,7 +264,15 @@ proc episode(
     doAssert process.waitForExit(5000) == 0,
       "completed game shutdown failed"
 
+# An optional game name runs only that game's checks.
+let only = if paramCount() > 0: paramStr(1) else: ""
+
+proc selected(game: string): bool =
+  only.len == 0 or only == game
+
 for (game, count) in Games:
+  if not game.selected:
+    continue
   var scripts: seq[string]
   for slot in 0 ..< count:
     scripts.add "PRINT \"PRIVATE-" & $slot & "\", 1.5\nEND\n"
@@ -282,19 +291,21 @@ for (game, count) in Games:
 sendChat(-2, "CHAT")
 print pullMailbox$(), mailboxId()
 """
-  episode(game, count, scripts, ticks = 3, waitForLlm = true,
-    expectedOutput = "CHAT")
+  # AWM is turn-based: one seat decides per tick, so every seat needs one.
+  episode(game, count, scripts, ticks = (if game == "awm": count else: 3),
+    waitForLlm = true, expectedOutput = "CHAT")
   echo game, ": hosted mailbox integration passed"
 
-episode(
-  "lvd",
-  2,
-  @["PRINT \"" & repeat('x', 7900) & "\"\nEND\n", "END\n"],
-  ticks = 28800
-)
-echo "10 MiB player log bound passed"
+if "lvd".selected:
+  episode(
+    "lvd",
+    2,
+    @["PRINT \"" & repeat('x', 7900) & "\"\nEND\n", "END\n"],
+    ticks = 28800
+  )
+  echo "10 MiB player log bound passed"
 
-block:
+if "gota".selected:
   const Source = """
 dim data(24)
 if initialized = 0 then
@@ -322,7 +333,7 @@ print "PACKAGE-PASSED"
     expectedRuntimeError = "BASIC source exceeds")
   echo "GOTA unpacked BASIC reaches the VM source limit and player failure log"
 
-block:
+if "gota".selected:
   let
     library = readFile(Root /
       "examples/gods_of_the_arena/neural/policies/david.bas").split(
@@ -345,7 +356,7 @@ res = nn_david("model.bin", state, data)
     expectedRuntimeError = "David model needs GOTANET1 magic")
   echo "GOTA model errors reach the per-player failure log and status"
 
-block:
+if "gota".selected:
   let
     library = readFile(Root /
       "examples/gods_of_the_arena/neural/policies/andre.bas").split(
