@@ -15,18 +15,17 @@ end
   doAssert vm.runtime.instructionsUsed > 500_000
   doAssert vm.runtime.instructionsUsed <= 5_000_000
 
-echo "Testing arrays beyond the previous memory budget"
+echo "Testing arrays within the restored memory budget"
 block:
   var game = newGame(Archer, Warrior, 7)
   let vm = loadBot("""
-dim values(4500000)
-values(4500000) = 42
+dim values(1000000)
+values(1000000) = 42
 end
 """, game.currentPlayer.int32)
-  doAssert vm.runtime.memoryBytes > 64'i64 * 1024 * 1024
-  doAssert vm.runtime.memoryBytes < 640'i64 * 1024 * 1024
+  doAssert vm.runtime.memoryBytes < 64'i64 * 1024 * 1024
   doAssert vm.runDecision(game) == BotEndedTurn
-  doAssert vm.runtime.getArray("values", 4_500_000).asInt == 42
+  doAssert vm.runtime.getArray("values", 1_000_000).asInt == 42
 
 echo "Testing runaway decisions still stop at the new budget"
 block:
@@ -37,7 +36,7 @@ block:
   doAssert vm.runtime.instructionsUsed > 4_999_900
   doAssert vm.runtime.instructionsUsed <= 5_000_000
 
-echo "Testing allocations still stop at the new memory budget"
+echo "Testing allocations stop at the restored memory budget"
 block:
   let source = "dim values(" & $(botLimits().maxArrayElements - 1) & ")"
   try:
