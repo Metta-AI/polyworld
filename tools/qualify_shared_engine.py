@@ -41,6 +41,7 @@ if __name__ == "__main__":
         dependencies.append({"name": name, "expected": expected, "actual": actual})
         paths.append(f"--path:{source}")
     report = {
+        "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "engine_source": subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip(),
@@ -53,6 +54,9 @@ if __name__ == "__main__":
         "scope": "Asset-free native assertions. Does not establish rendered browser or downstream game acceptance.",
         "results": [],
     }
+    (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    if not report["dependency_lock_matches"]:
+        raise ValueError("Qualification requires every dependency to match nimby.lock")
     for test in args.test or COHORT:
         source = root / "tests" / f"{test}.nim"
         command = [
