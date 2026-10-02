@@ -3629,9 +3629,11 @@ proc updateFootman(world: World, footman: var Footman) =
       let other {.cursor.} = world.footmen[i]
       if not world.hostile(other, footman.team):
         continue
+      let distance = distanceSquared(footman.position, other.position)
+      if distance > bestSquared:
+        continue
       if not visible(world, footman.team, other.position):
         continue
-      let distance = distanceSquared(footman.position, other.position)
       if distance < bestSquared or (distance == bestSquared and bestId != 0 and
         targetBefore(other.position, other.id,
           bestPosition, bestId, footman.team)):
@@ -3643,9 +3645,11 @@ proc updateFootman(world: World, footman: var Footman) =
       let hero = world.heroes[i]
       if hero.team == footman.team or hero.state == Dying or hero.hp <= 0:
         continue
+      let distance = distanceSquared(footman.position, hero.position)
+      if distance > bestSquared:
+        continue
       if not visible(world, footman.team, hero.position):
         continue
-      let distance = distanceSquared(footman.position, hero.position)
       if distance < bestSquared or (distance == bestSquared and
         targetFootman < 0 and bestId != 0 and targetBefore(hero.position,
           hero.id, bestPosition, bestId, footman.team)):
