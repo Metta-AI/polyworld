@@ -15,3 +15,7 @@ Both failures disappeared after locking the complete dependency set. No shared c
 These assertions cover animation controls, character representation, picking, pathing, tile paths and terrain maps.
 They do not establish rendered pixel fidelity, browser execution or acceptance in Cogcraft, Puzzle Pirates and Dwarf Fortress.
 Those downstream owners must pin game revisions, scene seeds and native/browser snapshots before declaring cross-game qualification.
+
+The same pathing, tile-path and terrain-map assertions also pass after Emscripten5.0.7-git compilation, under Node24.
+`qualify_shared_engine_wasm_results.json` pins the native receipt and records each WebAssembly compile command and assertion output.
+This checks simulation portability. A Node run does not establish browser graphics or WebGL behavior.
