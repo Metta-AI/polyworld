@@ -290,7 +290,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
       "Invalid Coworld configuration: " & error.msg)
   let slotCount =
     if requiredSlots > 0: requiredSlots else: config.players.len
-  if slotCount < 1 or seats.schema != "coworld-player-seats/1" or
+  if slotCount < 1 or seats.schema notin ["coworld-player-seats/1", "coworld-player-seats/2"] or
     seats.seats.len != slotCount or tokens.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
