@@ -241,19 +241,12 @@ proc toonFrag(
     return
   if toonNeutralMaterial:
     albedo = vec4(0.8'f, 0.8'f, 0.8'f, albedo.a)
-  if toonUnlit and toonUnlitReceivesShadow and toonLightingMode != 2:
-    # convoy/unlit-shadow-receive: shadow-only multiply, no ramp, no N.L term,
-    # so the ridge-slope banding the unlit branch exists to avoid cannot
-    # return. sunFactor is PCF-softened; renormalize by toonShadowStrength so
-    # toonUnlitShadowDark is the exact floor at full shadow.
-    let
-      sunShadow = sunShadowFactor(worldPos)
-      shadowTerm = clamp(
-        (1.0'f - sunShadow) / max(toonShadowStrength, 0.0001'f), 0.0'f, 1.0'f)
-      unlitBand = mix(1.0'f, toonUnlitShadowDark, shadowTerm)
-    fragColor = vec4(applyFog(albedo.rgb * unlitBand, worldPos), albedo.a) * toonTint
-    return
-  if toonUnlit or toonLightingMode == 2:
+  # Upstream returns plain `albedo` here for any unlit node. Convoy's unlit
+  # contract (character eyes/mouths, terrain, FX) is the older one -- band
+  # forced to 1.0 and still tinted by toonHighlightColor unless
+  # toonUnlitFullBright -- so only the inspection mode takes the early exit
+  # and unlit nodes fall through to the Convoy branch below.
+  if toonLightingMode == 2:
     fragColor = vec4(applyFog(albedo.rgb, worldPos), albedo.a) * toonTint
     return
   var lambert = lightIntensity
@@ -277,6 +270,16 @@ proc toonFrag(
     # multiply below (toonSmoothShadowDark). Upstream's toonLightingMode==1
     # is the same idea but global, not per-node.
     band = 1.0'f - toonShadingStrength + lambert * toonShadingStrength
+  if toonUnlit:
+    band = 1.0'f
+    if toonUnlitReceivesShadow:
+      # convoy/unlit-shadow-receive: shadow-only multiply, no ramp, no N.L
+      # term (ridge-slope banding cannot return); sunFactor is PCF-softened,
+      # renormalized by toonShadowStrength so toonUnlitShadowDark is the
+      # exact floor at full shadow.
+      let unlitShadowTerm = clamp(
+        (1.0'f - sunFactor) / max(toonShadowStrength, 0.0001'f), 0.0'f, 1.0'f)
+      band = mix(1.0'f, toonUnlitShadowDark, unlitShadowTerm)
   # Step 3: two hand-picked colours, then the albedo on top.
   # convoy/spark-r1: a `toonUnlitFullBright` fragment reuses `band` (already the 1.0
   # full-bright / `toonUnlitShadowDark` in-shadow range from the branch above) as a
@@ -300,7 +303,8 @@ proc toonFrag(
     eye: Vec3 = normalize(toonCameraPosition - worldPos)
     facing = 1.0'f - abs(dot(eye, n))
     rim = facing * facing * facing * facing
-  lit = mix(lit, toonRimColor.rgb, rim * toonRimColor.a)
+  if not toonUnlit:
+    lit = mix(lit, toonRimColor.rgb, rim * toonRimColor.a)
   var emissive: Vec3 = texture(toonEmissiveTexture, uv).rgb * toonEmissiveFactor
   if toonNeutralMaterial:
     emissive = vec3(0.0'f)
