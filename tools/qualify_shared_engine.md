@@ -19,3 +19,12 @@ Those downstream owners must pin game revisions, scene seeds and native/browser 
 The same pathing, tile-path and terrain-map assertions also pass after Emscripten5.0.7-git compilation, under Node24.
 `qualify_shared_engine_wasm_results.json` pins the native receipt and records each WebAssembly compile command and assertion output.
 This checks simulation portability. A Node run does not establish browser graphics or WebGL behavior.
+
+The pinned Puzzle Pirates consumer3f7b2fa870858c7069d55e52674153d47501c56b also passes its existing
+`tools/test-portable.sh` harness against engine4fc74f6 and the28locked dependencies. Native and WebAssembly
+outputs match across167lines, SHA256a5267673bc309265b90724fc2cd2cada9ccd50cad258ed24f26a7f2a44db45e4.
+`qualify_shared_engine_consumer_results.json` records the exact command and source identities.
+The shared low-memory wrapper initially refused admission75 while another task held its lock; it passed after
+that owner released the seat. No lock bypass or shared dependency edits occurred. Consumer source remains unchanged.
+This proves the existing consumer's simulation/replay hash portability, including puzzle and paid-labor fixtures.
+Browser rendering and acceptance in the other two games remain unqualified.

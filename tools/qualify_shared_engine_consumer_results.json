@@ -1,0 +1,19 @@
+{
+  "consumer": "Metta-AI/puzzle_pirates",
+  "consumer_source": "3f7b2fa870858c7069d55e52674153d47501c56b",
+  "engine_source": "4fc74f6adf000ea2534fcecfbd1859fa1fcaa252",
+  "command": "NIM=<single-worker Nim wrapper> PATH=<Nim2.2.10>:$PATH python3 tools/dev-low-memory.py qa -- sh tools/test-portable.sh",
+  "exit_code": 0,
+  "output_lines": 167,
+  "native_sha256": "a5267673bc309265b90724fc2cd2cada9ccd50cad258ed24f26a7f2a44db45e4",
+  "wasm_sha256": "a5267673bc309265b90724fc2cd2cada9ccd50cad258ed24f26a7f2a44db45e4",
+  "compiler": "Nim2.2.10/Emscripten5.0.7-git",
+  "runtime": "Node24",
+  "harness_sha256": "8ecde66646fe8ba6c6502d6df59f2f6e92c2c2e54fa5be03ba10a8c33ffca62e",
+  "test_sha256": "25f98f49aeff1aaf132f7c89b1d00f8c783550a3a8b508883ed42c1e3681911c",
+  "locked_dependencies": 28,
+  "evidence_log": "/tmp/relh-october-dispatch/evidence/engines-policy-cleanup/polyworld-pirates-portable-admitted.log",
+  "scope": "Existing deterministic gameplay/state/replay hash harness; no browser/WebGL pixel fidelity or other consumer acceptance claim",
+  "failed_attempts": "Three prior admissions refused75 while another owner held shared lock; no bypass",
+  "own_checkout_note": "Qualified engine supplied through own vendor symlink; git status requires --ignore-submodules=all. Original consumer checkout untouched."
+}
