@@ -411,7 +411,14 @@ suite "Turns and the spectator camera":
     check spectating.turnLabel ==
       "PLAYER " & $(spectating.current + 1) & "'S TURN"
     check spectating.turnStatus == "Watching bot match..."
-
+    let names = @["Andrew B", "Andre H", "Rodrigo"]
+    check spectating.turnLabel(names) ==
+      names[spectating.current] & "'s turn"
+    check human.turnLabel(names) == names[human.current] & "'s turn"
+    var finished = spectating
+    finished.game.winner = 1
+    finished.game.gameOver = true
+    check finished.turnStatus(names) == "Andre H is the last one standing."
 
 suite "Playing cards in a multiplayer match":
   proc humanMatch(heroClass: HeroClass): MultiplayerMatch =

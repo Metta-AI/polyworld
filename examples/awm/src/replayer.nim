@@ -42,10 +42,16 @@ proc newReplayGame*(replayer: Replayer): GameState =
   newGame(replayer.classes, replayer.data.header.setup.seed.int64)
 
 proc playerName*(replayer: Replayer, player: int): string =
-  if player < replayer.data.config.players.len:
+  ## Returns the recorded public name for this seat.
+  if player in 0 ..< replayer.data.config.players.len:
     replayer.data.config.players[player].displayName(player)
   else:
     "Player " & $(player + 1)
+
+proc playerNames*(replayer: Replayer): seq[string] =
+  ## Supplies every HUD surface with the replay's public roster names.
+  for player in 0 ..< replayer.data.header.setup.classes.len:
+    result.add replayer.playerName(player)
 
 proc checkTick(replayer: Replayer, game: GameState, tick: int32) =
   replayer.data.hashes.checkReplayHash(tick.uint32, game.stateHash,

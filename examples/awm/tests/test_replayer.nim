@@ -63,6 +63,23 @@ let
   layout = buildMultiplayerLayout(data.header.setup.classes.len)
   view = layout.multiplayerView(16.0'f / 9)
 
+echo "Recorded names and unnamed seats share the same labels"
+block:
+  var namedData = data
+  namedData.config.players = @[
+    PlayerConfig(name: "Andrew B"), PlayerConfig(name: "")]
+  let
+    replay = newReplayer(namedData)
+    names = replay.playerNames()
+    game = replay.newReplayGame()
+  doAssert names == @["Andrew B", "Player 2", "Player 3", "Player 4",
+    "Player 5"]
+  doAssert game.playerName(0, names) == "Andrew B"
+  doAssert game.playerName(1, @["Andrew B", ""]) == "Player 2"
+  doAssert game.playerName(2) == "Player 3"
+  doAssert game.choiceLabel(heroChoice(0), names) == "Andrew B Warrior hero"
+  doAssert game.choiceLabel(heroChoice(1), names) == "Player 2 Mage hero"
+
 for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
   echo "Playing once at 16x, frame seconds ", seconds
   let replay = newReplayer(data)

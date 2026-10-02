@@ -174,7 +174,9 @@ proc drawCardReadingView(
     inspected.toughness, inspected.lost)
 
 proc runDuel*(app: App) =
+  ## Presents a duel using public replay names when they are available.
   bindApp(app)
+  let names = if app.replay != nil: app.replay.playerNames() else: @[]
   var
     phase = ChooseClasses
     game: GameState
@@ -795,9 +797,12 @@ proc runDuel*(app: App) =
         else:
           play.statusMessage = "Your opponent is thinking..."
     else:
-      drawPlayerPanel(sk, window, game, 0, sessionOptions.human, hudTime)
-      drawPlayerPanel(sk, window, game, 1, sessionOptions.human, hudTime)
-      drawTurnHeader(sk, window, game, sessionOptions.human, play.statusMessage)
+      drawPlayerPanel(sk, window, game, 0, sessionOptions.human,
+        hudTime, names)
+      drawPlayerPanel(sk, window, game, 1, sessionOptions.human,
+        hudTime, names)
+      drawTurnHeader(sk, window, game, sessionOptions.human,
+        play.statusMessage, names)
       let inspectingCard = drawCardReadingView(
         sk,
         window,
@@ -842,7 +847,7 @@ proc runDuel*(app: App) =
 
       if not play.attackActive:
         sk.drawMatchResult(window, play, game,
-          if sessionOptions.human: 0 else: -1)
+          if sessionOptions.human: 0 else: -1, names = names)
 
     when defined(emscripten):
       let role =
@@ -851,9 +856,17 @@ proc runDuel*(app: App) =
         else: "Bot match"
       var summary = role & ". " & play.statusMessage
       if phase == PlayGame:
-        summary.add &" Turn {game.turnNumber}. Active player {game.currentPlayer + 1}."
+        summary.add &" Turn {game.turnNumber}. " &
+          (if names.len > 0:
+            "Active " & game.playerName(game.currentPlayer, names)
+          else:
+            "Active player " & $(game.currentPlayer + 1)) & "."
         for owner, player in game.players:
-          summary.add &" Player {owner + 1} {player.heroClass.className()}: life {player.life}, energy {player.energy}/{player.totalEnergy}, hand {player.hand.len}, board {player.board.len}, deck {player.deck.len}, discard {player.discardPile.len}."
+          summary.add " " & game.playerName(owner, names) &
+            &" {player.heroClass.className()}: life {player.life}, " &
+            &"energy {player.energy}/{player.totalEnergy}, " &
+            &"hand {player.hand.len}, board {player.board.len}, " &
+            &"deck {player.deck.len}, discard {player.discardPile.len}."
         if humanTurn() and not play.pendingTargeting and
             play.presentationIdle(game):
           summary.add " Ready for your action."
