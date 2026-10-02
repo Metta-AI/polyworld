@@ -29,11 +29,11 @@ proc turnNumber*(match: MultiplayerMatch): int =
   match.game.turnNumber
 
 proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
-    seed: int64, botSources: openArray[string] = []): MultiplayerMatch =
+    seed: int64, botSources: openArray[string] = [],
+    pickClasses = false): MultiplayerMatch =
   ## One seat per class, dealt by the core. The last seat standing wins.
   ## Every seat but the human's runs a bot script, taken from `botSources`
   ## in turn (repeating); with none, those seats don't act.
-  result.game = newGame(classes, seed)
   result.humanSeat = humanSeat
   var sources = newSeq[string](classes.len)
   if botSources.len > 0:
@@ -43,6 +43,14 @@ proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
         sources[seat] = botSources[next mod botSources.len]
         inc next
   result.bots = loadBots(sources)
+  var selected = @classes
+  if pickClasses:
+    for seat in 0 ..< selected.len:
+      if seat != humanSeat:
+        selected[seat] = result.bots[seat].chooseClass(selected.len, seed)
+  for bot in result.bots:
+    bot.ensureSeed(seed)
+  result.game = newGame(selected, seed)
 
 proc humanTurn*(match: MultiplayerMatch): bool =
   ## The living human's turn: the dead can't act.
@@ -217,14 +225,13 @@ when not defined(headless):
       window.buttonPressed[button] and not uiCapturesMouse
     proc startMatch(humanClass: Option[HeroClass]) =
       var classes = newSeq[HeroClass](layout.playerCount)
-      for seat in 0 ..< layout.playerCount:
-        classes[seat] = seatRng.rand(HeroClass)
       if humanClass.isSome:
         classes[0] = humanClass.get
       choosingClasses = false
       match = newMultiplayerMatch(classes,
         humanSeat = if humanClass.isSome: 0 else: -1,
-        seed = seatRng.rand(high(int)).int64, botSources = botSources)
+        seed = seatRng.rand(high(int)).int64, botSources = botSources,
+        pickClasses = true)
       botClock = initBotClock()
       orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
       play.resetTable()

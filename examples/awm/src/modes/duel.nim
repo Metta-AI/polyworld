@@ -548,14 +548,14 @@ proc runDuel*(app: App) =
       botClassWait -= dt
       if botClassWait <= 0:
         let
-          playerClass = play.visualRng.rand(HeroClass)
-          opponentClass = play.visualRng.rand(HeroClass)
-        game = newGame(playerClass, opponentClass, gameSeed())
+          seed = gameSeed()
+          playerClass = botVms[0].chooseClass(PlayerCount, seed)
+          opponentClass = botVms[1].chooseClass(PlayerCount, seed)
+        game = newGame(playerClass, opponentClass, seed)
         play.resetTable()
         phase = PlayGame
         play.addOpeningHands(game, duelLayout)
         botClock.wait = 1.2'f32
-        botClock.plays = 0
         play.statusMessage = "Watching bot match..."
 
     sk.uiScale = if phase == ChooseClasses: classSelectionScale()
@@ -778,17 +778,18 @@ proc runDuel*(app: App) =
     if phase == ChooseClasses:
       let picked = classSelection(viewProjection, sessionOptions.human, not uiCapturesMouse)
       if picked.isSome:
-        let heroClass = picked.get
+        let
+          heroClass = picked.get
+          seed = gameSeed()
         game = newGame(
           heroClass,
-          sessionOptions.opponentClass,
-          gameSeed()
+          botVms[1].chooseClass(PlayerCount, seed),
+          seed
         )
         play.resetTable()
         phase = PlayGame
         play.addOpeningHands(game, duelLayout)
         botClock.wait = 1.2'f32
-        botClock.plays = 0
         if game.currentPlayer == 0:
           play.statusMessage = "Your turn. Select a card to play."
         else:
@@ -829,7 +830,6 @@ proc runDuel*(app: App) =
           play.selectedAttacker = 0
           game.finishTurn()
           botClock.wait = 1.2'f32
-          botClock.plays = 0
           play.statusMessage = "Your opponent is thinking..."
           play.pendingTargeting = false
           play.pendingCardIndex = -1

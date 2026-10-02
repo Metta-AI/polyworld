@@ -708,10 +708,11 @@ proc playCard*(
     game.applyEffects(context.effects)
     game.players[playerIndex].discardPile.add card
   of Minion, Trinket:
-    let id = game.playMinion(cardIndex)
-    if id == 0:
+    var played = game.copyGameState()
+    let id = played.playMinion(cardIndex)
+    if id == 0 or not played.runMinionRules(card, choices, id):
       return false
-    discard game.runMinionRules(card, choices, id)
+    game = played
   true
 
 proc playCard*(

@@ -142,3 +142,42 @@ for forward in [false, true]:
   doAssert game.gameOver
 
 echo "Replay playback passed"
+
+echo "Live bot attack animation never ends a turn automatically"
+block:
+  var game = newGame(@[Mage, Warrior], 44)
+  let
+    player = game.currentPlayer
+    enemy = game.nextPlayer(player)
+    table = layout.seatTable(view, player, -1)
+    card = baseCardNamed("Primordial")
+    bots = loadBots(newSeqWith(2, """
+id = boardId(selfPlayer, 0)
+i = 0
+while i < attackChoiceCount(id)
+  if attackChoiceKind(id, i) = 2 then
+    if attack(id, i) then end
+  end if
+  i = i + 1
+wend
+endTurn()
+"""))
+  game.players[player].board = @[
+    MinionState(id: 1, owner: player, card: card,
+      currentToughness: card.toughness, canAttack: true)]
+  game.nextMinionId = 2
+  discard game.takeVisualEvents()
+  var
+    play = initTablePlay(1)
+    clock = initBotClock()
+  clock.wait = 0
+  doAssert not play.updateBots(game, table, bots, clock,
+    proc(): bool = false, 0.0'f)
+  doAssert play.attackActive
+  doAssert game.players[enemy].life == StartingLife
+  for i in 0 ..< 60:
+    discard play.advanceAttack(game, 1.0'f / 60)
+  doAssert not play.attackActive
+  doAssert game.players[enemy].life == StartingLife - 10
+  doAssert game.currentPlayer == player
+  doAssert game.players[player].board[0].hasAttacked
