@@ -152,7 +152,7 @@ proc episode(
     boundedLog = boundedLog or (source.len > 7000 and not source.isPackage)
     instructionFailure = instructionFailure or source.contains("WHILE")
   let seatDocument = %*{
-    "schema": "coworld-player-seats/1",
+    "schema": (if annotations: "coworld-player-seats/2" else: "coworld-player-seats/1"),
     "seats": seats,
     "player_status_uri": (directory / "status.json").fileUri()
   }
@@ -342,6 +342,9 @@ if "lvd".selected:
   echo "10 MiB player log bound passed"
 
 if "gota".selected:
+  let manifest = parseJson(readFile(Root / "coworld/gota/coworld_manifest_template.json"))
+  doAssert manifest["game"]["runnable"]["env"]["COGAME_PLAYER_SEATS_SCHEMA"].getStr() ==
+    "coworld-player-seats/2"
   const Source = """
 dim data(24)
 if initialized = 0 then
