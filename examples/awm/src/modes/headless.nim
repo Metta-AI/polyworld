@@ -132,8 +132,7 @@ when defined(coworld):
           try:
             selected.add vm.chooseClass(seats, options.seed.int64)
           except BasicError as error:
-            playerError(slot, error.msg)
-            raise newException(CoworldError, error.msg)
+            rejectPlayer(slot, error.msg)
         selected
     let recorder = initReplayRecorder(
       matchSetup(classes, options.seed, options.maximumTicks), coworld.config)
