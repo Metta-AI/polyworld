@@ -6,7 +6,6 @@ import json
 import subprocess
 from pathlib import Path
 
-
 COHORT = (
     "test_animblend_controls",
     "test_characters",
@@ -105,7 +104,12 @@ if __name__ == "__main__":
         command.extend((f"--out:{executable}", str(source)))
         with (output / f"{test}.log").open("w") as log:
             result = subprocess.run(
-                command, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=90
+                command,
+                cwd=root,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=90,
+                check=False,
             )
         report["results"].append(
             {
@@ -123,7 +127,12 @@ if __name__ == "__main__":
         )
         with (output / f"{test}.run.log").open("w") as log:
             run = subprocess.run(
-                execution, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=30
+                execution,
+                cwd=root,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=30,
+                check=False,
             )
         report["results"][-1].update(
             execution=execution,
