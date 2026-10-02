@@ -2330,6 +2330,24 @@ proc worldObjectCount*(world: World, heroId: int32): int =
   let team = world.ensureScriptObjects(heroId)
   world.scriptObjectCount[team]
 
+proc scriptObject*(
+    world: World,
+    heroId: int32,
+    index: int,
+    team: var Team
+): ptr WorldObject =
+  ## Returns one object of a hero's visibility-filtered enumeration where
+  ## it sits, along with the hero's team, or nil. Nothing is copied, and
+  ## the object stays put until the next decision frame rebuilds the
+  ## enumeration, so read what is needed from it straight away.
+  if world.heroIndex(heroId) < 0:
+    return nil
+  team = world.ensureScriptObjects(heroId)
+  if index < 0 or index >= world.scriptObjectCount[team]:
+    return nil
+  world.scriptObjects[team][index].addr
+
+
 proc worldObjectAt*(
     world: World,
     heroId: int32,
