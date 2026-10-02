@@ -152,7 +152,7 @@
       "name": "Baseline",
       "type": "player",
       "file": "players/base.bas",
-      "description": "AWM BASIC baseline: plays the first affordable card in hand, aiming at the enemy hero, then an enemy minion; two-target cards go on its own minion when the rule helps it."
+      "description": "AWM BASIC baseline: randomly chooses its class, card order, legal hero and minion attack targets, card targets, discards, and trigger targets; explicitly ends turns. Uses 5,000,000 instructions and 64 MiB of VM memory."
     }
   ],
   "variants": [
