@@ -64,3 +64,35 @@ discard buildTextureArray(layers, GL_REPEAT.GLint)
 doAssert generated == 4
 
 echo "Prop texture cache preserves pixels, mip shape, wrapping and owner scope"
+
+# Final mip identity, not base-image identity, owns compact layer sharing.
+block:
+  let original = @[@[base, tail], @[base.copy(), tail.copy()],
+    @[base.copy(), changed], @[base.copy(), tail.copy()]]
+  var compact = original
+  let model = PropModel(uvs: @[0.25'f32, 0.75, 3, 0.5, 0.125, 2, 1, 0, 1])
+
+  let originalUvs = model.uvs
+  compactPropTextureLayers(compact, @[model])
+  doAssert compact.len == 2
+  doAssert model.uvs == @[0.25'f32, 0.75, 0, 0.5, 0.125, 1, 1, 0, 0]
+  for index in countup(2, model.uvs.high, 3):
+    for mip in 0 ..< original[originalUvs[index].int].len:
+      doAssert compact[model.uvs[index].int][mip].data ==
+        original[originalUvs[index].int][mip].data
+
+  let beforeUploads = uploads
+  discard buildTextureArray(compact, GL_REPEAT.GLint)
+  doAssert uploads - beforeUploads == 4, "Only two distinct two-mip layers upload"
+  let stableUvs = model.uvs
+  compactPropTextureLayers(compact, @[model])
+  doAssert model.uvs == stableUvs and compact.len == 2
+
+echo "Prop layer compaction preserves all sampled mips and material references"
+
+block:
+  var layers = @[@[base, tail], @[base.copy(), tail.copy()]]
+  let model = PropModel(materialColors: true, uvs: @[0'f32, 0, 1])
+  compactPropTextureLayers(layers, @[model])
+  doAssert layers.len == 2 and model.uvs[2] == 1,
+    "Retexturable packs retain painted versus unpainted layer identity"

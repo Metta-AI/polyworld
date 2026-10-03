@@ -1460,6 +1460,27 @@ proc propTextureKey(layers: seq[seq[Image]]; wrap: GLint): string =
         state.update(bytes.toOpenArray(0, mip.data.len * sizeof(mip.data[0]) - 1))
   $SecureHash(state.finalize())
 
+proc compactPropTextureLayers(layers: var seq[seq[Image]]; models: seq[PropModel]) =
+  ## Keep first-occurrence layer order; compare final pixels including cutout mips.
+  if layers.len < 2: return
+  # Retexturing distinguishes painted white from the reserved unpainted layer.
+  for model in models:
+    if model.materialColors: return
+  var indices: Table[string, int]
+  var unique: seq[seq[Image]]
+  var remap: seq[int]
+  for chain in layers:
+    let key = propTextureKey(@[chain], 0)
+    if key notin indices:
+      indices[key] = unique.len
+      unique.add chain
+    remap.add indices[key]
+  if unique.len == layers.len: return
+  layers = unique
+  for model in models:
+    for index in countup(2, model.uvs.high, 3):
+      model.uvs[index] = remap[model.uvs[index].int].float32
+
 proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint;
     cache: PropTextureCache = nil): GLuint =
   ## Uploads equally sized RGBA mip chains as one anisotropic
@@ -1551,6 +1572,7 @@ proc loadPropPack*(
         GL_REPEAT.GLint
       else:
         GL_CLAMP_TO_EDGE.GLint
+    compactPropTextureLayers(chains, result.models)
     result.textureArray = buildTextureArray(chains, wrap, textureCache)
     for model in result.models:
       model.textureArray = result.textureArray
