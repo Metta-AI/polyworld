@@ -138,6 +138,14 @@ if __name__ == "__main__":
             execution=execution,
             runtime_exit_code=run.returncode,
             executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
+            runtime_artifacts_sha256={
+                artifact.name: hashlib.sha256(artifact.read_bytes()).hexdigest()
+                for artifact in (
+                    [executable, executable.with_suffix(".wasm")]
+                    if args.target == "wasm"
+                    else [executable]
+                )
+            },
             output_sha256=hashlib.sha256(
                 (output / f"{test}.run.log").read_bytes()
             ).hexdigest(),

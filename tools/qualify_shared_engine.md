@@ -28,3 +28,9 @@ The shared low-memory wrapper initially refused admission75 while another task h
 that owner released the seat. No lock bypass or shared dependency edits occurred. Consumer source remains unchanged.
 This proves the existing consumer's simulation/replay hash portability, including puzzle and paid-labor fixtures.
 Browser rendering and acceptance in the other two games remain unqualified.
+
+Runtime artifact custody includes the native executable, or both the JavaScript loader and its `.wasm` module.
+The qualifier fails if the expected module is missing. The primary executable hash remains separately recorded.
+`qualify_shared_engine_runtime_artifacts.json` adds the module identities to retained execution evidence.
+All six native and six Node runs reproduce their recorded assertion-output hashes.
+This is artifact reexecution, not recompilation or rendered consumer acceptance.
