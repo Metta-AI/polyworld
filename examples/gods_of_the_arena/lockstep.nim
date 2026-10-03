@@ -46,7 +46,7 @@ type
     command: CommandAttribution
 
   StepTrace {.bycopy.} = object
-    heroId, seat, tickBefore, tickAfter: int32
+    heroId, seat, team, tickBefore, tickAfter: int32
     potentialBefore, potentialAfter: int64
 
   StepLane = object
@@ -247,7 +247,7 @@ proc step*(
         let hero = game.world.heroes[index]
         game.world.commandAttributionHeroes.add hero.id
         batch.stepTrace[agent + i] = StepTrace(
-          heroId: hero.id, seat: int32(index),
+          heroId: hero.id, seat: int32(index), team: int32(hero.team.ord),
           tickBefore: game.world.tick,
           potentialBefore: lane.potentials[hero.team]
         )
@@ -385,7 +385,7 @@ proc gota_trace_enable(handle: pointer, maxCommands: cint) {.cdecl, exportc, dyn
   cast[StepBatch](handle).commandTraceLimit = int(maxCommands)
 
 proc gota_trace_identity(
-    handle: pointer, heroIds, gameSeats: ptr UncheckedArray[int32]
+    handle: pointer, heroIds, gameSeats, gameTeams: ptr UncheckedArray[int32]
 ) {.cdecl, exportc, dynlib.} =
   let batch = cast[StepBatch](handle)
   doAssert batch.commandTraceLimit > 0
@@ -394,6 +394,7 @@ proc gota_trace_identity(
     for index in lane.agents:
       heroIds[agent] = lane.game.world.heroes[index].id
       gameSeats[agent] = int32(index)
+      gameTeams[agent] = int32(lane.game.world.heroes[index].team.ord)
       inc agent
 
 proc gota_trace_count(handle: pointer): cint {.cdecl, exportc, dynlib.} =
