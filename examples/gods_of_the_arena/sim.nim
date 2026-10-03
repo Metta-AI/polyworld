@@ -267,7 +267,14 @@ type
     team: Team
     hero, fixed: bool
 
+  CommandAttribution* {.bycopy.} = object
+    ## Result of an actual command-handler call, not proof of later damage/movement.
+    tick*, heroId*, action*, slot*, first*, second*, error*, offsetX*, offsetY*: int32
+
   World* = ref object
+    commandAttributionLimit*: int
+    commandAttributionHeroes*: seq[int32]
+    commandAttribution*: seq[CommandAttribution]
     when defined(replayEvents):
       events*: seq[GameEvent]
       eventTick: int32
@@ -1093,6 +1100,14 @@ proc finishAction(
     offset = FixedVec2Zero
 ): bool =
   ## Updates only the submitting hero's diagnostic and records failed commands.
+  if world.commandAttributionLimit > 0 and heroId in world.commandAttributionHeroes:
+    doAssert world.commandAttribution.len < world.commandAttributionLimit,
+      "command attribution capacity exceeded"
+    world.commandAttribution.add CommandAttribution(
+      tick: world.tick, heroId: heroId, action: int32(action), slot: slot,
+      first: first, second: second, error: int32(error.ord),
+      offsetX: int32(offset.x), offsetY: int32(offset.y)
+    )
   let index = world.heroIndex(heroId)
   if index >= 0:
     world.heroes[index].lastActionError = error
