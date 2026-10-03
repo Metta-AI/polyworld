@@ -7,7 +7,7 @@
 ## (prop models load from ../polyworld_data/terrain/).
 
 import
-  std/[os, random, strformat, strutils, tables],
+  std/[os, random, sha1, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, pixie/internal, shady, vmath,
   assets, common, pathing, profiles, shadows, terrainblends, terrainmaps,
   terrainreliefs, terrainsurfaces, textures, toon
@@ -1014,6 +1014,13 @@ type
     rotation: float32
     scale: float32  # mild per-instance jitter around 1
 
+  PropTextureCache* = ref object
+    ## Share immutable prop atlases within one GL context. Keep the cache with
+    ## the packs' asset owner and discard it when that context is destroyed.
+    ## Entries retain texture handles and digests, never CPU pixel copies.
+    textures: Table[string, GLuint]
+    hits, misses: int
+
   PropPack* = ref object
     models: seq[PropModel]
     names: OrderedTable[string, int]
@@ -1432,9 +1439,39 @@ proc loadTreeTextures(style: TreeStyle): seq[seq[Image]] =
         c.a = uint8(min(c.a.float32 * alphaScale, 255))
     result.add chain
 
-proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
+proc newPropTextureCache*(): PropTextureCache =
+  ## Creates an optional cache for one context's immutable prop atlases.
+  PropTextureCache()
+
+proc propTextureCacheStats*(cache: PropTextureCache): tuple[entries, hits, misses: int] =
+  ## Reports sharing without changing atlas ownership or lifetime.
+  if cache.isNil: (0, 0, 0)
+  else: (cache.textures.len, cache.hits, cache.misses)
+
+proc propTextureKey(layers: seq[seq[Image]]; wrap: GLint): string =
+  var state = newSha1State()
+  state.update($wrap & ":" & $layers.len & ";")
+  for chain in layers:
+    state.update($chain.len & ";")
+    for mip in chain:
+      state.update($mip.width & ":" & $mip.height & ":" & $mip.data.len & ";")
+      if mip.data.len > 0:
+        let bytes = cast[ptr UncheckedArray[char]](mip.data[0].unsafeAddr)
+        state.update(bytes.toOpenArray(0, mip.data.len * sizeof(mip.data[0]) - 1))
+  $SecureHash(state.finalize())
+
+proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint;
+    cache: PropTextureCache = nil): GLuint =
   ## Uploads equally sized RGBA mip chains as one anisotropic
   ## GL_TEXTURE_2D_ARRAY, one chain per layer.
+  var key: string
+  if not cache.isNil:
+    key = propTextureKey(layers, wrap)
+    if key in cache.textures:
+      inc cache.hits
+      glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
+      return cache.textures[key]
+    inc cache.misses
   glGenTextures(1, result.addr)
   glBindTexture(GL_TEXTURE_2D_ARRAY, result)
   for level, mip in layers[0]:
@@ -1466,12 +1503,14 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, wrap)
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, wrap)
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
+  if not cache.isNil and result != 0:
+    cache.textures[key] = result
 
 proc loadPropPack*(
     paths: openArray[string], unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false,
     textureSize = 0, mergeNodes = false, materialColors = false,
-    textureOverride: Image = nil
+    textureOverride: Image = nil, textureCache: PropTextureCache = nil
 ): PropPack =
   ## Loads named glTF props, scaled to unit height unless disabled.
   ## MergeNodes joins each file into one prop named after its file stem.
@@ -1512,7 +1551,7 @@ proc loadPropPack*(
         GL_REPEAT.GLint
       else:
         GL_CLAMP_TO_EDGE.GLint
-    result.textureArray = buildTextureArray(chains, wrap)
+    result.textureArray = buildTextureArray(chains, wrap, textureCache)
     for model in result.models:
       model.textureArray = result.textureArray
   if unitHeight:
@@ -1526,12 +1565,12 @@ proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f,
     only: seq[string] = @[], textured = false, repeatTexture = false,
     textureSize = 0, mergeNodes = false, materialColors = false,
-    textureOverride: Image = nil
+    textureOverride: Image = nil, textureCache: PropTextureCache = nil
 ): PropPack =
   ## Loads an original single-file prop pack through the shared collector.
   loadPropPack(
     @[path], unitHeight, brightness, only, textured, repeatTexture,
-    textureSize, mergeNodes, materialColors, textureOverride)
+    textureSize, mergeNodes, materialColors, textureOverride, textureCache)
 
 proc createPropPack*(
     nodes: openArray[gltf.Node], textureSize = 512,
