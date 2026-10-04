@@ -1,5 +1,5 @@
 {
-  "scope": "Source-qualified peer receipts for current consumer review. Original three-consumer acceptance OPEN; no new runs, graphics allocation or persistent-world claim.",
+  "scope": "Source-qualified consumer receipts. Original three-consumer acceptance OPEN. Published exact00b peer artifact identities without rerunning consumers or claiming hardware/persistent-world readiness.",
   "pirates_current": {
     "source": "7c23a909d3d59b19e4eefe5c7551f48b350d3d88",
     "main_readback": "7c23a909d3d59b19e4eefe5c7551f48b350d3d88",
@@ -62,13 +62,14 @@
   "hardware_remaining": {
     "source": "7c23a909d3d59b19e4eefe5c7551f48b350d3d88",
     "runtime_assets": "Current7c23 readiness pins58publishedassets and nativebinary; source-qualified ready packet reviewed, graphics not launched",
-    "execution": "Not authorized by latest noGPU steering; existingowner50/UI33 retains runtime; no duplicate",
+    "execution": "Richard branch authority supersedes stale closer/noGPU wording. Readiness-qualified bounded existing-hardware proof remains subject to current source audit and idle lease/source-owner coordination. Owner50/UI33 retains current consumer work; no duplicate run, paid node or foreign mutation.",
     "gates": [
       "normal+compact actual1500msheldinput with original frame/HTTP/error gates",
       "current native/browser scene parity, animation, attachments, picking",
       "terrain/collision/pathing/state/screenshots and fixedmap memory/multiclient measurements"
     ],
-    "ready_receipt_sha256": "caa987e8af0754610bc8fdb1cb7bff1182ea9b71f6e29a40fa914ff4528c22bd"
+    "ready_receipt_sha256": "caa987e8af0754610bc8fdb1cb7bff1182ea9b71f6e29a40fa914ff4528c22bd",
+    "pin_limit": "Historical7c23 runtime packet remains at7c23; current00b and newer renderer source need their own readiness/paired proof."
   },
   "cogcraft_remaining": {
     "owner": "persistent-games50/UI33",
@@ -100,5 +101,67 @@
     },
     "retained_build_manifest_sha256": "2bc66a7fb911870b32960798f42513886c45cfe97e154adc69c1fc813d597441",
     "identity_readback": "Existing retained25e832 browser-build manifest and local complete commit identity; no runtime/build rerun or new acceptance."
+  },
+  "pirates_peer00b": {
+    "receipt_sha256": "34a6b550d68663ad50130ebbcb136a451b1c443385e1bca8f8af24578b162831",
+    "receipt": {
+      "source": "00b883566abc5ad21c55474bf3510600511c43f4",
+      "run": 37205939757,
+      "workflowConclusion": "success",
+      "artifacts": {
+        "nativeCrewShop": 11304384703,
+        "sharedBrowser": 11304719186,
+        "coreRulesReplay": 11305490079
+      },
+      "nativeShop": {
+        "outcome": "pass",
+        "seconds": 80.375996037,
+        "keyboardStrikes": 6,
+        "cancelledReceipts": 4,
+        "shopCoins": 100,
+        "nativeSha256": "8a28096660dd65fffc3a692d0aac8550fc16eff59d4223d224f8b4592276bf5b",
+        "serverSha256": "822658fb9e816fe6ae732bfa77ff93ac6b7508df184e2e92f2346a307e94f180"
+      },
+      "ordinaryBrowser": {
+        "complete": true,
+        "sessions": 2,
+        "renderedTacticalGrapple": true,
+        "physicalBoardingActions": 2,
+        "boardingCommandRaces": 0,
+        "reportReconnect": true,
+        "sharedReportAcknowledgement": true,
+        "cargoSales": 3,
+        "offlineBeneficiaryPaid": true,
+        "durableProcessReconnect": true,
+        "settlementSetup": false
+      },
+      "replay": {
+        "nativeWasmEqual": true,
+        "lines": 167,
+        "sha256": "a5267673bc309265b90724fc2cd2cada9ccd50cad258ed24f26a7f2a44db45e4"
+      },
+      "frames": {
+        "samples": 42,
+        "renderedFrames": 43,
+        "timeout": true,
+        "p95": 883.2000000000007,
+        "max": 949.8999999999996,
+        "mean": 614.2595238095239,
+        "schedulingBackend": "software"
+      },
+      "reviewedImages": [
+        "native-1/keyboard-forge-1440.png",
+        "native-2/reconnected-owner-1440.png",
+        "native-2/reconnected-owner-960.png"
+      ],
+      "limits": [
+        "Source00b only; current main2311 renderer/UI changed",
+        "Software frames remain negative; no hardware verdict",
+        "Six keyboard strikes are earned intermediate forge progress, not completed paid production",
+        "No duplicate consumer/GPU run"
+      ],
+      "latestOwnerRun": 37223507259
+    },
+    "acceptance": "Exact00b gameplay/keyboard/refund and nativeWasm replay proof; softwarep95883.2ms still fails original frame gate. Current peer renderer changes not relabeled. No duplicate consumer run."
   }
 }
