@@ -77,8 +77,7 @@
   },
   "dwarf_completed_slice": {
     "browser_main": "ccc3d7d403930d1b274ddf1c13cde434cf76f12c",
-    "rendered_source": "955484aa",
-    "engine": "a808",
+    "engine": "a808ccc81f06cd9cfdbfa872f795cba21aa1a7b1",
     "wasm_sha256_prefix": "544c9162",
     "js_sha256_prefix": "306bbf02",
     "actual_browser_two_clients_frames": 600,
@@ -86,6 +85,11 @@
       48.0,
       47.7
     ],
-    "scope": "Completed native/software-browser picking/save/reload/state/multiclient slice on its recorded cohort, not hardware/color/skeletal parity. Prior full receipts in runtime_artifacts.json, do not rerun."
+    "scope": "Completed native/software-browser picking/save/reload/state/multiclient slice on its recorded cohort, not hardware/color/skeletal parity. Full downstream proof is published in DwarfFortress PR7/8; retained local raw receipts are separate from the asset-free engine execution report. Do not rerun.",
+    "rendered_source_prefix": "955484aa",
+    "review_sources": [
+      "https://app.graphite.dev/github/pr/Metta-AI/dwarf_fortress/7",
+      "https://app.graphite.dev/github/pr/Metta-AI/dwarf_fortress/8"
+    ]
   }
 }
