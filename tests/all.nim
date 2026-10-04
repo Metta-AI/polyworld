@@ -11,12 +11,15 @@ import test_gota_abilities
 import determinism
 import
   test_cli,
+  test_annotations,
+  test_policy_hosts,
   test_tapes,
   test_policy_packages,
   test_gota_neural,
   test_gota_andre,
   test_gota_fly,
   test_gota_host,
+  test_gota_structures,
   test_gota_observations,
   test_gota_replays,
   test_gota_attacks,

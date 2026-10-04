@@ -1,5 +1,5 @@
 import std/[json, options, unittest]
-import ../awmsessions
+import ../src/core/sessions
 
 suite "session options":
   test "defaults":
@@ -8,6 +8,7 @@ suite "session options":
     check not options.seedGiven
     check options.playerClass == Archer
     check options.opponentClass == Mage
+    check options.playerCount == 2
     check options.human == false
 
   test "URL argument forms and negative seeds":
@@ -25,6 +26,25 @@ suite "session options":
     check parseSessionOptions(["--human=yes"]).human == true
     check parseSessionOptions(["--human", "false"]).human == false
     check parseSessionOptions(["--human", "--seed", "1"]).human == true
+
+  test "player count selects a scene without changing duel options":
+    check parseSessionOptions(["--players=2"]).playerCount == 2
+    check parseSessionOptions(["--players=3"]).playerCount == 3
+    let options = parseSessionOptions([
+      "--players", "6", "--human", "--class=warrior", "--seed=42"])
+    check options.playerCount == 6
+    check options.human
+    check options.playerClass == Warrior
+    check options.seed == 42
+    check options.seedGiven
+
+  test "invalid and missing player counts fail clearly":
+    for args in [@["--players"], @["--players="],
+        @["--players", "--seed=42"], @["--players=many"],
+        @["--players=3.5"], @["--players=0"], @["--players=1"],
+        @["--players=-3"], @["--players=9223372036854775808"]]:
+      expect ValueError:
+        discard parseSessionOptions(args)
 
   test "invalid and incomplete options fail clearly":
     for args in [@["--seed=none"], @["--class=rogue"],
@@ -237,7 +257,7 @@ suite "owned game snapshots":
     check game.players[0].board.len == 5
 
 import std/os
-import ../awmbots
+import ../src/core/bots
 
 suite "bots and two-target cards":
   proc duelGame(): (GameState, int) =

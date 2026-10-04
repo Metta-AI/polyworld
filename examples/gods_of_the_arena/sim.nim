@@ -70,6 +70,11 @@ type
     prepareDecision*: proc(tick: int32) {.closure.}
     pollRequests*: proc(): bool {.closure.}
     runtime*: Runtime
+    structured*: bool
+    legacyHeroData*: bool
+    structureGlobals*: seq[GlobalView]
+    structureFields*: seq[bool]
+    structureArrays*: seq[ArrayView]
     limits*: Limits
     ready*: bool
     failed*: bool
@@ -343,6 +348,8 @@ type
     replayMode*: bool
     recordingError*: string
     heroVms*: seq[HeroVm]
+    structuredBots*: bool
+    structureCounts*: array[Team, array[8, int32]]
     inboxes*: seq[Mailbox]
     nextFootmen: seq[Footman]
     nextHeroes: seq[Hero]
@@ -2377,6 +2384,30 @@ proc worldObjectAt*(
     return false
   value = world.scriptObjects[team][index]
   true
+
+iterator scriptObjects*(world: World, heroId: int32): lent WorldObject =
+  ## Borrows the existing visibility-filtered frame without copying objects.
+  if world.heroIndex(heroId) >= 0:
+    let team = world.ensureScriptObjects(heroId)
+    for value in world.scriptObjects[team]:
+      yield value
+
+proc scriptObject*(
+    world: World,
+    heroId: int32,
+    index: int,
+    team: var Team
+): ptr WorldObject =
+  ## Returns one object of a hero's visibility-filtered enumeration where
+  ## it sits, along with the hero's team, or nil. Nothing is copied, and
+  ## the object stays put until the next decision frame rebuilds the
+  ## enumeration, so read what is needed from it straight away.
+  if world.heroIndex(heroId) < 0:
+    return nil
+  team = world.ensureScriptObjects(heroId)
+  if index < 0 or index >= world.scriptObjectCount[team]:
+    return nil
+  world.scriptObjects[team][index].addr
 
 proc worldObjectById*(
     world: World,

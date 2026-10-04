@@ -2,11 +2,12 @@
 
 **New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.
 
-Two teams of five BASIC heroes battle to slay the enemy god. The ladder uses
-**Emmett's Glory**: each winning hero's lifetime XP divided by elapsed simulated
-minutes, rounded down to whole points. Fractional minutes and drafting time
-count. Losing teams, draws, and timeouts score zero. There is no fixed XP
-penalty per minute. Zero-duration games score zero.
+Two teams of five BASIC heroes battle to slay the enemy god. The Softmax ladder
+uses team win/loss MMR and matchmaking that favors nearby ratings. Game results
+also report **Emmett's Glory**: each winning hero's lifetime XP divided by
+elapsed simulated minutes, rounded down to whole points. Fractional minutes
+and drafting time count. Losing teams, draws, and timeouts score zero.
+There is no fixed XP penalty per minute. Zero-duration games score zero.
 
 Destroying the enemy god grants every hero on your team a flat 1,000 XP,
 including dead heroes and heroes elsewhere on the map, regardless of who lands
@@ -25,7 +26,7 @@ Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upl
 
 Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/gods_of_the_arena/bots.nim` and `content.nim`.
 
-The baseline is a playable reference for all GotA host functions. It drafts
+The baseline is a playable reference using structured GotA observations. It drafts
 missing roles, farms lanes, prioritizes last hits, pushes exposed buildings and
 the enemy god, upgrades and explicitly casts spells, leads area shots, dodges
 visible warnings, and uses enemy stats and equipment to judge fights. It also
@@ -34,9 +35,8 @@ and buys back when affordable. Actions are conditional on a useful opportunity,
 so one match need not exercise every mechanic. Its observation scans are bounded
 and its main decisions run every six ticks. Abilities and items require
 explicit policy commands; the engine never casts or uses them automatically.
-Spell ranges and shapes are not queryable, so their small policy table must
-follow balance changes in `content.nim`; health, damage, costs, and ranks use
-live observations. This is an editable starting point, not an optimal policy.
+Spell lead times and targeting preferences use a small policy table; ranges,
+health, damage, costs, and ranks use live observations. This is an editable starting point, not an optimal policy.
 
 Every hero has a free single-target melee or ranged basic attack in addition
 to four abilities. Basic damage grows each level and includes equipment bonuses.
@@ -51,6 +51,86 @@ charges.
 
 The bundled `players/rusher.bas` sends all five heroes down mid together. It regroups toward the living team's center when any pair is more than 10 tiles apart, closing to 8 tiles before resuming. It attacks visible, vulnerable enemies within 20 tiles, favoring the enemy closest to the group's center. Otherwise it attack-moves through the middle and toward the opposing god. Dead allies are ignored until they respawn. This policy uses basic attacks only; add explicit casting commands to use abilities.
 
+## Structured observations
+
+Existing policies keep working without changes. To use the additional API,
+put this marker on the first nonblank line of your BASIC source:
+
+```basic
+' @gota-structures
+
+if draft.active then
+  if draft.turnId = self.id then
+    accepted = draftHero(Ranger)
+  end if
+  end
+end if
+
+for i = 0 to match.objectCount - 1
+  if objects(i).team <> self.team and objects(i).alive then
+    accepted = attackTarget(objects(i).id)
+    exit for
+  end if
+next i
+```
+
+The host supplies the types and declarations in
+[`structures.bas`](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/structures.bas).
+Do not redeclare these names. Additional policy-defined types are allowed.
+
+| Record | Contents |
+| --- | --- |
+| `self` | Own health, mana, economy, level/XP, role, motion, combat, controls, respawn, shop and buyback state. |
+| `objects(i)` | Visible objects, including health, level, mana, motion, target, controls and neutral-camp metadata. |
+| `abilities(slot)` | Four ability slots with ranks, upgrade eligibility, effects, costs, range/radius, casting kind, charges and timers. |
+| `items(slot)` | Six inventory slots with ID, count and cooldown. |
+| `objectItems(i * 6 + slot)` | Visible object inventory IDs and stack counts. |
+| `spells(i)` | Visible spell warnings, positions, ability/caster IDs, impact tick, hostile and support flags. |
+| `camps(i)` | Public camp positions and difficulty tiers. |
+| `match` | Match/battle ticks, limits, seed, wave timers, observation counts and team-known building counts. |
+| `map` | Dimensions, layer count, world-to-map origin and enemy god position. |
+| `draft`, `players(i)`, `heroChoices(class)` | Draft state, public roster selections, roles and hero availability. |
+| `lastAction` | The latest gameplay command's `accepted` flag and `error` code. |
+| `tile` | Terrain kind, walkability, height and water depth after `readTile(x, y, layer)`. |
+
+Positions use FIXED tile-center map coordinates, the same frame accepted by
+`walkTo`, `attackMove`, `castPoint` and `useItemAt`. They are not team-relative.
+`position.y` is the map's second horizontal axis. Facing is a unit vector;
+velocity and `self.moveSpeed` are tiles per simulation tick. Attack and ability
+ranges are tiles. Durations end in `Ticks`; `spells(i).impactTick` is an absolute
+world tick. Flags, counts, IDs and health are INTEGER. Tile height/water depth
+retain the legacy terrain query units. `readTile` requires integer tile indices;
+use `floor(position.x + .5)` to select the containing tile.
+
+The visible-object and spell collections are a snapshot of the decision frame.
+They use the existing team LOS filter. Hidden target/caster identities remain
+zero, and enemy building counts use team-known state. `objects(i).alive`
+preserves `objectAlive(i)` semantics, including building vulnerability.
+Camp records contain static geometry, not hidden respawn or population data.
+Use the corresponding count: `match.objectCount`, `match.spellCount`,
+`match.campCount`, or `draft.playerCount`. Indices can change between decisions;
+remember stable IDs instead. Slots vacated by a shrinking collection are cleared.
+
+Own state, inventory, abilities, draft state and action feedback refresh after
+each gameplay command, including rejected commands. This lets a policy upgrade
+several abilities or buy several items in one decision. World snapshots stay
+fixed until the next decision. Writes to records only change the policy's copy;
+they cannot heal a hero, reveal an enemy, or alter the simulation.
+
+The API reserves space for 4,096 objects, 2,048 warnings, 64 camps, 10 players,
+and 10 hero choices. Exceeding a collection capacity raises a BASIC error rather
+than silently omitting observations. Structured policies have limits of 512
+scalar fields/globals, 128 array fields/arrays, 262,144 array cells and 8 MiB
+logical VM storage. Snapshot fields count toward those limits. Existing policies
+retain their original limits, and instruction/work budgets are unchanged.
+
+The host prepares referenced scalar fields and loads array columns on first
+access, avoiding work for observations a policy does not use. Loading keeps
+the same decision snapshot and does not change instruction or work budgets.
+
+The baseline now uses these records. The legacy scalar variables, functions,
+math helpers, neural functions, and chat/LLM APIs remain available.
+
 ## Drafting
 
 Every live match starts with a draft. A seeded random team picks first.
@@ -64,6 +144,10 @@ The match setting `draft_mode` selects the hero availability rules:
 | Unique Draft (default) | `unique` | Each hero class once across both teams. |
 | Team Draft | `team` | Each hero class once per team. Enemy teams may mirror picks. |
 | Open Draft | `open` | Any duplicates, including ten players using the same hero. |
+
+The Softmax Competition league uses Open Draft. Every player may pick any
+hero, including a hero already picked by a teammate or an opponent. Local
+games keep Unique Draft unless a different mode is selected.
 
 Local games accept `--draft-mode team` or `--draft-mode open`. The web
 player accepts `?draft-mode=team` or `?draft-mode=open`. JSON configs use
@@ -400,24 +484,27 @@ BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle mes
 
 Battles run up to 28,800 deterministic ticks (20 simulated minutes), plus drafting time, without real-time pacing. Replays run entirely in the browser with playback, seeking, speed, and loop controls. The server exposes `/healthz`; legacy clients are static stubs.
 
-The Competition league schedules 24 games per round with random matchups,
+The Competition league schedules 24 games per round with MMR-based matchups,
 on a 32-minute interval. Each match uses ten distinct policies when at least
 ten are eligible: five different policies on Red and five on Blue, with
 one hero per policy. The scheduler uses `team_n`, `team_count: 2`,
-`team_layout: "blocks"`, `matchmaking: "random"`, and
+`team_layout: "blocks"`, `matchmaking: "elo_softmax"`,
+`matchmaking_temperature: 100`, and
 `distinct_teammates: true`. Preserve these settings when updating the league.
 Separate baseline filler policies complete short rosters and are not ranked
 entrants. A policy controlling multiple heroes in a short-roster game receives
-their average score, so extra seats do not multiply it.
+their average game score, so extra seats do not multiply it.
 
-Each player's round score is the arithmetic average of their game scores.
-Standings use an exponential moving average: 15% of the new round score plus
-85% of the previous standing. The first scored round sets the initial standing.
-Higher standings rank first. Opponent ratings and win/loss Elo do not affect
-either standings or matchmaking. For example, a winning hero with 3,000
-lifetime XP after 10.5 simulated minutes scores 285. A losing hero scores zero
-regardless of XP. A previous standing of 800 followed by a round average of
-1,000 becomes 830.
+Standings use Elo MMR with an initial rating of 1,500 and K=32. Each match
+counts as a team win, loss, or draw. All rated players on a team receive the
+same rating change, based on the two teams' average MMR and the match result.
+XP and the size of an Emmett's Glory score do not affect MMR. Draws and
+timeouts count as draws. Higher MMR ranks first.
+
+Matchmaking favors players near the rating of the selected lobby's first
+player, with a scale of 100 MMR points, and balances the two teams'
+ratings. Players with fewer appearances get priority. This reduces large
+rating mismatches while still allowing them when the roster is small.
 
 ## BASIC numbers and coordinates
 

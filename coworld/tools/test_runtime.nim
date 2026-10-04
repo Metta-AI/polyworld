@@ -1,7 +1,7 @@
 ## Exercises the file handoff against compiled native Coworld games.
 
 import
-  std/[json, monotimes, net, os, osproc, strtabs, strutils, tempfiles,
+  std/[json, monotimes, net, os, osproc, sequtils, strtabs, strutils, tempfiles,
     times, uri],
   crunchy, jsony,
   ../../tests/neuralfixtures,
@@ -11,7 +11,8 @@ const
   Root = currentSourcePath().parentDir.parentDir.parentDir
   LogLimit = 10 * 1024 * 1024
   SocketTimeout = 5000
-  Games = [("gota", 10), ("lvd", 2), ("cta", 4)]
+  Games = [("gota", 10), ("lvd", 6), ("cta", 4),
+    ("awm", 2), ("awm", 7)]
 
 proc fileUri(path: string): string =
   ## Encodes one absolute path for the runner's local file handoff.
@@ -106,7 +107,9 @@ proc episode(
     ticks = 240,
     waitForLlm = false,
     expectedOutput = "",
-    expectedRuntimeError = ""
+    expectedRuntimeError = "",
+    annotations = true,
+    selectClass = true
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
   doAssert scripts.len == count
@@ -132,7 +135,16 @@ proc episode(
     env[key] = value
   env["COGAME_HOST"] = "127.0.0.1"
   env["COGAME_PORT"] = $port
-  for slot, source in scripts:
+  for slot, fixture in scripts:
+    let source =
+      if game == "awm" and selectClass:
+        "IF selectingClass THEN\npickClass(selfPlayer MOD 3)\nEND\n" &
+          "END IF\n" &
+          fixture.splitLines().filterIt(it.strip() != "END").join("\n") &
+          "\n" &
+          readFile(Root / "examples/awm/players/base.bas")
+      else:
+        fixture
     let path = directory / ("player-" & $slot)
     writeFile(path, source)
     config["tokens"].add(%("token-" & $slot))
@@ -145,10 +157,12 @@ proc episode(
       "log_uri": (directory / ("player-" & $slot & ".log")).fileUri(),
       "artifact_uri": (directory / ("player-" & $slot & ".zip")).fileUri()
     }
-    boundedLog = boundedLog or (source.len > 7000 and not source.isPackage)
-    instructionFailure = instructionFailure or source.contains("WHILE")
+    if annotations:
+      seats[slot]["annotations_uri"] = %(directory / ("player-" & $slot & ".jsonl")).fileUri()
+    boundedLog = boundedLog or (fixture.len > 7000 and not fixture.isPackage)
+    instructionFailure = instructionFailure or fixture.contains("WHILE")
   let seatDocument = %*{
-    "schema": "coworld-player-seats/1",
+    "schema": (if annotations: "coworld-player-seats/2" else: "coworld-player-seats/1"),
     "seats": seats,
     "player_status_uri": (directory / "status.json").fileUri()
   }
@@ -186,13 +200,32 @@ proc episode(
   while not fileExists(marker):
     doAssert process.running(), "exit " & $process.peekExitCode() &
       ": " & readFile(logPath)
-    doAssert getMonoTime() < deadline, "episode timed out"
+    doAssert getMonoTime() < deadline,
+      "episode timed out: " & readFile(logPath)
     sleep(20)
   let output = readFile(marker).fromJson(JsonNode)
   doAssert fileExists(directory / "status.json"), "completion preceded status"
   var logs: seq[string]
   for slot in 0 ..< count:
     logs.add readFile(directory / ("player-" & $slot & ".log"))
+  for slot, source in scripts:
+    let path = directory / ("player-" & $slot & ".jsonl")
+    if annotations and source.contains("ANNOTATE"):
+      let lines = readFile(path).strip().splitLines()
+      doAssert lines.len > 0
+      for line in lines:
+        let event = line.fromJson(JsonNode)
+        doAssert event["schema_version"].getInt() == 1
+        doAssert event["time"].getInt() == 123
+        doAssert event["kind"].getStr() == "intent"
+        doAssert event["function"].getStr() == "selectTarget"
+        doAssert event["args"]["target"].getInt() == slot
+      doAssert not logs[slot].contains("selectTarget")
+    else:
+      doAssert not fileExists(path)
+  if expectedOutput == "ANNOTATION-CONTINUED":
+    for log in logs:
+      doAssert not log.contains("BASIC error:")
   if expectedOutput.len > 0:
     for private in logs:
       doAssert private.contains(expectedOutput), private
@@ -263,11 +296,35 @@ proc episode(
     doAssert process.waitForExit(5000) == 0,
       "completed game shutdown failed"
 
+# An optional game name runs only that game's checks.
+let only = if paramCount() > 0: paramStr(1) else: ""
+
+proc selected(game: string): bool =
+  ## Limits runtime checks to the requested game.
+  only.len == 0 or only == game
+
 for (game, count) in Games:
+  if not game.selected:
+    continue
   var scripts: seq[string]
   for slot in 0 ..< count:
     scripts.add "PRINT \"PRIVATE-" & $slot & "\", 1.5\nEND\n"
   episode(game, count, scripts)
+  for slot in 0 ..< count:
+    scripts[slot] = "ANNOTATE(123, \"intent\", \"selectTarget\", \"{\"\"target\"\":" & $slot & "}\")\nEND\n"
+  episode(game, count, scripts)
+  episode(game, count, scripts, annotations = false)
+  let annotationScripts = scripts
+  for invalid in ["[1,2]", "5", "{}}", "{", "{\"x\":}"]:
+    let valid = scripts[0]
+    scripts[0] = valid.replace("END\n", "") &
+      "ANNOTATE(123, \"intent\", \"invalid\", \"" &
+      invalid.replace("\"", "\"\"") & "\")\nPRINT \"ANNOTATION-CONTINUED\"\nEND\n"
+    for slot in 1 ..< count:
+      scripts[slot] = scripts[slot].replace("END\n", "PRINT \"ANNOTATION-CONTINUED\"\nEND\n")
+    episode(game, count, scripts,
+      expectedOutput = "ANNOTATION-CONTINUED")
+    scripts = annotationScripts
   episode(game, count, newSeq[string](count))
   for slot in 0 ..< scripts.len:
     scripts[slot] = "END\n"
@@ -275,6 +332,11 @@ for (game, count) in Games:
   episode(game, count, scripts, failure = true)
   scripts[0] = "WHILE 1\nWEND\n"
   episode(game, count, scripts)
+  if game == "awm":
+    episode(game, count, scripts.mapIt("END\n"), failure = true,
+      selectClass = false,
+      expectedRuntimeError = "BASIC setup selected no class")
+    echo "AWM missing class reports policy failure with healthy endpoints"
   echo game, ": runtime contracts passed"
 
   for slot in 0 ..< scripts.len:
@@ -282,19 +344,24 @@ for (game, count) in Games:
 sendChat(-2, "CHAT")
 print pullMailbox$(), mailboxId()
 """
-  episode(game, count, scripts, ticks = 3, waitForLlm = true,
-    expectedOutput = "CHAT")
+  # AWM actions share a turn, so allow the baseline to reach every seat.
+  episode(game, count, scripts, ticks = (if game == "awm": 240 else: 3),
+    waitForLlm = true, expectedOutput = "CHAT")
   echo game, ": hosted mailbox integration passed"
 
-episode(
-  "lvd",
-  2,
-  @["PRINT \"" & repeat('x', 7900) & "\"\nEND\n", "END\n"],
-  ticks = 28800
-)
-echo "10 MiB player log bound passed"
+if "lvd".selected:
+  episode(
+    "lvd",
+    2,
+    @["PRINT \"" & repeat('x', 7900) & "\"\nEND\n", "END\n"],
+    ticks = 28800
+  )
+  echo "10 MiB player log bound passed"
 
-block:
+if "gota".selected:
+  let manifest = parseJson(readFile(Root / "coworld/gota/coworld_manifest_template.json"))
+  doAssert manifest["game"]["runnable"]["env"]["COGAME_PLAYER_SEATS_SCHEMA"].getStr() ==
+    "coworld-player-seats/2"
   const Source = """
 dim data(24)
 if initialized = 0 then
@@ -322,7 +389,7 @@ print "PACKAGE-PASSED"
     expectedRuntimeError = "BASIC source exceeds")
   echo "GOTA unpacked BASIC reaches the VM source limit and player failure log"
 
-block:
+if "gota".selected:
   let
     library = readFile(Root /
       "examples/gods_of_the_arena/neural/policies/david.bas").split(
@@ -345,7 +412,7 @@ res = nn_david("model.bin", state, data)
     expectedRuntimeError = "David model needs GOTANET1 magic")
   echo "GOTA model errors reach the per-player failure log and status"
 
-block:
+if "gota".selected:
   let
     library = readFile(Root /
       "examples/gods_of_the_arena/neural/policies/andre.bas").split(
