@@ -90,6 +90,15 @@
     "review_sources": [
       "https://app.graphite.dev/github/pr/Metta-AI/dwarf_fortress/7",
       "https://app.graphite.dev/github/pr/Metta-AI/dwarf_fortress/8"
-    ]
+    ],
+    "rendered_source": "955484aad9ddb3ca0f6670926ddceea21c862e1b",
+    "rendered_artifacts_sha256": {
+      "fortress.data": "79e851404657dac2106b3d22ad256d47824a9a5765458edb72c9102a45816d95",
+      "fortress.wasm": "544c91626b44d6740b3ab615a2a4a36994edcbcf7758079364c7c92aee9c55d7",
+      "fortress.html": "363c3447397323d346a244199bdbdeee3c4da69a8e4cb1e51e5a66ce312bbead",
+      "fortress.js": "306bbf02b0ff6511df4a23e5c728c0c10638a64f6bd37d3f97160e57590a21e1"
+    },
+    "retained_build_manifest_sha256": "2bc66a7fb911870b32960798f42513886c45cfe97e154adc69c1fc813d597441",
+    "identity_readback": "Existing retained25e832 browser-build manifest and local complete commit identity; no runtime/build rerun or new acceptance."
   }
 }
