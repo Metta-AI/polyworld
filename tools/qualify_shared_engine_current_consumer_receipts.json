@@ -1,0 +1,91 @@
+{
+  "scope": "Source-qualified peer receipts for current consumer review. Original three-consumer acceptance OPEN; no new runs, graphics allocation or persistent-world claim.",
+  "pirates_current": {
+    "source": "7c23a909d3d59b19e4eefe5c7551f48b350d3d88",
+    "main_readback": "7c23a909d3d59b19e4eefe5c7551f48b350d3d88",
+    "source_owner": "persistent-games50/UI33",
+    "peer_receipt_sha256": {
+      "20-asyncify-main-delivery-readback.json": "57f1d2363617a2fdd2886991c45464b45a3aa28c031a5d7d31192188988ef652",
+      "20-asyncify-callback-controls.json": "4f618bf827190c9d9fe612410ef96dd699d5e2fcf98f9745a45acb49d70ff437",
+      "20-current7c23-two-browser-60b6d2d26b57451781407f7be3657293/receipt.json": "112ed303a561279367c3bd1450b3b66c4e5e88e019eb2ddc177fe22f944c6a89"
+    },
+    "component_delivered_to_main": true,
+    "actual_two_browser_functional": {
+      "state": "two-browser-physical-move-chat-reload-passed",
+      "elapsedSeconds": 24.69731195794884,
+      "ownedTunnelJoined": true,
+      "peerChatObserved": true,
+      "peerChatReloaded": true,
+      "firstActor": 1,
+      "gpuDisabled": true,
+      "hardwareAcceptance": false
+    },
+    "physical_motion": {
+      "before": {
+        "x": 32,
+        "y": 45
+      },
+      "after": {
+        "x": 33,
+        "y": 45
+      },
+      "reloaded": {
+        "actorId": 1,
+        "frameCount": 3,
+        "position": {
+          "x": 33,
+          "y": 45
+        }
+      }
+    },
+    "indirect_suspension_controls": "Three valid controls pass; ignore-indirect plus indirect yield intentionally fails. Source owner audited actual Harbour direct yield and synchronous callbacks.",
+    "limits": "Software GPU-disabled functional/input/chat/reload proof, not hardware 1500ms held-key frame/transport acceptance, current native/browser full scene parity or original three-consumer18 closure. Earlier4f3 hardware negatives remain authoritative at their source. Linker-O3 comparison not present in these receipts. No duplicate graphics or GPU allocation."
+  },
+  "pirates_previous_negative": {
+    "source": "4f3ef1a7182950bc57db3f3b8e69b34a519f1fda",
+    "engine": "f866e2fddabce9df909ad79de31fe2e2d73592b9",
+    "normal": {
+      "frame_p95_ms": 61.4,
+      "http_p95_ms": 133.9
+    },
+    "compact": {
+      "frame_p95_ms": 27.8,
+      "http_p95_ms": 83.2
+    },
+    "frozen_limits": {
+      "frame_p95_ms": 33.34,
+      "http_p95_ms": 50
+    },
+    "decision": "FAIL; not relabeled to7c23",
+    "receipt_sha256": "2d661ba97cf9292f6ed76c3c251c2bd2c9bc2998cdbdc28ff641e58fb8857b2f"
+  },
+  "hardware_remaining": {
+    "source": "7c23a909d3d59b19e4eefe5c7551f48b350d3d88",
+    "runtime_assets": "Current7c23 readiness pins58publishedassets and nativebinary; source-qualified ready packet reviewed, graphics not launched",
+    "execution": "Not authorized by latest noGPU steering; existingowner50/UI33 retains runtime; no duplicate",
+    "gates": [
+      "normal+compact actual1500msheldinput with original frame/HTTP/error gates",
+      "current native/browser scene parity, animation, attachments, picking",
+      "terrain/collision/pathing/state/screenshots and fixedmap memory/multiclient measurements"
+    ],
+    "ready_receipt_sha256": "caa987e8af0754610bc8fdb1cb7bff1182ea9b71f6e29a40fa914ff4528c22bd"
+  },
+  "cogcraft_remaining": {
+    "owner": "persistent-games50/UI33",
+    "build_only_source": "ffdda2ce42a6ac3e9b27e7ad6b1dd4f19f5b4900",
+    "decision": "Build custody is not renderer/camp acceptance; current source-qualified paired scene receipt remains required. Earlier0558functional receipts remain at their original source."
+  },
+  "dwarf_completed_slice": {
+    "browser_main": "ccc3d7d403930d1b274ddf1c13cde434cf76f12c",
+    "rendered_source": "955484aa",
+    "engine": "a808",
+    "wasm_sha256_prefix": "544c9162",
+    "js_sha256_prefix": "306bbf02",
+    "actual_browser_two_clients_frames": 600,
+    "frame_p95_ms": [
+      48.0,
+      47.7
+    ],
+    "scope": "Completed native/software-browser picking/save/reload/state/multiclient slice on its recorded cohort, not hardware/color/skeletal parity. Prior full receipts in runtime_artifacts.json, do not rerun."
+  }
+}
