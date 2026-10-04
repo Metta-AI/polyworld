@@ -121,6 +121,7 @@ proc installPolicy(batch: StepBatch, lane: ptr StepLane, index: int) =
   let program = compile(source, host, limits)
   bindHeroData(program)
   game.heroVms[index] = HeroVm(
+    legacyHeroData: true,
     runtime: initRuntime(program, host, limits), limits: limits, ready: true
   )
 
