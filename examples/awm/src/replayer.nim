@@ -24,11 +24,14 @@ type
     follow: bool
 
 proc newReplayer*(data: ReplayData): Replayer =
-  ## Creates a viewer that plays one recorded game without looping.
+  ## Creates a viewer that automatically loops the recorded game.
   result = Replayer(data: data,
-    transport: initPlayer(live = false, durationTicks = data.hashes.len.int32),
+    transport: initPlayer(
+      live = false,
+      durationTicks = data.hashes.len.int32,
+      repeating = true
+    ),
     actionCam: initActionCam(), attackTick: -1)
-  result.transport.repeating = false
 
 proc timeScale*(replayer: Replayer): float32 =
   ## How fast the table runs: the selected speed, cards and lunges included.

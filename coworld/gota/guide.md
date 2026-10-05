@@ -131,6 +131,21 @@ the same decision snapshot and does not change instruction or work budgets.
 The baseline now uses these records. The legacy scalar variables, functions,
 math helpers, neural functions, and chat/LLM APIs remain available.
 
+## BASIC-defined neural networks
+
+Policies can implement their neural architecture in BASIC using packed int32,
+Q16.16 or float32 tensors loaded from their ZIP. Float32 stays inside tensors;
+BASIC scalar arithmetic keeps its existing deterministic behavior. Each player's
+VM owns its weights, scratch buffers and recurrent state.
+
+Generic operations include dense and sparse CSR multiplication, activations,
+elementwise math, slicing and gather/scatter. Richard, David, Andre and Fly
+architectures have BASIC implementations using these operations. Existing custom
+runners remain available. Example packages contain synthetic weights only.
+
+See the [tensor API and package format](https://github.com/Metta-AI/polyworld/blob/main/docs/neural-tensors.md)
+for all functions, resource limits and conversion commands.
+
 ## Drafting
 
 Every live match starts with a draft. A seeded random team picks first.
