@@ -5,7 +5,7 @@ import
   std/math,
   bassy, fixxy,
   polyworld/[policyhosts, llms, mailboxes, metrics, bodies, cli, controllers,
-    pathing, profiles, tapes],
+    pathing, profiles, tapes, tensors],
   neural/[common, richard, david, andre, fly],
   content,
   maps,
@@ -120,10 +120,11 @@ proc heroVmLimits(): Limits =
   result.maxSourceBytes = 64 * 1024
   result.maxCodeInstructions = 20_000
   result.maxArrays = 32
+  result.maxNativeBuffers = 256
   result.maxArrayElements = 4096
   result.maxGlobals = 256
   result.maxHostData = 128
-  result.maxHostFunctions = 128
+  result.maxHostFunctions = 256
   result.maxRoutines = 64
   result.maxParameters = 16
   result.maxRegisters = 256
@@ -1035,6 +1036,7 @@ proc initHeroHost(
   discard result.addFunction("readTile", 3, readTile, 128)
   result.infoFunctions(heroId)
   let context = NeuralContext(policy: policy)
+  result.addTensorFunctions(policy)
   result.addNeuralFunctions(
     richardRunner(context), davidRunner(context), andreRunner(context),
     flyRunner(context)
