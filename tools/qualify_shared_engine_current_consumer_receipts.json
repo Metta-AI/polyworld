@@ -69,7 +69,8 @@
       "terrain/collision/pathing/state/screenshots and fixedmap memory/multiclient measurements"
     ],
     "ready_receipt_sha256": "caa987e8af0754610bc8fdb1cb7bff1182ea9b71f6e29a40fa914ff4528c22bd",
-    "pin_limit": "Historical7c23 runtime packet remains at7c23; current00b and newer renderer source need their own readiness/paired proof."
+    "pin_limit": "Historical7c23/00b retained at exactsource; source2311 official published artifact proof added separately. Current already-built pairedbundle/ownerhandoff stillneeded beforehardwareacceptance; donot relabel dirtyfreshvoyage0d966 asclean2311.",
+    "current_peer_source": "2311c87ea165a955987a48ec2e01f3cfb52613cc"
   },
   "cogcraft_remaining": {
     "owner": "persistent-games50/UI33",
@@ -163,5 +164,79 @@
       "latestOwnerRun": 37223507259
     },
     "acceptance": "Exact00b gameplay/keyboard/refund and nativeWasm replay proof; softwarep95883.2ms still fails original frame gate. Current peer renderer changes not relabeled. No duplicate consumer run."
+  },
+  "pirates_peer2311": {
+    "receipt_sha256": "5d08965f44910a7346946415c031263580a9fdefdbc658ea50980843f775d0f9",
+    "receipt": {
+      "source": "2311c87ea165a955987a48ec2e01f3cfb52613cc",
+      "run": 37223507259,
+      "workflowConclusion": "success",
+      "artifacts": {
+        "nativeCrewShop": 11311610884,
+        "sharedBrowser": 11311089418,
+        "coreRulesReplay": 11311645790
+      },
+      "nativeShop": {
+        "outcome": "pass",
+        "seconds": 100.23175215500004,
+        "keyboardStrikes": 6,
+        "cancelledReceipts": 4,
+        "shopCoins": 100,
+        "nativeSha256": "b9668fe0cfabd379aa836ac091969d09ff6772075c37a4bc7eba6185399d705e",
+        "serverSha256": "d8dae37df9054ea66bbd2a372faf90d49dfcc4c63f4f4cf30b3de3625a7e865c"
+      },
+      "ordinaryBrowser": {
+        "complete": true,
+        "sessions": 2,
+        "renderedTacticalGrapple": true,
+        "physicalBoardingActions": 3,
+        "boardingCommandRaces": 1,
+        "reportReconnect": true,
+        "sharedReportAcknowledgement": true,
+        "cargoSales": 3,
+        "offlineBeneficiaryPaid": true,
+        "durableProcessReconnect": true,
+        "settlementSetup": false
+      },
+      "replay": {
+        "nativeWasmEqual": true,
+        "lines": 167,
+        "sha256": "a5267673bc309265b90724fc2cd2cada9ccd50cad258ed24f26a7f2a44db45e4"
+      },
+      "frames": {
+        "samples": 41,
+        "renderedFrames": 42,
+        "timeout": true,
+        "p95": 849.9,
+        "max": 883.3,
+        "mean": 611.763,
+        "schedulingBackend": "software"
+      },
+      "reviewedImages": [
+        "native-1/keyboard-forge-1440.png",
+        "native-2/reconnected-owner-960.png",
+        "desktop-final-tactical-decision.png",
+        "compact-boarding-complete-boards.png"
+      ],
+      "limits": [
+        "Producer2311 only; do not relabel later source",
+        "Software frames remain negative; no hardware verdict",
+        "Six keyboard strikes are intermediate forge progress, not completed paid production",
+        "No duplicate consumer/GPU run"
+      ]
+    },
+    "dependency_source": {
+      "vendor/polyworld": "449ad184052567c30fa54c269ef45ff8c9e8e29b",
+      "vendor/dommy": "2b37c50c7a09e9ef6947ca979b6ced6b28b7b92f"
+    },
+    "dependency_receipt_sha256": "a5c98b2d8464dbce6ca7c69d24ef954cfacfcf286134cd59d2e52c5c7e3f8e2e",
+    "independent_readback": {
+      "native_wasm_bytes_equal": true,
+      "native_wasm_lines": 167,
+      "native_wasm_sha256": "a5267673bc309265b90724fc2cd2cada9ccd50cad258ed24f26a7f2a44db45e4",
+      "compact_image_sha256": "ef7b42929b0983f9a1d142fdbbc723a2c831029c96908d81c98ff3c8cedec345",
+      "compact_visual": "Rendered two boarding boards, CaptainMoss connected, crew2/2 andbrigands2/2, controls/target visible. Stillimage shows owned0moves andtarget48; it does not independently prove sustained movement, animations/attachments or completion."
+    },
+    "acceptance": "Source2311 native/browser gameplay/reconnect and exactnativeWasm replay slice. Softwarep95849.9ms/timeoutnegative remains. Source-qualified engine449ad/Dommy2b37, not older00b/f866. No fullrenderer/hardware/threeconsumerclosure; no duplicate run."
   }
 }
