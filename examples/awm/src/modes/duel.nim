@@ -479,17 +479,17 @@ proc runDuel*(app: App) =
         game.currentPlayer = 1
         play.statusMessage = "Demo: Bubble."
       if getEnv("AWM_DEMO_PRIMORDIAL") == "1":
-        # Primordial returns every other card, Plan included, to its
-        # owner's hand (see AWM_DEMO_ENEMY_BOARD for the other side).
+        # Summon Primordial returns every card the enemy hero controls,
+        # Plan included, to their hand, then summons a Primordial.
         play.animations.setLen(0)
         game.players[0].heroClass = Mage
         game.players[0].board.add MinionState(id: 5, owner: 0,
           card: baseCard("plan-3"), enteredTurn: game.turnNumber)
         game.nextMinionId = max(game.nextMinionId, 6)
-        game.players[0].hand = @[baseCard("primordial-8")]
+        game.players[0].hand = @[baseCard("summon-primordial-8")]
         game.players[0].energy = 10
         game.players[0].totalEnergy = 10
-        if game.playCard(0):
+        if game.playCard(0, heroChoice(1)):
           play.statusMessage = "Demo: Primordial."
       if getEnv("AWM_DEMO_SHARPSHOOTER_TARGET").len > 0:
         # Sharpshooter enters and shoots that enemy card.

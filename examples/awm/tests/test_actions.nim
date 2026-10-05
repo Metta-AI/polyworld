@@ -112,9 +112,11 @@ endTurn()
   doAssert played.game.currentPlayer == player
   doAssert played.game.players[player].energy == 0
   doAssert played.game.players[enemy].life == StartingLife - 10
-  doAssert played.game.players[enemy].board.len == 0
-  doAssert played.game.players[player].board.len == 1
-  doAssert not played.game.players[player].board[0].canAttack
+  # Primordial is a vanilla 10/10 now: the Bear and the Bouncer both stay.
+  doAssert played.game.players[enemy].board.len == 1
+  doAssert played.game.players[player].board.len == 2
+  for minion in played.game.players[player].board:
+    doAssert not minion.canAttack
   human.finishTurn()
   doAssert played.step()
   doAssert played.game.stateHash == human.stateHash
