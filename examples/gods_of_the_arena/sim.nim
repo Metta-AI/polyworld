@@ -272,14 +272,7 @@ type
     team: Team
     hero, fixed: bool
 
-  CommandAttribution* {.bycopy.} = object
-    ## Result of an actual command-handler call, not proof of later damage/movement.
-    tick*, heroId*, action*, slot*, first*, second*, error*, offsetX*, offsetY*: int32
-
   World* = ref object
-    commandAttributionLimit*: int
-    commandAttributionHeroes*: seq[int32]
-    commandAttribution*: seq[CommandAttribution]
     when defined(replayEvents):
       events*: seq[GameEvent]
       eventTick: int32
@@ -1106,14 +1099,6 @@ proc finishAction(
     offset = FixedVec2Zero
 ): bool =
   ## Updates only the submitting hero's diagnostic and records failed commands.
-  if world.commandAttributionLimit > 0 and heroId in world.commandAttributionHeroes:
-    doAssert world.commandAttribution.len < world.commandAttributionLimit,
-      "command attribution capacity exceeded"
-    world.commandAttribution.add CommandAttribution(
-      tick: world.tick, heroId: heroId, action: int32(action), slot: slot,
-      first: first, second: second, error: int32(error.ord),
-      offsetX: int32(offset.x), offsetY: int32(offset.y)
-    )
   let index = world.heroIndex(heroId)
   if index >= 0:
     world.heroes[index].lastActionError = error
@@ -3656,11 +3641,9 @@ proc updateFootman(world: World, footman: var Footman) =
       let other {.cursor.} = world.footmen[i]
       if not world.hostile(other, footman.team):
         continue
-      let distance = distanceSquared(footman.position, other.position)
-      if distance > bestSquared:
-        continue
       if not visible(world, footman.team, other.position):
         continue
+      let distance = distanceSquared(footman.position, other.position)
       if distance < bestSquared or (distance == bestSquared and bestId != 0 and
         targetBefore(other.position, other.id,
           bestPosition, bestId, footman.team)):
@@ -3672,11 +3655,9 @@ proc updateFootman(world: World, footman: var Footman) =
       let hero = world.heroes[i]
       if hero.team == footman.team or hero.state == Dying or hero.hp <= 0:
         continue
-      let distance = distanceSquared(footman.position, hero.position)
-      if distance > bestSquared:
-        continue
       if not visible(world, footman.team, hero.position):
         continue
+      let distance = distanceSquared(footman.position, hero.position)
       if distance < bestSquared or (distance == bestSquared and
         targetFootman < 0 and bestId != 0 and targetBefore(hero.position,
           hero.id, bestPosition, bestId, footman.team)):
