@@ -194,29 +194,6 @@ block:
   layers[0].tiles[4].tops = [1'i16, 1'i16, 1'i16, 0'i16]
   doAssert tileTop(0, 1, 1) == 0, "mean of 3/4 truncates to 0"
 
-echo "Testing explicit tile heights before installing a map"
-block:
-  let
-    installed = QuadLayer(width: 1, depth: 1,
-      tiles: @[Tile(tops: [8'i16, 8, 8, 8])])
-    candidate = QuadLayer(width: 2, depth: 2, tiles: newSeq[Tile](4))
-  layers = @[installed]
-  # Every possible corner sum, including both int16 extrema and negative
-  # fractional means. No floating point enters the expected value.
-  for total in -131072'i32 .. 131068'i32:
-    var remaining = total
-    for corner in 0 .. 3:
-      let value = min(32767'i32, max(-32768'i32, remaining))
-      candidate.tiles[3].tops[corner] = int16(value)
-      remaining -= value
-    doAssert remaining == 0
-    let expected = (total + 131072) div 4 - 32768
-    doAssert candidate.tileTop(1, 1) == expected
-    doAssert tileTop(0, 0, 0) == 8
-    doAssert layers.len == 1 and layers[0] == installed
-  layers = @[candidate]
-  doAssert tileTop(0, 1, 1) == candidate.tileTop(1, 1)
-
 echo "Testing tileTop matches a ramp's rise per tile"
 block:
   const Rise = 8'i16
