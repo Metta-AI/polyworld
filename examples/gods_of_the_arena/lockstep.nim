@@ -41,6 +41,14 @@ type
     potential*: int64
       ## Leaderboard score numerator at the end; points = potential / 7200.
 
+  CommandTrace {.bycopy.} = object
+    agent, ordinal: int32
+    command: CommandAttribution
+
+  StepTrace {.bycopy.} = object
+    heroId, seat, team, tickBefore, tickAfter: int32
+    potentialBefore, potentialAfter: int64
+
   StepLane = object
     game: Game
     seed: int
@@ -60,6 +68,9 @@ type
     selfPlay: bool
     rewardMode: RewardMode
     agentsPerLane*: int
+    commandTraceLimit: int
+    commandTrace: seq[CommandTrace]
+    stepTrace: seq[StepTrace]
 
 proc teamPotential(world: World, team: Team): int64 =
   ## Scales whole XP per minute into the training API's score numerator.
@@ -225,6 +236,9 @@ proc step*(
 ) =
   ## Runs every lane for actionTicks ticks with the given actions.
   doAssert actions.len == batch.agentCount
+  if batch.commandTraceLimit > 0:
+    batch.commandTrace.setLen(0)
+    batch.stepTrace.setLen(batch.agentCount)
   var agent = 0
   for laneIndex in 0 ..< batch.lanes.len:
     let lane = batch.lanes[laneIndex].addr
@@ -232,6 +246,18 @@ proc step*(
       doAssert actions[agent + i] in 0 ..< GotaActionCount
       lane.actions[i] = actions[agent + i]
     let game = lane.game
+    if batch.commandTraceLimit > 0:
+      game.world.commandAttribution.setLen(0)
+      game.world.commandAttributionHeroes.setLen(0)
+      game.world.commandAttributionLimit = batch.commandTraceLimit
+      for i, index in lane.agents:
+        let hero = game.world.heroes[index]
+        game.world.commandAttributionHeroes.add hero.id
+        batch.stepTrace[agent + i] = StepTrace(
+          heroId: hero.id, seat: int32(index), team: int32(hero.team.ord),
+          tickBefore: game.world.tick,
+          potentialBefore: lane.potentials[hero.team]
+        )
     var ticks = 0
     while ticks < batch.actionTicks and not game.finished():
       activeGame = game
@@ -277,6 +303,22 @@ proc step*(
     for i, index in lane.agents:
       rewards[agent + i] = reward[world.heroes[index].team]
       terminals[agent + i] = uint8(done)
+    if batch.commandTraceLimit > 0:
+      for command in world.commandAttribution:
+        for i, index in lane.agents:
+          if world.heroes[index].id == command.heroId:
+            doAssert batch.commandTrace.len < batch.commandTraceLimit,
+              "batch command attribution capacity exceeded"
+            batch.commandTrace.add CommandTrace(
+              agent: int32(agent + i), ordinal: int32(batch.commandTrace.len),
+              command: command
+            )
+            break
+      for i, index in lane.agents:
+        batch.stepTrace[agent + i].tickAfter = world.tick
+        batch.stepTrace[agent + i].potentialAfter = lane.potentials[world.heroes[index].team]
+      # Preserve the completed world's command/reward facts before automatic reset.
+      world.commandAttributionLimit = 0
     if done:
       batch.startLane(lane, lane.seed + batch.lanes.len)
     agent += lane.agents.len
@@ -335,6 +377,49 @@ proc gota_step(
     features.toOpenArray(0, count * GotaFeatureCount - 1),
     seats.toOpenArray(0, count - 1)
   )
+
+proc gota_attribution_version(): cint {.cdecl, exportc, dynlib.} =
+  1
+
+proc gota_command_trace_size(): cint {.cdecl, exportc, dynlib.} =
+  cint(sizeof(CommandTrace))
+
+proc gota_step_trace_size(): cint {.cdecl, exportc, dynlib.} =
+  cint(sizeof(StepTrace))
+
+proc gota_trace_enable(handle: pointer, maxCommands: cint) {.cdecl, exportc, dynlib.} =
+  doAssert maxCommands > 0
+  cast[StepBatch](handle).commandTraceLimit = int(maxCommands)
+
+proc gota_trace_identity(
+    handle: pointer, heroIds, gameSeats, gameTeams: ptr UncheckedArray[int32]
+) {.cdecl, exportc, dynlib.} =
+  let batch = cast[StepBatch](handle)
+  doAssert batch.commandTraceLimit > 0
+  var agent = 0
+  for lane in batch.lanes:
+    for index in lane.agents:
+      heroIds[agent] = lane.game.world.heroes[index].id
+      gameSeats[agent] = int32(index)
+      gameTeams[agent] = int32(lane.game.world.heroes[index].team.ord)
+      inc agent
+
+proc gota_trace_count(handle: pointer): cint {.cdecl, exportc, dynlib.} =
+  cint(cast[StepBatch](handle).commandTrace.len)
+
+proc gota_trace_copy(
+    handle: pointer,
+    commands: ptr UncheckedArray[CommandTrace], capacity: cint,
+    steps: ptr UncheckedArray[StepTrace]
+) {.cdecl, exportc, dynlib.} =
+  let batch = cast[StepBatch](handle)
+  doAssert batch.commandTraceLimit > 0
+  doAssert int(capacity) >= batch.commandTrace.len
+  doAssert batch.stepTrace.len == batch.agentCount
+  for i, command in batch.commandTrace:
+    commands[i] = command
+  for i, step in batch.stepTrace:
+    steps[i] = step
 
 proc gota_close(handle: pointer) {.cdecl, exportc, dynlib.} =
   GC_unref(cast[StepBatch](handle))

@@ -54,6 +54,45 @@ echo "Testing agent counts"
 doAssert newStepBatch(config, bot, bot, policy, 3, 240, 24, false).agentCount == 15
 doAssert newStepBatch(config, bot, bot, policy, 3, 240, 24, true).agentCount == 30
 
+echo "Testing attribution preserves actual team and outgoing terminal identity"
+for seed in [0, 7]:
+  let
+    traced = newStepBatch(config, bot, bot, policy, 1, 48, 24, false)
+    plain = newStepBatch(config, bot, bot, policy, 1, 48, 24, false)
+  traced.reset(seed)
+  plain.reset(seed)
+  traced.commandTraceLimit = 4096
+  var
+    actions = newSeq[int32](5)
+    rewards, plainRewards = newSeq[float32](5)
+    terminals, plainTerminals = newSeq[uint8](5)
+    stats, plainStats = newSeq[LaneStats](1)
+  for frame in 0 ..< 2:
+    let outgoing = traced.lanes[0].game
+    let tickBefore = outgoing.world.tick
+    traced.step(actions, rewards, terminals, stats)
+    plain.step(actions, plainRewards, plainTerminals, plainStats)
+    doAssert rewards == plainRewards and terminals == plainTerminals
+    doAssert traced.lanes[0].game.stateHash() == plain.lanes[0].game.stateHash()
+    doAssert traced.commandTrace.len > 0
+    for agent, trace in traced.stepTrace:
+      let hero = outgoing.world.heroes[trace.seat]
+      doAssert trace.heroId == hero.id
+      doAssert trace.team == int32(hero.team.ord)
+      doAssert trace.team == int32((seed mod 10) div 5)
+      doAssert trace.tickBefore == tickBefore
+      doAssert trace.tickAfter == outgoing.world.tick
+      doAssert rewards[agent] == float32(trace.potentialAfter - trace.potentialBefore) /
+        float32(ScoreDenominator)
+    for ordinal, trace in traced.commandTrace:
+      doAssert trace.ordinal == int32(ordinal)
+      doAssert trace.command.heroId == traced.stepTrace[trace.agent].heroId
+    doAssert stats[0].finished == int32(frame == 1)
+    if frame == 1:
+      doAssert outgoing.finished()
+      doAssert traced.lanes[0].game != outgoing
+      doAssert outgoing.world.commandAttributionLimit == 0
+
 echo "Testing observations and seats"
 let played = run(true, XpReward, 2400, 20)
 for agent in 0 ..< played.seats.len:
