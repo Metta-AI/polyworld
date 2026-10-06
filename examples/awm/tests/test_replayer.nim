@@ -81,9 +81,9 @@ block:
   doAssert game.choiceLabel(heroChoice(1), names) == "Player 2 Mage hero"
 
 for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
-  echo "Playing once at 16x, frame seconds ", seconds
+  echo "Default looping at 16x, frame seconds ", seconds
   let replay = newReplayer(data)
-  doAssert not replay.transport.repeating
+  doAssert replay.transport.repeating
   replay.transport.setSpeed(3)
   var
     game = replay.newReplayGame()
@@ -91,6 +91,25 @@ for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
     time = 0.0'f
     finished = false
   play.addOpeningHands(game, layout.seatTable(view, game.currentPlayer, -1))
+  for i in 0 ..< 20_000:
+    replay.advance(play, game, layout, view, time, seconds)
+    if game.gameOver:
+      finished = true
+    if finished and replay.tick == 0:
+      break
+  doAssert finished
+  doAssert replay.tick == 0
+  doAssert replay.transport.playing
+  doAssert not game.gameOver
+  doAssert not play.attackActive
+  doAssert play.heroDeaths.len == 0
+  for seat in 0 ..< game.playerCount:
+    doAssert not game.dead(seat)
+    doAssert play.deathClock(game, seat, time) == -1
+
+  echo "Disabling looping plays once and stops"
+  replay.transport.repeating = false
+  finished = false
   for i in 0 ..< 20_000:
     replay.advance(play, game, layout, view, time, seconds)
     if not replay.transport.playing and play.presentationIdle(game) and
@@ -137,6 +156,7 @@ for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
 for forward in [false, true]:
   echo "Seeking during a lunge, forward = ", forward
   let replay = newReplayer(data)
+  replay.transport.repeating = false
   replay.transport.setSpeed(3)
   var
     game = replay.newReplayGame()

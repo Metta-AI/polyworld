@@ -134,7 +134,7 @@ IF handSize > 0 THEN
           IF n = 0 THEN
             valid = 0
           ELSE
-            picks(s) = random(n)
+            GOSUB aim
           END IF
           s = s + 1
         WEND
@@ -150,6 +150,65 @@ END IF
 GOSUB attacks
 endTurn()
 END
+
+aim:
+' Choose the s'th target of hand card i. A target that helps goes to one of
+' your own cards, any other to the next living opponent's, picked at random
+' among that side: Duel buffs your minion and duels theirs, not itself. With
+' nothing on the wanted side every choice stays eligible, so a lone minion
+' still bounces itself and hero-only cards keep their random pick.
+mine = helpsTarget(i, s)
+want = enemyPlayer
+IF mine THEN want = selfPlayer
+GOSUB tally
+IF wanted = 0 AND mine = 0 THEN
+  ' The designated enemy has nothing to aim at: any opponent will do.
+  want = -1
+  GOSUB tally
+END IF
+IF wanted = 0 THEN
+  picks(s) = random(n)
+  RETURN
+END IF
+k = random(wanted)
+c = 0
+WHILE c < n
+  o = nextChoiceOwner(i, "picks", s, c)
+  GOSUB wants
+  IF hit THEN
+    IF k = 0 THEN
+      picks(s) = c
+      c = n
+    END IF
+    k = k - 1
+  END IF
+  c = c + 1
+WEND
+RETURN
+
+tally:
+' How many of the target's choices are on the wanted side.
+wanted = 0
+c = 0
+WHILE c < n
+  o = nextChoiceOwner(i, "picks", s, c)
+  GOSUB wants
+  IF hit THEN wanted = wanted + 1
+  c = c + 1
+WEND
+RETURN
+
+wants:
+' hit = 1 when owner o is the wanted player, or any opponent when want is
+' -1. Choices with no owner, like declining the target, never match.
+hit = 0
+IF o < 0 THEN RETURN
+IF want >= 0 THEN
+  IF o = want THEN hit = 1
+ELSE
+  IF o <> selfPlayer THEN hit = 1
+END IF
+RETURN
 
 attacks:
 ' Visit every permanent. Every legal hero and minion target can be picked,
