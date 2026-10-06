@@ -43,6 +43,8 @@ match seed and seat. It does not advance the game's shuffle RNG. The reference
 script uses it for class selection, card order, all legal hero and minion
 attack targets, card targets, discards, and trigger targets. It tries attacks
 both before and after card plays, then explicitly ends when no move is left.
+Card targets prefer friendly cards for helpful effects and opponents for
+harmful effects, using `helpsTarget(handIndex, step)`.
 An explicit `classes` config
 bypasses selection and supplies the corresponding normal class queries.
 
@@ -123,10 +125,12 @@ picks when later targets depend on them. `choiceId` identifies a particular
 minion for a card's first target; `handName$` and `boardName$` expose printed
 names from the same zones that humans can see.
 
-The Primordial loop is legal as three decisions in one turn: attack with the
-existing Primordial, play Bouncer targeting its ID, then replay Primordial.
-The replayed Primordial cannot attack again that turn. The board reset and
-mana costs are unchanged.
+Mage decks contain two copies of `Summon Primordial`, an eight-energy spell.
+Choose a hero, return all cards on that hero's board to their hand, then
+summon a 10/10 Primordial on your board. You may choose your own hero.
+Primordial itself has no board-clearing effect. Bouncing and replaying it
+restores the minion without clearing any board, and it cannot attack again
+that turn. Another board clear requires another `Summon Primordial` spell.
 
 ## Ticks
 
@@ -134,6 +138,8 @@ One tick is one game action: a card played, one minion's attack, a discard or
 trigger answered, or a turn ended. `max_ticks` bounds the match; a match that
 reaches it is a timeout. Replays store one action and one state hash per tick
 and play back in the browser with seeking, speed, and loop controls.
+Replays autoplay and loop by default. Turn off the loop control to stop at
+the end of one game.
 
 ## Logs and failures
 
