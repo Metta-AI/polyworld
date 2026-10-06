@@ -97,7 +97,7 @@ proc runLane(args: LaneWorkerArgs) {.thread.} =
       config = loadConfig(args.configPath)
       gameMap = generateMap(int32(args.seed), config.mapPreset)
       game = newGame(
-        gameMap, config.spawnIntervalTicks, 10, false, ReplayData()
+        gameMap, config.spawnIntervalTicks, 10, false, ReplayData(), false
       )
       team = Team((args.seed mod 10) div 5)
       groups =
@@ -117,7 +117,7 @@ proc runLane(args: LaneWorkerArgs) {.thread.} =
       observed, stopped: bool
 
     proc snapshot(terminal: bool, features: openArray[int32] = []): Transition =
-      result.tick = game.world.battleTick()
+      result.tick = game.world.tick
       result.seat = int32(reportingSeat)
       result.terminal = int32(terminal)
       result.outcome =
@@ -158,19 +158,15 @@ proc runLane(args: LaneWorkerArgs) {.thread.} =
       previousScore = score
 
     proc installPolicy(index: int) =
-      let
-        hero = game.world.heroes[index]
-        structured = usesStructures(args.policy)
+      let hero = game.world.heroes[index]
       var
         host = initHeroHost(hero.id)
         limits = heroVmLimits()
-      limits.disableFixed = not structured
-      if structured:
-        limits = structureLimits(limits)
+      limits.disableFixed = true
       limits.maxParameters = GotaFeatureCount
       discard host.addFunction("chooseAction", GotaFeatureCount,
         proc(values: openArray[int32]): int32 =
-          if game.world.phase == Drafting or stopped:
+          if stopped:
             return 0
           reportingSeat = index
           args.bridge.sendTransition(snapshot(false, values))
@@ -198,20 +194,17 @@ proc runLane(args: LaneWorkerArgs) {.thread.} =
         "  neuralActionCountdown = " & $GotaActionRepeat & "\n" &
         "  decision = chooseAction(" & featureArguments.join(",") & ")\n" &
         "end if")
-      let program = compile(
-        if structured: StructureSource & "\n" & source else: source, host, limits)
+      let program = compile(source, host, limits)
       bindHeroData(program)
       game.heroVms[index] = HeroVm(
-        structured: structured, legacyHeroData: program.usesHeroData(),
-        runtime: initRuntime(program, host, limits), limits: limits, ready: true
+        runtime: initRuntime(program, host, limits), limits: limits, ready: true, legacyHeroData: program.usesHeroData()
       )
-      game.structuredBots = game.structuredBots or structured
-      game.heroVms[index].bindStructures(program, game.world, hero.id)
 
     for index, hero in game.world.heroes:
       if hero.team == team:
         installPolicy(index)
-    while not stopped and not game.finished():
+    while not stopped and not game.world.gameOver and
+        game.world.tick < args.maxTicks:
       tickWorld(game, proc() = runBotDecisions(game))
       for vm in game.heroVms:
         doAssert not vm.failed, vm.lastError

@@ -52,13 +52,11 @@ def convert(source, weights, hidden=None, layers=None, action_ticks=24,
         raise ValueError("Temperature must be zero (argmax) or 0.01..10")
     if 0 < temperature < 0.01:
         raise ValueError("Positive temperature must be at least 0.01")
-    structured = source.lstrip().splitlines()[0].lower() == "' @gota-structures"
-    if not structured:
-        # Unstructured lockstep policies use integer-only BASIC.
-        for line in source.splitlines():
-            code = line.split("'", 1)[0]
-            if "/" in code or re.search(r"\d+\.\d+", code):
-                raise ValueError("Expected integer-only hero arithmetic")
+    # The source was trained with integer-only BASIC; retain that arithmetic.
+    for line in source.splitlines():
+        code = line.split("'", 1)[0]
+        if "/" in code or re.search(r"\d+\.\d+", code):
+            raise ValueError("Expected integer-only hero arithmetic")
     library = (Path(__file__).parent.parent / "neural/policies/andre.bas").read_text()
     library = library.split("' Example policy.")[0]
     library = library.replace("andrePeriod = 24", f"andrePeriod = {action_ticks}")

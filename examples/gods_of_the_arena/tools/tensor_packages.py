@@ -140,10 +140,7 @@ def tensorize(source, resources):
     # DIM declarations are unique even when two Richard networks are present.
     library = "\n".join(libraries)
     library = library.replace("dim tensorShape(0)\n", "")
-    structured = source.lstrip().splitlines()[0].lower() == "' @gota-structures"
     source = "dim tensorShape(0)\n" + library + "\n" + source
-    if structured:
-        source = "' @gota-structures\n" + source
     if len(source.encode()) > 64 * 1024:
         raise ValueError("BASIC source with tensor architecture exceeds 64 KiB")
     return (source,
