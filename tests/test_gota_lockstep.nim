@@ -87,7 +87,7 @@ for (ended, draw, winner) in [
     batch = newStepBatch(config, bot, bot, policy, 1, 28800, 24,
       true, LeaderboardReward)
     world = batch.lanes[0].game.world
-  world.tick = if ended: 15120 else: 28800
+  world.tick = if ended: 15120 else: 28920
   world.draftTicks = 120
   world.gameOver = ended
   world.draw = draw

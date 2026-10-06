@@ -1,3 +1,4 @@
+' @gota-structures
 ' Andre PufferNet helpers. BASIC owns observations, timing and sampling.
 ' Reusable glue and a synthetic example written for this API.
 ' This is not a submitted player policy and contains no learned coefficients.
@@ -39,25 +40,25 @@ end sub
 
 sub andreAdvance()
   ' Advance from the previous captured features before the hero thinks.
-  if drafting then
+  if draft.active then
     exit sub
   end if
   if andreInitialized = 0 then
     andreState = blobCreate()
     andrePeriod = 24
     andreTemperature = 1.0
-    andreSeed = matchInfo(2) + selfId * 7919
-    for andreI = 0 to draftPlayerCount() - 1
-      if draftPlayerId(andreI) = selfId then
+    andreSeed = match.seed + self.id * 7919
+    for andreI = 0 to draft.playerCount - 1
+      if players(andreI).id = self.id then
         andreData(40 + andreI mod 5) = 1.0
       end if
     next andreI
     andreInitialized = 1
   end if
-  if worldTick < andreNextTick then
+  if match.tick < andreNextTick then
     exit sub
   end if
-  andreNextTick = worldTick + andrePeriod
+  andreNextTick = match.tick + andrePeriod
   andreResult = andre_nn("weights.bin", andreState, andreData)
   andreChoose()
 end sub
@@ -79,25 +80,25 @@ end sub
 ' Example policy.
 dim f(40)
 andreAdvance()
-if drafting then
+if draft.active then
   for candidate = 0 to 9
-    if heroAvailable(candidate) then
+    if heroChoices(candidate).available then
       draftHero(candidate)
       end
     end if
   next candidate
   end
 end if
-if selfHp <= 0 then
+if self.hp <= 0 then
   end
 end if
-f(0) = selfHp * 100 \ selfMaxHp
+f(0) = self.hp * 100 \ self.maxHp
 f(39) = decision * 9
 andreCapture()
 decision = andreAction
 ' The real converted hero keeps all eleven macro behaviours in its BASIC.
 if decision = 1 then
-  walkTo(selfX, selfY)
+  walkTo(self.position.x, self.position.y)
 else
-  attackMove(selfX, selfY)
+  attackMove(self.position.x, self.position.y)
 end if

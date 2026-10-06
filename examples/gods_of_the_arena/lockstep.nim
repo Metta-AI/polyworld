@@ -37,7 +37,7 @@ type
 
   LaneStats* {.bycopy.} = object
     ## Summary of one finished match, from the first policy team's side.
-    finished*, outcome*, tick*, selfPlay*: int32
+    finished*, outcome*, tick*, selfPlay*, draftTicks*: int32
     potential*: int64
       ## Leaderboard score numerator at the end; points = potential / 7200.
 
@@ -86,13 +86,16 @@ proc installPolicy(batch: StepBatch, lane: ptr StepLane, index: int) =
     game = lane.game
     hero = game.world.heroes[index]
     agent = lane.agents.len
+    structured = usesStructures(batch.policy)
   lane.agents.add index
   lane.features.add default(array[GotaFeatureCount, int32])
   lane.actions.add 0
   var
     host = initHeroHost(hero.id)
     limits = heroVmLimits()
-  limits.disableFixed = true
+  limits.disableFixed = not structured
+  if structured:
+    limits = structureLimits(limits)
   limits.maxParameters = GotaFeatureCount
   discard host.addFunction("chooseAction", GotaFeatureCount,
     proc(values: openArray[int32]): int32 =
@@ -107,12 +110,15 @@ proc installPolicy(batch: StepBatch, lane: ptr StepLane, index: int) =
     arguments.add "f(" & $i & ")"
   let source = batch.policy.replace("' METTA_DECISION",
     "decision = chooseAction(" & arguments.join(",") & ")")
-  let program = compile(source, host, limits)
+  let program = compile(
+    if structured: StructureSource & "\n" & source else: source, host, limits)
   bindHeroData(program)
   game.heroVms[index] = HeroVm(
-    legacyHeroData: true,
+    structured: structured, legacyHeroData: program.usesHeroData(),
     runtime: initRuntime(program, host, limits), limits: limits, ready: true
   )
+  game.structuredBots = game.structuredBots or structured
+  game.heroVms[index].bindStructures(program, game.world, hero.id)
 
 proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
   ## Builds a fresh match for one lane and installs the policy scripts.
@@ -120,7 +126,7 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     config = loadConfig(batch.configPath)
     gameMap = generateMap(int32(seed), config.mapPreset)
     game = newGame(
-      gameMap, config.spawnIntervalTicks, 10, false, ReplayData(), false
+      gameMap, config.spawnIntervalTicks, 10, false, ReplayData()
     )
     team = Team((seed mod 10) div 5)
     opponent = batch.opponents[(seed div 10) mod batch.opponents.len]
@@ -149,6 +155,9 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
       if hero.team != team:
         batch.installPolicy(lane, index)
   doAssert lane.agents.len == batch.agentsPerLane
+  while game.world.phase == Drafting:
+    activeGame = game
+    tickWorld(game, proc() = runBotDecisions(game))
   for side in Team:
     lane.potentials[side] =
       case batch.rewardMode
@@ -224,15 +233,14 @@ proc step*(
       lane.actions[i] = actions[agent + i]
     let game = lane.game
     var ticks = 0
-    while ticks < batch.actionTicks and not game.world.gameOver and
-        game.world.tick < batch.maxTicks:
+    while ticks < batch.actionTicks and not game.finished():
       activeGame = game
       tickWorld(game, proc() = runBotDecisions(game))
       inc ticks
     for vm in game.heroVms:
       doAssert not vm.failed, vm.lastError
     let
-      done = game.world.gameOver or game.world.tick >= batch.maxTicks
+      done = game.finished()
       world = game.world
     var reward: array[Team, float32]
     for side in Team:
@@ -257,8 +265,9 @@ proc step*(
       stats[laneIndex] = LaneStats(
         finished: 1,
         outcome: outcome(world, lane.team, true),
-        tick: world.tick,
+        tick: world.battleTick(),
         selfPlay: int32(batch.selfPlay),
+        draftTicks: world.draftTicks,
         potential:
           if outcome(world, lane.team, true) == 1:
             teamPotential(world, lane.team)
