@@ -389,7 +389,7 @@ proc infoFunctions(host: var Host, heroId: int32) =
       let caster = world.heroIndex(spell.heroId)
       toValue(caster < 0 or
         world.heroes[caster].team != world.heroById(heroId).team)
-    of 3: toValue(spell.ability.abilitySpec.kind != Strike)
+    of 3: toValue(spell.ability.abilitySpec.damage == 0)
     else: toValue(0)
   let matchInfo: HostProc = proc(args: openArray[int32]): int32 =
     ## Reads match timing and team-remembered structure counts under fog.
