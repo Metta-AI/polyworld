@@ -11,6 +11,7 @@ import
   test_chrome,
   test_characters,
   test_cli,
+  test_crewrift,
   test_annotations,
   test_policy_hosts,
   test_clickmarks,
