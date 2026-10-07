@@ -4,8 +4,8 @@
 ## parameters and its own reflection pass mirrored at its own surface.
 ##
 ## Use: call installWaters before initTerrain and initWaters after it, then once per view
-## after the opaque scene, drawWaterBodies with the water layers and a callback that
-## draws the scene (drawWaterSky, terrain, props, characters) from the mirrored camera.
+## after the opaque scene, captureScene. For each body, beginReflection, draw the
+## mirrored scene, restore the view framebuffer, then drawWaterBody.
 ##
 ## Reflections: the scene is rendered once more from the camera reflected in the water's
 ## surface (oblique near-plane clipping keeps out everything below it) into a texture the
@@ -521,7 +521,7 @@ proc reflectedCamera*(eye: Vec3, view, projection: Mat4,
     oblique[column, 2] = c[column] - oblique[column, 3]
   result.projection = scale(vec3(-1'f32, 1, 1)) * oblique
 
-proc beginReflection(size: IVec2) {.measure.} =
+proc beginReflection*(size: IVec2) {.measure.} =
   ## Starts rendering a reflection into its texture, at the window's size.
   if size != reflectionSize:
     reflectionSize = size
@@ -553,7 +553,7 @@ proc beginReflection(size: IVec2) {.measure.} =
   glViewport(0, 0, size.x, size.y)
   glClear(GL_DEPTH_BUFFER_BIT)
 
-proc captureScene(size: IVec2) {.measure.} =
+proc captureScene*(size: IVec2) {.measure.} =
   ## Copies the window's colour and depth into colorCopy and depthCopy. The depth texture
   ## matches the window's 24-bit depth, 8-bit stencil format, which a depth blit requires;
   ## a multisampled window is resolved by the blit.
@@ -591,7 +591,7 @@ proc reflecting*(params: WaterParams): bool =
   ## Whether this water shows reflections, so it needs its reflection pass.
   params.reflectiveness > 0 or params.fresnelStrength > 0
 
-proc drawWaterBody(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize: IVec2,
+proc drawWaterBody*(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize: IVec2,
     sunToward: Vec3, sunLight: Color, rect: IVec4, reflected: bool) {.measure.} =
   ## Draws one body of water over the captured scene.
   let
@@ -654,46 +654,3 @@ proc drawWaterBody(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize:
     glBindTexture(GL_TEXTURE_2D, texture)
   glActiveTexture(GL_TEXTURE0)
   drawWater(viewProjection, eye, firstVertex = vertices.a, vertexCount = vertices.len)
-
-proc drawWaterBodies*(
-    bodies: openArray[WaterBody],
-    view, projection: Mat4,
-    eye: Vec3,
-    windowSize: IVec2,
-    sunToward: Vec3,
-    sunLight: Color,
-    drawMirrored: proc(view, projection: Mat4, eye: Vec3),
-    viewport = ivec4(0, 0, 0, 0)
-) {.measure.} =
-  ## Draws the water bodies over this view's opaque scene, in order (put lower water
-  ## first). Each reflective body first renders its reflection: `drawMirrored` draws the
-  ## scene (drawWaterSky first, then what should show in the water) from the camera
-  ## mirrored in its surface, into the reflection target at the window's size.
-  ## `sunToward` points at the sun and `sunLight` is its colour, for the sheen and glints.
-  ## An inset view passes its x, y, width, height in window pixels as `viewport`; the
-  ## scissor and that viewport are restored after each reflection pass.
-  if bodies.len == 0:
-    return
-  let
-    inset = viewport.z > 0
-    rect = if inset: viewport else: ivec4(0, 0, windowSize.x, windowSize.y)
-  captureScene(windowSize)
-  for body in bodies:
-    if body.layer notin 0 ..< waterLayerRanges.len or
-        waterLayerRanges[body.layer].len == 0:
-      continue
-    let reflected = reflecting(body.params)
-    if reflected:
-      profileBlock "Water mirror pass":
-        if inset:
-          glDisable(GL_SCISSOR_TEST)
-        let mirrored = reflectedCamera(eye, view, projection,
-          waterLayerSurfaces[body.layer] + body.params.lift)
-        beginReflection(windowSize)
-        drawMirrored(mirrored.view, mirrored.projection, mirrored.eye)
-        glBindFramebuffer(GL_FRAMEBUFFER, 0)
-        if inset:
-          glEnable(GL_SCISSOR_TEST)
-        glViewport(rect.x, rect.y, rect.z, rect.w)
-    drawWaterBody(body, projection * view, eye, windowSize, sunToward, sunLight, rect,
-      reflected)

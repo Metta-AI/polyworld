@@ -78,11 +78,21 @@ block:
   doAssert first.toon.meshes[0].joints == firstJoints
   body.baseVisible = false
   scene.prepareCharacter(first, model, vec3(0), 0, 0, 0)
-  doAssert first.toon.meshes.len == 0
+  doAssert first.toon.meshCount == 0
+  doAssert first.toon.meshes.len == 1
   body.baseVisible = true
   scene.prepareCharacter(first, model, vec3(0), 0, 0, 0)
-  doAssert first.toon.meshes.len == 1
+  doAssert first.toon.meshCount == 1
+  doAssert unsafeAddr(first.toon.meshes[0].joints[0]) == storage
   doAssert first.toon.meshes[0].joints == root.skinMatrices(body)
+  when defined(nimTypeNames):
+    let before = getMemCounters()
+    for i in 0 ..< 100:
+      body.baseVisible = i mod 2 == 0
+      scene.prepareCharacter(first, model, vec3(0), 0, 0, i.float32 / 100)
+      doAssert first.toon.meshCount == (i mod 2 == 0).ord
+    let after = getMemCounters()
+    doAssert after[0] == before[0], "Prepared pose storage must be reused."
 
 echo "Prepared poses retain each instance's visible eyes"
 block:
@@ -90,7 +100,11 @@ block:
     root = node()
     livingEyes = node("living eyes")
     deadEyes = node("dead eyes")
-    model = CharacterModel(file: GltfFile(root: root), baseTransform: mat4())
+    model = CharacterModel(
+      file: GltfFile(root: root),
+      baseTransform: mat4(),
+      unlitParts: @["living eyes", "dead eyes"]
+    )
     scene = CharacterScene(shading: ToonCharacters)
   root.nodes = @[livingEyes, deadEyes]
   livingEyes.mesh = Mesh()
@@ -101,9 +115,11 @@ block:
   livingEyes.baseVisible = false
   deadEyes.baseVisible = true
   scene.prepareCharacter(dead, model, vec3(2, 0, 0), 1, 0, 0)
-  doAssert living.toon.meshes.len == 1
+  doAssert living.toon.meshCount == 1
+  doAssert living.toon.meshes[0].unlit
   doAssert living.toon.meshes[0].node == livingEyes
-  doAssert dead.toon.meshes.len == 1
+  doAssert dead.toon.meshCount == 1
+  doAssert dead.toon.meshes[0].unlit
   doAssert dead.toon.meshes[0].node == deadEyes
   # A subsequent instance must not erase either earlier drawing snapshot.
   livingEyes.baseVisible = true

@@ -392,6 +392,7 @@ type
 
   ToonMeshPose* = object
     node*: Node
+    unlit*: bool
     transform*: Mat4
     normal*: Mat3
     joints*: seq[Mat4]
@@ -407,6 +408,7 @@ type
 
   ToonPose* = object
     meshes*: seq[ToonMeshPose]
+    meshCount*: int
     bounds*: AABounds
     boundsValid*: bool
 
@@ -419,6 +421,11 @@ type
     sources: seq[ShadowSource]
     primitives: seq[Primitive]
 
+  ToonBlend = object
+    node: Node
+    primitive: Primitive
+    pose: ptr ToonMeshPose
+
   ToonContext* = ref object
     shader: GLuint
     uniforms: ToonUniforms
@@ -429,6 +436,7 @@ type
     backgroundVao, backgroundVbo: GLuint
     rampTexture: GLuint
     jointMatrices: seq[Mat4]
+    blended: seq[ToonBlend]
     shadowGeometry: Table[pointer, ShadowGeometry]
     transform*: Mat4             ## model transform applied above the root
     view*, proj*: Mat4
@@ -684,31 +692,42 @@ proc posedBounds(mesh: var ToonMeshPose, node: Node): AABounds =
   result.min -= vec3(0.001'f)
   result.max += vec3(0.001'f)
 
-proc prepareToonPose*(pose: var ToonPose, root: Node, transform: Mat4) =
-  ## Captures visible meshes and skin matrices once for all drawing passes.
+proc prepareMeshPoses(
+  node, root: Node,
+  pose: var ToonPose,
+  unlitParts: openArray[string]
+) =
+  ## Reuses mesh slots even when visibility temporarily hides some nodes.
+  if not node.visible:
+    return
+  if node.mesh != nil:
+    if pose.meshCount == pose.meshes.len:
+      pose.meshes.add ToonMeshPose()
+    let index = pose.meshCount
+    inc pose.meshCount
+    let mesh = addr pose.meshes[index]
+    mesh.node = node
+    mesh.unlit = node.name in unlitParts
+    mesh.transform = node.mat
+    mesh.normal = node.mat.normalMatrix
+    root.skinMatricesInto(node, mesh.joints)
+    pose.bounds.extend(mesh[].posedBounds(node))
+    pose.boundsValid = pose.boundsValid and mesh.boundsValid
+  for child in node.nodes:
+    prepareMeshPoses(child, root, pose, unlitParts)
+
+proc prepareToonPose*(
+  pose: var ToonPose,
+  root: Node,
+  transform: Mat4,
+  unlitParts: openArray[string] = []
+) =
+  ## Captures active meshes in retained storage for all drawing passes.
   root.updateTransforms(transform)
   pose.bounds = emptyBounds()
   pose.boundsValid = true
-  var count = 0
-  proc visit(node: Node, pose: var ToonPose, count: var int) =
-    ## Retains per-mesh joint storage while replacing the current snapshot.
-    if not node.visible:
-      return
-    if node.mesh != nil:
-      if count == pose.meshes.len:
-        pose.meshes.add ToonMeshPose()
-      let index = count
-      inc count
-      pose.meshes[index].node = node
-      pose.meshes[index].transform = node.mat
-      pose.meshes[index].normal = node.mat.normalMatrix
-      root.skinMatricesInto(node, pose.meshes[index].joints)
-      pose.bounds.extend(pose.meshes[index].posedBounds(node))
-      pose.boundsValid = pose.boundsValid and pose.meshes[index].boundsValid
-    for child in node.nodes:
-      visit(child, pose, count)
-  visit(root, pose, count)
-  pose.meshes.setLen(count)
+  pose.meshCount = 0
+  prepareMeshPoses(root, root, pose, unlitParts)
 
 proc uploadPose(
   useSkinning, jointMatrices: GLint,
@@ -741,7 +760,9 @@ proc drawPrimitive(
     uploadPose(u.useSkinning, u.jointMatrices, pose.joints)
   glUniform1i(
     u.unlit,
-    (primitive.material.unlit or owner.name in ctx.unlitNodes).ord.GLint
+    (primitive.material.unlit or
+      (pose != nil and pose.unlit) or
+      owner.name in ctx.unlitNodes).ord.GLint
   )
 
   primitive.uploadToGpu()
@@ -798,6 +819,25 @@ proc drawPrimitive(
       GL_TRIANGLES, primitive.indices32.len.GLint, GL_UNSIGNED_INT, nil)
   else:
     glDrawArrays(GL_TRIANGLES, 0, primitive.points.len.cint)
+
+proc drawToonMesh(
+  ctx: ToonContext, root, node: Node, pose: ptr ToonMeshPose = nil
+) =
+  ## Retains transparent draws in the context's reusable queue.
+  for primitive in node.mesh.primitives:
+    if primitive.material.alphaMode == BlendAlphaMode:
+      ctx.blended.add ToonBlend(node: node, primitive: primitive, pose: pose)
+    else:
+      ctx.drawPrimitive(root, node, primitive, pose)
+
+proc drawToonNodes(ctx: ToonContext, root, node: Node) =
+  ## Walks visible nodes without allocating a recursive closure.
+  if not node.visible:
+    return
+  if node.mesh != nil:
+    ctx.drawToonMesh(root, node)
+  for child in node.nodes:
+    ctx.drawToonNodes(root, child)
 
 proc draw*(
   ctx: ToonContext,
@@ -867,29 +907,16 @@ proc draw*(
   glDepthFunc(GL_LEQUAL)
   glFrontFace(GL_CCW)
 
-  var blended: seq[(Node, Primitive, ptr ToonMeshPose)]
-  proc drawMesh(node: Node, meshPose: ptr ToonMeshPose = nil) =
-    ## Defers transparent primitives without losing their prepared pose.
-    for primitive in node.mesh.primitives:
-      if primitive.material.alphaMode == BlendAlphaMode:
-        blended.add (node, primitive, meshPose)
-      else:
-        ctx.drawPrimitive(root, node, primitive, meshPose)
-  proc visit(node: Node) =
-    ## Walks visible nodes for callers without a prepared snapshot.
-    if not node.visible:
-      return
-    if node.mesh != nil:
-      drawMesh(node)
-    for child in node.nodes:
-      visit(child)
+  ctx.blended.setLen(0)
   if pose == nil:
-    visit(root)
+    ctx.drawToonNodes(root, root)
   else:
-    for meshPose in pose.meshes.mitems:
-      drawMesh(meshPose.node, meshPose.addr)
-  for (node, primitive, meshPose) in blended:
-    ctx.drawPrimitive(root, node, primitive, meshPose)
+    for i in 0 ..< pose.meshCount:
+      let mesh = addr pose.meshes[i]
+      ctx.drawToonMesh(root, mesh.node, mesh)
+  for entry in ctx.blended:
+    ctx.drawPrimitive(root, entry.node, entry.primitive, entry.pose)
+  ctx.blended.setLen(0)
 
   glDisable(GL_BLEND)
   glDepthMask(GL_TRUE)
@@ -968,6 +995,24 @@ proc prepareShadowGeometry(ctx: ToonContext, mesh: Mesh) =
     )
   geometry.primitives = mesh.shadowPrimitives()
 
+proc drawDepthMesh(
+  ctx: ToonContext, root, node: Node, pose: ptr ToonMeshPose = nil
+) =
+  ## Borrows cached shadow primitives without copying their sequence.
+  ctx.prepareShadowGeometry(node.mesh)
+  let geometry = addr ctx.shadowGeometry[cast[pointer](node.mesh)]
+  for primitive in geometry.primitives:
+    ctx.drawSunDepthPrimitive(root, node, primitive, pose)
+
+proc drawDepthNodes(ctx: ToonContext, root, node: Node) =
+  ## Walks visible shadow casters without allocating a recursive closure.
+  if not node.visible:
+    return
+  if node.mesh != nil:
+    ctx.drawDepthMesh(root, node)
+  for child in node.nodes:
+    ctx.drawDepthNodes(root, child)
+
 proc drawSunDepth*(
   ctx: ToonContext,
   root: Node,
@@ -991,22 +1036,10 @@ proc drawSunDepth*(
   glEnable(GL_DEPTH_TEST)
   glDepthMask(GL_TRUE)
 
-  proc drawMesh(node: Node, meshPose: ptr ToonMeshPose = nil) =
-    ## Uses the same prepared joints for either shadow map.
-    ctx.prepareShadowGeometry(node.mesh)
-    for primitive in ctx.shadowGeometry[cast[pointer](node.mesh)].primitives:
-      ctx.drawSunDepthPrimitive(root, node, primitive, meshPose)
-  proc visit(node: Node) =
-    ## Walks visible nodes for callers without a prepared snapshot.
-    if not node.visible:
-      return
-    if node.mesh != nil:
-      drawMesh(node)
-    for child in node.nodes:
-      visit(child)
   if pose == nil:
-    visit(root)
+    ctx.drawDepthNodes(root, root)
   else:
-    for meshPose in pose.meshes.mitems:
-      drawMesh(meshPose.node, meshPose.addr)
+    for i in 0 ..< pose.meshCount:
+      let mesh = addr pose.meshes[i]
+      ctx.drawDepthMesh(root, mesh.node, mesh)
   glBindVertexArray(0)

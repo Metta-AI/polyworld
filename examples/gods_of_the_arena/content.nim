@@ -882,9 +882,15 @@ proc abilitySpec*(ability: Ability, rank: int32): AbilitySpec =
     result.charges = 0
     result.controlTicks = 0
 
+const AbilityIconKeys = block:
+  var keys: array[Ability, string]
+  for ability in Ability:
+    keys[ability] = "ability_" & ability.abilitySpec.icon
+  keys
+
 proc abilityIconKey*(ability: Ability): string =
-  ## Returns the atlas name packed from one ability art file.
-  "ability_" & ability.abilitySpec.icon
+  ## Returns the atlas name without constructing it during drawing.
+  AbilityIconKeys[ability]
 
 proc itemSpec*(item: Item): ItemSpec =
   ## Returns the immutable shop tuning for one item.
@@ -897,11 +903,16 @@ proc itemFromId*(id: int32): Item =
   else:
     Item(id)
 
+const ItemIconKeys = block:
+  var keys: array[Item, string]
+  for item in Item:
+    if item != NoItem:
+      keys[item] = "item_" & $item
+  keys
+
 proc itemIconKey*(item: Item): string =
-  ## Returns the atlas name packed from one item art file.
-  if item == NoItem:
-    return ""
-  "item_" & $item
+  ## Returns the atlas name without constructing it during drawing.
+  ItemIconKeys[item]
 
 proc heroMaxHp*(class: HeroClass, level: int): int32 =
   ## Returns class hit points using its declared deterministic growth curve.
