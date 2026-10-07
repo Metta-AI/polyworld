@@ -18,6 +18,7 @@ else:
   --path:"../windy/src"
   --path:"../gltf/src"
   --path:"../vmath/src"
+  --path:"../spacy/src"
   --path:"../mummy/src"
 
 --define:nimTypeNames
