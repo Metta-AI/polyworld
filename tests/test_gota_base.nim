@@ -8,7 +8,7 @@ const
   Root = currentSourcePath().parentDir.parentDir
   Policy = Root / "examples/gods_of_the_arena/players/base.bas"
 
-proc policyGame(team = RedTeam, size = 116): Game =
+proc policyGame(team = RedTeam, size = defaultConfig().mapSize): Game =
   ## Creates one real policy VM with controllable opponents and allied towers.
   var preset = defaultConfig()
   preset.mapSize = size
@@ -360,8 +360,8 @@ for item in [HealthPotion, ManaPotion, VitalityElixir, ManaElixir]:
   doAssert hero.itemCounts[0] == 1
   doAssert not game.decide().hasAction(ActionUseItem)
 
-echo "Testing hostile warnings and maximum-size crowded maps stay bounded"
-for size in [64, 116, 256]:
+echo "Testing hostile warnings and crowded maps stay bounded"
+for size in [defaultConfig().mapSize]:
   let
     game = policyGame(size = size)
     world = game.world

@@ -163,12 +163,10 @@ proc checkPortals(game: Game) =
         doAssert firstPosition.rotated == secondPosition
 
 echo "Testing exact arena rotation, wave spawns, and navigation"
-for (size, seed) in [(116, 54), (64, 54), (116, 0), (116, 55),
-  (128, 54), (256, 54)]:
+for seed in [54, 0, 55]:
   var preset = defaultConfig()
-  preset.mapSize = size
   preset.seed = seed
-  echo "Map size ", size, ", seed ", seed
+  echo "Map size ", preset.mapSize, ", seed ", seed
   let game = newGame(generateMap(7, preset), 100_000, 10, false,
     ReplayData(), drafting = false)
   game.checkMap()

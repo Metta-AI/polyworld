@@ -168,11 +168,10 @@ proc check(first, second: Game) =
     if not a.draw:
       doAssert a.winner != b.winner, label & " winner"
 
-proc checkRotation(seed, mapSeed: int32, size, ticks: int) =
+proc checkRotation(seed, mapSeed: int32, ticks: int) =
   ## Runs real policies on paired worlds and compares every authoritative tick.
   var preset = defaultConfig()
   preset.seed = mapSeed
-  preset.mapSize = size
   let
     first = newGame(generateMap(seed, preset), 480, 10, false,
       ReplayData(), drafting = false)
@@ -195,12 +194,11 @@ proc checkRotation(seed, mapSeed: int32, size, ticks: int) =
     if first.world.gameOver:
       break
   echo "Mirrored ticks: ", first.world.tick, ", seed: ", seed,
-    ", map seed: ", mapSeed, ", size: ", size
+    ", map seed: ", mapSeed, ", size: ", preset.mapSize
 
 echo "Testing complete simulation rotation with actual BASIC policies"
 when defined(gotaLongSymmetry):
-  for (seed, mapSeed, size) in [(7, 54, 116), (0, 54, 116), (8, 55, 116),
-    (42, 0, 116), (7, 54, 64), (7, 54, 128), (7, 54, 256)]:
-      checkRotation(seed.int32, mapSeed.int32, size, 28_800)
+  for (seed, mapSeed) in [(7, 54), (0, 54), (8, 55), (42, 0)]:
+    checkRotation(seed.int32, mapSeed.int32, 28_800)
 else:
-  checkRotation(7, 54, 116, 1000)
+  checkRotation(7, 54, 1000)

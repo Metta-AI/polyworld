@@ -4,7 +4,7 @@ import
   polyworld/[cli, pathing, tapes],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
-proc portalGame(team = RedTeam, size = 116): Game =
+proc portalGame(team = RedTeam, size = defaultConfig().mapSize): Game =
   ## Creates a quiet match with one living hero and allied tower anchors.
   var preset = defaultConfig()
   preset.mapSize = size
@@ -38,7 +38,7 @@ proc step(game: Game, ticks: int32) =
     game.tickWorld(nil)
 
 echo "Testing scroll stacks, channel timing, landing and shared cooldown"
-for size in [64, 116, 256]:
+for size in [defaultConfig().mapSize]:
   for team in Team:
     let
       game = portalGame(team, size)

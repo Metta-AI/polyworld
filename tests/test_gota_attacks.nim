@@ -4,9 +4,7 @@ import
 
 proc attackGame(class: HeroClass): Game =
   ## Isolates basic attacks in the arena without bot decisions.
-  # The measured chase corridor belongs to the original 128 tile preset.
   var preset = defaultConfig()
-  preset.mapSize = 128
   preset.roadWidth = 62
   result = newGame(
     generateMap(2026, preset),
@@ -30,10 +28,13 @@ proc attackGame(class: HeroClass): Game =
   hero.refreshHeroStats()
   hero.hp = hero.maxHp
   hero.state = Marching
-  let tile = layers[GroundLayer].tiles[18 * GridTiles + 56]
+  let
+    x = mapTiles() * 7 div 16
+    z = mapTiles() * 9 div 64
+    tile = layers[GroundLayer].tiles[z * mapTiles() + x]
   var point = WorldPoint(
-    x: (56 - GridTiles div 2) * WorldScale + WorldScale div 2,
-    z: (18 - GridTiles div 2) * WorldScale + WorldScale div 2
+    x: (x - mapTiles() div 2).int32 * WorldScale + WorldScale div 2,
+    z: (z - mapTiles() div 2).int32 * WorldScale + WorldScale div 2
   )
   for height in tile.tops:
     point.y += height.int32 * WorldScale div 32

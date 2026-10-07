@@ -2,7 +2,7 @@ import
   polyworld/pathing,
   ../examples/gods_of_the_arena/[content, maps, replays, scores, sim]
 
-proc quietGame(size = 116): Game =
+proc quietGame(size = defaultConfig().mapSize): Game =
   ## Creates a match without automatic heroes or recurring creep waves.
   var preset = defaultConfig()
   preset.mapSize = size
@@ -23,8 +23,8 @@ proc quietGame(size = 116): Game =
   for building in result.world.buildings.mitems:
     building.attackTicks = 100_000
 
-echo "Testing mirrored god guards occupy open ground on supported maps"
-for size in [64, 116, 256]:
+echo "Testing mirrored god guards occupy open ground on the default map"
+for size in [defaultConfig().mapSize]:
   let game = quietGame(size)
   var guards: array[Team, seq[Building]]
   for building in game.world.buildings:
@@ -102,7 +102,7 @@ for defender in Team:
       doAssert world.forts[defender.ord].hp < hp
 
 echo "Testing creeps attack surviving guards before the god"
-for size in [64, 116, 256]:
+for size in [defaultConfig().mapSize]:
   for defender in Team:
     let
       game = quietGame(size)

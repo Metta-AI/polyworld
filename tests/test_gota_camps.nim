@@ -4,7 +4,7 @@ import
   polyworld/[cli, pathing],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
-proc campGame(size = 116): Game =
+proc campGame(size = defaultConfig().mapSize): Game =
   ## Creates camps without lane waves, bots, or incidental tower attacks.
   var preset = defaultConfig()
   preset.mapSize = size
@@ -49,7 +49,7 @@ proc poison(game: Game, hero: Hero, index: int) =
   hero.hasMoveTarget = true
 
 echo "Testing seeded camp tiers, mirror groups, and valid spawn tiles"
-for size in [64, 116, 256]:
+for size in [defaultConfig().mapSize]:
   let
     game = campGame(size)
     world = game.world

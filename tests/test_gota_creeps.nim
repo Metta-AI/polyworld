@@ -5,7 +5,6 @@ import
 proc creepGame(): Game =
   ## Isolates creep combat in a broad, open section of the upper lane.
   var preset = defaultConfig()
-  preset.mapSize = 128
   preset.roadWidth = 62
   result = newGame(
     generateMap(2026, preset),
@@ -27,10 +26,13 @@ proc creepGame(): Game =
 
 proc lanePoint(offset = 0'i32): WorldPoint =
   ## Returns a measured test position on the arena floor.
-  let tile = layers[GroundLayer].tiles[18 * GridTiles + 56]
+  let
+    x = mapTiles() * 7 div 16
+    z = mapTiles() * 9 div 64
+    tile = layers[GroundLayer].tiles[z * mapTiles() + x]
   result = WorldPoint(
-    x: (56 - GridTiles div 2) * WorldScale + WorldScale div 2 + offset,
-    z: (18 - GridTiles div 2) * WorldScale + WorldScale div 2
+    x: (x - mapTiles() div 2).int32 * WorldScale + WorldScale div 2 + offset,
+    z: (z - mapTiles() div 2).int32 * WorldScale + WorldScale div 2
   )
   for height in tile.tops:
     result.y += height.int32 * WorldScale div 32

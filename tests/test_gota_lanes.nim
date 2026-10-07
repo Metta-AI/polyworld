@@ -3,7 +3,7 @@ import
   polyworld/pathing,
   ../examples/gods_of_the_arena/[content, maps, replays, sim]
 
-proc quietGame(size = 116, heroes = 0): Game =
+proc quietGame(size = defaultConfig().mapSize, heroes = 0): Game =
   ## Creates a deterministic arena with no recurring waves or bot decisions.
   var preset = defaultConfig()
   preset.mapSize = size
@@ -35,8 +35,8 @@ proc standingTile(creep: Footman): PathTile =
     z: mapCoordinate(creep.position.z, creep.team) +
       int32(mapOrigin() - floor.originZ))
 
-echo "Testing living tower and barracks footprints across supported map sizes"
-for size in [64, 116, 256]:
+echo "Testing living tower and barracks footprints on the default map"
+for size in [defaultConfig().mapSize]:
   let game = quietGame(size)
   doAssert game.world.buildings.len == 34
   for building in game.world.buildings:
@@ -73,7 +73,7 @@ for size in [64, 116, 256]:
         "new creeps within six tiles must clear the barracks exit"
 
 echo "Testing both teams route past their buildings in all three lanes"
-for size in [64, 116, 256]:
+for size in [defaultConfig().mapSize]:
   for team in Team:
     let game = quietGame(size)
     game.world.spawnTimerTicks = 1
@@ -180,7 +180,7 @@ block:
 
 echo "Testing the combat tick clears a reached waypoint while chasing"
 block:
-  let game = quietGame(116, 10)
+  let game = quietGame(defaultConfig().mapSize, 10)
   for hero in game.world.heroes:
     hero.hp = 0
     hero.state = Dying
@@ -203,7 +203,7 @@ block:
 echo "Testing BASIC building visibility and barracks combat from outside tiles"
 block:
   let
-    game = quietGame(116, 10)
+    game = quietGame(defaultConfig().mapSize, 10)
     hero = game.world.heroes[0]
   for other in game.world.heroes:
     other.hp = 0

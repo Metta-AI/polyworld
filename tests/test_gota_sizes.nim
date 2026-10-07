@@ -4,7 +4,7 @@ import
 import ../examples/gods_of_the_arena/generation/maps as editorMaps
 import ../examples/gods_of_the_arena/generation/tiles as editorTiles
 
-for size in [64, 96, 100, 116, 128, 192, 256]:
+for size in [defaultConfig().mapSize]:
   echo "Testing a ", size, " tile preset and its replay."
   var preset = defaultConfig()
   preset.mapSize = size

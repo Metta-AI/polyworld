@@ -11,9 +11,8 @@ const
     "examples/gods_of_the_arena/players/rusher.bas"
 
 proc draftGame(mode = UniqueDraft): Game =
-  ## Creates a live draft on a compact arena with a fresh recording.
-  var preset = defaultConfig()
-  preset.mapSize = 64
+  ## Creates a live draft on the default arena with a fresh recording.
+  let preset = defaultConfig()
   result = newGame(
     generateMap(54, preset), 240, 10, false, ReplayData(), draftMode = mode
   )

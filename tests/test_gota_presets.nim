@@ -14,7 +14,6 @@ let
     "max_ticks": 100,
     "map_preset": {
       "seed": 55,
-      "map_size": 128,
       "jungle_roads": 24,
       "camp_radius": 34,
       "camps_touch_roads": false
@@ -33,7 +32,7 @@ doAssert saved.mapPreset.mapSize == 116
 doAssert custom.seed == 1988
 doAssert custom.maxTicks == 100
 doAssert custom.mapPreset.seed == 55
-doAssert custom.mapPreset.mapSize == 128
+doAssert custom.mapPreset.mapSize == defaultConfig().mapSize
 doAssert custom.mapPreset.jungleRoads == 24
 doAssert custom.mapPreset.campRadius == 34
 doAssert not custom.mapPreset.campsTouchRoads

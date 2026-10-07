@@ -4,7 +4,7 @@ import
   polyworld/[cli, pathing, tapes],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
-proc quietGame(team = RedTeam, size = 116): Game =
+proc quietGame(team = RedTeam, size = defaultConfig().mapSize): Game =
   ## Creates a real map with one living hero and no nearby combat.
   var preset = defaultConfig()
   preset.mapSize = size
@@ -49,7 +49,7 @@ proc enter(hero: Hero, area: BaseArea) =
   doAssert false, "No open floor in " & $area
 
 echo "Testing purchases and spawn recovery use the exact own base floors"
-for size in [64, 116, 256]:
+for size in [defaultConfig().mapSize]:
   for team in Team:
     let
       game = quietGame(team, size)

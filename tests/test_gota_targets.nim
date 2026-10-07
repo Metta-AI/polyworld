@@ -5,12 +5,13 @@ import
 
 echo "Testing spatial shortlists preserve integer range at signed map edges"
 block:
+  let half = defaultConfig().mapSize div 2
   var
     space: TargetSpace
     positions: seq[WorldPoint]
   space.reset(20 * WorldScale)
-  for x in [-128, -21, -20, -19, -11, -9, 0, 9, 11, 19, 20, 21, 128]:
-    for z in [-128, -21, -20, -19, -11, -9, 0, 9, 11, 19, 20, 21, 128]:
+  for x in [-half, -21, -20, -19, -11, -9, 0, 9, 11, 19, 20, 21, half]:
+    for z in [-half, -21, -20, -19, -11, -9, 0, 9, 11, 19, 20, 21, half]:
       for offset in [-1, 0, 1]:
         let point = WorldPoint(
           x: x.int32 * WorldScale + offset.int32,
@@ -30,7 +31,8 @@ block:
         if within(origin, point, radius):
           doAssert found[i], "spatial query missed an in-range actor"
   space.reset(20 * WorldScale)
-  space.insert(0, 100 * WorldScale, 100 * WorldScale)
+  let edge = (half - 1).int32 * WorldScale
+  space.insert(0, edge, edge)
   for i in space.nearby(0, 0, FootmanSightRadius, 1):
     doAssert false, "spatial rebuild retained an old actor"
 
