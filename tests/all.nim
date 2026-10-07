@@ -24,6 +24,7 @@ import
   test_gota_host,
   test_gota_structures,
   test_gota_observations,
+  test_gota_targets,
   test_gota_replays,
   test_gota_attacks,
   test_gota_decisions,

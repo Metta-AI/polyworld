@@ -1,7 +1,38 @@
 import
   std/algorithm,
   polyworld/pathing,
-  ../examples/gods_of_the_arena/[content, maps, replays, sim]
+  ../examples/gods_of_the_arena/[content, maps, replays, sim, targets]
+
+echo "Testing spatial shortlists preserve integer range at signed map edges"
+block:
+  var
+    space: TargetSpace
+    positions: seq[WorldPoint]
+  space.reset(20 * WorldScale)
+  for x in [-128, -21, -20, -19, -11, -9, 0, 9, 11, 19, 20, 21, 128]:
+    for z in [-128, -21, -20, -19, -11, -9, 0, 9, 11, 19, 20, 21, 128]:
+      for offset in [-1, 0, 1]:
+        let point = WorldPoint(
+          x: x.int32 * WorldScale + offset.int32,
+          z: z.int32 * WorldScale - offset.int32
+        )
+        space.insert(positions.len, point.x, point.z)
+        positions.add point
+  for origin in positions:
+    for radius in [FootmanSightRadius, TowerAttackRanges[OuterTower],
+        TowerAttackRanges[InnerTower], TowerAttackRanges[GateTower]]:
+      var found = newSeq[bool](positions.len)
+      for i in space.nearby(origin.x, origin.z, radius, positions.len):
+        doAssert i >= 0 and i < positions.len
+        doAssert not found[i], "spatial query duplicated an actor"
+        found[i] = true
+      for i, point in positions:
+        if within(origin, point, radius):
+          doAssert found[i], "spatial query missed an in-range actor"
+  space.reset(20 * WorldScale)
+  space.insert(0, 100 * WorldScale, 100 * WorldScale)
+  for i in space.nearby(0, 0, FootmanSightRadius, 1):
+    doAssert false, "spatial rebuild retained an old actor"
 
 proc arena(): Game =
   ## Creates a quiet middle lane with no active buildings or opposing scripts.
@@ -63,6 +94,44 @@ for creep in [false, true]:
   doAssert first != 0
   doAssert first == second,
     "creep=" & $creep & ", targets=" & $first & "," & $second
+
+echo "Testing indexed tower acquisition matches full scans for both teams"
+for team in Team:
+  let game = arena()
+  var space: TargetSpace
+  space.reset(20 * WorldScale)
+  for faction in Team:
+    for i in 0 ..< game.world.teamVisible[faction.ord].len:
+      game.world.teamVisible[faction.ord][i] = 255
+  for x in -12 .. 12:
+    for z in -12 .. 12:
+      let i = game.world.footmen.len
+      var unit = Footman(
+        id: 1000 + i.int32,
+        team: (if i mod 3 == 0: team else: Team(1 - team.ord)),
+        hp: (if i mod 7 == 0: 0 else: FootmanHp)
+      )
+      unit.place(WorldPoint(
+        x: x.int32 * WorldScale,
+        z: z.int32 * WorldScale
+      ))
+      space.insert(i, unit.position.x, unit.position.z)
+      game.world.footmen.add unit
+  for tier in TowerTier:
+    for x in -21 .. 21:
+      var scanned = Building(
+        id: 10,
+        team: team,
+        kind: TowerBuilding,
+        tier: tier,
+        hp: TowerHitPoints[tier],
+        position: WorldPoint(x: x.int32 * WorldScale, z: -9 * WorldScale)
+      )
+      var indexed = scanned
+      game.world.updateTower(scanned)
+      game.world.updateTower(indexed, space)
+      doAssert indexed.targetId == scanned.targetId,
+        "indexed tower changed its target"
 
 proc shot(reverse: bool): int32 =
   ## Sweeps a real ground projectile across two equally distant opponents.

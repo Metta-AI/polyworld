@@ -13,7 +13,7 @@ import
   bassy, fixxy,
   polyworld/[bodies, hashes, metrics, noises, pathing, profiles, rngs, tapes,
     visions, mailboxes],
-  content, events, motions,
+  content, events, motions, targets,
   maps,
   replays
 
@@ -349,6 +349,7 @@ type
     collisionUnits: seq[CollisionUnit]
     collisionOrder: seq[int]
     collisionOffsets: seq[FixedVec2]
+    targetSpace: TargetSpace
 
 var
   navigationWorld: World
@@ -3161,7 +3162,8 @@ proc startSwing(world: World, hero: Hero) =
   hero.swingTicks = 0
   hero.damageLanded = false
 
-proc updateTower*(world: World, tower: var Building) =
+proc updateTower*(world: World, tower: var Building,
+    targets = TargetSpace()) =
   ## Reloads independently of acquisition and fires a homing shot when ready.
   if tower.kind == BarracksBuilding or tower.hp <= 0:
     tower.targetId = 0
@@ -3191,7 +3193,12 @@ proc updateTower*(world: World, tower: var Building) =
       bestSquared = int64(attackRange) * attackRange
       bestId = 0'i32
       bestPosition: WorldPoint
-    for i in 0 ..< world.footmen.len:
+    for i in targets.nearby(
+      tower.position.x,
+      tower.position.z,
+      attackRange,
+      world.footmen.len
+    ):
       let footman {.cursor.} = world.footmen[i]
       if not world.hostile(footman, tower.team) or footman.state == Dying or
           footman.hp <= 0 or
@@ -3572,7 +3579,8 @@ proc updateNeutral(world: World, unit: var Footman) =
   unit.animClip = unit.swingClip
   unit.animTicks = max(unit.swingTicks, 0)
 
-proc updateFootman(world: World, footman: var Footman) =
+proc updateFootman(world: World, footman: var Footman,
+    targets: TargetSpace) =
   ## Advances one footman's movement, target selection, combat, and animation.
   footman.velocity = Heading()
   if footman.state == Dying:
@@ -3645,7 +3653,12 @@ proc updateFootman(world: World, footman: var Footman) =
       bestSquared = int64(FootmanSightRadius) * FootmanSightRadius
       bestId = 0'i32
       bestPosition: WorldPoint
-    for i in 0 ..< world.footmen.len:
+    for i in targets.nearby(
+      footman.position.x,
+      footman.position.z,
+      FootmanSightRadius,
+      world.footmen.len
+    ):
       let other {.cursor.} = world.footmen[i]
       if not world.hostile(other, footman.team):
         continue
@@ -5645,6 +5658,11 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
 
   world.updateCamps()
 
+  profileBlock "indexTargets":
+    game.targetSpace.reset(20 * WorldScale)
+    for i, footman in world.footmen:
+      game.targetSpace.insert(i, footman.position.x, footman.position.z)
+
   # Plan every unit against the same actor state, then publish together.
   game.nextFootmen.setLen(world.footmen.len)
   for i in 0 ..< world.footmen.len:
@@ -5658,11 +5676,11 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   profileBlock "footmen":
     for offset in 0 ..< world.footmen.len:
       let index = (world.tick.int + offset) mod world.footmen.len
-      updateFootman(world, game.nextFootmen[index])
+      updateFootman(world, game.nextFootmen[index], game.targetSpace)
   profileBlock "towers":
     for offset in 0 ..< world.buildings.len:
       let index = (world.tick.int + offset) mod world.buildings.len
-      updateTower(world, world.buildings[index])
+      updateTower(world, world.buildings[index], game.targetSpace)
   profileBlock "heroes":
     for offset in 0 ..< world.heroes.len:
       let index = (world.tick.int + offset) mod world.heroes.len
