@@ -22,6 +22,7 @@ when defined(takeScreenshot):
 
 const
   DefaultCameraDistance = 17.0'f / 1.2'f
+  ProfileWarmupFrames {.intdefine.} = 0
   AtlasPath = TmpRoot & "/gota.atlas.png"
   MossyStoneSurface = SurfaceNames.len
   CourtyardSurface = MossyStoneSurface + 1
@@ -35,6 +36,10 @@ type
   GraphicsError = object of CatchableError
   GodAnimation = enum
     GodIdle, GodDeath, GodVictory
+  WorldCharacter = object
+    pose: CharacterPose
+    living: bool
+    eyes: ptr DeathEyes
 
 proc renderPoint(position: WorldPoint): Vec3 =
   ## Converts authoritative integer coordinates at the rendering boundary.
@@ -93,7 +98,12 @@ var
 
 proc runGraphics*() =
   ## Runs the native or Emscripten graphical spectator.
-  startGameProfile()
+  when ProfileWarmupFrames > 0:
+    finishGameProfile()
+  else:
+    startGameProfile()
+  when ActiveTracePath.len > 0:
+    framePaceHz = 0
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     for class in HeroClass:
@@ -214,6 +224,7 @@ proc runGraphics*() =
     footmanEyes: array[Team, array[CreepKind, DeathEyes]]
     godEyes: array[Team, DeathEyes]
     heroEyes: array[HeroClass, DeathEyes]
+    worldCharacters: seq[WorldCharacter]
   profileBlock "models":
     let
       characterLibrary = readManifest(ChargenLibrary)
@@ -577,12 +588,16 @@ proc runGraphics*() =
     else:
       1'f
 
+  proc creepEyeState(unit: Footman): ptr DeathEyes =
+    ## Selects the shared eye nodes for a camp appearance or team creep.
+    if unit.camp > 0:
+      addr neutralEyes[unit.appearance]
+    else:
+      addr footmanEyes[unit.team][unit.kind]
+
   proc creepEyes(unit: Footman, dead: bool) =
     ## Switches every mob's face for living and corpse draws.
-    if unit.camp > 0:
-      neutralEyes[unit.appearance].setDead(dead)
-    else:
-      footmanEyes[unit.team][unit.kind].setDead(dead)
+    creepEyeState(unit)[].setDead(dead)
 
   proc creepRenderTime(footman: Footman): float32 =
     ## Fits authored attack impacts and death poses to simulation timing.
@@ -1997,10 +2012,20 @@ proc runGraphics*() =
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
+  when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
+    var profileWarmup = 0
 
   holdSplash(sk, window, splash)
+  when defined(takeScreenshot) and ActiveTracePath.len > 0 and
+    ProfileWarmupFrames == 0:
+    # Exclude loading and the requested simulation seek from frame captures.
+    startTrace()
   window.onFrame = proc() =
-    profileBlock "frame":
+    when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
+      if profileWarmup == ProfileWarmupFrames:
+        startGameProfile()
+      inc profileWarmup
+    profileBlock "game frame":
       let dt = frameDelta(lastFrameTime)
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
@@ -2094,36 +2119,43 @@ proc runGraphics*() =
           clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
-        proc drawWorldCharacters(livingOnly = false) =
-          ## Uses identical poses for shadows, occlusion masks, and the camera.
+        profileBlock "prepare character poses":
+          var count = 0
           for footman in run.world.footmen:
             if not visibleInView(footman):
               continue
-            if livingOnly and (footman.hp <= 0 or footman.state == Dying):
-              continue
             let
               model = creepModel(footman)
-              clip =
-                creepClip(footman)
-            creepEyes(footman,
-              footman.hp <= 0 or footman.state == Dying
-            )
-            drawCharacter(
-              scene, model, unitRenderPoint(footman.id, footman.position),
+              clip = creepClip(footman)
+              dead = footman.hp <= 0 or footman.state == Dying
+            creepEyes(footman, dead)
+            if count == worldCharacters.len:
+              worldCharacters.add WorldCharacter()
+            worldCharacters[count].living = not dead
+            worldCharacters[count].eyes = creepEyeState(footman)
+            scene.prepareCharacter(
+              worldCharacters[count].pose,
+              model,
+              unitRenderPoint(footman.id, footman.position),
               unitRenderFacing(footman.id, footman.facing),
               clip,
               creepRenderTime(footman),
               sizeFactor = creepSize(footman)
             )
+            inc count
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
               continue
-            if livingOnly and (hero.hp <= 0 or hero.state == Dying):
-              continue
-            let pose = heroRenderPose(hero)
-            heroEyes[hero.class].setDead(hero.hp <= 0 or hero.state == Dying)
-            drawCharacter(
-              scene,
+            let
+              pose = heroRenderPose(hero)
+              dead = hero.hp <= 0 or hero.state == Dying
+            heroEyes[hero.class].setDead(dead)
+            if count == worldCharacters.len:
+              worldCharacters.add WorldCharacter()
+            worldCharacters[count].living = not dead
+            worldCharacters[count].eyes = addr heroEyes[hero.class]
+            scene.prepareCharacter(
+              worldCharacters[count].pose,
               heroModels[hero.class],
               unitRenderPoint(hero.id, hero.position),
               unitRenderFacing(hero.id, hero.facing),
@@ -2131,72 +2163,97 @@ proc runGraphics*() =
               pose.time,
               sizeFactor = hero.heroSizeFactor()
             )
+            inc count
           for god in gods:
             if not visibleInView(
                 god.team, run.world.forts[god.team.ord].center):
               continue
-            if livingOnly and run.world.forts[god.team.ord].hp <= 0:
-              continue
             let
               model = godModels[god.team]
               clip = godRenderClips[god.team][god.godClip]
-            godEyes[god.team].setDead(run.world.forts[god.team.ord].hp <= 0)
+              dead = run.world.forts[god.team.ord].hp <= 0
+            godEyes[god.team].setDead(dead)
             var animTime = god.animTime
             if run.world.gameOver and
               (run.world.draw or god.team != run.world.winner):
                 animTime = min(animTime, clipDuration(model, clip))
-            drawCharacter(
-              scene, model, god.position, god.facing,
-              clip, animTime)
+            if count == worldCharacters.len:
+              worldCharacters.add WorldCharacter()
+            worldCharacters[count].living = not dead
+            worldCharacters[count].eyes = addr godEyes[god.team]
+            scene.prepareCharacter(
+              worldCharacters[count].pose,
+              model,
+              god.position,
+              god.facing,
+              clip,
+              animTime
+            )
+            inc count
+          worldCharacters.setLen(count)
 
-        sunDepthPasses(window.size):
-          drawTerrainSunDepth()
-          for tower in run.world.buildings:
-            if tower.hp <= 0:
+        proc drawWorldCharacters(livingOnly = false) {.measure.} =
+          ## Reuses each pose for shadows, outlines, the camera, and water.
+          for character in worldCharacters.mitems:
+            if livingOnly and not character.living:
               continue
-            towerPacks[tower.team].drawPropSunDepth(
+            if scene.shading == PbrCharacters:
+              character.eyes[].setDead(not character.living)
+            scene.drawCharacter(character.pose)
+
+        profileBlock "Shadow pass":
+          sunDepthPasses(window.size):
+            drawTerrainSunDepth()
+            for tower in run.world.buildings:
+              if tower.hp <= 0:
+                continue
+              towerPacks[tower.team].drawPropSunDepth(
+                buildingPropName(tower),
+                renderPoint(tower.position),
+                renderFacing(tower.facing),
+                buildingScale(tower)
+              )
+            scene.sunDepthPass = true
+            profileBlock "Shadow characters":
+              drawWorldCharacters()
+            scene.sunDepthPass = false
+        profileBlock "Main pass":
+          when not defined(emscripten):
+            glEnable(GL_MULTISAMPLE)
+          glClearColor(0.05, 0.06, 0.09, 1.0)
+          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          scene.toon.drawBackground()
+          updateTerrainVision()
+          if showTiles and (terrainEdgeWorld != run.world or
+              terrainEdgeRevision != run.world.navigationRevision):
+            updateTerrainEdges(navigationOpen)
+            terrainEdgeWorld = run.world
+            terrainEdgeRevision = run.world.navigationRevision
+          drawTerrain(viewProjection, showTiles)
+          for tower in run.world.buildings:
+            if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
+              continue
+            towerPacks[tower.team].drawProp(
               buildingPropName(tower),
               renderPoint(tower.position),
               renderFacing(tower.facing),
-              buildingScale(tower)
+              buildingScale(tower),
+              viewProjection
             )
-          scene.sunDepthPass = true
-          drawWorldCharacters()
-          scene.sunDepthPass = false
-        when not defined(emscripten):
-          glEnable(GL_MULTISAMPLE)
-        glClearColor(0.05, 0.06, 0.09, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-        scene.toon.drawBackground()
-        updateTerrainVision()
-        if showTiles and (terrainEdgeWorld != run.world or
-            terrainEdgeRevision != run.world.navigationRevision):
-          updateTerrainEdges(navigationOpen)
-          terrainEdgeWorld = run.world
-          terrainEdgeRevision = run.world.navigationRevision
-        drawTerrain(viewProjection, showTiles)
-        for tower in run.world.buildings:
-          if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
-            continue
-          towerPacks[tower.team].drawProp(
-            buildingPropName(tower),
-            renderPoint(tower.position),
-            renderFacing(tower.facing),
-            buildingScale(tower),
-            viewProjection
-          )
 
-        if showOccludedCharacters:
-          occlusionOutline.beginMask(window.size)
-          beginCharacters(scene, window, view, projection, cameraEye)
-          drawWorldCharacters(livingOnly = true)
-          finishCharacters(scene)
-          # Only opaque scenery is in the window depth buffer at this point.
-          occlusionOutline.drawOutline(OccludedOutlineColor)
+          if showOccludedCharacters:
+            profileBlock "Character outline pass":
+              occlusionOutline.beginMask(window.size)
+              beginCharacters(scene, window, view, projection, cameraEye)
+              drawWorldCharacters(livingOnly = true)
+              finishCharacters(scene)
+              # Only opaque scenery is in the window depth buffer here.
+              occlusionOutline.drawOutline(OccludedOutlineColor)
 
-        beginCharacters(scene, window, view, projection, cameraEye)
-        drawWorldCharacters()
-        finishCharacters(scene)
+          profileBlock "Main characters":
+            beginCharacters(scene, window, view, projection, cameraEye)
+            drawWorldCharacters()
+            finishCharacters(scene)
 
         # The arena's lakes, each with its own reflection. The water mirrors the sky,
         # terrain, towers and characters; particles, spells and markers stay out of it.
@@ -2222,10 +2279,11 @@ proc runGraphics*() =
                 buildingScale(tower),
                 mirroredViewProjection
               )
-            beginCharacters(scene, window, mirroredView, mirroredProjection,
-              mirroredEye)
-            drawWorldCharacters()
-            finishCharacters(scene)
+            profileBlock "Water mirror characters":
+              beginCharacters(
+                scene, window, mirroredView, mirroredProjection, mirroredEye)
+              drawWorldCharacters()
+              finishCharacters(scene)
         )
         particles.drawParticles(
           viewProjection,
@@ -2327,7 +2385,7 @@ proc runGraphics*() =
           )
           sk.endUi()
           drawStatsOverlay(sk, window)
-      when defined(takeScreenshot):
+      when defined(takeScreenshot) and ActiveTracePath.len == 0:
         captureScreenshot(
           window,
           screenshotFrame,

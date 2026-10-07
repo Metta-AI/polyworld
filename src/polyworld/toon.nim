@@ -23,10 +23,10 @@
 ## PBR renderer uploads, so a scene can switch between the two per frame.
 
 import
-  std/sets,
+  std/[math, sets, tables],
   opengl, vmath, chroma, pixie, shady,
   gltf,
-  shadows
+  frustums, shadowmeshes, shadows
 
 ## Shaders
 
@@ -120,8 +120,9 @@ proc sunShadowFactor(worldPos: Vec3): float32 =
   ## quantized sun steps. The result already folds in the shadow strength.
   result = 1.0'f
   if toonShadowsOn > 0.5'f:
-    let lit = mix(
-      toonLitFraction0(worldPos), toonLitFraction1(worldPos), toonShadowStep)
+    var lit = toonLitFraction0(worldPos)
+    if toonShadowStep > 0:
+      lit = mix(lit, toonLitFraction1(worldPos), toonShadowStep)
     result = 1.0'f - (1.0'f - lit) * toonShadowStrength
 
 proc toonVert(
@@ -394,9 +395,29 @@ type
     transform*: Mat4
     normal*: Mat3
     joints*: seq[Mat4]
+    boundsNode: Node
+    boundsMesh: Mesh
+    boundsPrimitives: seq[Primitive]
+    geometryVersions: seq[uint64]
+    bindBounds: seq[AABounds]
+    boundsJointCount: int
+    boundsValid: bool
+    weightScale: float32
+    weightMinimum: float32
 
   ToonPose* = object
     meshes*: seq[ToonMeshPose]
+    bounds*: AABounds
+    boundsValid*: bool
+
+  ShadowSource = object
+    primitive: Primitive
+    version: uint64
+    alpha: AlphaMode
+
+  ShadowGeometry = object
+    sources: seq[ShadowSource]
+    primitives: seq[Primitive]
 
   ToonContext* = ref object
     shader: GLuint
@@ -408,6 +429,7 @@ type
     backgroundVao, backgroundVbo: GLuint
     rampTexture: GLuint
     jointMatrices: seq[Mat4]
+    shadowGeometry: Table[pointer, ShadowGeometry]
     transform*: Mat4             ## model transform applied above the root
     view*, proj*: Mat4
     cameraPosition*: Vec3
@@ -575,9 +597,98 @@ proc drawBackground*(ctx: ToonContext) =
   glEnable(GL_CULL_FACE)
   glUseProgram(0)
 
+proc prepareBindBounds(mesh: var ToonMeshPose, node: Node) =
+  ## Caches geometry boxes per joint, including only its weighted vertices.
+  var changed = mesh.boundsNode != node or mesh.boundsMesh != node.mesh or
+    mesh.geometryVersions.len != node.mesh.primitives.len or
+    mesh.boundsJointCount != mesh.joints.len
+  if not changed:
+    for i, primitive in node.mesh.primitives:
+      if mesh.boundsPrimitives[i] != primitive or
+        mesh.geometryVersions[i] != primitive.geometryVersion:
+        changed = true
+        break
+  if not changed:
+    return
+  mesh.boundsNode = node
+  mesh.boundsMesh = node.mesh
+  mesh.boundsJointCount = mesh.joints.len
+  mesh.geometryVersions.setLen(node.mesh.primitives.len)
+  mesh.boundsPrimitives.setLen(node.mesh.primitives.len)
+  for i, primitive in node.mesh.primitives:
+    mesh.geometryVersions[i] = primitive.geometryVersion
+    mesh.boundsPrimitives[i] = primitive
+  mesh.bindBounds.setLen(max(mesh.joints.len, 1))
+  for bounds in mesh.bindBounds.mitems:
+    bounds = emptyBounds()
+  mesh.boundsValid = true
+  mesh.weightScale = 1
+  mesh.weightMinimum = 1
+  for primitive in node.mesh.primitives:
+    if mesh.joints.len > 0 and
+      (primitive.jointIds.len != primitive.points.len or
+      primitive.jointWeights.len != primitive.points.len):
+        mesh.boundsValid = false
+        return
+    for i, point in primitive.points:
+      for axis in 0 ..< 3:
+        if classify(point[axis]) in {fcNan, fcInf, fcNegInf}:
+          mesh.boundsValid = false
+          return
+      if mesh.joints.len == 0:
+        mesh.bindBounds[0].extend(point)
+        continue
+      var sum = 0.0'f
+      for j in 0 ..< 4:
+        let
+          weight = primitive.jointWeights[i][j]
+          joint = primitive.jointIds[i][j].int
+        if weight < 0 or classify(weight) in {fcNan, fcInf, fcNegInf}:
+          mesh.boundsValid = false
+          return
+        sum += weight
+        if weight == 0:
+          continue
+        if joint >= mesh.joints.len:
+          mesh.boundsValid = false
+          return
+        mesh.bindBounds[joint].extend(point)
+      mesh.weightScale = max(mesh.weightScale, sum)
+      mesh.weightMinimum = min(mesh.weightMinimum, sum)
+
+proc posedBounds(mesh: var ToonMeshPose, node: Node): AABounds =
+  ## Bounds the convex combination of joint-transformed vertex positions.
+  mesh.prepareBindBounds(node)
+  result = emptyBounds()
+  if not mesh.boundsValid:
+    return
+  var local = emptyBounds()
+  if mesh.joints.len == 0:
+    local = mesh.bindBounds[0]
+  else:
+    for i, bounds in mesh.bindBounds:
+      local.extend(bounds.transformed(mesh.joints[i]))
+    # Include zero and expand for weights whose sum is not exactly one.
+    local.extend(vec3(0))
+    local.min *= mesh.weightScale
+    local.max *= mesh.weightScale
+  result = local.transformed(mesh.transform)
+  if mesh.joints.len > 0:
+    # Skin weights scale model translation as well as local positions.
+    let
+      lower = mesh.transform.pos * (mesh.weightMinimum - 1)
+      upper = mesh.transform.pos * (mesh.weightScale - 1)
+    result.min += min(lower, upper)
+    result.max += max(lower, upper)
+  # Leave room for floating-point roundoff at the clipping planes.
+  result.min -= vec3(0.001'f)
+  result.max += vec3(0.001'f)
+
 proc prepareToonPose*(pose: var ToonPose, root: Node, transform: Mat4) =
   ## Captures visible meshes and skin matrices once for all drawing passes.
   root.updateTransforms(transform)
+  pose.bounds = emptyBounds()
+  pose.boundsValid = true
   var count = 0
   proc visit(node: Node, pose: var ToonPose, count: var int) =
     ## Retains per-mesh joint storage while replacing the current snapshot.
@@ -592,6 +703,8 @@ proc prepareToonPose*(pose: var ToonPose, root: Node, transform: Mat4) =
       pose.meshes[index].transform = node.mat
       pose.meshes[index].normal = node.mat.normalMatrix
       root.skinMatricesInto(node, pose.meshes[index].joints)
+      pose.bounds.extend(pose.meshes[index].posedBounds(node))
+      pose.boundsValid = pose.boundsValid and pose.meshes[index].boundsValid
     for child in node.nodes:
       visit(child, pose, count)
   visit(root, pose, count)
@@ -693,6 +806,9 @@ proc draw*(
 ) =
   ## Draws every visible mesh under root with toon shading. Blended
   ## materials go last so they see the opaque depth.
+  if pose != nil and pose.boundsValid and
+    not pose.bounds.inFrustum(ctx.proj * ctx.view):
+      return
   if pose == nil:
     root.updateTransforms(ctx.transform)
   glUseProgram(ctx.shader)
@@ -820,6 +936,38 @@ proc drawSunDepthPrimitive(
   else:
     glDrawArrays(GL_TRIANGLES, 0, primitive.points.len.cint)
 
+proc prepareShadowGeometry(ctx: ToonContext, mesh: Mesh) =
+  ## Retains batched shadow buffers until source geometry or cutouts change.
+  let key = cast[pointer](mesh)
+  let geometry = addr ctx.shadowGeometry.mgetOrPut(key, ShadowGeometry())
+  var changed = geometry.sources.len != mesh.primitives.len
+  if not changed:
+    for i, primitive in mesh.primitives:
+      let source = geometry.sources[i]
+      if source.primitive != primitive or
+        source.version != primitive.geometryVersion or
+        source.alpha != primitive.material.alphaMode:
+          changed = true
+          break
+  if not changed:
+    return
+  for primitive in geometry.primitives:
+    var owned = true
+    for source in geometry.sources:
+      if primitive == source.primitive:
+        owned = false
+        break
+    if owned:
+      primitive.clearFromGpu()
+  geometry.sources.setLen(mesh.primitives.len)
+  for i, primitive in mesh.primitives:
+    geometry.sources[i] = ShadowSource(
+      primitive: primitive,
+      version: primitive.geometryVersion,
+      alpha: primitive.material.alphaMode
+    )
+  geometry.primitives = mesh.shadowPrimitives()
+
 proc drawSunDepth*(
   ctx: ToonContext,
   root: Node,
@@ -829,6 +977,9 @@ proc drawSunDepth*(
   ## (polyworld/shadows), skinning included, so characters cast shadows.
   ## Call between beginSunDepthPass and endSunDepthPass with ctx.transform
   ## already posed; blended materials never cast.
+  if pose != nil and pose.boundsValid and
+    not pose.bounds.inFrustum(sunDepthPassMvp()):
+      return
   if pose == nil:
     root.updateTransforms(ctx.transform)
   glUseProgram(ctx.depthShader)
@@ -842,9 +993,9 @@ proc drawSunDepth*(
 
   proc drawMesh(node: Node, meshPose: ptr ToonMeshPose = nil) =
     ## Uses the same prepared joints for either shadow map.
-    for primitive in node.mesh.primitives:
-      if primitive.material.alphaMode != BlendAlphaMode:
-        ctx.drawSunDepthPrimitive(root, node, primitive, meshPose)
+    ctx.prepareShadowGeometry(node.mesh)
+    for primitive in ctx.shadowGeometry[cast[pointer](node.mesh)].primitives:
+      ctx.drawSunDepthPrimitive(root, node, primitive, meshPose)
   proc visit(node: Node) =
     ## Walks visible nodes for callers without a prepared snapshot.
     if not node.visible:

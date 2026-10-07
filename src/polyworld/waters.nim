@@ -51,7 +51,7 @@
 import
   std/[math, random, times],
   chroma, opengl, shady, vmath,
-  quadterrain
+  profiles, quadterrain
 
 const
   ShaderTarget =
@@ -521,7 +521,7 @@ proc reflectedCamera*(eye: Vec3, view, projection: Mat4,
     oblique[column, 2] = c[column] - oblique[column, 3]
   result.projection = scale(vec3(-1'f32, 1, 1)) * oblique
 
-proc beginReflection(size: IVec2) =
+proc beginReflection(size: IVec2) {.measure.} =
   ## Starts rendering a reflection into its texture, at the window's size.
   if size != reflectionSize:
     reflectionSize = size
@@ -553,7 +553,7 @@ proc beginReflection(size: IVec2) =
   glViewport(0, 0, size.x, size.y)
   glClear(GL_DEPTH_BUFFER_BIT)
 
-proc captureScene(size: IVec2) =
+proc captureScene(size: IVec2) {.measure.} =
   ## Copies the window's colour and depth into colorCopy and depthCopy. The depth texture
   ## matches the window's 24-bit depth, 8-bit stencil format, which a depth blit requires;
   ## a multisampled window is resolved by the blit.
@@ -592,7 +592,7 @@ proc reflecting*(params: WaterParams): bool =
   params.reflectiveness > 0 or params.fresnelStrength > 0
 
 proc drawWaterBody(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize: IVec2,
-    sunToward: Vec3, sunLight: Color, rect: IVec4, reflected: bool) =
+    sunToward: Vec3, sunLight: Color, rect: IVec4, reflected: bool) {.measure.} =
   ## Draws one body of water over the captured scene.
   let
     params = body.params
@@ -664,7 +664,7 @@ proc drawWaterBodies*(
     sunLight: Color,
     drawMirrored: proc(view, projection: Mat4, eye: Vec3),
     viewport = ivec4(0, 0, 0, 0)
-) =
+) {.measure.} =
   ## Draws the water bodies over this view's opaque scene, in order (put lower water
   ## first). Each reflective body first renders its reflection: `drawMirrored` draws the
   ## scene (drawWaterSky first, then what should show in the water) from the camera
@@ -684,15 +684,16 @@ proc drawWaterBodies*(
       continue
     let reflected = reflecting(body.params)
     if reflected:
-      if inset:
-        glDisable(GL_SCISSOR_TEST)
-      let mirrored = reflectedCamera(eye, view, projection,
-        waterLayerSurfaces[body.layer] + body.params.lift)
-      beginReflection(windowSize)
-      drawMirrored(mirrored.view, mirrored.projection, mirrored.eye)
-      glBindFramebuffer(GL_FRAMEBUFFER, 0)
-      if inset:
-        glEnable(GL_SCISSOR_TEST)
-      glViewport(rect.x, rect.y, rect.z, rect.w)
+      profileBlock "Water mirror pass":
+        if inset:
+          glDisable(GL_SCISSOR_TEST)
+        let mirrored = reflectedCamera(eye, view, projection,
+          waterLayerSurfaces[body.layer] + body.params.lift)
+        beginReflection(windowSize)
+        drawMirrored(mirrored.view, mirrored.projection, mirrored.eye)
+        glBindFramebuffer(GL_FRAMEBUFFER, 0)
+        if inset:
+          glEnable(GL_SCISSOR_TEST)
+        glViewport(rect.x, rect.y, rect.z, rect.w)
     drawWaterBody(body, projection * view, eye, windowSize, sunToward, sunLight, rect,
       reflected)

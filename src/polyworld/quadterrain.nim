@@ -99,8 +99,9 @@ proc sampleSunShadow(shadowPos: Vec3): float32 =
   ## quantized sun steps. The result already folds in the shadow strength.
   result = 1.0'f
   if shadowsOn > 0.5'f:
-    let lit = mix(
-      sunLitFraction0(shadowPos), sunLitFraction1(shadowPos), shadowStep)
+    var lit = sunLitFraction0(shadowPos)
+    if shadowStep > 0:
+      lit = mix(lit, sunLitFraction1(shadowPos), shadowStep)
     result = 1.0'f - (1.0'f - lit) * shadowStrength
 
 proc ambientVisibility(position: Vec3): float32 =
