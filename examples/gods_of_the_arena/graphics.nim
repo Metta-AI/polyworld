@@ -13,7 +13,7 @@ import
   polyworld/profiles,
   polyworld/quadterrain,
   polyworld/shadows,
-  polyworld/terrainsurfaces,
+  polyworld/terrainsurfaces, polyworld/waters,
   polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars, worldtexts]
 
@@ -131,10 +131,12 @@ proc runGraphics*() =
   profileBlock "terrain":
     amplitude = 2.8'f
     seed = ArenaSeed
+    installWaters()
     initTerrain(
       GotaTreeStyle, GeneratedTerrain, NoRocks, ArenaTextures,
       settings = GotaTerrainAssets
     )
+    initWaters()
     terrainUnboostedMaterial = CourtyardSurface.float32
     let landscape = buildLandscape(
       layers[GroundLayer],
@@ -2196,14 +2198,34 @@ proc runGraphics*() =
         drawWorldCharacters()
         finishCharacters(scene)
 
-        let waterTime =
-          (run.world.tick.float32 + renderAlpha) / TickRate.float32
-        drawWater(
-          viewProjection,
-          cameraEye,
-          offset = vec2(waterTime * 0.25'f, 0),
-          opacity = 0.5'f,
-          highlightOpacity = 0.0'f
+        # The arena's lakes, each with its own reflection. The water mirrors the sky,
+        # terrain, towers and characters; particles, spells and markers stay out of it.
+        var lakes: seq[WaterBody]
+        for i, layer in layers:
+          if layer.water:
+            lakes.add WaterBody(layer: i, params: DefaultWaterParams)
+        drawWaterBodies(
+          lakes, view, projection, cameraEye, window.size,
+          sunDirection, scene.toon.highlightColor,
+          proc(mirroredView, mirroredProjection: Mat4, mirroredEye: Vec3) =
+            let mirroredViewProjection = mirroredProjection * mirroredView
+            drawWaterSky(mirroredViewProjection, mirroredEye, scene.toon.skyColor,
+              scene.toon.horizonColor, scene.toon.groundColor)
+            drawTerrain(mirroredViewProjection, false)
+            for tower in run.world.buildings:
+              if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
+                continue
+              towerPacks[tower.team].drawProp(
+                buildingPropName(tower),
+                renderPoint(tower.position),
+                renderFacing(tower.facing),
+                buildingScale(tower),
+                mirroredViewProjection
+              )
+            beginCharacters(scene, window, mirroredView, mirroredProjection,
+              mirroredEye)
+            drawWorldCharacters()
+            finishCharacters(scene)
         )
         particles.drawParticles(
           viewProjection,
