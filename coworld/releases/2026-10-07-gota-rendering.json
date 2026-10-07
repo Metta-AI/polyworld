@@ -1,0 +1,206 @@
+{
+  "date": "2026-10-07",
+  "version": "2026.10.7.2",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_6fb99f9c-98e4-4a9e-802c-ecc59621f179",
+  "source_commit": "801749e509e888b423ba44ee2188946c22e3ba85",
+  "asset_commit": "f78d18d8eeb899ed3aa7a304944be448aec34dcf",
+  "silky_commit": "3c5dd562924c044bfd4417331f82132fa0a0afdb",
+  "replay_version": 69,
+  "canonical": true,
+  "changes": [
+    "Retain character rendering, single-shadow-pass and renderer-buffer performance improvements.",
+    "Pin native and Coworld dependencies to merged Silky master, PR 73.",
+    "Include current main's committed GotA balance changes; exclude experimental GPU skinning."
+  ],
+  "checks": [
+    "Native and Coworld Nim checks passed.",
+    "Release CI tests and all-game determinism passed locally.",
+    "Ten local certification steps and native replay verification passed.",
+    "Hosted certification and five smoke games passed.",
+    "Hosted JavaScript, WASM and data match the built artifacts.",
+    "The requested main-ladder round completed all 24 games with mixed teams and verified scores.",
+    "Full hosted replay completed in the web player without browser errors."
+  ],
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/37697441807",
+  "local_certification": {
+    "steps_passed": 10,
+    "results": {
+      "scores": [
+        208,
+        234,
+        310,
+        364,
+        290,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ticks": 16389,
+      "seed": 2026,
+      "outcome": "RedTeam",
+      "banked_gold": [],
+      "returned": [],
+      "total_xp": [
+        2374,
+        2673,
+        3539,
+        4151,
+        3311,
+        382,
+        1079,
+        609,
+        541,
+        423
+      ]
+    }
+  },
+  "hosted_certification": {
+    "state": "certified",
+    "job_id": "ef160d83-4517-4f4c-995c-0f54178511e4"
+  },
+  "viewer_assets": {
+    "wasm": {
+      "bytes": 6156560,
+      "sha256": "63be775a81850f57ddb6820731e79ce2c321d53d0f010b3ec29b7d5e6c17e630"
+    },
+    "data": {
+      "bytes": 33451159,
+      "sha256": "6a1d07f38179cd0ce3498dbaefb725c634d74a7705426ded9a119a83dd98e3f0"
+    },
+    "js": {
+      "bytes": 348139,
+      "sha256": "12c16e49238de60ca57ec509e04d14279c8266b9ea9b8986a67818957c34322f"
+    }
+  },
+  "league_settings_preserved": [
+    {
+      "id": "league_080e6abb-597b-45e3-ab21-63321905fdd6",
+      "name": "NeuralHub at Diablo Valley College",
+      "unchanged_fields": [
+        "settings",
+        "commissioner_config",
+        "rounds_paused_at",
+        "disabled_at",
+        "filler_policy_version_ids"
+      ]
+    },
+    {
+      "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+      "name": "Gods of the Arena",
+      "unchanged_fields": [
+        "settings",
+        "commissioner_config",
+        "rounds_paused_at",
+        "disabled_at",
+        "filler_policy_version_ids"
+      ]
+    }
+  ],
+  "verification_round": {
+    "round_id": "round_fc6f4de1-6b16-4943-b3c4-d4f53727fb5c",
+    "round_number": 1316,
+    "status": "completed",
+    "games": 24,
+    "completed_games": 24,
+    "failed_games": 0,
+    "failures": [],
+    "coworld_id": "cow_6fb99f9c-98e4-4a9e-802c-ecc59621f179",
+    "version": "2026.10.7.2",
+    "integer_scores_verified": 240,
+    "scoring": "Emmett's Glory",
+    "mixed_team_games_verified": 24,
+    "outcomes": {
+      "time_limit": 17,
+      "RedTeam": 5,
+      "BlueTeam": 2
+    },
+    "replay_version": 69,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=ad280d98-ccd3-48e1-b336-f9b2f1cfadac",
+    "verified_at": "2026-10-07T22:47:28.503305+00:00"
+  },
+  "replay_verification": {
+    "round_number": 1316,
+    "id": "ereq_a9010846-a972-40e9-89cd-209df011035b",
+    "episode_id": "b211c281-cf49-44e1-ab47-c50bae5e2950",
+    "replay_version": 69,
+    "sha256": "9a0f2263c4380dd60f5a56be7a969558b97540ace381b25136af4af9684c26ed",
+    "ticks": 28909,
+    "outcome": "time_limit",
+    "native_verified": true
+  },
+  "browser_verification": {
+    "coworld_id": "cow_6fb99f9c-98e4-4a9e-802c-ecc59621f179",
+    "episode_id": "b211c281-cf49-44e1-ab47-c50bae5e2950",
+    "rendered": true,
+    "end_tick": 28909,
+    "browser_errors": [],
+    "method": "Deployed WASM viewer rendered the match and completed an initial-to-final seek at tick 28909/28909 with no errors. Native replay consumed all 91628 actions and validated every tick hash.",
+    "verified_at": "2026-10-07T22:49:09.811998+00:00"
+  },
+  "performance": {
+    "workload": {
+      "seats": 10,
+      "policy": "rusher.bas",
+      "seed": 42,
+      "simulationTick": 1440,
+      "paused": true,
+      "window": "1280x800",
+      "warmupFrames": 60,
+      "capturedFrames": 40,
+      "repetitions": 3
+    },
+    "views": [
+      {
+        "view": "lake",
+        "before": {
+          "frameMs": 38.132752775,
+          "fps": 26.191838242817457
+        },
+        "after": {
+          "frameMs": 19.581352433333336,
+          "fps": 50.958673636771394
+        },
+        "speedup": 1.9455936297539445
+      },
+      {
+        "view": "overview",
+        "before": {
+          "frameMs": 40.502235375,
+          "fps": 24.65625250077226
+        },
+        "after": {
+          "frameMs": 35.73109160833334,
+          "fps": 27.965369670068696
+        },
+        "speedup": 1.134210061695012
+      },
+      {
+        "view": "land",
+        "before": {
+          "frameMs": 40.327350083333336,
+          "fps": 24.77336867627175
+        },
+        "after": {
+          "frameMs": 13.742160399999998,
+          "fps": 72.77509769416196
+        },
+        "speedup": 2.9376343058207857
+      }
+    ],
+    "finalVerification": {
+      "before": {
+        "frameMs": 43.59925215,
+        "fps": 22.91970498087203
+      },
+      "after": {
+        "frameMs": 21.3370083,
+        "fps": 47.447619658888065
+      }
+    }
+  },
+  "manifest_hash": "sha256:0d083677d7a7d1c9f89d88608fe9b7cbe885ebbdd7ad67ac3b5a5d262af86365",
+  "verified_at": "2026-10-07T22:49:09.855310+00:00"
+}
