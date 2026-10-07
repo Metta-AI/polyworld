@@ -262,6 +262,37 @@ proc computeWalkable*() {.measure.} =
           int32(layer.originZ + z - GridTiles div 2) *
           PathUnitsPerTile + PathUnitsPerTile div 2
 
+proc refreshWalkableLayers*(changed: openArray[int]) =
+  ## Refresh edited layers without reallocating search storage. Changes to node
+  ## counts require new offsets. Incoming cross-layer edge caches are invalidated
+  ## globally because either endpoint's geometry may have changed.
+  for layerIndex in changed:
+    if layerIndex < 0 or layerIndex >= layers.len:
+      raise newException(ValueError, "Edited pathing layer index out of bounds")
+  if layerNodeOffsets.len != layers.len + 1:
+    computeWalkable()
+    return
+  for i, layer in layers:
+    if layerNodeOffsets[i + 1] - layerNodeOffsets[i] != layer.tiles.len:
+      computeWalkable()
+      return
+  for layerIndex in changed:
+    let layer = layers[layerIndex]
+    layerWalkable[layerIndex] = computeWalkable(layer)
+    for z in 0..<layer.depth:
+      for x in 0..<layer.width:
+        let index = nodeIndex(layerIndex, x, z)
+        let h = layer.tiles[z * layer.width + x].tops
+        nodeLayers[index] = layerIndex
+        nodeXs[index] = x
+        nodeZs[index] = z
+        nodePathXs[index] = int32(layer.originX + x - GridTiles div 2) *
+          PathUnitsPerTile + PathUnitsPerTile div 2
+        nodePathYs[index] = int32(h[0]) + int32(h[1]) + int32(h[2]) + int32(h[3])
+        nodePathZs[index] = int32(layer.originZ + z - GridTiles div 2) *
+          PathUnitsPerTile + PathUnitsPerTile div 2
+  for known in edgeKnown.mitems: known = [false, false, false, false]
+
 proc sameLayers(contextLayers: openArray[QuadLayer]): bool =
   if layers.len != contextLayers.len or
       layerWalkable.len != contextLayers.len:
