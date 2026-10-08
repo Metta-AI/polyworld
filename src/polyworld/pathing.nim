@@ -982,6 +982,10 @@ proc stepPathTile(
   else:
     (false, tile)
 
+proc pathOpen(tile: PathTile, walkable: PathWalkable): bool {.inline.} =
+  ## Applies the optional runtime occupancy filter without a closure.
+  walkable == nil or walkable(int(tile.layer), int(tile.x), int(tile.z))
+
 proc lineClear*(
     a, b: PathTile,
     start, finish: tuple[x, z: int64],
@@ -990,10 +994,7 @@ proc lineClear*(
 ): bool =
   ## Traces exact positions in global tile space through terrain and occupancy.
   ## Layer changes follow edge links; exact corner crossings require both routes.
-  proc open(tile: PathTile): bool =
-    ## Applies the optional runtime occupancy filter.
-    walkable == nil or walkable(int(tile.layer), int(tile.x), int(tile.z))
-  if not open(a) or not open(b):
+  if not pathOpen(a, walkable) or not pathOpen(b, walkable):
     return false
   var node = a
   let
@@ -1054,8 +1055,10 @@ proc lineClear*(
         viaX.open and viaXZ.open and viaZ.open and viaZX.open
       ):
         return false
-      if not open(viaX.next) or not open(viaZ.next) or
-          not open(viaXZ.next) or not open(viaZX.next):
+      if not pathOpen(viaX.next, walkable) or
+          not pathOpen(viaZ.next, walkable) or
+          not pathOpen(viaXZ.next, walkable) or
+          not pathOpen(viaZX.next, walkable):
         return false
       if viaXZ.next != viaZX.next:
         return false
@@ -1066,14 +1069,14 @@ proc lineClear*(
       nextZ += unitsPerTile
     elif takeX:
       let crossing = stepPathTile(node, dirX)
-      if not crossing.open or not open(crossing.next):
+      if not crossing.open or not pathOpen(crossing.next, walkable):
         return false
       node = crossing.next
       tileX += stepX
       nextX += unitsPerTile
     elif takeZ:
       let crossing = stepPathTile(node, dirZ)
-      if not crossing.open or not open(crossing.next):
+      if not crossing.open or not pathOpen(crossing.next, walkable):
         return false
       node = crossing.next
       tileZ += stepZ

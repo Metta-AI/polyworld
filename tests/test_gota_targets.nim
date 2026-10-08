@@ -20,7 +20,8 @@ block:
         space.insert(positions.len, point.x, point.z)
         positions.add point
   for origin in positions:
-    for radius in [FootmanSightRadius, TowerAttackRanges[OuterTower],
+    for radius in [NeutralAggroTiles * WorldScale, NeutralLeash,
+        FootmanSightRadius, TowerAttackRanges[OuterTower],
         TowerAttackRanges[InnerTower], TowerAttackRanges[GateTower]]:
       var found = newSeq[bool](positions.len)
       for i in space.nearby(origin.x, origin.z, radius, positions.len):

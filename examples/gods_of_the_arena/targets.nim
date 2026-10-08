@@ -6,7 +6,7 @@ type TargetSpace* = object
   space: HashSpace
 
 proc reset*(targets: var TargetSpace, cellWidth: int32) =
-  ## Reuses a spatial index for the next simultaneous planning phase.
+  ## Reuses a spatial index for the next actor snapshot.
   if targets.space == nil:
     targets.space = newHashSpace(cellWidth.float)
   else:

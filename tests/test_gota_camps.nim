@@ -1,5 +1,5 @@
 import
-  std/[os, sets, tempfiles],
+  std/[algorithm, os, sets, tempfiles],
   bassy,
   polyworld/[cli, pathing],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
@@ -172,6 +172,84 @@ for team in Team:
           doAssert event.target.id == mob.id
           doAssert event.cause == Proximity
       doAssert engaged == 1
+
+echo "Testing camp activation ties ignore unit storage order"
+block:
+  var selected = 0'i32
+  for reverse in [false, true]:
+    let
+      game = campGame()
+      world = game.world
+      mob = world.footmen[world.member(0)]
+    world.camps.setLen(1)
+    world.footmen = @[mob]
+    world.footmen[0].controls[StunControl] =
+      ControlTimer(started: world.tick, ends: world.tick + 100)
+    for direction in [-1'i32, 1'i32]:
+      var creep = Footman(id: world.nextFootmanId, team: RedTeam,
+        hp: 10_000, kind: MeleeCreep, swingTicks: -1)
+      inc world.nextFootmanId
+      var point = mob.position
+      point.x += direction * WorldScale
+      creep.place(point)
+      creep.controls[StunControl] =
+        ControlTimer(started: world.tick, ends: world.tick + 100)
+      world.footmen.add creep
+    if reverse:
+      world.footmen.reverse()
+    game.tickWorld(nil)
+    doAssert world.camps[0].state == FightingCamp
+    if selected == 0:
+      selected = world.camps[0].targetId
+    else:
+      doAssert world.camps[0].targetId == selected
+
+echo "Testing camp activation uses positions after movement"
+block:
+  let
+    game = campGame()
+    world = game.world
+    mob = world.footmen[world.member(0)]
+  world.camps.setLen(1)
+  world.footmen = @[mob]
+  world.footmen[0].controls[StunControl] =
+    ControlTimer(started: world.tick, ends: world.tick + 100)
+  var point = mob.position
+  point.x += NeutralAggroTiles * WorldScale + 1
+  let hero = game.awaken(0, point)
+  doAssert world.applyWalkTo(
+    hero.id,
+    mapCoordinate(mob.position.x, hero.team),
+    mapCoordinate(mob.position.z, hero.team)
+  )
+  doAssert world.camps[0].state == RestingCamp
+  game.tickWorld(nil)
+  doAssert within(hero.position, mob.position,
+    NeutralAggroTiles * WorldScale)
+  doAssert world.camps[0].state == FightingCamp
+  doAssert world.camps[0].targetId == hero.id
+
+echo "Testing camp respawns join the shared index before activation"
+block:
+  let
+    game = campGame()
+    world = game.world
+    center = world.camps[0].center
+  world.camps.setLen(1)
+  world.footmen.setLen(0)
+  world.camps[0].state = EmptyCamp
+  world.camps[0].respawnTick = world.tick + 1
+  var creep = Footman(id: world.nextFootmanId, team: RedTeam,
+    hp: 10_000, kind: MeleeCreep, swingTicks: -1)
+  inc world.nextFootmanId
+  creep.place(center)
+  creep.controls[StunControl] =
+    ControlTimer(started: world.tick, ends: world.tick + 100)
+  world.footmen.add creep
+  game.tickWorld(nil)
+  doAssert world.footmen.len == world.camps[0].count + 1
+  doAssert world.camps[0].state == FightingCamp
+  doAssert world.camps[0].targetId == creep.id
 
 echo "Testing a nearby hidden hero does not provoke a camp"
 block:

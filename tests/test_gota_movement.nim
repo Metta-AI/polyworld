@@ -25,6 +25,38 @@ proc middle(): WorldPoint =
   const Unit = WorldScale div PathUnitsPerTile
   WorldPoint(x: point.x * Unit, y: point.y * Unit, z: point.z * Unit)
 
+echo "Testing repeated hero paths reuse warmed buffers"
+block:
+  let
+    game = arena()
+    world = game.world
+    hero = world.heroes[0]
+    origin = middle()
+  hero.hp = hero.maxHp
+  hero.state = Marching
+  hero.place(origin)
+  let
+    x = mapCoordinate(origin.x, hero.team) + 3
+    z = mapCoordinate(origin.z, hero.team)
+  doAssert world.applyWalkTo(hero.id, x, z)
+  let
+    expected = hero.movePath
+    expectedLayers = hero.movePathLayers
+  when defined(nimTypeNames):
+    let allocations = getMemCounters()[0]
+  for i in 0 ..< 100:
+    hero.hasMoveTarget = false
+    doAssert world.applyWalkTo(hero.id, x, z)
+    doAssert hero.movePath == expected
+    doAssert hero.movePathLayers == expectedLayers
+  when defined(nimTypeNames):
+    doAssert getMemCounters()[0] == allocations
+  let snapshot = world.clone()
+  hero.movePath[0].x += 1
+  doAssert snapshot.heroes[0].movePath == expected
+  world.restore(snapshot)
+  doAssert world.heroes[0].movePath == expected
+
 proc crossing(kind: Observer, reverse, outward: bool): int32 =
   ## Acquires from the starting positions while an enemy crosses the radius.
   let

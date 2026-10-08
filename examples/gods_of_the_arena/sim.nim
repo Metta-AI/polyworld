@@ -39,8 +39,7 @@ var
   visionBlockers: seq[int16]
   visionSources: seq[VisionSource]
   visionSkipNow: seq[int32]
-  heroPathPoints: seq[PathPoint]
-  heroPathTiles: seq[PathTile]
+  navigationTiles, movementTiles: seq[PathTile]
   gotaWalkLayer: int
   gotaWalkDestLayer: int
   gotaWalkOrigin: FixedVec2
@@ -1815,7 +1814,7 @@ proc tryMove(
     footman: var Footman,
     direction: WorldPoint,
     destLayer = -1'i32
-) =
+) {.measure.} =
   ## Turns toward the offset, then walks along facing with wall-slide.
   gotaWalkLayer = int(footman.navLayer)
   gotaWalkTeam = footman.team
@@ -1834,7 +1833,8 @@ proc tryMove(
   settleOnLayer(footman.position, footman.navLayer, footman.team)
   footman.surfaceHint = footman.position.y
 
-proc tryMove(hero: Hero, direction: WorldPoint, destLayer = -1'i32) =
+proc tryMove(hero: Hero, direction: WorldPoint,
+    destLayer = -1'i32) {.measure.} =
   ## Turns and walks a hero at its level-scaled tile-space speed.
   gotaWalkLayer = int(hero.navLayer)
   gotaWalkTeam = hero.team
@@ -2496,12 +2496,13 @@ proc nearestNavTile(
           bestScore = score
           result = true
 
-proc movementPath(tiles: seq[PathTile], start: WorldPoint,
-    team: Team): seq[PathTile] =
-  ## Keeps the farthest clear shortcut from each turn, starting at the unit.
+proc fillMovementPath(tiles: seq[PathTile], start: WorldPoint,
+    team: Team, path: var seq[PathTile]) {.measure.} =
+  ## Fills farthest clear shortcuts, retaining the destination buffer.
+  path.setLen(0)
   if tiles.len == 0:
     return
-  result.add tiles[0]
+  path.add tiles[0]
   var
     anchor = 0
     position = start
@@ -2522,13 +2523,14 @@ proc movementPath(tiles: seq[PathTile], start: WorldPoint,
         destination = point
         break
     if reach < 0:
-      return @[]
-    result.add tiles[reach]
+      path.setLen(0)
+      return
+    path.add tiles[reach]
     position = destination
     anchor = reach
 
 proc navigationPath(world: World, query: PathQuery,
-    tiles: var seq[PathTile]) =
+    tiles: var seq[PathTile]) {.measure.} =
   ## Runs A* over navigationOpen, reusing results until occupancy changes.
   const MaxCachedPaths = 4096
   if world.pathCacheRevision != world.navigationRevision or
@@ -2546,7 +2548,8 @@ proc navigationPath(world: World, query: PathQuery,
   discard fillTilePath(query, tiles)
   world.pathCache[key] = tiles
 
-proc followCreepPath(world: World, footman: var Footman, goal: WorldPoint) =
+proc followCreepPath(world: World, footman: var Footman,
+    goal: WorldPoint) {.measure.} =
   ## Follows a cached route and throttles changed chase goals and failed searches.
   if footman.controls[RootControl].ends > world.tick:
     return
@@ -2570,13 +2573,17 @@ proc followCreepPath(world: World, footman: var Footman, goal: WorldPoint) =
       int(mapCoordinate(goal.z, footman.team)), goal.y, last,
       reverseSearch = footman.team == RedTeam
     ):
-      var route: seq[PathTile]
       world.navigationPath(PathQuery(
         startLayer: first.layer, startX: first.x, startZ: first.z,
         finishLayer: last.layer, finishX: last.x, finishZ: last.z,
         tieOrder: (if footman.team == RedTeam: ReverseTies else: ForwardTies),
-        walkable: navigationOpen), route)
-      footman.movePath = movementPath(route, footman.position, footman.team)
+        walkable: navigationOpen), navigationTiles)
+      fillMovementPath(
+        navigationTiles,
+        footman.position,
+        footman.team,
+        footman.movePath
+      )
       # The first tile is the search origin, not a movement destination.
       if footman.movePath.len > 1:
         footman.movePathIndex = 1
@@ -2616,7 +2623,7 @@ proc setHeroDestination(
     mapY: int,
     referenceY: int32,
     offset = FixedVec2Zero
-): bool =
+): bool {.measure.} =
   ## Computes and stores a server-side path for one hero destination.
   let
     targetX = clamp(mapX, 0, mapTiles() - 1)
@@ -2642,15 +2649,20 @@ proc setHeroDestination(
     finishZ: finishTile.z,
     tieOrder: (if hero.team == RedTeam: ReverseTies else: ForwardTies),
     walkable: navigationOpen
-  ), heroPathTiles)
-  if heroPathTiles.len == 0:
+  ), navigationTiles)
+  if navigationTiles.len == 0:
     return false
-  let pulled = movementPath(heroPathTiles, hero.position, hero.team)
-  if pulled.len == 0:
+  fillMovementPath(
+    navigationTiles,
+    hero.position,
+    hero.team,
+    movementTiles
+  )
+  if movementTiles.len == 0:
     return false
-  hero.movePath.setLen(pulled.len)
-  hero.movePathLayers.setLen(pulled.len)
-  for i, tile in pulled:
+  hero.movePath.setLen(movementTiles.len)
+  hero.movePathLayers.setLen(movementTiles.len)
+  for i, tile in movementTiles:
     hero.movePath[i] = worldPoint(pathPoint(
       int(tile.layer),
       int(tile.x),
@@ -2672,7 +2684,7 @@ proc setHeroDestination(
   hero.moveOffset = offset
   hero.moveRevision = navigationWorld.navigationRevision
   # Replanning must not send the hero back to its starting tile's center.
-  hero.movePathIndex = if pulled.len > 1: 1 else: 0
+  hero.movePathIndex = if movementTiles.len > 1: 1 else: 0
   hero.moveTileX = targetX
   hero.moveTileY = targetY
   hero.hasMoveTarget = true
@@ -3321,7 +3333,7 @@ proc initCamps(world: World, map: MapData) =
       world.camps[index].count = count
       world.camps[index].appearance = appearance
 
-proc spawnCamp(world: World, index: int) =
+proc spawnCamp(world: World, index: int, targets: TargetSpace) =
   ## Places a mirrored group on open camp tiles with fresh lifetime IDs.
   let
     camp = world.camps[index]
@@ -3373,7 +3385,11 @@ proc spawnCamp(world: World, index: int) =
     unit.hp = unit.unitMaxHp
     group.add unit
   world.nextFootmanId += camp.count.int32
+  let first = world.footmen.len
   world.footmen.add group
+  for i in first ..< world.footmen.len:
+    let unit {.cursor.} = world.footmen[i]
+    targets.insert(i, unit.position.x, unit.position.z)
   world.camps[index].started = true
   world.camps[index].state = RestingCamp
   world.camps[index].targetId = 0
@@ -3411,7 +3427,8 @@ proc returnCamp(world: World, index: int) =
     world.emit GameEvent(kind: CampReturning, detail: index.int32,
       cause: CampReset, related: -1)
 
-proc provokeCamp(world: World, index: int) =
+proc provokeCamp(world: World, index: int,
+    targets: TargetSpace) {.measure.} =
   ## Starts group combat when a visible hero or lane creep gets too close.
   let camp = world.camps[index]
   var
@@ -3421,7 +3438,12 @@ proc provokeCamp(world: World, index: int) =
   template consider(candidateId: int32, point: WorldPoint) =
     ## Finds the closest visible intruder to any living camp member.
     if within(point, camp.center, NeutralLeash):
-      for unitSlot in 0 ..< world.footmen.len:
+      for unitSlot in targets.nearby(
+        point.x,
+        point.z,
+        NeutralAggroTiles * WorldScale,
+        world.footmen.len
+      ):
         let unit {.cursor.} = world.footmen[unitSlot]
         if unit.camp != index + 1 or unit.hp <= 0 or unit.state == Dying:
           continue
@@ -3441,7 +3463,12 @@ proc provokeCamp(world: World, index: int) =
   for hero in world.heroes:
     if hero.hp > 0 and hero.state != Dying:
       consider(hero.id, hero.position)
-  for unitSlot in 0 ..< world.footmen.len:
+  for unitSlot in targets.nearby(
+    camp.center.x,
+    camp.center.z,
+    NeutralLeash,
+    world.footmen.len
+  ):
     let unit {.cursor.} = world.footmen[unitSlot]
     if unit.camp == 0 and unit.hp > 0 and unit.state != Dying:
       consider(unit.id, unit.position)
@@ -3455,7 +3482,7 @@ proc provokeCamp(world: World, index: int) =
         target: world.eventEntity(memberId), detail: index.int32,
         cause: Proximity, related: -1)
 
-proc updateCamps(world: World) =
+proc updateCamps(world: World, targets: TargetSpace) {.measure.} =
   ## Handles whole-group leashes, full resets, and delayed full-camp respawns.
   var activity = newSeq[tuple[alive: int, away, outside: bool]](
     world.camps.len)
@@ -3474,7 +3501,7 @@ proc updateCamps(world: World) =
     if not camp.started:
       if world.tick >= camp.respawnTick:
         world.camps[index].respawnTick = world.tick + TickRate
-        world.spawnCamp(index)
+        world.spawnCamp(index, targets)
       continue
     let
       alive = activity[index].alive
@@ -3494,7 +3521,7 @@ proc updateCamps(world: World) =
               break
         if not blocked:
           world.camps[index].respawnTick = world.tick + TickRate
-          world.spawnCamp(index)
+          world.spawnCamp(index, targets)
     elif camp.state == ReturningCamp and home:
       for unit in world.footmen.mitems:
         if unit.camp == index + 1 and unit.hp > 0:
@@ -3525,9 +3552,10 @@ proc updateCamps(world: World) =
         elif world.tick - camp.lastSeenTick >= 3 * TickRate:
           world.returnCamp(index)
     elif camp.state == RestingCamp:
-      world.provokeCamp(index)
+      world.provokeCamp(index, targets)
 
-proc updateNeutral(world: World, unit: var Footman) =
+proc updateNeutral(world: World, unit: var Footman,
+    targets: TargetSpace) {.measure.} =
   ## Runs camp melee combat or the ordinary cached path back home.
   let camp = world.camps[unit.camp - 1]
   unit.targetId = 0
@@ -3561,7 +3589,12 @@ proc updateNeutral(world: World, unit: var Footman) =
   for hero in world.heroes:
     if hero.hp > 0 and hero.state != Dying:
       consider(hero.id, hero.position)
-  for otherSlot in 0 ..< world.footmen.len:
+  for otherSlot in targets.nearby(
+    unit.position.x,
+    unit.position.z,
+    12 * WorldScale,
+    world.footmen.len
+  ):
     let other {.cursor.} = world.footmen[otherSlot]
     if other.camp == 0 and other.hp > 0 and other.state != Dying:
       consider(other.id, other.position)
@@ -3619,7 +3652,7 @@ proc updateFootman(world: World, footman: var Footman,
     )
 
   if footman.camp > 0:
-    world.updateNeutral(footman)
+    world.updateNeutral(footman, targets)
     return
 
   # Acquire: keep a live target while it stays in extended range, otherwise
@@ -5666,12 +5699,13 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
           if onHeroTurn != nil:
             onHeroTurn()
 
-  world.updateCamps()
-
   profileBlock "indexTargets":
     game.targetSpace.reset(20 * WorldScale)
-    for i, footman in world.footmen:
+    for i in 0 ..< world.footmen.len:
+      let footman {.cursor.} = world.footmen[i]
       game.targetSpace.insert(i, footman.position.x, footman.position.z)
+
+  world.updateCamps(game.targetSpace)
 
   # Plan every unit against the same actor state, then publish together.
   game.nextFootmen.setLen(world.footmen.len)
@@ -5703,7 +5737,13 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   world.advanceSpells()
   world.advanceTowerShots()
   world.resolveCombat()
-  world.updateCamps()
+  # Movement changed the indexed positions before the second camp update.
+  profileBlock "indexTargets":
+    game.targetSpace.reset(20 * WorldScale)
+    for i in 0 ..< world.footmen.len:
+      let footman {.cursor.} = world.footmen[i]
+      game.targetSpace.insert(i, footman.position.x, footman.position.z)
+  world.updateCamps(game.targetSpace)
 
   var write = 0
   for read in 0 ..< world.footmen.len:

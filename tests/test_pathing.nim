@@ -108,6 +108,13 @@ block:
   doAssert pulled.len == 2, "an open field should pull to start and finish"
   doAssert pulled[0] == raw[0]
   doAssert pulled[^1] == raw[^1]
+  when defined(nimTypeNames):
+    echo "Testing line traversal with occupancy does not allocate"
+    doAssert lineClear(raw[0], raw[^1], isWalkable)
+    let allocations = getMemCounters()[0]
+    for i in 0 ..< 1000:
+      doAssert lineClear(raw[0], raw[^1], isWalkable)
+    doAssert getMemCounters()[0] == allocations
   # Block the diagonal so the straight line from start to finish is closed.
   open.tiles[1 * 5 + 1].flags = TileExists
   computeWalkable()
