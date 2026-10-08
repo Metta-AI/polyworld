@@ -4,7 +4,9 @@
 ## ray still uses the same integer lerp so visibility matches the live
 ## formula.
 
-import std/tables
+import
+  std/[bitops, tables],
+  profiles
 
 const
   MaxVisionRadius* = 16
@@ -25,10 +27,25 @@ type
   VisionOffset* = object
     ## One tile in a precomputed sight circle, relative to the observer.
     dx*, dz*: int8
+  VisionProfile* = object
+    ## Describes a common sight shape stored in a bounded per-tile cache.
+    radius*: int32
+    eyeHeight*: int16
+    rows: seq[uint64]
+    versions, seen: seq[uint32]
+  VisionCells = object
+    cells: seq[int32]
+    seen: uint32
   VisionCache* = object
     width, height: int32
     terrain, blockers: seq[int16]
-    sources: Table[VisionSource, seq[int32]]
+    profiles: seq[VisionProfile]
+    sources: Table[VisionSource, VisionCells]
+    counts: seq[uint16]
+    previous, next: seq[VisionSource]
+    version, serial: uint32
+    changedCells*: seq[int32]
+      ## Tiles whose current visibility changed in the latest update.
 
 var
   visionRayOffsets: seq[VisionRayStep]
@@ -362,43 +379,250 @@ proc sameHeights(a, b: seq[int16]): bool =
   a.len == b.len and (a.len == 0 or
     equalMem(a[0].unsafeAddr, b[0].unsafeAddr, a.len * sizeof(int16)))
 
+proc initVisionCache*(profiles: openArray[VisionProfile]): VisionCache =
+  ## Configures dense ray-mask storage for common observer shapes.
+  for profile in profiles:
+    doAssert profile.radius > 0 and profile.radius <= MaxVisionRadius
+  result.profiles = @profiles
+
+proc profileIndex(cache: VisionCache, source: VisionSource): int =
+  ## Finds a dense profile for a source without fractional range limits.
+  if source.units <= 0:
+    for i in 0 ..< cache.profiles.len:
+      let profile {.cursor.} = cache.profiles[i]
+      if profile.radius == source.radius and
+        profile.eyeHeight == source.eyeHeight:
+          return i
+  -1
+
+proc resetVisionCache(
+    cache: var VisionCache,
+    width, height: int32,
+    terrainHeights, blockerHeights: seq[int16]
+): bool =
+  ## Invalidates masks and coverage when terrain or blockers change.
+  inc cache.serial
+  result = cache.width != width or cache.height != height or
+    not sameHeights(cache.terrain, terrainHeights) or
+    not sameHeights(cache.blockers, blockerHeights)
+  if result:
+    inc cache.version
+    cache.sources.clear()
+    cache.previous.setLen(0)
+    cache.next.setLen(0)
+    if cache.width != width or cache.height != height:
+      cache.counts = newSeq[uint16](width * height)
+      for profile in cache.profiles.mitems:
+        profile.rows = newSeq[uint64](
+          width * height * (profile.radius * 2 + 1)
+        )
+        profile.versions = newSeq[uint32](width * height)
+        profile.seen = newSeq[uint32](width * height)
+    else:
+      for count in cache.counts.mitems:
+        count = 0
+    cache.width = width
+    cache.height = height
+    cache.terrain = terrainHeights
+    cache.blockers = blockerHeights
+
+proc fillVisionRows(
+    cache: var VisionCache,
+    profile: int,
+    source: VisionSource
+) {.measure.} =
+  ## Computes one local bitmask with the unchanged integer ray kernel.
+  let
+    side = source.radius * 2 + 1
+    index = source.z * cache.width + source.x
+    base = index * side
+    sourceY = int64(cache.terrain[index]) + int64(source.eyeHeight)
+  for row in 0 ..< side:
+    cache.profiles[profile].rows[base + row] = 0
+  for offset in visionCircleTiles(source.radius):
+    let
+      x = source.x + int32(offset.dx)
+      z = source.z + int32(offset.dz)
+    if x < 0 or x >= cache.width or z < 0 or z >= cache.height:
+      continue
+    if offsetVisible(
+      cache.width,
+      cache.terrain,
+      cache.blockers,
+      source.x,
+      source.z,
+      sourceY,
+      offset
+    ):
+      let row = base + int32(offset.dz) + source.radius
+      cache.profiles[profile].rows[row] =
+        cache.profiles[profile].rows[row] or
+          (1'u64 shl (int32(offset.dx) + source.radius))
+  cache.profiles[profile].versions[index] = cache.version
+
+proc fillVisionCells(
+    cache: VisionCache,
+    source: VisionSource
+): seq[int32] {.measure.} =
+  ## Computes masks for structures and less common sight shapes.
+  if source.radius <= MaxVisionRadius:
+    let sourceY = int64(cache.terrain[source.z * cache.width + source.x]) +
+      int64(source.eyeHeight)
+    for offset in visionCircleTiles(source.radius):
+      let
+        x = source.x + int32(offset.dx)
+        z = source.z + int32(offset.dz)
+      if x < 0 or x >= cache.width or z < 0 or z >= cache.height:
+        continue
+      if source.inVisionRange(x, z) and offsetVisible(
+        cache.width,
+        cache.terrain,
+        cache.blockers,
+        source.x,
+        source.z,
+        sourceY,
+        offset
+      ):
+        result.add z * cache.width + x
+  else:
+    for z in max(0'i32, source.z - source.radius) ..
+      min(cache.height - 1, source.z + source.radius):
+        for x in max(0'i32, source.x - source.radius) ..
+          min(cache.width - 1, source.x + source.radius):
+            if source.inVisionRange(x, z) and lineVisible(
+              cache.width,
+              cache.height,
+              cache.terrain,
+              cache.blockers,
+              source.x,
+              source.z,
+              x,
+              z,
+              source.radius,
+              source.eyeHeight
+            ):
+              result.add z * cache.width + x
+
+proc cacheVisionSource(
+    cache: var VisionCache,
+    source: VisionSource,
+    wasActive: var bool
+): bool =
+  ## Caches a unique observer and reports its previous participation.
+  let profile = cache.profileIndex(source)
+  if profile >= 0:
+    let index = source.z * cache.width + source.x
+    if cache.profiles[profile].seen[index] == cache.serial:
+      return false
+    wasActive = cache.profiles[profile].seen[index] == cache.serial - 1
+    cache.profiles[profile].seen[index] = cache.serial
+    if cache.profiles[profile].versions[index] != cache.version:
+      cache.fillVisionRows(profile, source)
+  elif cache.sources.hasKey(source):
+    if cache.sources[source].seen == cache.serial:
+      return false
+    wasActive = cache.sources[source].seen == cache.serial - 1
+    cache.sources[source].seen = cache.serial
+  else:
+    cache.sources[source] = VisionCells(
+      cells: cache.fillVisionCells(source),
+      seen: cache.serial
+    )
+  true
+
+proc sourceActive(cache: var VisionCache, source: VisionSource): bool =
+  ## Checks whether an old observer still contributes to visibility.
+  let profile = cache.profileIndex(source)
+  if profile >= 0:
+    cache.profiles[profile].seen[source.z * cache.width + source.x] ==
+      cache.serial
+  else:
+    cache.sources[source].seen == cache.serial
+
+proc changeVisibility(
+    cache: var VisionCache,
+    visible: var seq[uint8],
+    index: int32,
+    added: bool
+) =
+  ## Changes one coverage count without losing overlapping observers.
+  if added:
+    doAssert cache.counts[index] < uint16.high
+    inc cache.counts[index]
+    if cache.counts[index] == 1:
+      visible[index] = 255
+      cache.changedCells.add index
+  else:
+    doAssert cache.counts[index] > 0
+    dec cache.counts[index]
+    if cache.counts[index] == 0:
+      visible[index] = 0
+      cache.changedCells.add index
+
+proc applyVisionSource(
+    cache: var VisionCache,
+    visible: var seq[uint8],
+    source: VisionSource,
+    added: bool
+) {.measure.} =
+  ## Adds or removes the cached footprint of one observer.
+  let profile = cache.profileIndex(source)
+  if profile >= 0:
+    let
+      side = source.radius * 2 + 1
+      base = (source.z * cache.width + source.x) * side
+    for row in 0 ..< side:
+      let z = source.z - source.radius + row
+      var bits = cache.profiles[profile].rows[base + row]
+      while bits != 0:
+        let
+          x = source.x - source.radius + int32(countTrailingZeroBits(bits))
+          index = z * cache.width + x
+        cache.changeVisibility(visible, index, added)
+        bits = bits and (bits - 1)
+  else:
+    for index in cache.sources[source].cells:
+      cache.changeVisibility(visible, index, added)
+
 proc revealVisionCached*(
     cache: var VisionCache,
     visible: var seq[uint8],
     width, height: int32,
     terrainHeights, blockerHeights: seq[int16],
     sources: openArray[VisionSource]
-) =
-  ## Retains only the previous frame's source rays. Terrain or blocker changes
-  ## invalidate every entry, including height changes without moving a source.
-  if cache.width != width or cache.height != height or
-      not sameHeights(cache.terrain, terrainHeights) or
-      not sameHeights(cache.blockers, blockerHeights):
-    cache.sources.clear()
-    cache.width = width
-    cache.height = height
-    cache.terrain = terrainHeights
-    cache.blockers = blockerHeights
+) {.measure.} =
+  ## Updates only changed observer footprints using uint16 coverage counts.
+  initVisionKernel()
+  let invalid = cache.resetVisionCache(
+    width,
+    height,
+    terrainHeights,
+    blockerHeights
+  )
   visible.setLen(int(width * height))
-  for value in visible.mitems:
-    value = 0
-  var nextSources: Table[VisionSource, seq[int32]]
+  cache.changedCells.setLen(0)
+  if invalid:
+    for i in 0 ..< visible.len:
+      if visible[i] != 0:
+        cache.changedCells.add int32(i)
+        visible[i] = 0
+  cache.next.setLen(0)
   for source in sources:
-    if nextSources.hasKey(source):
+    if source.radius <= 0 or source.x < 0 or source.x >= width or
+      source.z < 0 or source.z >= height:
+        continue
+    var wasActive = false
+    if not cache.cacheVisionSource(source, wasActive):
       continue
-    if not cache.sources.hasKey(source):
-      var cells: seq[int32]
-      for z in max(0'i32, source.z - source.radius) .. min(height - 1, source.z + source.radius):
-        for x in max(0'i32, source.x - source.radius) .. min(width - 1, source.x + source.radius):
-          if source.radius > 0 and source.inVisionRange(x, z) and lineVisible(
-              width, height, terrainHeights, blockerHeights,
-              source.x, source.z, x, z, source.radius, source.eyeHeight):
-            cells.add z * width + x
-      cache.sources[source] = move(cells)
-    for index in cache.sources[source]:
-      visible[index] = 255
-    nextSources[source] = move(cache.sources[source])
-  cache.sources = move(nextSources)
+    cache.next.add source
+    if invalid or not wasActive:
+      cache.applyVisionSource(visible, source, true)
+  for source in cache.previous:
+    if not cache.sourceActive(source):
+      cache.applyVisionSource(visible, source, false)
+      if cache.profileIndex(source) < 0:
+        cache.sources.del(source)
+  swap(cache.previous, cache.next)
 
 proc blurVisibility*(visible: openArray[uint8], width, height: int32): seq[uint8] =
   ## Softens only presentation edges with one deterministic box-blur pass.

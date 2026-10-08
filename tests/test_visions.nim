@@ -52,6 +52,72 @@ block:
     revealVisionCached(cache, cached, 17, 17, terrain, blockers, sources)
     doAssert cached == reference, "cached vision diverged at frame " & $frame
 
+echo "Testing incremental dense masks, overlaps and changed tiles"
+block:
+  const Size = 41'i32
+  var
+    cache = initVisionCache([
+      VisionProfile(radius: 5, eyeHeight: 12),
+      VisionProfile(radius: 10, eyeHeight: 14),
+      VisionProfile(radius: 16, eyeHeight: 14)
+    ])
+    reference, cached, explored: seq[uint8]
+    terrain = newSeq[int16](Size * Size)
+    blockers = newSeq[int16](Size * Size)
+  explored.setLen(Size * Size)
+  for frame in 0 ..< 192:
+    if frame mod 19 == 0:
+      blockers[(frame * 31) mod blockers.len] = int16(frame mod 40)
+    if frame mod 23 == 0:
+      terrain[(frame * 47) mod terrain.len] = int16(frame mod 50)
+    var sources = @[
+      VisionSource(x: int32(frame mod Size), z: 20, radius: 5,
+        eyeHeight: 12),
+      VisionSource(x: 20, z: int32(frame mod Size), radius: 10,
+        eyeHeight: 14),
+      VisionSource(x: 20, z: 20, radius: 16, eyeHeight: 14),
+      VisionSource(x: 20, z: 20, radius: 18, eyeHeight: 17)
+    ]
+    if frame mod 3 == 0:
+      sources.add sources[0]
+    if frame mod 7 == 0:
+      sources.delete(1)
+    if frame mod 29 == 0:
+      sources.setLen(0)
+    let previous = cached
+    revealVision(reference, Size, Size, terrain, blockers, sources)
+    revealVisionCached(cache, cached, Size, Size, terrain, blockers, sources)
+    for index in cache.changedCells:
+      if cached[index] != 0:
+        explored[index] = 255
+    doAssert cached == reference, "dense vision diverged at frame " & $frame
+    for index, value in reference:
+      if value != 0:
+        doAssert explored[index] == 255
+      if previous.len > 0 and previous[index] != cached[index]:
+        doAssert int32(index) in cache.changedCells
+
+echo "Testing more than 255 overlapping vision sources"
+block:
+  const Size = 9'i32
+  var
+    cache: VisionCache
+    visible: seq[uint8]
+    terrain = newSeq[int16](Size * Size)
+    blockers = newSeq[int16](Size * Size)
+    sources: seq[VisionSource]
+  for i in 1 .. 300:
+    sources.add VisionSource(x: 4, z: 4, radius: 3, eyeHeight: int16(i))
+  revealVisionCached(cache, visible, Size, Size, terrain, blockers, sources)
+  doAssert visible[4 * Size + 4] == 255
+  sources.setLen(1)
+  revealVisionCached(cache, visible, Size, Size, terrain, blockers, sources)
+  doAssert visible[4 * Size + 4] == 255
+  sources.setLen(0)
+  revealVisionCached(cache, visible, Size, Size, terrain, blockers, sources)
+  for value in visible:
+    doAssert value == 0
+
 const
   Width = 9'i32
   Height = 7'i32

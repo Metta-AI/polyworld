@@ -317,7 +317,7 @@ type
     teamHeroDeaths*: array[2, int]
     teamVisible*: array[2, seq[uint8]]
     teamExplored*: array[2, seq[uint8]]
-    visionCache: array[2, VisionCache]
+    visionCache: array[2, ref VisionCache]
     visionSkipKeys: seq[int32]
     scriptObjects: array[Team, seq[WorldObject]]
     scriptObjectCount: array[Team, int]
@@ -609,6 +609,8 @@ proc clone*(w: World): World =
   ## Deep copy. Heroes are refs and must be cloned one by one.
   result = World()
   result[] = w[]
+  # Disposable ray masks must not multiply across replay checkpoints.
+  result.visionCache = default(array[2, ref VisionCache])
   result.stats = w.stats.clone()
   result.heroes = cloneHeroes(w.heroes)
   when defined(replayEvents):
@@ -617,6 +619,7 @@ proc clone*(w: World): World =
 proc restore*(w: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
   w[] = snapshot[]
+  w.visionCache = default(array[2, ref VisionCache])
   w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
   when defined(replayEvents):
@@ -735,8 +738,9 @@ proc fillVisionKeys(world: World, dest: var seq[int32]) =
 proc rebuildVision*(world: World) {.measure.} =
   ## Rebuilds both teams' limited, terrain-occluded visibility maps.
   world.fillVisionKeys(visionSkipNow)
-  if sameVisionKeys(visionSkipNow, world.visionSkipKeys):
-    return
+  if world.visionCache[0] != nil and world.visionCache[1] != nil and
+    sameVisionKeys(visionSkipNow, world.visionSkipKeys):
+      return
   visionBlockers.setLen(sightTerrain.blockerHeights.len)
   if visionBlockers.len > 0:
     copyMem(visionBlockers[0].addr, sightTerrain.blockerHeights[0].addr,
@@ -749,6 +753,12 @@ proc rebuildVision*(world: World) {.measure.} =
     if fort.hp > 0:
       addVisionBlocker(fort.center, 32)
   for team in Team:
+    if world.visionCache[team.ord] == nil:
+      world.visionCache[team.ord] = new(VisionCache)
+      world.visionCache[team.ord][] = initVisionCache([
+        VisionProfile(radius: FootmanSightRadius div WorldScale, eyeHeight: 12),
+        VisionProfile(radius: 10, eyeHeight: 14)
+      ])
     visionSources.setLen(0)
     for i in 0 ..< world.heroes.len:
       let hero = world.heroes[i]
@@ -777,7 +787,7 @@ proc rebuildVision*(world: World) {.measure.} =
       if fort.team == team and fort.hp > 0:
         addVisionSource(fort.center, FortSightRadius, 28)
     revealVisionCached(
-      world.visionCache[team.ord],
+      world.visionCache[team.ord][],
       world.teamVisible[team.ord],
       mapTiles().int32,
       mapTiles().int32,
@@ -785,8 +795,8 @@ proc rebuildVision*(world: World) {.measure.} =
       visionBlockers,
       visionSources
     )
-    for i, value in world.teamVisible[team.ord]:
-      if value != 0:
+    for i in world.visionCache[team.ord].changedCells:
+      if world.teamVisible[team.ord][i] != 0:
         world.teamExplored[team.ord][i] = 255
   copyVisionKeys(world.visionSkipKeys, visionSkipNow)
 

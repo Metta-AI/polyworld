@@ -1,6 +1,6 @@
 import
   std/algorithm,
-  ../examples/gods_of_the_arena/[content, maps, observations, sim]
+  ../examples/gods_of_the_arena/[content, maps, observations, replays, sim]
 
 proc observationWorld(): World =
   ## Builds spell observations with independent caster and warning visibility.
@@ -166,3 +166,45 @@ block:
 
 echo "Testing warning frames ignore cast storage order and rotate with teams"
 checkWarningFrames()
+
+echo "Testing replay snapshots rebuild independent incremental vision"
+block:
+  let
+    game = newGame(
+      generateMap(42),
+      100_000,
+      10,
+      false,
+      ReplayData(),
+      drafting = false
+    )
+    world = game.world
+  world.rebuildVision()
+  let
+    snapshot = world.clone()
+    visible = world.teamVisible
+    explored = world.teamExplored
+  for hero in world.heroes:
+    hero.hp = 0
+    hero.state = Dying
+  for building in world.buildings.mitems:
+    building.hp = 0
+  for fort in world.forts.mitems:
+    fort.hp = 0
+  world.rebuildVision()
+  for cells in world.teamVisible:
+    for value in cells:
+      doAssert value == 0
+  doAssert snapshot.teamVisible == visible
+  doAssert snapshot.teamExplored == explored
+  world.restore(snapshot)
+  world.rebuildVision()
+  doAssert world.teamVisible == visible
+  doAssert world.teamExplored == explored
+  world.heroes[0].hp = 0
+  world.heroes[0].state = Dying
+  world.rebuildVision()
+  world.restore(snapshot)
+  world.rebuildVision()
+  doAssert world.teamVisible == visible
+  doAssert world.teamExplored == explored
