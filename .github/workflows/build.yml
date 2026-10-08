@@ -35,5 +35,7 @@ jobs:
         run: nim r -d:release -d:bassyNativeStrict tests/all.nim
       - name: Test lockstep training API
         run: nim r -d:release -d:headless -d:bassyNativeStrict tests/test_gota_lockstep.nim
+      - name: Test native GotA harness parity
+        run: nim r -d:release -d:headless -d:bassyNativeStrict tests/test_gota_harness.nim
       - name: Check neural converters
         run: python tests/test_neural_converters.py
