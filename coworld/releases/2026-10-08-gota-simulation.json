@@ -1,0 +1,220 @@
+{
+  "date": "2026-10-08",
+  "version": "2026.10.8.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_3e536e3c-3f1c-4029-b006-b3d3ef3393b3",
+  "source_commit": "02eda3d34d0e7cc3ae1986d2ab57482a04cbe08a",
+  "asset_commit": "f78d18d8eeb899ed3aa7a304944be448aec34dcf",
+  "bassy_commit": "a02e6dd5889310b13d21725c891bde8d01539f08",
+  "spacy_commit": "5d77384202a7b4377423310b94e75ef987c1dcb9",
+  "replay_version": 69,
+  "canonical": true,
+  "changes": [
+    "Use incremental uint16 visibility counts with cached terrain-occluded masks, retaining the original integer ray kernel.",
+    "Reuse the targeting HashSpace for camp activation, neutral target selection and camp respawns.",
+    "Remove capturing closures from grid line checks and refill reusable unit paths and navigation scratch buffers.",
+    "Borrow unit positions while indexing instead of copying their path arrays.",
+    "Preserve gameplay and exact replay version 69."
+  ],
+  "checks": [
+    "Nim checks, focused allocation regressions and the full release test suite passed.",
+    "Benchmark matches remained byte-identical before and after optimization.",
+    "GitHub CI passed on Linux, Windows and macOS.",
+    "Ten local and hosted certification checks and five hosted smoke games passed.",
+    "Hosted JavaScript, WASM and data bytes match the certified build.",
+    "All 24 requested main-ladder games completed with mixed teams, no failures and 240 verified scores.",
+    "A forced-round replay reproduced all native state hashes and completed in the deployed WASM viewer without errors."
+  ],
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/37812139814",
+  "local_certification": {
+    "steps_passed": 10,
+    "artifact_directory": "/Users/me/p/metta-polyworld-coworld/tmp/coworld-cert-q48g5uw9",
+    "results": {
+      "scores": [
+        208,
+        234,
+        310,
+        364,
+        290,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ticks": 16389,
+      "seed": 2026,
+      "outcome": "RedTeam",
+      "banked_gold": [],
+      "returned": [],
+      "total_xp": [
+        2374,
+        2673,
+        3539,
+        4151,
+        3311,
+        382,
+        1079,
+        609,
+        541,
+        423
+      ]
+    }
+  },
+  "hosted_certification": {
+    "coworld_id": "cow_3e536e3c-3f1c-4029-b006-b3d3ef3393b3",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-a05c4b8849fe",
+    "certification_job_id": "66bbf97a-bf4f-4aaf-b1e0-b0222f5b6f04",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-10-08T17:00:13.045852Z"
+  },
+  "viewer_assets": {
+    "wasm": {
+      "bytes": 6201195,
+      "sha256": "25915ef2ec42d86596c58ba9802c70077b427d63493da20e59ddfd4004c8ebbb"
+    },
+    "data": {
+      "bytes": 33451159,
+      "sha256": "6a1d07f38179cd0ce3498dbaefb725c634d74a7705426ded9a119a83dd98e3f0"
+    },
+    "js": {
+      "bytes": 348124,
+      "sha256": "1a68c02a7fe43f97b18633e45bc06c305ee64ad3248cd458d753a393c7ccd7d3"
+    }
+  },
+  "league_settings_preserved": [
+    {
+      "id": "league_080e6abb-597b-45e3-ab21-63321905fdd6",
+      "name": "NeuralHub at Diablo Valley College",
+      "unchanged_fields": [
+        "settings",
+        "commissioner_config",
+        "rounds_paused_at",
+        "disabled_at",
+        "filler_policy_version_ids"
+      ]
+    },
+    {
+      "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+      "name": "Gods of the Arena",
+      "unchanged_fields": [
+        "settings",
+        "commissioner_config",
+        "rounds_paused_at",
+        "disabled_at",
+        "filler_policy_version_ids"
+      ]
+    }
+  ],
+  "verification_round": {
+    "round_id": "round_f805357e-0be8-4d80-9434-fc068f164f09",
+    "round_number": 1350,
+    "status": "completed",
+    "games": 24,
+    "completed_games": 24,
+    "failed_games": 0,
+    "failures": [],
+    "coworld_id": "cow_3e536e3c-3f1c-4029-b006-b3d3ef3393b3",
+    "version": "2026.10.8.1",
+    "integer_scores_verified": 240,
+    "scoring": "Emmett's Glory",
+    "mixed_team_games_verified": 24,
+    "outcomes": {
+      "time_limit": 13,
+      "RedTeam": 6,
+      "BlueTeam": 5
+    },
+    "replay_version": 69,
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=b715d084-6ef8-4d48-805a-66ce0ca4fd2f",
+    "verified_at": "2026-10-08T17:05:34.994332+00:00"
+  },
+  "replay_verification": {
+    "round_number": 1350,
+    "id": "ereq_a5f133ff-08cd-450e-9929-7c30854a3fe3",
+    "episode_id": "ab166aaa-0b0f-4491-9859-69eb9a019aca",
+    "replay_version": 69,
+    "sha256": "05c9079e366f7a446fdd04a7e22918af4f8bdee4f5e87bc922c7afd9d609696f",
+    "ticks": 25605,
+    "outcome": "RedTeam",
+    "native_verified": true
+  },
+  "browser_verification": {
+    "coworld_id": "cow_3e536e3c-3f1c-4029-b006-b3d3ef3393b3",
+    "rendered": true,
+    "end_tick": 25605,
+    "browser_errors": [],
+    "method": "Deployed WASM viewer rendered a game from round 1350 and completed an initial-to-final seek. The final results rendered at tick 25605/25605; warning and error logs were empty. Native playback verified all 25605 state hashes and consumed all 86417 actions.",
+    "verified_at": "2026-10-08T17:06:54.196081+00:00",
+    "episode_id": "ab166aaa-0b0f-4491-9859-69eb9a019aca"
+  },
+  "performance": {
+    "path_buffers": {
+      "workload": "10 khors v270 seats, seed 42, open draft, 20 min, 116x116",
+      "repetitions": 5,
+      "medians": {
+        "baseline": 5.0435,
+        "reused": 4.9263
+      },
+      "reductionPercent": 2.323783087141862,
+      "replaySha256": "8f7d3a4ded30c60e19de10e48b690075f1c00f5e891318adc8f0b45f60d46945"
+    },
+    "sampled_ticks": 900,
+    "movement_allocations": {
+      "before": 69784,
+      "after": 0
+    },
+    "creep_path_allocations": {
+      "before": 68801,
+      "after": 549
+    },
+    "remaining_allocations": "Amortized buffer growth and new cached routes.",
+    "vision": "Separate production benchmark: 7.5513 to 5.8287 seconds median, 22.8 percent faster; detailed alternatives and timings are in commit 2d391d3."
+  },
+  "manifest_hash": "sha256:1035c6da85cb974d049cde1793784973909a4fb27c432c15bd293f9745716b39",
+  "verified_at": "2026-10-08T17:06:54.199566+00:00"
+}
