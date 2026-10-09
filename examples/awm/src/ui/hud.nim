@@ -1,7 +1,7 @@
 ## The screen-space HUD every game mode draws with: panels, the turn header,
 ## prompts, buttons, the card inspector and the pile tooltip. No world or
 ## camera state.
-import std/[math, os, strformat, tables]
+import std/[math, options, os, strformat, tables]
 import chroma, pixie, silky, vmath, windy
 import ../core/sim, cardfaces, ../scene/cardrenderer, ../play, ../scene/table,
   ../vfx/vfxrenderer
@@ -124,6 +124,92 @@ proc drawCardReading*(sk: Silky, window: Window, card: Card, power = -1,
     toughness = -1, lost: set[Keyword] = {}): bool =
   ## The duel's preview, on the left of the screen.
   sk.drawCardReading(cardReadingRect(window), card, power, toughness, lost)
+
+const
+  ChooseCardHeight* = 820'f32  ## The offered cards, as tall as the screen allows.
+  ChooseCardGap* = 56'f32
+
+proc chooseCardRects*(window: Window, count: int): seq[UiRect] =
+  ## Where the offered branches sit: one card each, in a centered row.
+  if count <= 0:
+    return
+  let
+    screen = hudSize(window)
+    height = max(260'f32, min(ChooseCardHeight, screen.y - 520))
+    width = height * CardFaceWidth.float32 / CardFaceHeight.float32
+    span = count.float32 * width + float32(count - 1) * ChooseCardGap
+    left = (screen.x - span) * 0.5'f32
+    top = (screen.y - height) * 0.5'f32 - 20
+  for index in 0 ..< count:
+    result.add UiRect(
+      origin: vec2(left + index.float32 * (width + ChooseCardGap), top),
+      size: vec2(width, height))
+
+proc chooseCancelRect*(window: Window): UiRect =
+  let screen = hudSize(window)
+  UiRect(origin: vec2(screen.x * 0.5'f32 - 230, screen.y - 196),
+    size: vec2(460, 126))
+
+proc hoveredChooseOption*(sk: Silky, window: Window, count: int): int =
+  ## The offered card under the cursor, or -1 between and around them.
+  result = -1
+  for index, rect in chooseCardRects(window, count):
+    if rect.contains(sk.mousePos):
+      return index
+
+proc scaled(rect: UiRect, factor: float32): UiRect =
+  ## Grown or shrunk about its own centre.
+  let grow = rect.size * (factor - 1) * 0.5'f32
+  UiRect(origin: rect.origin - grow, size: rect.size * factor)
+
+proc eased(t: float32): float32 =
+  ## Fast out, settling in: 0 at 0, 1 at 1.
+  let clamped = clamp(t, 0, 1)
+  1 - pow(1 - clamped, 3)
+
+proc drawChooseScreen*(sk: Silky, window: Window, card: Card,
+    options: seq[Card], hovered: int, picked: Option[int],
+    appear, sincePick: float32): bool =
+  ## Dims the table and offers one card per branch, rising as they appear.
+  ## The picked one grows and takes the table while the rest fade. True
+  ## when the cancel button was clicked.
+  let
+    screen = hudSize(window)
+    rects = chooseCardRects(window, options.len)
+    leaving =
+      if picked.isSome: eased(sincePick / ChoosePickSeconds) else: 0'f32
+    opened = eased(appear / ChooseAppearSeconds)
+  sk.drawRect(vec2(0, 0), screen,
+    rgbx(4, 6, 10, uint8(170 * opened * (1 - leaving))))
+  sk.drawLabel(if picked.isSome: card.name else: "Choose one",
+    vec2(0, rects[0].origin.y - 108), vec2(screen.x, 72),
+    HudIvory, "Display", CenterAlign)
+  for index, rect in rects:
+    let
+      arrive = eased((appear - index.float32 * 0.07'f32) / ChooseAppearSeconds)
+      taken = picked == some(index)
+      fade =
+        if picked.isNone: arrive
+        elif taken: 1 - leaving * 0.25'f32
+        else: (1 - leaving) * 0.6'f32
+      grow =
+        if taken: 1 + leaving * 0.18'f32
+        elif picked.isSome: 1 - leaving * 0.08'f32
+        elif index == hovered: 1.05'f32
+        else: 1'f32
+      lift = (1 - arrive) * 70'f32
+      placed = UiRect(origin: rect.origin + vec2(0, lift), size: rect.size)
+      shown = placed.scaled(grow)
+      alpha = uint8(clamp(fade, 0, 1) * 255)
+    if index == hovered and picked.isNone:
+      # A gold edge under the card the cursor is over.
+      let frame = shown.scaled(1.035'f32)
+      sk.drawRect(frame.origin, frame.size, rgbx(215, 181, 112, alpha))
+    sk.drawCardImage(sk.bakedCardImage(options[index]), shown.origin,
+      shown.size, rgbx(255, 255, 255, alpha))
+  if picked.isSome:
+    return false
+  drawButton(sk, window, chooseCancelRect(window), "Cancel")
 
 proc drawHudNotice*(sk: Silky, rect: UiRect) =
   sk.hudSprite("notice", rect.origin, rect.size)
@@ -302,7 +388,7 @@ proc drawTossPrompt*(sk: Silky, window: Window, play: TablePlay,
 proc drawTargetPrompt*(sk: Silky, window: Window, play: TablePlay,
     game: GameState, centerX = hudSize(window).x * 0.5'f32) =
   ## What to target, while the human is choosing: the rule's own words.
-  if not play.pendingTargeting:
+  if not play.pendingTargeting or play.choosing:
     return
   let
     card = play.pendingCard
@@ -310,10 +396,11 @@ proc drawTargetPrompt*(sk: Silky, window: Window, play: TablePlay,
       if play.pendingTrigger: game.waitingTriggerRules().rules
       else: card.rules
     step = play.pendingPicks.len
-    count = rules.targetCount()
+    board = game.boardCards()
+    count = rules.targetCount(play.pendingPicks, board)
     # The rules' own text: "Choose a minion." for "Deal 1 damage to
     # a minion."
-    prompt = rules.targetPrompt(card, step)
+    prompt = rules.targetPrompt(card, step, play.pendingPicks, board)
     accent =
       HudClassInk[game.players[game.actingPlayer()].heroClass]
     progress = if count > 1: &" ({step + 1} of {count})" else: ""

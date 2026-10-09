@@ -276,6 +276,8 @@ proc newVfx*(kind: VfxKind, target: Choice, position: Vec3, seed: int): ActiveVf
       of SwordClashVfx: 1.25'f32
       of SwordBreakVfx: 1.4'f32
       of OozeSplatVfx: 1.8'f32
+      of ExplosionVfx: 0.95'f32
+      of StabVfx: 0.6'f32
       of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
           HeroDeathVfx: 0.0'f32)
 
@@ -533,6 +535,80 @@ include warriorvfx
 
 include oozevfx
 
+proc addExplosion(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A minion bursts: a white-hot core that blooms and dies, embers thrown
+  ## out on ballistic arcs, and a shock ring racing across the ground.
+  const
+    CoreLife = 0.22'f32
+    Embers = 22
+  let
+    age = effect.elapsed
+    life = clamp(age / effect.duration, 0.0'f32, 1.0'f32)
+    center = effect.position + vec3(0, 0.34, 0)
+  if age < CoreLife:
+    let bloom = age / CoreLife
+    renderer.addBillboard(center, 0.45'f32 + bloom * 1.55'f32, eye,
+      vec4(1.0, 0.56, 0.18, (1 - bloom) * 0.85'f32), 4)
+    renderer.addBillboard(center, 0.26'f32 + bloom * 0.78'f32, eye,
+      vec4(1.0, 0.95, 0.78, (1 - bloom) * 0.95'f32), 4)
+  for index in 0 ..< Embers:
+    let
+      angle = particleNoise(index, 17, effect.seed) * 2 * PI.float32
+      speed = 1.9'f32 + particleNoise(index, 29, effect.seed) * 2.7'f32
+      rise = 1.7'f32 + particleNoise(index, 41, effect.seed) * 2.5'f32
+      course = vec3(cos(angle), 0, sin(angle)) * speed +
+        vec3(0, rise - 9.5'f32 * age, 0)
+      spark = center + vec3(cos(angle), 0, sin(angle)) * (speed * age) +
+        vec3(0, rise * age - 4.75'f32 * age * age, 0)
+    if spark.y <= effect.position.y:
+      continue
+    let fade = clamp(1 - age / (effect.duration * 0.85'f32), 0.0'f32, 1.0'f32)
+    renderer.addGlowLine(spark - course * 0.05'f32, spark, eye, 0.022'f32,
+      vec4(1.0, 0.45'f32 + 0.35'f32 * fade, 0.16'f32, fade * 0.9'f32))
+  let
+    ring = 0.35'f32 + life * 2.6'f32
+    ringFade = clamp(1 - life * 1.5'f32, 0.0'f32, 1.0'f32)
+  if ringFade > 0.01'f32:
+    const Segments = 36
+    for i in 0 ..< Segments:
+      let
+        a = i.float32 * 2 * PI.float32 / Segments
+        b = (i + 1).float32 * 2 * PI.float32 / Segments
+        ground = effect.position + vec3(0, 0.035, 0)
+      renderer.addGlowLine(ground + vec3(cos(a), 0, sin(a)) * ring,
+        ground + vec3(cos(b), 0, sin(b)) * ring, eye, 0.02'f32,
+        vec4(1.0, 0.6'f32, 0.22'f32, ringFade * 0.65'f32))
+
+proc addStab(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A blade thrusts out of the dark, bites, and flicks back, leaving a
+  ## bright slash across its target.
+  const Thrust = 0.16'f32
+  let
+    age = effect.elapsed
+    center = effect.position + vec3(0, 0.42'f32, 0)
+    lean = particleNoise(0, 61, effect.seed) * 2 * PI.float32
+    aside = vec3(cos(lean), 0, sin(lean))
+    axes = facing(center, eye)
+  if age < Thrust:
+    # The thrust: a lean blade driving in from off to one side.
+    let
+      drive = age / Thrust
+      tip = center + aside * (0.35'f32 - drive * 0.35'f32)
+      hilt = tip + aside * 0.95'f32 + vec3(0, 0.22'f32, 0)
+    renderer.addGlowLine(hilt, tip, eye, 0.028'f32,
+      vec4(0.86'f32, 0.92'f32, 1.0, 0.25'f32 + drive * 0.75'f32))
+    return
+  let
+    after = age - Thrust
+    fade = clamp(1 - after / (effect.duration - Thrust), 0.0'f32, 1.0'f32)
+    reach = 0.52'f32 * (0.4'f32 + fade * 0.6'f32)
+    slash = axes.right * reach + axes.up * reach * 0.75'f32
+  # The cut itself, and a spark where the blade bit.
+  renderer.addGlowLine(center - slash, center + slash, eye, 0.03'f32 * fade,
+    vec4(1.0, 0.96'f32, 0.92'f32, fade * 0.95'f32))
+  renderer.addBillboard(center, 0.22'f32 + (1 - fade) * 0.5'f32, eye,
+    vec4(0.9'f32, 0.95'f32, 1.0, fade * fade * 0.45'f32), 4)
+
 proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
     eye: Vec3) =
   for effect in effects:
@@ -548,6 +624,8 @@ proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
     of SwordClashVfx: renderer.addSwordClash(effect, eye)
     of SwordBreakVfx: renderer.addSwordBreak(effect, eye)
     of OozeSplatVfx: renderer.addOozeSplat(effect, eye)
+    of ExplosionVfx: renderer.addExplosion(effect, eye)
+    of StabVfx: renderer.addStab(effect, eye)
     of DamageFlashVfx:
       let t = effect.elapsed / effect.duration
       renderer.addBillboard(effect.position, 1.2'f32 + t * 0.8'f32, eye,

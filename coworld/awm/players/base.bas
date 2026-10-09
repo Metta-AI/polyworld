@@ -24,6 +24,21 @@
 '   needsChoice(i)    1 if the card needs a target
 '
 ' CHOICE QUERIES
+'   A choice kind of 4 is an option: the card offers branches to choose
+'   between, and the choice index is the branch. Its value is in
+'   optionDamage/optionSelfDamage below. Later targets only appear once an
+'   option is picked, so ask the next* queries with the picks so far.
+'   nextTargetCount(handIndex, "picks", pickedCount)
+'   nextHelpsTarget(handIndex, "picks", pickedCount)
+'   nextIntent(handIndex, "picks", pickedCount)
+'   nextAmount(handIndex, "picks", pickedCount)
+'   optionDamage(handIndex, "picks", pickedCount, option)
+'   optionSelfDamage(handIndex, "picks", pickedCount, option)
+'   targetIntent(handIndex, step)  what the card does to that target:
+'                                  0 = nothing to judge, 1 = damage,
+'                                  2 = buff, 3 = weaken, 4 = bounce,
+'                                  5 = destroy, 6 = loses a keyword
+'   targetAmount(handIndex, step)  how much: damage dealt, stats changed
 '   choiceCount(handIndex)              number of valid targets
 '   choiceKind(handIndex, choiceIndex)  0=canceled 1=noTarget 2=hero 3=creature
 '   choiceOwner(handIndex, choiceIndex) player who owns the target (-1 if n/a)
@@ -80,31 +95,50 @@ IF selectingClass THEN
 END IF
 
 DIM picks(1023)
+DIM junk(1023)
 IF tossCount > 0 THEN
-  ' Shuffle the hand indexes, then explicitly discard the first required ones.
+  ' Rank the hand by what it is worth to you: a card you are still far from
+  ' affording is dead weight, a minion is worth its body, and a spell about
+  ' its price. Discard from the top of that ranking, ties at random.
   i = 0
   WHILE i < handSize
     picks(i) = i
+    worth = 3 + handCost(i)
+    IF handKind(i) = 0 THEN worth = handPower(i) + handToughness(i)
+    over = handCost(i) - totalEnergy
+    IF over < 0 THEN over = 0
+    junk(i) = over * 4 - worth
     i = i + 1
   WEND
   i = 0
   WHILE i < tossCount
-    j = i + random(handSize - i)
+    best = i
+    j = i + 1
+    WHILE j < handSize
+      take = 0
+      IF junk(picks(j)) > junk(picks(best)) THEN take = 1
+      IF junk(picks(j)) = junk(picks(best)) THEN take = random(2)
+      IF take THEN best = j
+      j = j + 1
+    WEND
     swap = picks(i)
-    picks(i) = picks(j)
-    picks(j) = swap
+    picks(i) = picks(best)
+    picks(best) = swap
     i = i + 1
   WEND
   discardCards("picks")
   END
 END IF
 IF triggerTargets > 0 THEN
-  ' Every legal trigger target is eligible, including declining the target.
+  ' A trigger aims like a card: hand index -1 asks about the waiting one.
+  ' With nothing worth aiming at, every legal choice stays eligible,
+  ' including declining the target.
   s = 0
   WHILE s < triggerTargets
     n = nextChoiceCount(-1, "picks", s)
     IF n = 0 THEN STOP
-    picks(s) = random(n)
+    i = -1
+    GOSUB aim
     s = s + 1
   WEND
   resolveTrigger("picks")
@@ -135,6 +169,8 @@ IF handSize > 0 THEN
             valid = 0
           ELSE
             GOSUB aim
+            ' Picking an option reveals that branch's own targets.
+            count = nextTargetCount(i, "picks", s + 1)
           END IF
           s = s + 1
         WEND
@@ -152,67 +188,118 @@ endTurn()
 END
 
 aim:
-' Choose the s'th target of hand card i. A target that helps goes to one of
-' your own cards, any other to the next living opponent's, picked at random
-' among that side: Duel buffs your minion and duels theirs, not itself. With
-' nothing on the wanted side every choice stays eligible, so a lone minion
-' still bounces itself and hero-only cards keep their random pick.
-mine = helpsTarget(i, s)
-want = enemyPlayer
-IF mine THEN want = selfPlayer
-GOSUB tally
-IF wanted = 0 AND mine = 0 THEN
-  ' The designated enemy has nothing to aim at: any opponent will do.
-  want = -1
-  GOSUB tally
-END IF
-IF wanted = 0 THEN
-  picks(s) = random(n)
-  RETURN
-END IF
-k = random(wanted)
+' Choose the s'th target of hand card i (-1 for a waiting trigger) by what
+' the card does to it. A target that helps goes on your best body; damage
+' goes where it kills, otherwise at a hero; removal takes their biggest
+' threat; a keyword only comes off a minion that has one. Ties break at
+' random, and when nothing scores every choice stays eligible, so a lone
+' minion still bounces itself and declining stays possible.
+mine = nextHelpsTarget(i, "picks", s)
+what = nextIntent(i, "picks", s)
+size = nextAmount(i, "picks", s)
+best = -1
+bestScore = 0
 c = 0
 WHILE c < n
+  k = nextChoiceKind(i, "picks", s, c)
   o = nextChoiceOwner(i, "picks", s, c)
-  GOSUB wants
-  IF hit THEN
-    IF k = 0 THEN
-      picks(s) = c
-      c = n
+  d = nextChoiceId(i, "picks", s, c)
+  GOSUB score
+  IF value > 0 THEN
+    IF best < 0 THEN
+      take = 1
+    ELSE
+      take = 0
+      IF value > bestScore THEN take = 1
+      IF value = bestScore THEN take = random(2)
     END IF
-    k = k - 1
+    IF take THEN
+      best = c
+      bestScore = value
+    END IF
   END IF
   c = c + 1
 WEND
+IF best < 0 THEN
+  picks(s) = random(n)
+  RETURN
+END IF
+picks(s) = best
 RETURN
 
-tally:
-' How many of the target's choices are on the wanted side.
-wanted = 0
-c = 0
-WHILE c < n
-  o = nextChoiceOwner(i, "picks", s, c)
-  GOSUB wants
-  IF hit THEN wanted = wanted + 1
-  c = c + 1
-WEND
-RETURN
-
-wants:
-' hit = 1 when owner o is the wanted player, or any opponent when want is
-' -1. Choices with no owner, like declining the target, never match.
-hit = 0
+score:
+' What choice c is worth for this target: 0 means do not aim here. Scores
+' stay small and positive so that equals can break at random.
+value = 0
+IF k = 4 THEN
+  ' An option: worth what it deals, less twice what it costs your own hero,
+  ' and never one that would finish you off.
+  cost = optionSelfDamage(i, "picks", s, c)
+  IF cost >= selfLife THEN RETURN
+  value = 20 + optionDamage(i, "picks", s, c) - cost * 2
+  IF value < 1 THEN value = 1
+  RETURN
+END IF
 IF o < 0 THEN RETURN
-IF want >= 0 THEN
-  IF o = want THEN hit = 1
+IF mine THEN
+  IF o <> selfPlayer THEN RETURN
 ELSE
-  IF o <> selfPlayer THEN hit = 1
+  IF o = selfPlayer THEN RETURN
+END IF
+IF k = 2 THEN
+  ' A hero. Damage always lands, and a card that only offers heroes, like
+  ' Summon Primordial, still has to pick one.
+  value = 3
+  IF mine THEN value = 0
+ELSE
+  GOSUB stats
+  IF mine THEN
+    value = 4 + power * 2 + hp
+  ELSE
+    IF what = 1 THEN
+      ' Damage: a kill is worth their whole body, else soften the biggest.
+      value = 1 + power
+      IF hp <= size THEN value = 10 + power * 2 + hp
+    ELSE
+      IF what = 6 THEN
+        ' Taking a keyword away only matters to a minion that has one.
+        IF ranged THEN value = 10 + power * 2 + hp
+      ELSE
+        ' Bounce, destroy or weaken: take their biggest threat.
+        value = 4 + power * 2 + hp
+      END IF
+    END IF
+  END IF
+END IF
+IF value > 0 THEN
+  IF o = enemyPlayer THEN value = value + 1
 END IF
 RETURN
 
+stats:
+' power, hp and ranged for the minion with id d on player o's board.
+power = 0
+hp = 0
+ranged = 0
+b = 0
+WHILE b < boardCount(o)
+  IF boardId(o, b) = d THEN
+    power = boardPower(o, b)
+    hp = boardHp(o, b)
+    ranged = boardHasKeyword(o, b, 0)
+    b = boardCount(o)
+  END IF
+  b = b + 1
+WEND
+RETURN
+
 attacks:
-' Visit every permanent. Every legal hero and minion target can be picked,
-' across all opponents. Trinkets and unready minions have no attack choices.
+' Visit every permanent. Each minion takes the swing worth the most: a kill
+' is worth the body it removes, a hero swing is worth the damage it lands,
+' and a trade only the difference, so a big minion goes face instead of
+' eating a chump. A swing that dies for nothing is never taken. Ranged
+' minions take no combat damage from non-ranged ones, attacking or
+' defending. Trinkets and unready minions have no attack choices.
 IF boardCount(selfPlayer) > 0 THEN
   start = random(boardCount(selfPlayer))
   offset = 0
@@ -221,9 +308,73 @@ IF boardCount(selfPlayer) > 0 THEN
     id = boardId(selfPlayer, i)
     n = attackChoiceCount(id)
     IF n > 0 THEN
-      IF attack(id, random(n)) THEN END
+      myPower = boardPower(selfPlayer, i)
+      myHp = boardHp(selfPlayer, i)
+      myRanged = boardHasKeyword(selfPlayer, i, 0)
+      best = -1
+      bestScore = 0
+      c = 0
+      WHILE c < n
+        k = attackChoiceKind(id, c)
+        o = attackChoiceOwner(id, c)
+        d = attackChoiceId(id, c)
+        GOSUB swing
+        IF value > 0 THEN
+          IF best < 0 THEN
+            take = 1
+          ELSE
+            take = 0
+            IF value > bestScore THEN take = 1
+            IF value = bestScore THEN take = random(2)
+          END IF
+          IF take THEN
+            best = c
+            bestScore = value
+          END IF
+        END IF
+        c = c + 1
+      WEND
+      IF best >= 0 THEN
+        IF attack(id, best) THEN END
+      END IF
     END IF
     offset = offset + 1
   WEND
+END IF
+RETURN
+
+swing:
+' What attacking choice c is worth to a minion of myPower and myHp.
+value = 0
+IF k = 2 THEN
+  ' Their hero: every point of power lands on it.
+  value = 4 + myPower * 2
+ELSE
+  GOSUB stats
+  kills = 0
+  dies = 0
+  IF myPower >= hp THEN kills = 1
+  IF power >= myHp THEN dies = 1
+  IF ranged THEN
+    IF myRanged = 0 THEN kills = 0
+  END IF
+  IF myRanged THEN
+    IF ranged = 0 THEN dies = 0
+  END IF
+  IF kills THEN
+    IF dies THEN
+      ' A trade is worth what their body beats yours by.
+      value = 6 + power * 2 + hp - myPower - myHp
+      IF value < 1 THEN value = 1
+    ELSE
+      value = 6 + power * 2 + hp
+    END IF
+  ELSE
+    ' No kill: chip in only when you walk away from it.
+    IF dies = 0 THEN value = 6
+  END IF
+END IF
+IF value > 0 THEN
+  IF o = enemyPlayer THEN value = value + 1
 END IF
 RETURN

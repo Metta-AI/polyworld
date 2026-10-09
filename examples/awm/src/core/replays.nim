@@ -17,7 +17,7 @@ const
   ReplayFormatVersion* = 1'u16
   ## This client supports only this gameplay version. Bump it when rules
   ## change. Older replays use their archived client.
-  ReplayGameVersion* = 1'u16
+  ReplayGameVersion* = 2'u16
 
   MaxReplayActions* = 1_000_000
   MaxReplayHashes* = 1_000_000
@@ -35,6 +35,7 @@ type
     ## A Choice in a flat, portable form.
     kind*: uint8  ## ChoiceKind's ordinal.
     owner*, creatureId*: int32
+    option*: int32  ## Which branch of a `choose` rule the player picked.
 
   Setup* = object
     seed*: int32
@@ -62,6 +63,8 @@ proc toReplay*(choice: Choice): ReplayChoice =
   result = ReplayChoice(kind: choice.kind.ord.uint8, owner: choice.owner.int32)
   if choice.kind == CreatureChoice:
     result.creatureId = choice.creatureId.int32
+  if choice.kind == OptionChoice:
+    result.option = choice.option.int32
 
 proc toChoice*(choice: ReplayChoice): Choice =
   if choice.kind > ChoiceKind.high.ord.uint8:
@@ -71,6 +74,7 @@ proc toChoice*(choice: ReplayChoice): Choice =
   of NoTargetChoice: NoTarget
   of HeroChoice: heroChoice(choice.owner.int)
   of CreatureChoice: creatureChoice(choice.owner.int, choice.creatureId.int)
+  of OptionChoice: optionChoice(choice.option.int)
 
 proc toReplay*(choices: openArray[Choice]): seq[ReplayChoice] =
   for choice in choices:

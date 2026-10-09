@@ -194,6 +194,7 @@ proc runDuel*(app: App) =
     botVms: seq[BotVm]
     seedRng = initRand()
     uiCapturesMouse = false  ## The pointer is over a tuning window.
+    chooseCanceled = false  ## The choose screen's button, clicked last frame.
 
   template gamePressed(button: Button): bool =
     ## A press the board should react to (not one meant for a window).
@@ -455,6 +456,86 @@ proc runDuel*(app: App) =
         game.players[0].totalEnergy = 3
         if game.playCard(0):
           play.statusMessage = "Demo: Plan."
+      if getEnv("AWM_DEMO_PILLAGE") == "1":
+        # Pillage destroys a trinket, then offers its two branches: the
+        # choice comes after a target, so the screen opens on the way.
+        play.animations.setLen(0)
+        game.currentPlayer = 0
+        game.players[0].heroClass = Warrior
+        game.players[0].hand = @[baseCard("pillage-4")]
+        game.players[0].energy = 4
+        game.players[0].totalEnergy = 4
+        game.players[0].board = @[MinionState(id: 5, owner: 0,
+          card: baseCard("bear-2"), currentToughness: 2)]
+        game.players[1].heroClass = Mage
+        game.players[1].board = @[MinionState(id: 6, owner: 1,
+          card: baseCard("plan-3"), enteredTurn: game.turnNumber)]
+        game.nextMinionId = 7
+        discard play.playHandCard(game, duelLayout, 0)
+        if play.pendingTargeting:
+          play.takePick(game, duelLayout, creatureChoice(1, 6))
+      if getEnv("AWM_DEMO_HIDDEN") == "1":
+        # Player 2's Spirit and Ambusher are hidden: player 1 sees them in
+        # shadow and can't attack them.
+        play.animations.setLen(0)
+        game.currentPlayer = 0
+        game.players[0].board = @[MinionState(id: 5, owner: 0,
+          card: baseCard("bear-2"), currentToughness: 2, canAttack: true)]
+        game.players[1].heroClass = Mage
+        game.players[1].board = @[
+          MinionState(id: 6, owner: 1, card: baseCard("spirit-3"),
+            currentToughness: 3, hiddenTurns: Always),
+          MinionState(id: 7, owner: 1, card: baseCard("bear-2"),
+            currentToughness: 2)]
+        game.nextMinionId = 8
+        play.selectedAttacker = 5
+        play.statusMessage = "Demo: hidden minions."
+      if getEnv("AWM_DEMO_RELOAD") == "1":
+        # Reload repeats a Sharpshooter: once it is picked, the table asks
+        # for the repeated shot's own target.
+        play.animations.setLen(0)
+        game.currentPlayer = 0
+        game.players[0].heroClass = Archer
+        game.players[0].hand = @[baseCard("reload-2")]
+        game.players[0].energy = 2
+        game.players[0].totalEnergy = 2
+        game.players[0].board = @[MinionState(id: 5, owner: 0,
+          card: baseCard("sharpshooter-3"), currentToughness: 1)]
+        game.players[1].board = @[MinionState(id: 6, owner: 1,
+          card: baseCard("bear-2"), currentToughness: 2)]
+        game.nextMinionId = 7
+        discard play.playHandCard(game, duelLayout, 0)
+        if play.pendingTargeting:
+          play.takePick(game, duelLayout, creatureChoice(0, 5))
+      if getEnv("AWM_DEMO_EXPLODE") == "1":
+        # Explode blows up your own Sharpshooter and throws its power at
+        # the enemy Bear.
+        play.animations.setLen(0)
+        game.currentPlayer = 0
+        game.players[0].heroClass = Archer
+        game.players[0].hand = @[baseCard("explode-3")]
+        game.players[0].energy = 3
+        game.players[0].totalEnergy = 3
+        game.players[0].board = @[MinionState(id: 5, owner: 0,
+          card: baseCard("sharpshooter-3"), currentToughness: 1)]
+        game.players[1].board = @[MinionState(id: 6, owner: 1,
+          card: baseCard("bear-2"), currentToughness: 2)]
+        game.nextMinionId = 7
+        if game.playCard(0, @[creatureChoice(0, 5), creatureChoice(1, 6)]):
+          play.statusMessage = "Demo: Explode."
+      if getEnv("AWM_DEMO_OVERCHARGE") == "1":
+        # Overcharge offers its two branches; the enemy Bear waits for the
+        # one that is picked.
+        play.animations.setLen(0)
+        game.players[0].heroClass = Archer
+        game.currentPlayer = 0
+        game.players[0].hand = @[baseCard("overcharge-3")]
+        game.players[0].energy = 3
+        game.players[0].totalEnergy = 3
+        game.players[1].board = @[MinionState(id: 2, owner: 1,
+          card: baseCard("bear-2"), currentToughness: 2)]
+        game.nextMinionId = 3
+        discard play.playHandCard(game, duelLayout, 0)
       if getEnv("AWM_DEMO_STUDY") == "1":
         # Study draws two, then player 1 chooses a card to discard.
         play.animations.setLen(0)
@@ -518,7 +599,7 @@ proc runDuel*(app: App) =
         play.animations.setLen(0)
         let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
           class: some(Mage),
-          rules: rules(on(nextTurn(You), damage(1, target({TargetKind.Minion})))))
+          rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
         game.players[0].board.add MinionState(id: 3, owner: 0, card: snare,
           enteredTurn: game.turnNumber - 2)
         game.nextMinionId = 4
@@ -599,6 +680,7 @@ proc runDuel*(app: App) =
 
     var
       hoverIndex = -1
+      chooseHover = -1
       hoveredTarget = Canceled
       hoveredBoard = Canceled
     if phase == PlayGame:
@@ -635,6 +717,21 @@ proc runDuel*(app: App) =
               not finishRect(window).contains(sk.mousePos),
             cancel = gamePressed(MouseRight) or
               window.buttonPressed[KeyEscape])
+      elif humanActs() and play.choosing and play.presentationIdle(game) and
+          not game.gameOver:
+        hoverIndex = -1
+        chooseHover = hoveredChooseOption(sk, window, play.pendingChoices.len)
+        if play.chooseStart <= 0:
+          play.chooseStart = animationTime
+        let clicked = gamePressed(MouseLeft)
+        play.updateChoosing(game, duelLayout, chooseHover,
+          pick = clicked and chooseHover >= 0,
+          # Anywhere off the offered cards cancels, as does the button.
+          cancel = (clicked and chooseHover < 0) or chooseCanceled or
+            gamePressed(MouseRight) or window.buttonPressed[KeyEscape],
+          time = animationTime)
+        if not play.choosing:
+          play.chooseStart = 0
       elif humanActs() and play.pendingTargeting and play.presentationIdle(game) and
           not game.gameOver:
         hoveredTarget = play.updateTargeting(game, duelLayout, window,
@@ -648,6 +745,16 @@ proc runDuel*(app: App) =
         hoverIndex = -1
         hoveredBoard = Canceled
         hoveredTarget = Canceled
+      if getEnv("AWM_DEMO_CHOOSE_HOVER").len > 0 and play.choosing:
+        chooseHover = parseInt(getEnv("AWM_DEMO_CHOOSE_HOVER"))
+      if getEnv("AWM_DEMO_CHOOSE_PICK").len > 0 and play.choosing:
+        # Take that option and let its animation run without a human.
+        if play.choosePicked.isNone:
+          play.choosePicked = some(parseInt(getEnv("AWM_DEMO_CHOOSE_PICK")))
+          play.choosePickedAt = animationTime
+        else:
+          play.updateChoosing(game, duelLayout, -1, pick = false,
+            cancel = false, time = animationTime)
       if getEnv("AWM_DEMO_HALO") == "1":
         if play.pendingTargeting:
           for choice in play.pendingChoices:
@@ -840,6 +947,13 @@ proc runDuel*(app: App) =
           play.pendingCardIndex = -1
           play.pendingChoices.setLen(0)
 
+      if play.choosing:
+        chooseCanceled = drawChooseScreen(sk, window, play.pendingCard,
+          play.chooseOptions(game), chooseHover, play.choosePicked,
+          appear = animationTime - play.chooseStart,
+          sincePick = animationTime - play.choosePickedAt)
+      else:
+        chooseCanceled = false
       sk.drawTossPrompt(window, play, game)
       sk.drawTargetPrompt(window, play, game)
 

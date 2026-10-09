@@ -259,6 +259,69 @@ suite "owned game snapshots":
 import std/os
 import ../src/core/bots
 
+suite "bots and cards that offer a choice":
+  proc overchargeGame(life = StartingLife): (GameState, int, int) =
+    var game = newGame(Archer, Warrior, 877)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[baseCard("overcharge-3")]
+    game.players[me].energy = 3
+    game.players[me].life = life
+    game.players[enemy].board = @[MinionState(id: 1, owner: enemy,
+      card: baseCard("bear-2"), currentToughness: 2)]
+    game.nextMinionId = 2
+    (game, me, enemy)
+
+  test "the built-in bot weighs an option against what it costs":
+    let (game, _, enemy) = overchargeGame()
+    let action = game.nextBotAction()
+    check action.kind == PlayCardAction
+    # 6 damage for 3 of its own is worse than 2 for nothing.
+    check action.choices == @[optionChoice(0), creatureChoice(enemy, 1)]
+
+  test "an option that would finish the bot off is never taken":
+    var game = newGame(Archer, Warrior, 881)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    # A card whose only generous branch would kill its own hero.
+    game.players[me].hand = @[Card(name: "Gamble", energyCost: 0, kind: Spell,
+      rules: rules(choose(
+        rules(damage(1, target({kind: {Hero}}))),
+        rules(damage(9, target({kind: {Hero}})), damage(3, You)))))]
+    game.players[me].life = 3
+    let action = game.nextBotAction()
+    check action.kind == PlayCardAction
+    check action.choices == @[optionChoice(0), heroChoice(enemy)]
+
+  test "a hidden minion's cover survives a snapshot round trip":
+    var game = newGame(Archer, Mage, 887)
+    let me = game.currentPlayer
+    game.players[me].board = @[
+      MinionState(id: 1, owner: me, card: baseCard("ambusher-3"),
+        currentToughness: 2, hiddenTurns: 1),
+      MinionState(id: 2, owner: me, card: baseCard("spirit-3"),
+        currentToughness: 3, hiddenTurns: Always),
+      MinionState(id: 3, owner: me, card: baseCard("bear-2"),
+        currentToughness: 2)]
+    game.nextMinionId = 4
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check gameToJson(decoded) == encoded
+    check decoded.players[me].board[0].hiddenTurns == 1
+    check decoded.players[me].board[1].hiddenTurns == Always
+    check decoded.players[me].board[2].hiddenTurns == 0
+
+  test "an option survives a snapshot round trip":
+    let choice = choiceFromJson(choiceToJson(optionChoice(1)))
+    check choice.kind == OptionChoice
+    check choice == optionChoice(1)
+    check choice != optionChoice(0)
+    expect ValueError:
+      discard choiceFromJson(%*{"kind": ord(OptionChoice), "owner": 0,
+        "option": 1})
+
 suite "bots and two-target cards":
   proc duelGame(): (GameState, int) =
     ## Duel in hand, a Bear on our side and a Sniper on theirs.
@@ -351,7 +414,7 @@ suite "waiting triggers in snapshots":
 
   test "the built-in bot answers a waiting trigger for its owner":
     let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
-      rules: rules(on(nextTurn(You), damage(1, target({Minion})))))
+      rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
     var game = newGame(Mage, Warrior, 1109)
     let
       me = game.currentPlayer

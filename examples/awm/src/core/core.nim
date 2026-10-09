@@ -23,16 +23,20 @@ type
     NoTargetChoice
     HeroChoice
     CreatureChoice
+    OptionChoice  ## Which branch of a `choose` rule runs.
 
   Choice* = object
     ## A selected game object. `owner` is the player index for both heroes
     ## and creatures, which lets targets enforce friendly/enemy restrictions.
+    ## An option names no object: it picks one of a card's offered branches.
     owner*: int
     case kind*: ChoiceKind
     of CanceledChoice, NoTargetChoice, HeroChoice:
       discard
     of CreatureChoice:
       creatureId*: int
+    of OptionChoice:
+      option*: int
 
   TargetRelation* = enum
     Friendly
@@ -48,6 +52,7 @@ type
     Opponent
       ## A player, not a card: `target({Opponent})` picks one living
       ## opponent, as in `draw(1, target({Opponent}))`.
+    Trinket  ## A trinket in play, which is not a minion.
 
   VfxKind* = enum
     NoVfx
@@ -74,6 +79,10 @@ type
     SwordBreakVfx
     # A glob of ooze drops onto a minion and bursts.
     OozeSplatVfx
+    # A minion bursts: a white-hot core, embers thrown out, a shock ring.
+    ExplosionVfx
+    # A blade thrusts out of the dark and flicks back.
+    StabVfx
     # Presentation cue, not a card VFX: a card moved from a deck to a hand.
     # The UI plays the regular draw animation into that hand slot.
     DrawVfx
@@ -101,20 +110,27 @@ type
       ## An effect on one chosen opponent uses `target({Opponent})`.
     AllOpponents
       ## Every opponent, everywhere else: `draw(1, AllOpponents)`,
-      ## `game.board.choose(owner: AllOpponents)`.
+      ## `game.board.getCards({owner: AllOpponents})`.
+    AllPlayers
+      ## Everyone, you included: `damage(1, game.players)`.
 
   Zone* = enum
     ## Game zones rules can query. Hand, deck and discard will join the board.
     BoardZone
 
   Target* = ref object of RootObj
-    ## Base target. Concrete targets control text and legal choices.
-    vfx*: VfxKind
+    ## Base target. Concrete targets control text and legal choices. The
+    ## visual belongs to the rule that aims it, not to the target.
 
   ObjectTarget* = ref object of Target
     ## Selects one hero and/or minion, restricted by its owner's relation.
     kinds*: set[TargetKind]
     relation*: TargetRelation
+
+  OptionTarget* = ref object of Target
+    ## Picks which branch of a `choose` rule runs. It names no game object,
+    ## so the table shows the branches themselves to choose between.
+    count*: int
 
   RuleValueKind* = enum
     ## The game-state reads a rule parameter can make. Each is plain data,
@@ -125,6 +141,7 @@ type
     PowerOf      ## int: a minion's current power.
     ToughnessOf  ## int: a minion's current toughness.
     OwnerOf      ## Owner: who controls what a target chose.
+    RulesOf      ## Rules: the printed rules of the card a target chose.
     CountOf      ## int: how many cards a query matches.
     Sum          ## int: `a + b`.
     Difference   ## int: `a - b`.
@@ -142,7 +159,7 @@ type
       name*: string
     of SelfCard:
       discard
-    of PowerOf, ToughnessOf, OwnerOf:
+    of PowerOf, ToughnessOf, OwnerOf, RulesOf:
       target*: Target
     of CountOf:
       query*: CardQuery
@@ -273,7 +290,10 @@ type
       ## Preselected answers, one per card target in order. When empty, the
       ## selector is asked instead.
     targets*: seq[Choice]
-      ## What each target chose so far while resolving, for `getTarget`.
+      ## The game objects chosen so far while resolving, for `getTarget`.
+      ## An option names no object, so it is counted but not listed.
+    picked*: int
+      ## How many of the card's choices are answered, options included.
     cardNamed*: CardLookup
     effects*: seq[Effect]
 
@@ -305,6 +325,17 @@ type
       target*: Target
     of SelectQuery:
       query*: CardQuery
+
+  TargetIntent* = enum
+    ## What a rule does to the target it asks a player to pick. Bots read
+    ## it to aim: damage goes where it kills, a buff goes on your best.
+    NoIntent
+    DamageIntent
+    BuffIntent
+    WeakenIntent
+    BounceIntent
+    DestroyIntent
+    KeywordIntent
 
   DamageRule* = ref object of Rule
     amount*: RuleValue[int]
@@ -346,13 +377,14 @@ type
 
   TriggerKind* = enum
     NextTurnStart  ## A player's next turn starts, after their draw.
+    EachTurnStart  ## Every one of a player's turns, after their draw.
     HeroAttacked   ## A player's hero is attacked, after the damage.
     CardAttacked   ## A card in play is attacked, after the damage.
 
   Trigger* = object
     ## When `on(...)` rules resolve instead of on play.
     case kind*: TriggerKind
-    of NextTurnStart, HeroAttacked:
+    of NextTurnStart, EachTurnStart, HeroAttacked:
       player*: RuleValue[Owner]
     of CardAttacked:
       card*: RuleValue[Card]
@@ -378,7 +410,32 @@ type
     fighter*, opponent*: Target
     vfx*: VfxKind
 
+  HiddenRule* = ref object of Rule
+    ## A minion that can't be attacked: for `turns` of its owner's turns,
+    ## or for as long as it stays in play when `turns` is Always.
+    turns*: int
+
+  RepeatRule* = ref object of Rule
+    ## "Repeat a minion or trinket's rules." They run again for the card
+    ## that repeats them, aiming fresh targets of their own.
+    what*: RuleValue[Rules]
+
+  ChooseRule* = ref object of Rule
+    ## "Choose:" — the player picks one of these rule lists, and it runs as
+    ## if it were the card's own rules. The pick comes first, so the branch
+    ## is known before its targets are aimed.
+    options*: seq[Rules]
+
+  DamagePlayerRule* = ref object of Rule
+    ## Damage straight to players' heroes: `damage(3, You)`,
+    ## `damage(1, getTarget().owner)`.
+    amount*: RuleValue[int]
+    players*: RuleValue[Owner]
+    vfx*: VfxKind
+
 const
+  Always* = -1
+    ## A status that never runs down: `hidden()`.
   Canceled* = Choice(kind: CanceledChoice, owner: -1)
   NoTarget* = Choice(kind: NoTargetChoice, owner: -1)
 
@@ -393,6 +450,10 @@ proc className*(heroClass: HeroClass): string =
 
 proc heroChoice*(player: int): Choice =
   Choice(kind: HeroChoice, owner: player)
+
+proc optionChoice*(option: int): Choice =
+  ## One of a `choose` rule's branches, by position.
+  Choice(kind: OptionChoice, owner: -1, option: option)
 
 proc creatureChoice*(owner, creatureId: int): Choice =
   Choice(
@@ -415,6 +476,8 @@ proc `==`*(a, b: Choice): bool =
     true
   of CreatureChoice:
     a.creatureId == b.creatureId
+  of OptionChoice:
+    a.option == b.option
 
 proc relationAllows(
     relation: TargetRelation,
@@ -457,6 +520,22 @@ method text*(target: ObjectTarget): string =
       "an enemy minion"
     of Any:
       "a minion"
+  elif target.kinds == {TargetKind.Trinket}:
+    case target.relation
+    of Friendly:
+      "a friendly trinket"
+    of Enemy:
+      "an enemy trinket"
+    of Any:
+      "a trinket"
+  elif target.kinds == {TargetKind.Minion, TargetKind.Trinket}:
+    case target.relation
+    of Friendly:
+      "a friendly minion or trinket"
+    of Enemy:
+      "an enemy minion or trinket"
+    of Any:
+      "a minion or trinket"
   else:
     case target.relation
     of Friendly:
@@ -486,6 +565,14 @@ method candidates*(
       if choice.kind == CreatureChoice and
           target.relation.relationAllows(context.sourcePlayer, choice.owner):
         result.add choice
+  if TargetKind.Trinket in target.kinds:
+    # Trinkets are on the board but out of `creatures`, which is minions.
+    for entry in context.game.board:
+      if entry.card.kind == CardKind.Trinket and
+          entry.choice.kind == CreatureChoice and
+          target.relation.relationAllows(context.sourcePlayer,
+            entry.choice.owner) and entry.choice notin result:
+        result.add entry.choice
 
 proc select(
     context: RuleContext,
@@ -494,8 +581,8 @@ proc select(
 ): Choice =
   ## The preselected pick for the next target, else the selector's answer.
   if context.picks.len > 0:
-    if context.targets.len < context.picks.len:
-      context.picks[context.targets.len]
+    if context.picked < context.picks.len:
+      context.picks[context.picked]
     else:
       Canceled
   elif context.selector.isNil:
@@ -519,13 +606,13 @@ method choose*(target: Target, context: var RuleContext): Choice {.base, gcsafe.
     else:
       for choice in choices:
         if choice == selected:
-          if target.vfx != NoVfx:
-            context.effects.add Effect(kind: TargetVfxEffect,
-              targetVfx: target.vfx, visualTarget: selected)
           result = selected
           break
   if not result.isCanceled:
-    context.targets.add result
+    inc context.picked
+    # `getTarget` numbers the objects a card aimed at, not its options.
+    if result.kind != OptionChoice:
+      context.targets.add result
 
 proc ordinal(index: int): string =
   case index
@@ -542,6 +629,14 @@ method choose*(target: PickedTarget, context: var RuleContext): Choice =
     context.targets[target.index]
   else:
     Canceled
+
+method text*(target: OptionTarget): string =
+  "an option"
+
+method candidates*(target: OptionTarget, context: RuleContext): seq[Choice] =
+  discard context
+  for option in 0 ..< target.count:
+    result.add optionChoice(option)
 
 method makesChoice*(target: Target): bool {.base, gcsafe.} =
   ## Whether a player picks this target. References to an earlier pick or
@@ -573,7 +668,8 @@ proc getTarget*(index = 0): Target =
   ## `fight(getTarget(0), getTarget(1))`: reuses earlier targets' choices.
   PickedTarget(index: index)
 
-proc targetCount*(card: Card): int {.gcsafe.}
+proc targetCount*(card: Card, picks: seq[Choice] = @[],
+  board: seq[BoardCard] = @[]): int {.gcsafe.}
 
 proc targetText(target: Target, card: Card): string =
   ## A `getTarget` on a card with a single target is just "the target".
@@ -604,6 +700,12 @@ proc toughness*(target: Target): RuleValue[int] =
   ## destroyed still counts with the toughness it had.
   RuleValue[int](kind: ToughnessOf, target: target)
 
+proc printedRules*(target: Target): RuleValue[Rules] =
+  ## `target({kind: {Minion, Trinket}}).printedRules`: what is printed on
+  ## the card that target chose, for `repeat`. Not `rules`, which builds a
+  ## card's own rule list.
+  RuleValue[Rules](kind: RulesOf, target: target)
+
 proc owner*(target: Target): RuleValue[Owner] =
   ## `getTarget().owner`: the player who controls what the target chose
   ## (You when that is the caster). With nothing chosen, You.
@@ -633,6 +735,9 @@ proc `-`*(a, b: RuleValue[int]): RuleValue[int] =
     toRuleValue(a.fixed - b.fixed)
   else:
     RuleValue[int](kind: Difference, operands: @[a, b])
+
+# A chosen branch runs through the resolution defined at the end of the file.
+proc runRules*(card: Card, rules: Rules, context: var RuleContext): bool {.gcsafe.}
 
 # Reads resolve through targets and queries defined further down.
 proc value*(number: RuleValue[int], context: var RuleContext): int {.gcsafe.}
@@ -678,22 +783,83 @@ proc change(amount: RuleValue[int], removes: bool, context: var RuleContext): in
 
 proc objectTarget*(
     kinds: set[TargetKind],
-    relation = Any,
-    vfx = NoVfx
+    relation = Any
 ): Target =
-  ObjectTarget(kinds: kinds, relation: relation, vfx: vfx)
+  ObjectTarget(kinds: kinds, relation: relation)
 
-template target*(
-    kinds: untyped,
-    relation: TargetRelation = Any,
-    vfx: VfxKind = NoVfx
-): Target =
-  ## `target({Hero})`, `target({Minion}, Enemy)`, `target({Minion, Hero})`.
-  ## Set literals ignore their expected type, so `Minion` is locally bound to
-  ## TargetKind.Minion instead of being ambiguous with CardKind.Minion.
-  block:
-    const Minion {.inject, used.} = TargetKind.Minion
-    objectTarget(kinds, relation, vfx)
+proc ownerRelation*(owner: Owner): TargetRelation =
+  ## An `owner:` filter in a target's braces: your own, or an opponent's.
+  case owner
+  of You: Friendly
+  of AnyOpponent, AllOpponents: Enemy
+  of AllPlayers: Any
+
+proc plain(node: NimNode): NimNode {.compileTime.} =
+  ## The expression itself, with any conversion a typed pass wrapped it in.
+  result = node
+  while result.kind in {nnkHiddenSubConv, nnkHiddenStdConv, nnkConv,
+      nnkStmtListExpr} and result.len > 0:
+    result = result[^1]
+
+proc parseFilters(filters: NimNode, what: string):
+    tuple[kinds: seq[NimNode], owner, self: NimNode] {.compileTime.} =
+  ## The filters `target` and `getCards` share, all named and in braces:
+  ## `{kind: {Minion, Hero}, owner: You, self: false}`. `{}` filters
+  ## nothing.
+  var items: seq[NimNode]
+  let filters = filters.plain()
+  case filters.kind
+  of nnkCurly, nnkTableConstr:
+    for item in filters:
+      items.add item
+  of nnkBracket:
+    # Passed through a template, `{name: value}` arrives as pairs.
+    for item in filters:
+      let pair = item.plain()
+      if pair.kind in {nnkPar, nnkTupleConstr} and pair.len == 2:
+        items.add nnkExprColonExpr.newTree(pair[0], pair[1].plain())
+      else:
+        items.add pair
+  else:
+    error(what & " takes its filters in braces: " & what &
+      "({kind: {Minion}})", filters)
+  for filter in items:
+    if filter.kind != nnkExprColonExpr:
+      error("filters are written `name: value`, and kinds go in a set: " &
+        "`kind: {Minion}`", filter)
+    if filter[0].eqIdent("kind"):
+      let kinds = filter[1].plain()
+      if kinds.kind != nnkCurly:
+        error("`kind` takes a set: `kind: {Minion, Hero}`", filter[1])
+      for kind in kinds:
+        result.kinds.add kind.plain()
+    elif filter[0].eqIdent("owner"):
+      result.owner = filter[1]
+    elif filter[0].eqIdent("self"):
+      result.self = filter[1]
+    else:
+      error("unknown filter; use `kind`, `owner` or `self`", filter[0])
+
+macro target*(filters: untyped): Target =
+  ## One hero, opponent or minion for a player to pick:
+  ## `target({kind: {Hero}})`, `target({kind: {Minion}, owner: You})`,
+  ## `target({kind: {Minion, Hero}})`. An omitted `owner` takes either
+  ## side. The rule aiming the target carries the visual:
+  ## `damage(2, target({kind: {Hero}}), vfx = LightningVfx)`.
+  let parsed = parseFilters(filters, "target")
+  if not parsed.self.isNil:
+    error("`self` filters a board query, not a target", filters)
+  var kinds = nnkCurly.newTree()
+  for kind in parsed.kinds:
+    if kind.eqIdent("Minion") or kind.eqIdent("Hero") or
+        kind.eqIdent("Opponent") or kind.eqIdent("Trinket"):
+      kinds.add newDotExpr(bindSym"TargetKind", ident(kind.strVal))
+    else:
+      error("a target is a Hero, an Opponent, a Minion or a Trinket", kind)
+  let relation =
+    if parsed.owner.isNil: bindSym"Any"
+    else: newCall(bindSym"ownerRelation", parsed.owner)
+  newCall(bindSym"objectTarget", kinds, relation)
 
 method text*(rule: Rule, card: Card): string {.base, gcsafe.} =
   discard card
@@ -721,6 +887,17 @@ method helpsTarget*(rule: Rule): bool {.base, gcsafe.} =
   discard rule
   false
 
+method intent*(rule: Rule): TargetIntent {.base, gcsafe.} =
+  ## What the rule does to the target it asks for.
+  discard rule
+  NoIntent
+
+method intentAmount*(rule: Rule): int {.base, gcsafe.} =
+  ## How much of it: damage dealt, or stats raised or lowered. A value
+  ## only known on resolve counts as 1, as `helpsTarget` estimates it.
+  discard rule
+  0
+
 method run*(
     rule: Rule,
     card: Card,
@@ -740,7 +917,7 @@ proc subject(query: CardQuery, card: Card): string =
     things =
       if query.kinds == {CardKind.Minion}: "minions"
       elif query.kinds == {Spell}: "spells"
-      elif query.kinds == {Trinket}: "trinkets"
+      elif query.kinds == {CardKind.Trinket}: "trinkets"
       else: "cards"
   if query.anyOwner:
     other & things
@@ -810,7 +987,7 @@ proc value*(number: RuleValue[int], context: var RuleContext): int =
     number.operands[0].value(context) + number.operands[1].value(context)
   of Difference:
     number.operands[0].value(context) - number.operands[1].value(context)
-  of CardNamed, SelfCard, OwnerOf:
+  of CardNamed, SelfCard, OwnerOf, RulesOf:
     raiseAssert "not a number: " & $number.kind
 
 proc value*(owner: RuleValue[Owner], context: var RuleContext): Owner =
@@ -839,6 +1016,9 @@ proc resolvePlayers(owner: RuleValue[Owner], context: var RuleContext):
   of FixedValue:
     if owner.fixed == You:
       result.players.add context.sourcePlayer
+    elif owner.fixed == AllPlayers:
+      for hero in context.heroes:
+        result.players.add hero.owner
     else:
       for hero in context.heroes:
         if hero.owner != context.sourcePlayer:
@@ -863,6 +1043,11 @@ proc picks(owner: RuleValue[Owner]): seq[Target] =
   if owner.kind == OwnerOf and owner.target.makesChoice():
     result.add owner.target
 
+proc picks(repeated: RuleValue[Rules]): seq[Target] =
+  ## The target that names the card whose rules are repeated.
+  if repeated.kind == RulesOf and repeated.target.makesChoice():
+    result.add repeated.target
+
 proc picks(query: CardQuery): seq[Target] =
   ## The target the query's `owner:` filter asks its card to pick.
   if not query.anyOwner:
@@ -876,9 +1061,19 @@ proc effectOwner(owner: RuleValue[Owner], rule: string): RuleValue[Owner] =
 
 proc triggerOwner(owner: RuleValue[Owner], trigger: string): RuleValue[Owner] =
   ## A trigger watches you or any one opponent.
-  doAssert owner.kind != FixedValue or owner.fixed != AllOpponents,
-    trigger & ": use AnyOpponent in triggers"
+  doAssert owner.kind != FixedValue or
+    owner.fixed notin {AllOpponents, AllPlayers},
+    trigger & ": use You or AnyOpponent in triggers"
   owner
+
+proc value*(repeated: RuleValue[Rules], context: var RuleContext): Rules =
+  ## The printed rules of the card a target chose, empty when it chose none.
+  case repeated.kind
+  of FixedValue: repeated.fixed
+  of RulesOf:
+    let chosen = repeated.target.chosenEntry(context)
+    if chosen.found: chosen.entry.card.rules else: @[]
+  else: raiseAssert "not rules: " & $repeated.kind
 
 proc value*(named: RuleValue[Card], context: var RuleContext): Card =
   case named.kind
@@ -904,7 +1099,7 @@ proc text*(number: RuleValue[int], card: Card): string =
     number.operands[0].text(card) & " plus " & number.operands[1].text(card)
   of Difference:
     number.operands[0].text(card) & " minus " & number.operands[1].text(card)
-  of CardNamed, SelfCard, OwnerOf: raiseAssert "not a number: " & $number.kind
+  of CardNamed, SelfCard, OwnerOf, RulesOf: raiseAssert "not a number: " & $number.kind
 
 proc text*(owner: RuleValue[Owner], card: Card): string =
   ## "you", "an opponent", "each opponent", "the target's owner".
@@ -914,6 +1109,7 @@ proc text*(owner: RuleValue[Owner], card: Card): string =
     of You: "you"
     of AnyOpponent: "an opponent"
     of AllOpponents: "each opponent"
+    of AllPlayers: "each player"
   of OwnerOf:
     # A picked player is named as picked; a picked card, by its owner.
     if owner.target of ObjectTarget and
@@ -922,6 +1118,12 @@ proc text*(owner: RuleValue[Owner], card: Card): string =
     else:
       owner.target.targetText(card) & "'s owner"
   else: raiseAssert "not an owner: " & $owner.kind
+
+proc text*(repeated: RuleValue[Rules], card: Card): string =
+  ## "a minion or trinket's rules", "the target's rules".
+  case repeated.kind
+  of RulesOf: repeated.target.targetText(card) & "'s rules"
+  else: "these rules"
 
 proc text*(named: RuleValue[Card], card: Card): string =
   ## A card's printed name.
@@ -1023,7 +1225,7 @@ proc resolve(
     case selected.kind
     of CanceledChoice:
       result.ok = false
-    of NoTargetChoice:
+    of NoTargetChoice, OptionChoice:
       discard
     of HeroChoice, CreatureChoice:
       result.chosen.add selected
@@ -1046,6 +1248,10 @@ method choices*(rule: DamageRule, card: Card, context: RuleContext): seq[Choice]
 method targets*(rule: DamageRule): seq[Target] =
   rule.what.picks()
 
+method intent*(rule: DamageRule): TargetIntent = DamageIntent
+
+method intentAmount*(rule: DamageRule): int = rule.amount.estimate()
+
 method run*(rule: DamageRule, card: Card, context: var RuleContext): bool =
   discard card
   let selection = rule.what.resolve(context, rule.vfx)
@@ -1060,7 +1266,7 @@ method run*(rule: DamageRule, card: Card, context: var RuleContext): bool =
     of CreatureChoice:
       context.effects.add Effect(kind: DamageCreatureEffect,
         damagedCreatureId: choice.creatureId, creatureDamage: amount)
-    of CanceledChoice, NoTargetChoice:
+    of CanceledChoice, NoTargetChoice, OptionChoice:
       discard
   true
 
@@ -1078,6 +1284,12 @@ method targets*(rule: StatsRule): seq[Target] =
 method helpsTarget*(rule: StatsRule): bool =
   let total = rule.power.estimate() + rule.toughness.estimate()
   if rule.removes: total < 0 else: total > 0
+
+method intent*(rule: StatsRule): TargetIntent =
+  if rule.removes: WeakenIntent else: BuffIntent
+
+method intentAmount*(rule: StatsRule): int =
+  rule.power.estimate() + rule.toughness.estimate()
 
 method run*(rule: StatsRule, card: Card, context: var RuleContext): bool =
   discard card
@@ -1109,6 +1321,8 @@ method choices*(rule: BounceRule, card: Card, context: RuleContext): seq[Choice]
 method targets*(rule: BounceRule): seq[Target] =
   rule.what.picks()
 
+method intent*(rule: BounceRule): TargetIntent = BounceIntent
+
 method run*(rule: BounceRule, card: Card, context: var RuleContext): bool =
   discard card
   let selection = rule.what.resolve(context, rule.vfx)
@@ -1129,6 +1343,8 @@ method choices*(rule: DestroyRule, card: Card, context: RuleContext): seq[Choice
 
 method targets*(rule: DestroyRule): seq[Target] =
   rule.what.picks()
+
+method intent*(rule: DestroyRule): TargetIntent = DestroyIntent
 
 method run*(rule: DestroyRule, card: Card, context: var RuleContext): bool =
   discard card
@@ -1154,6 +1370,8 @@ method choices*(rule: LoseKeywordRule, card: Card,
 method targets*(rule: LoseKeywordRule): seq[Target] =
   rule.what.picks()
 
+method intent*(rule: LoseKeywordRule): TargetIntent = KeywordIntent
+
 method run*(rule: LoseKeywordRule, card: Card, context: var RuleContext): bool =
   discard card
   let selection = rule.what.resolve(context, rule.vfx)
@@ -1165,9 +1383,132 @@ method run*(rule: LoseKeywordRule, card: Card, context: var RuleContext): bool =
         keywordLoserId: choice.creatureId, lostKeyword: rule.keyword)
   true
 
-proc damage*(amount: RuleValue[int], what: Selection, vfx = NoVfx): Rule =
-  ## `damage(1, target({Minion}))`, `damage(1, game.board.choose(...))`.
-  DamageRule(amount: amount, what: what, vfx: vfx)
+method text*(rule: DamagePlayerRule, card: Card): string =
+  ## "Deal 3 damage to yourself.", "Deal 1 damage to the target's owner."
+  let victims =
+    if rule.players.kind == FixedValue and rule.players.fixed == You:
+      "yourself"
+    else:
+      rule.players.text(card)
+  "Deal " & rule.amount.text(card) & " damage to " & victims & "."
+
+method targets*(rule: DamagePlayerRule): seq[Target] =
+  rule.players.picks()
+
+method intent*(rule: DamagePlayerRule): TargetIntent = DamageIntent
+
+method intentAmount*(rule: DamagePlayerRule): int = rule.amount.estimate()
+
+method run*(rule: DamagePlayerRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let players = rule.players.resolvePlayers(context)
+  if not players.ok:
+    return false
+  let amount = rule.amount.value(context)
+  for player in players.players:
+    if rule.vfx != NoVfx:
+      context.effects.add Effect(kind: TargetVfxEffect, targetVfx: rule.vfx,
+        visualTarget: heroChoice(player))
+  for player in players.players:
+    context.effects.add Effect(kind: DamageHeroEffect,
+      heroPlayer: player, heroDamage: amount)
+  true
+
+method text*(rule: HiddenRule, card: Card): string =
+  discard card
+  if rule.turns == Always: "Hidden." else: "Hidden " & $rule.turns & "."
+
+method text*(rule: RepeatRule, card: Card): string =
+  ## "Repeat a minion or trinket's rules."
+  "Repeat " & rule.what.text(card) & "."
+
+method targets*(rule: RepeatRule): seq[Target] =
+  ## The card to repeat. Its own rules ask for their targets after that
+  ## pick, which the rules-level enumeration below splices in.
+  rule.what.picks()
+
+method run*(rule: RepeatRule, card: Card, context: var RuleContext): bool =
+  var repeated: Rules
+  if rule.what.kind == RulesOf:
+    let chosen = rule.what.target.choose(context)
+    case chosen.kind
+    of CanceledChoice:
+      # No card to repeat: the card that repeats it does nothing at all.
+      return false
+    of NoTargetChoice, HeroChoice, OptionChoice:
+      return true
+    of CreatureChoice:
+      for entry in context.game.board:
+        if entry.choice == chosen:
+          repeated = entry.card.rules
+  else:
+    repeated = rule.what.value(context)
+  if repeated.len == 0:
+    # A card with nothing printed on it repeats nothing.
+    return true
+  # They run with no card of their own in play, so anything aimed at
+  # `self` finds nothing and does nothing, and every target is picked anew.
+  let source = context.sourceId
+  context.sourceId = 0
+  result = card.runRules(repeated, context)
+  context.sourceId = source
+
+method text*(rule: ChooseRule, card: Card): string =
+  ## "Choose:" and one line per branch, each reading as its own card would.
+  result = "Choose:"
+  for option in rule.options:
+    var parts: seq[string]
+    for sub in option:
+      let line = sub.text(card)
+      if line.len > 0:
+        parts.add line
+    result.add "\n- " & parts.join(" ")
+
+method targets*(rule: ChooseRule): seq[Target] =
+  ## The option itself. Its branch's targets come after that pick, and the
+  ## rules-level enumeration below splices them in.
+  @[Target(OptionTarget(count: rule.options.len))]
+
+method run*(rule: ChooseRule, card: Card, context: var RuleContext): bool =
+  let option = OptionTarget(count: rule.options.len).choose(context)
+  if option.kind != OptionChoice or option.option notin 0 ..< rule.options.len:
+    return false
+  card.runRules(rule.options[option.option], context)
+
+proc damage*(amount: RuleValue[int], what: Target, vfx = NoVfx): Rule =
+  ## `damage(1, target({Minion}), vfx = ArrowVfx)`, `damage(1, getTarget())`.
+  DamageRule(amount: amount, what: what.toSelection(), vfx: vfx)
+
+proc damage*(amount: RuleValue[int], what: CardQuery, vfx = NoVfx): Rule =
+  ## `damage(1, game.board.choose(kind: Minion, owner: AllOpponents))`.
+  DamageRule(amount: amount, what: what.toSelection(), vfx: vfx)
+
+proc damage*(amount: RuleValue[int], players: RuleValue[Owner],
+    vfx = NoVfx): Rule =
+  ## Damages the players themselves: `damage(3, You)`,
+  ## `damage(1, getTarget().owner)`, `damage(1, AllOpponents)`.
+  DamagePlayerRule(amount: amount, players: players.effectOwner("damage"),
+    vfx: vfx)
+
+proc hidden*(turns: int): Rule =
+  ## `hidden(2)`: it can't be attacked until the start of its owner's
+  ## second turn from now. The count runs down as its owner's turns begin.
+  doAssert turns > 0, "hidden: count the owner's turns, or write hidden()"
+  HiddenRule(turns: turns)
+
+proc hidden*(): Rule =
+  ## `hidden()`: it can never be attacked.
+  HiddenRule(turns: Always)
+
+proc repeat*(what: RuleValue[Rules]): Rule =
+  ## `repeat(target({kind: {Minion, Trinket}}).rules)`: run a card in play's
+  ## printed rules again, for the card that repeats them.
+  RepeatRule(what: what)
+
+proc choose*(options: varargs[Rules]): Rule =
+  ## `choose(rules(...), rules(...))`: the player picks one branch to run.
+  doAssert options.len > 1, "choose: offer at least two options"
+  ChooseRule(options: @options)
 
 proc addPowerToughness*(
     power, toughness: RuleValue[int],
@@ -1301,6 +1642,11 @@ proc toss*(
   ## Nim keyword.)
   TossRule(count: count, player: player.effectOwner("toss"))
 
+proc eachTurn*(player: RuleValue[Owner]): Trigger =
+  ## `on(eachTurn(You), ...)`: fires every time that player's turn starts,
+  ## after their draw, for as long as the card stays in play.
+  Trigger(kind: EachTurnStart, player: player.triggerOwner("eachTurn"))
+
 proc nextTurn*(player: RuleValue[Owner]): Trigger =
   ## `on(nextTurn(You), ...)`: fires once, when that player's next turn
   ## starts, after their draw. `nextTurn(AnyOpponent)`: when the next
@@ -1326,6 +1672,13 @@ proc text*(trigger: Trigger, card: Card): string =
       else: "at the start of an opponent's next turn"
     else:
       "at the start of " & player.text(card) & "'s next turn"
+  of EachTurnStart:
+    let player = trigger.player
+    if player.kind == FixedValue:
+      if player.fixed == You: "at the start of each of your turns"
+      else: "at the start of each opponent's turn"
+    else:
+      "at the start of each of " & player.text(card) & "'s turns"
 
 proc firesAtTurnStart*(
     trigger: Trigger,
@@ -1337,10 +1690,14 @@ proc firesAtTurnStart*(
   ## watches. The game fires each such trigger only once, so that is their
   ## next turn, however many turns were skipped on the way.
   case trigger.kind
-  of NextTurnStart:
+  of NextTurnStart, EachTurnStart:
     turnPlayer in trigger.player.players(context) and turn > enteredTurn
   of HeroAttacked, CardAttacked:
     false
+
+proc firesOnce*(trigger: Trigger): bool =
+  ## Whether firing spends the trigger. An each-turn one never does.
+  trigger.kind != EachTurnStart
 
 proc firesOnAttack*(
     trigger: Trigger,
@@ -1350,7 +1707,7 @@ proc firesOnAttack*(
   ## Whether an attack on `victim` fires the trigger. It fires after the
   ## attack's damage.
   case trigger.kind
-  of NextTurnStart:
+  of NextTurnStart, EachTurnStart:
     return false
   of HeroAttacked:
     return victim.kind == HeroChoice and
@@ -1476,69 +1833,62 @@ proc fight*(fighter, opponent: Target, vfx = NoVfx): Rule =
   ## `fight(getTarget(0), getTarget(1))`: both deal their power at once.
   FightRule(fighter: fighter, opponent: opponent, vfx: vfx)
 
+proc players*(game: GameQuery): RuleValue[Owner] =
+  ## `damage(1, game.players)`: everyone at the table, you included.
+  discard game
+  toRuleValue(AllPlayers)
+
 proc board*(game: GameQuery): ZoneQuery =
   ZoneQuery(zone: BoardZone)
 
-macro choose*(zone: ZoneQuery, filters: varargs[untyped]): CardQuery =
-  ## Selects every card in `zone` matching `kind: CardKind`, `owner:`
-  ## (`You`, `AllOpponents`, or computed: `getTarget().owner`) and `self: false`
-  ## (not the card these rules belong to). An omitted filter matches
-  ## anything.
+macro getCards*(zone: ZoneQuery, filters: untyped): CardQuery =
+  ## Every card in `zone` the filters match, found when the card resolves:
+  ## `game.board.getCards({kind: {Minion}, owner: AllOpponents})`,
+  ## `game.board.getCards({self: false})`, `game.board.getCards({})` for
+  ## every card. `owner` takes `You`, `AllOpponents` or a computed player
+  ## (`getTarget().owner`), and `self: false` leaves out the card these
+  ## rules belong to. A board holds cards, so a `Hero` among the kinds
+  ## matches nothing here; it is the one kind only `target` acts on.
+  let parsed = parseFilters(filters, "getCards")
+  var
+    kinds = nnkCurly.newTree()
+    cardKinds = 0
+  for kind in parsed.kinds:
+    if kind.eqIdent("Minion") or kind.eqIdent("Spell") or
+        kind.eqIdent("Trinket"):
+      kinds.add newDotExpr(bindSym"CardKind", ident(kind.strVal))
+      inc cardKinds
+    elif kind.eqIdent("Hero") or kind.eqIdent("Opponent"):
+      discard
+    else:
+      error("a card is a Minion, a Spell or a Trinket", kind)
+  if parsed.kinds.len > 0 and cardKinds == 0:
+    error("a board query matches cards; Hero only applies to `target`",
+      filters)
   let query = genSym(nskVar, "query")
   var body = newStmtList(quote do:
     var `query` = CardQuery(zone: `zone`.zone,
       kinds: {low(CardKind) .. high(CardKind)},
       anyOwner: true, includeSelf: true))
-  # Filters come as `kind: Minion` or in braces: `{self: false}`. `{}` is
-  # no filter at all.
-  var named: seq[NimNode]
-  for filter in filters:
-    case filter.kind
-    of nnkExprColonExpr:
-      named.add filter
-    of nnkTableConstr:
-      for pair in filter:
-        named.add pair
-    of nnkCurly:
-      if filter.len > 0:
-        error("choose filters are written `name: value`", filter)
-    else:
-      error("choose filters are written `name: value`", filter)
-  for filter in named:
-    let value = filter[1]
-    if filter[0].eqIdent("kind"):
-      body.add(quote do:
-        block:
-          let kind: CardKind = `value`
-          `query`.kinds = {kind})
-    elif filter[0].eqIdent("owner"):
-      body.add(quote do:
-        block:
-          let owner: RuleValue[Owner] = `value`
-          `query`.owner = owner
-          `query`.anyOwner = false)
-    elif filter[0].eqIdent("self"):
-      body.add(quote do:
-        block:
-          let includeSelf: bool = `value`
-          `query`.includeSelf = includeSelf)
-    else:
-      error("unknown choose filter; use `kind`, `owner` or `self`", filter[0])
+  if cardKinds > 0:
+    body.add(quote do:
+      `query`.kinds = `kinds`)
+  if not parsed.owner.isNil:
+    let owned = parsed.owner
+    body.add(quote do:
+      block:
+        let owner: RuleValue[Owner] = `owned`
+        `query`.owner = owner
+        `query`.anyOwner = false)
+  if not parsed.self.isNil:
+    let kept = parsed.self
+    body.add(quote do:
+      block:
+        let includeSelf: bool = `kept`
+        `query`.includeSelf = includeSelf)
   body.add query
   result = newBlockStmt(body)
 
-proc chooseCalls(node: NimNode): NimNode =
-  ## `zone.choose(kind: Minion)` parses as an object constructor, which Nim
-  ## would reject before `choose` saw its filters. Rewrite it into a call.
-  if node.kind == nnkObjConstr and node[0].kind == nnkDotExpr and
-      node[0][1].eqIdent("choose"):
-    result = newCall(ident"choose", chooseCalls(node[0][0]))
-    for index in 1 ..< node.len:
-      result.add node[index]
-  else:
-    result = node
-    for index in 0 ..< node.len:
-      result[index] = chooseCalls(node[index])
 
 proc ranged*(): KeywordRule =
   ## Ranged minions take no combat damage from non-ranged minions. Also
@@ -1551,10 +1901,11 @@ proc ruleList(items: varargs[Rule]): Rules =
 
 macro rules*(items: varargs[untyped]): Rules =
   ## A card's printed rules, in order: `rules: rules(ranged(), damage(...))`.
-  ## Inside, `game` names the live game: `game.board.choose(...)`.
+  ## Inside, `game` names the live game: `game.board.getCards(...)`. For
+  ## the rules printed on a card in play, see `printedRules`.
   var call = newCall(bindSym"ruleList")
   for item in items:
-    call.add chooseCalls(item)
+    call.add item
   let game = nnkPragmaExpr.newTree(ident"game",
     nnkPragma.newTree(ident"used"))
   result = newBlockStmt(newStmtList(
@@ -1573,6 +1924,13 @@ proc ruleText*(card: Card): string =
       lines.add line
   lines.join("\n")
 
+proc hiddenTurns*(card: Card): int =
+  ## How long the card is hidden once in play: 0 when it never is,
+  ## `Always` when it always is, else that many of its owner's turns.
+  for rule in card.rules:
+    if rule of HiddenRule:
+      return HiddenRule(rule).turns
+
 proc keywords*(card: Card): set[Keyword] =
   for rule in card.rules:
     if rule of KeywordRule:
@@ -1584,76 +1942,232 @@ proc picks(rule: Rule): seq[Target] =
     if target.makesChoice():
       result.add target
 
-proc targets*(rules: Rules): seq[Target] =
-  ## Every choice the rules ask for, in the order players make them.
+type
+  Aim* = tuple[target: Target, rule: Rule]
+    ## One choice a card asks for, and the rule that asks it.
+
+proc cardAt(board: seq[BoardCard], choice: Choice): Card =
+  ## The card a choice names on the board, or none at all.
+  for entry in board:
+    if entry.choice == choice:
+      return entry.card
+
+proc appendAims(rules: Rules, picks: seq[Choice], board: seq[BoardCard],
+    into: var seq[Aim]): bool =
+  ## Adds the choices `rules` ask for, in order. A `choose` asks for its
+  ## option first and a `repeat` for the card to repeat; once that pick is
+  ## made, the branch's or the repeated card's own choices follow. False
+  ## when such a pick is still missing, which leaves the rest unknown.
   for rule in rules:
-    result.add rule.picks()
+    if rule of ChooseRule:
+      let options = ChooseRule(rule).options
+      into.add (Target(OptionTarget(count: options.len)), rule)
+      let at = into.len - 1
+      if at >= picks.len or picks[at].kind != OptionChoice or
+          picks[at].option notin 0 ..< options.len:
+        return false
+      if not options[picks[at].option].appendAims(picks, board, into):
+        return false
+    elif rule of RepeatRule:
+      for target in rule.picks():
+        into.add (target, rule)
+      let at = into.len - 1
+      if at >= picks.len:
+        return false
+      # The repeated card's rules ask for their own targets, so the list
+      # only grows once the board says which card was picked.
+      let repeated = board.cardAt(picks[at]).rules
+      if repeated.len > 0 and not repeated.appendAims(picks, board, into):
+        return false
+    else:
+      for target in rule.picks():
+        into.add (target, rule)
+  true
 
-proc targetCount*(rules: Rules): int =
-  rules.targets().len
+proc aims*(rules: Rules, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): seq[Aim] =
+  ## Every choice the rules ask for, as far as the picks so far reveal.
+  ## `board` resolves a pick to the card it names, for `repeat`.
+  discard rules.appendAims(picks, board, result)
 
-proc helpsTarget*(rules: Rules, step: int): bool =
+proc targets*(rules: Rules, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): seq[Target] =
+  for aim in rules.aims(picks, board):
+    result.add aim.target
+
+proc targetCount*(rules: Rules, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): int =
+  rules.aims(picks, board).len
+
+proc helpsTarget*(rules: Rules, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): bool =
   ## Whether the `step`th target (from 0) is one to aim at your own.
-  var index = 0
-  for rule in rules:
-    for _ in rule.picks():
-      if index == step:
-        return rule.helpsTarget()
-      inc index
+  let aims = rules.aims(picks, board)
+  if step in 0 ..< aims.len:
+    aims[step].rule.helpsTarget()
+  else:
+    false
 
-proc choices*(rules: Rules, context: RuleContext, step = 0): seq[Choice] =
-  ## Unique legal choices for the `step`th target (from 0).
-  let targets = rules.targets()
+proc intent*(rules: Rules, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): TargetIntent =
+  ## What the `step`th target (from 0) has done to it.
+  let aims = rules.aims(picks, board)
+  if step in 0 ..< aims.len:
+    aims[step].rule.intent()
+  else:
+    NoIntent
+
+proc intentAmount*(rules: Rules, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): int =
+  ## How much of it the `step`th target (from 0) takes.
+  let aims = rules.aims(picks, board)
+  if step in 0 ..< aims.len:
+    aims[step].rule.intentAmount()
+  else:
+    0
+
+proc choices*(rules: Rules, context: RuleContext, step = 0,
+    picks: seq[Choice] = @[]): seq[Choice] =
+  ## Unique legal choices for the `step`th target (from 0). The context's
+  ## board resolves a card picked earlier, for `repeat`.
+  let targets = rules.targets(picks, context.game.board)
   if step >= targets.len:
     return
   for choice in targets[step].candidates(context):
     if choice notin result:
       result.add choice
 
+proc damageToSelf*(rules: Rules): int =
+  ## Damage these rules deal to the player whose card they are. A branch
+  ## that burns your own hero costs this much to pick.
+  for rule in rules:
+    if rule of DamagePlayerRule:
+      let players = DamagePlayerRule(rule).players
+      if players.kind == FixedValue and players.fixed == You:
+        result += DamagePlayerRule(rule).amount.estimate()
+
+proc damageDealt*(rules: Rules): int =
+  ## Damage these rules deal to what they are aimed at, your own hero
+  ## aside. Bots weigh a branch by this against what it costs them.
+  for rule in rules:
+    if rule of DamageRule:
+      result += DamageRule(rule).amount.estimate()
+    elif rule of DamagePlayerRule:
+      let players = DamagePlayerRule(rule).players
+      if players.kind != FixedValue or players.fixed != You:
+        result += DamagePlayerRule(rule).amount.estimate()
+
+proc options*(rules: Rules, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): seq[Rules] =
+  ## The branches the next pick chooses between, empty unless that pick is
+  ## an option. The table shows one card per branch.
+  let aims = rules.aims(picks, board)
+  if picks.len < aims.len and aims[picks.len].rule of ChooseRule:
+    result = ChooseRule(aims[picks.len].rule).options
+
 proc targetPrompt*(
     rules: Rules,
     card: Card,
-    step: int
+    step: int,
+    picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]
 ): tuple[rule, choose: string] =
   ## What a player sees while picking the `step`th target: the rule being
   ## aimed ("Deal 1 damage to a minion.") and the pick ("Choose a minion.").
-  var index = 0
-  for rule in rules:
-    for target in rule.picks():
-      if index == step:
-        return (rule.text(card), "Choose " & target.text() & ".")
-      inc index
+  let aims = rules.aims(picks, board)
+  if step in 0 ..< aims.len:
+    (aims[step].rule.text(card), "Choose " & aims[step].target.text() & ".")
+  else:
+    ("", "")
 
-proc targets*(card: Card): seq[Target] =
-  card.rules.targets()
+proc targets*(card: Card, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): seq[Target] =
+  card.rules.targets(picks, board)
 
 proc needsChoice*(card: Card): bool =
   card.targets().len > 0
 
-proc targetCount*(card: Card): int {.gcsafe.} =
-  card.rules.targetCount()
+proc targetCount*(card: Card, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): int {.gcsafe.} =
+  card.rules.targetCount(picks, board)
 
-proc helpsTarget*(card: Card, step: int): bool =
-  card.rules.helpsTarget(step)
+proc helpsTarget*(card: Card, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): bool =
+  card.rules.helpsTarget(step, picks, board)
 
-proc choices*(card: Card, context: RuleContext, step = 0): seq[Choice] =
-  card.rules.choices(context, step)
+proc intent*(card: Card, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): TargetIntent =
+  card.rules.intent(step, picks, board)
 
-proc targetPrompt*(card: Card, step: int): tuple[rule, choose: string] =
-  card.rules.targetPrompt(card, step)
+proc intentAmount*(card: Card, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): int =
+  card.rules.intentAmount(step, picks, board)
+
+proc choices*(card: Card, context: RuleContext, step = 0,
+    picks: seq[Choice] = @[]): seq[Choice] =
+  card.rules.choices(context, step, picks)
+
+proc options*(card: Card, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): seq[Rules] =
+  card.rules.options(picks, board)
+
+proc everyOption*(rules: Rules): seq[Rules] =
+  ## Every branch any `choose` in these rules offers, wherever it sits and
+  ## whatever is picked before it. `options` answers for the pick being
+  ## made now; this answers for the whole card, which is what the faces
+  ## are baked from, so no branch is ever shown as a card back.
+  for rule in rules:
+    if rule of ChooseRule:
+      for option in ChooseRule(rule).options:
+        result.add option
+        result.add option.everyOption()
+    elif rule of OnRule:
+      result.add OnRule(rule).rules.everyOption()
+
+proc everyOption*(card: Card): seq[Rules] =
+  card.rules.everyOption()
+
+proc answer*(context: var RuleContext, picks: seq[Choice]) =
+  ## Treats `picks` as choices already made, so the next one is asked for
+  ## in the right place and `getTarget` sees the objects they named.
+  context.picked = picks.len
+  context.targets.setLen(0)
+  for pick in picks:
+    if pick.kind != OptionChoice:
+      context.targets.add pick
+
+proc optionCard*(card: Card, option: Rules): Card =
+  ## The same card showing one branch alone, for the table to offer.
+  result = card
+  result.rules = option
+
+proc targetPrompt*(card: Card, step: int, picks: seq[Choice] = @[],
+    board: seq[BoardCard] = @[]): tuple[rule, choose: string] =
+  card.rules.targetPrompt(card, step, picks, board)
 
 proc runRules*(card: Card, rules: Rules, context: var RuleContext): bool =
   ## Resolves `rules` for `card`. A canceled/invalid target cancels them all.
   let effectStart = context.effects.len
-  for index, rule in rules:
+  var beat = 0
+  for rule in rules:
     let ruleStart = context.effects.len
     if not rule.run(card, context):
       # A later canceled rule must not leak damage or VFX from earlier rules.
       context.effects.setLen(effectStart)
       return false
-    for effect in context.effects.toOpenArray(ruleStart,
-        context.effects.high).mitems:
-      effect.beat = index
+    if rule of ChooseRule:
+      # The branch numbered its own beats: keep them, after this rule's.
+      var last = beat
+      for effect in context.effects.toOpenArray(ruleStart,
+          context.effects.high).mitems:
+        effect.beat += beat
+        last = max(last, effect.beat)
+      beat = last + 1
+    else:
+      for effect in context.effects.toOpenArray(ruleStart,
+          context.effects.high).mitems:
+        effect.beat = beat
+      inc beat
   true
 
 proc runRules*(card: Card, context: var RuleContext): bool =

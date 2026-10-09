@@ -226,6 +226,7 @@ when not defined(headless):
         ## The bot scripts for the seats that aren't the human's, taken in
         ## turn: the --bot scripts, else the reference bot.
       uiCapturesMouse = false  ## The pointer is over a tuning window.
+      chooseCanceled = false  ## The choose screen's button, clicked last frame.
     when defined(takeScreenshot):
       var playDemoDone = false
     template gamePressed(button: Button): bool =
@@ -407,7 +408,7 @@ when not defined(headless):
           else: camera.eye
         target =
           if choosingClasses: classChoiceTarget
-          else: camera.target
+          else: camera.lookPoint
         view = lookAt(eye, target, vec3(0, 1, 0))
         farPlane = max(CameraFar, length(eye) * 3)
         projection = perspective(42.0'f32, aspect, CameraNear, farPlane)
@@ -428,6 +429,7 @@ when not defined(headless):
           else: previewTime
       var
         hoverIndex = -1
+        chooseHover = -1
         hoveredTarget = Canceled
         hoveredBoard = Canceled
       if not choosingClasses:
@@ -466,6 +468,20 @@ when not defined(headless):
             # Pick one of your minions, then any opponent's minion or hero.
             play.updateAttack(game, table, window, stageVp, hoveredBoard,
               pick, cancel)
+        elif match.humanActs and play.choosing and
+            play.presentationIdle(game) and not game.gameOver:
+          hoverIndex = -1
+          chooseHover = hoveredChooseOption(sk, window,
+            play.pendingChoices.len)
+          if play.chooseStart <= 0:
+            play.chooseStart = previewTime
+          play.updateChoosing(game, table, chooseHover,
+            pick = pick and chooseHover >= 0,
+            # Anywhere off the offered cards cancels, as does the button.
+            cancel = (pick and chooseHover < 0) or chooseCanceled or cancel,
+            time = previewTime)
+          if not play.choosing:
+            play.chooseStart = 0
         elif match.humanActs and play.pendingTargeting and
             play.presentationIdle(game) and not game.gameOver:
           hoveredTarget = play.updateTargeting(game, table, window,
@@ -618,6 +634,14 @@ when not defined(headless):
           else:
             play.statusMessage
         )
+        chooseCanceled =
+          if play.choosing:
+            drawChooseScreen(sk, window, play.pendingCard,
+              play.chooseOptions(match.game), chooseHover, play.choosePicked,
+              appear = previewTime - play.chooseStart,
+              sincePick = previewTime - play.choosePickedAt)
+          else:
+            false
         sk.drawTossPrompt(window, play, match.game, centerX)
         sk.drawTargetPrompt(window, play, match.game, centerX)
         sk.drawCombatPrompt(window, play, match.game, centerX)

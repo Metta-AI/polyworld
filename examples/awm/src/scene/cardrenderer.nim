@@ -3,7 +3,7 @@
 
 import std/[options, tables]
 import chroma, opengl, pixie, shady, silky, vmath
-import ../core/core, ../core/baseset, ../ui/cardfaces
+import ../core/core, ../baseset, ../ui/cardfaces
 
 type CardRenderer* = object
   program, vertexArray, vertexBuffer: GLuint
@@ -115,6 +115,11 @@ proc addBaseCardImages*(builder: AtlasBuilder) =
       raise newException(IOError, "Card images do not fit the UI atlas")
   for card in baseCards:
     builder.add(card.cardImageKey(), card.renderCardFace())
+    # A card that offers a choice shows each branch on a face of its own,
+    # wherever that choice sits among its rules.
+    for option in card.everyOption():
+      let branch = card.optionCard(option)
+      builder.add(branch.cardImageKey(), branch.renderCardFace())
   # Pack the large back before small overlays fragment the remaining space.
   builder.add(CardBackKey, renderCardBack())
   for slot in StatSlot:
@@ -210,10 +215,11 @@ proc draw*(renderer: var CardRenderer, sk: Silky, viewProjection: Mat4) =
   glDrawArrays(GL_TRIANGLES, 0, (renderer.vertices.len div 9).GLsizei)
   glBindVertexArray(0)
 
-proc drawCardImage*(sk: Silky, imageKey: string, origin, size: Vec2) =
+proc drawCardImage*(sk: Silky, imageKey: string, origin, size: Vec2,
+    tint = rgbx(255, 255, 255, 255)) =
   let entry = sk.atlas.entries[imageKey]
   sk.drawQuad(origin, size, vec2(entry.x.float32, entry.y.float32),
-    vec2(entry.width.float32, entry.height.float32), rgbx(255, 255, 255, 255))
+    vec2(entry.width.float32, entry.height.float32), tint)
 
 proc drawMinionOverlays*(sk: Silky, card: Card, power, toughness: int,
     lost: set[Keyword], origin, size: Vec2) =

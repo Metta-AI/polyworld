@@ -185,7 +185,7 @@ wend
   let player = played.game.currentPlayer
   let owner = played.game.nextPlayer(player)
   let snare = Card(name: "Snare", kind: Trinket, class: some(Mage),
-    rules: rules(on(nextTurn(You), damage(1, target({TargetKind.Minion})))))
+    rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
   played.game.players[owner].board = @[ready(owner, 1, snare)]
   played.game.players[player].board = @[ready(player, 2, baseCardNamed("Bear"))]
   played.game.nextMinionId = 3

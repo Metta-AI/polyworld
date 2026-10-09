@@ -447,10 +447,12 @@ proc addCard*(
     currentPower = -1,
     currentToughness = -1,
     damageFlash = 0.0'f32,
-    lostKeywords: set[Keyword] = {}
+    lostKeywords: set[Keyword] = {},
+    veiled = false
 ) =
   ## A minion on the battlefield passes its live stats (currentToughness
-  ## >= 0); they are drawn over a stat-less face.
+  ## >= 0); they are drawn over a stat-less face. A `veiled` minion is
+  ## hidden from the player looking at it, and sits in shadow.
   var raised = pose.position
   if targetable:
     raised.y += 0.08'f32
@@ -489,7 +491,10 @@ proc addCard*(
     imageKey =
       if hidden or card.name.len == 0: CardBackKey
       else: sk.bakedCardImage(card)
-    brightness = if hidden or enabled: 1.0'f32 else: 0.68'f32
+    brightness =
+      if veiled: 0.4'f32
+      elif hidden or enabled: 1.0'f32
+      else: 0.68'f32
   var corners: array[4, Vec3]
   for i in 0 ..< corners.len:
     corners[i] = raised + pose.transformCardVector(local[i])

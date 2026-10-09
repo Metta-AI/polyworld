@@ -23,7 +23,8 @@ proc forward*(camera: Placement): Vec3 =
   ## The direction a camera looks: pitched below the horizon, then yawed.
   turnRight(vec3(0, -sin(camera.pitch), -cos(camera.pitch)), camera.yaw)
 
-proc target*(camera: Placement): Vec3 =
+proc lookPoint*(camera: Placement): Vec3 =
+  ## The point a camera looks at. Not `target`: that names a card's pick.
   camera.eye + camera.forward
 
 proc seatEye*(camera: Placement, side: float32): Vec3 =

@@ -15,7 +15,7 @@ connection.
 
 Start with the bundled `players/base.bas`, which lists the game's values and calls.
 The same source is available under `examples/awm/src/core/bots.nim`, and the
-cards are in `examples/awm/src/core/baseset.nim` and `examples/awm/README.md`.
+cards are in `examples/awm/src/baseset.nim` and `examples/awm/README.md`.
 
 ## Class selection
 
