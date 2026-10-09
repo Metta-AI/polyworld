@@ -3705,12 +3705,11 @@ proc updateFootman(world: World, footman: var Footman,
       let other {.cursor.} = world.footmen[i]
       if not world.hostile(other, footman.team):
         continue
-      if not visible(world, footman.team, other.position):
-        continue
       let distance = distanceSquared(footman.position, other.position)
-      if distance < bestSquared or (distance == bestSquared and bestId != 0 and
+      if (distance < bestSquared or (distance == bestSquared and bestId != 0 and
         targetBefore(other.position, other.id,
-          bestPosition, bestId, footman.team)):
+          bestPosition, bestId, footman.team))) and
+        visible(world, footman.team, other.position):
           bestSquared = distance
           bestId = other.id
           bestPosition = other.position
@@ -3719,12 +3718,11 @@ proc updateFootman(world: World, footman: var Footman,
       let hero = world.heroes[i]
       if hero.team == footman.team or hero.state == Dying or hero.hp <= 0:
         continue
-      if not visible(world, footman.team, hero.position):
-        continue
       let distance = distanceSquared(footman.position, hero.position)
-      if distance < bestSquared or (distance == bestSquared and
+      if (distance < bestSquared or (distance == bestSquared and
         targetFootman < 0 and bestId != 0 and targetBefore(hero.position,
-          hero.id, bestPosition, bestId, footman.team)):
+          hero.id, bestPosition, bestId, footman.team))) and
+        visible(world, footman.team, hero.position):
           bestSquared = distance
           bestId = hero.id
           bestPosition = hero.position
@@ -5015,13 +5013,13 @@ proc nearestEnemy(
     let footman {.cursor.} = world.footmen[footmanSlot]
     if not world.hostile(footman, hero.team, engageResting = hero.attackMoving) or
         footman.state == Dying or
-        footman.hp <= 0 or
-        not visible(world, hero.team, footman.position):
+        footman.hp <= 0:
       continue
     let squared = distanceSquared(hero.position, footman.position)
-    if squared < bestSquared or (squared == bestSquared and
+    if (squared < bestSquared or (squared == bestSquared and
       targetBefore(footman.position, footman.id,
-        bestPosition, result, hero.team)):
+        bestPosition, result, hero.team))) and
+      visible(world, hero.team, footman.position):
         bestSquared = squared
         bestPosition = footman.position
         result = footman.id
@@ -5029,12 +5027,12 @@ proc nearestEnemy(
     if other.id == hero.id or
         other.team == hero.team or
         other.state == Dying or
-        other.hp <= 0 or
-        not visible(world, hero.team, other.position):
+        other.hp <= 0:
       continue
     let squared = distanceSquared(hero.position, other.position)
-    if squared < bestSquared or (squared == bestSquared and
-      targetBefore(other.position, other.id, bestPosition, result, hero.team)):
+    if (squared < bestSquared or (squared == bestSquared and
+      targetBefore(other.position, other.id, bestPosition, result, hero.team))) and
+      visible(world, hero.team, other.position):
         bestSquared = squared
         bestPosition = other.position
         result = other.id
@@ -5042,24 +5040,24 @@ proc nearestEnemy(
     let tower {.cursor.} = world.buildings[towerSlot]
     if tower.team == hero.team or
         tower.hp <= 0 or
-        not buildingExposed(world, tower) or
-        not visible(world, hero.team, tower.position):
+        not buildingExposed(world, tower):
       continue
     let squared = distanceSquared(hero.position, tower.position)
-    if squared < bestSquared or (squared == bestSquared and
-      targetBefore(tower.position, tower.id, bestPosition, result, hero.team)):
+    if (squared < bestSquared or (squared == bestSquared and
+      targetBefore(tower.position, tower.id, bestPosition, result, hero.team))) and
+      visible(world, hero.team, tower.position):
         bestSquared = squared
         bestPosition = tower.position
         result = tower.id
   for fort in world.forts:
     if fort.team == hero.team or
         fort.hp <= 0 or
-        not fortExposed(world, fort.team) or
-        not visible(world, hero.team, fort.center):
+        not fortExposed(world, fort.team):
       continue
     let squared = distanceSquared(hero.position, fort.center)
-    if squared < bestSquared or (squared == bestSquared and
-      targetBefore(fort.center, fort.id, bestPosition, result, hero.team)):
+    if (squared < bestSquared or (squared == bestSquared and
+      targetBefore(fort.center, fort.id, bestPosition, result, hero.team))) and
+      visible(world, hero.team, fort.center):
         bestSquared = squared
         bestPosition = fort.center
         result = fort.id
