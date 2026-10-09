@@ -19,6 +19,84 @@ import
 
 when defined(takeScreenshot):
   import std/[os, strutils]
+when defined(waterPanel):
+  import std/strutils
+
+const GotaLakeWater = block:
+  ## The arena's lakes: the engine's lake preset, tuned for the arena.
+  var params = DefaultWaterParams
+  params.color = vec3(0'f32, 0.52, 0.77) # deep turquoise over the arena's bed
+  params.colorStrength = 0.54
+  params.foamScale = 1.22
+  params.foamSpeed = 0.1
+  params.fadeDistance = 0.96
+  params.fadeCurve = 1.97
+  params
+
+var lakeWater = GotaLakeWater ## the look of the arena's lakes
+
+when defined(waterPanel):
+  type ColorPicker = object
+    ## A picker's hue, saturation and value, kept so hue survives greys and black.
+    hsv: ColorHSV
+    shown: Vec3 ## the colour it last showed, to notice outside changes (Reset)
+    dragging: int ## 0 none, 1 the saturation/value square, 2 the hue bar
+
+  var
+    showWaterPanel = true ## the lake water window; F4 toggles it
+    waterColorPicker, foamColorPicker: ColorPicker
+
+  proc colorPicker(sk: Silky, window: Window, picker: var ColorPicker, rgb: var Vec3,
+      id: string) =
+    ## A saturation (across) by value (down) square, a hue bar and a swatch, then red,
+    ## green and blue sliders; click or drag on the square or the bar, or drag a slider,
+    ## to change `rgb`. `id` keeps this picker's sliders apart from another's.
+    const
+      Square = 150'f32
+      Bar = 18'f32
+      Gap = 8'f32
+      Cells = 15
+    if rgb != picker.shown:
+      picker.hsv = color(rgb.x, rgb.y, rgb.z, 1).asHsv
+    let
+      origin = sk.placedAt(vec2(Square + Gap + Bar + Gap + Bar, Square))
+      squareRect = rect(origin, vec2(Square, Square))
+      barRect = rect(origin + vec2(Square + Gap, 0), vec2(Bar, Square))
+      mouse = sk.mousePos
+    if sk.buttonPressed[MouseLeft]:
+      if mouse.overlaps(squareRect): picker.dragging = 1
+      elif mouse.overlaps(barRect): picker.dragging = 2
+    if not sk.buttonDown[MouseLeft]:
+      picker.dragging = 0
+    if picker.dragging == 1:
+      picker.hsv.s = clamp((mouse.x - squareRect.x) / Square, 0, 1) * 100
+      picker.hsv.v = (1 - clamp((mouse.y - squareRect.y) / Square, 0, 1)) * 100
+    elif picker.dragging == 2:
+      picker.hsv.h = clamp((mouse.y - barRect.y) / Square, 0, 1) * 359.9
+    let picked = picker.hsv.color
+    rgb = vec3(picked.r, picked.g, picked.b)
+    picker.shown = rgb
+    let cell = Square / Cells.float32
+    for y in 0 ..< Cells:
+      for x in 0 ..< Cells:
+        let shade = hsv(picker.hsv.h, (x.float32 + 0.5) / Cells.float32 * 100,
+          (1 - (y.float32 + 0.5) / Cells.float32) * 100).color.asRgbx
+        sk.drawRect(origin + vec2(x.float32 * cell, y.float32 * cell),
+          vec2(cell + 0.5, cell + 0.5), shade)
+      let hue = hsv((y.float32 + 0.5) / Cells.float32 * 360, 100, 100).color.asRgbx
+      sk.drawRect(barRect.xy + vec2(0, y.float32 * cell), vec2(Bar, cell + 0.5), hue)
+    let
+      marker = origin + vec2(picker.hsv.s / 100 * Square, (1 - picker.hsv.v / 100) * Square)
+      hueY = barRect.y + picker.hsv.h / 360 * Square
+    sk.drawRect(marker - vec2(4, 4), vec2(8, 8), rgbx(255, 255, 255, 255))
+    sk.drawRect(marker - vec2(2, 2), vec2(4, 4), picked.asRgbx)
+    sk.drawRect(vec2(barRect.x - 2, hueY - 2), vec2(Bar + 4, 4), rgbx(255, 255, 255, 255))
+    sk.drawRect(barRect.xy + vec2(Bar + Gap, 0), vec2(Bar, Square), picked.asRgbx)
+    sk.advance(vec2(Square + Gap + Bar + Gap + Bar, Square))
+    # The sliders edit rgb directly; the next frame reads the change back into hsv.
+    for (channel, name) in [(0, "Red"), (1, "Green"), (2, "Blue")]:
+      text(name & " " & formatFloat(rgb[channel], ffDecimal, 2))
+      scrubber(id & name, rgb[channel], 0'f32, 1'f32)
 
 const
   DefaultCameraDistance = 17.0'f / 1.2'f
@@ -460,7 +538,7 @@ proc runGraphics*() =
   var lakes: seq[WaterBody]
   for i, layer in layers:
     if layer.water:
-      lakes.add WaterBody(layer: i, params: DefaultWaterParams)
+      lakes.add WaterBody(layer: i, params: lakeWater)
   drawSplash(sk, window, splash.name)
 
   type God = object
@@ -2248,6 +2326,8 @@ proc runGraphics*() =
         # terrain, towers and characters; particles, spells and markers stay out of it.
         if lakes.len > 0:
           captureScene(window.size)
+        for lake in lakes.mitems:
+          lake.params = lakeWater # the panel (-d:waterPanel) may have changed it
         for lake in lakes:
           if lake.layer notin 0 ..< waterLayerRanges.len or
             waterLayerRanges[lake.layer].len == 0:
@@ -2404,6 +2484,55 @@ proc runGraphics*() =
             actionCam,
             focusPlayerHero
           )
+          when defined(waterPanel):
+            # A developer window for the lakes' look; F4 shows and hides it.
+            if window.buttonPressed[KeyF4]:
+              showWaterPanel = not showWaterPanel
+            subWindow("Water (F4)", showWaterPanel, vec2(16, 130), vec2(340, 800)):
+              template slider(id, caption: string, value: var float32,
+                  low, high: float32) =
+                text(caption & " " & formatFloat(value, ffDecimal, 2))
+                scrubber(id, value, low, high)
+              template water: untyped = lakeWater
+              button("Reset"):
+                lakeWater = GotaLakeWater
+              h1text("Water")
+              text("Colour")
+              colorPicker(sk, window, waterColorPicker, water.color, "lakeColor")
+              slider("lakeColorStrength", "Colour strength", water.colorStrength, 0, 1)
+              slider("lakeLift", "Lift", water.lift, -2, 2)
+              h1text("Reflection")
+              slider("lakeReflectiveness", "Reflectiveness", water.reflectiveness, 0, 1)
+              slider("lakeFresnelStrength", "Fresnel strength", water.fresnelStrength, 0, 1)
+              slider("lakeFresnelPower", "Fresnel power", water.fresnelPower, 1, 10)
+              slider("lakeDistortion", "Reflection distortion", water.distortion, 0, 1)
+              h1text("Sun")
+              slider("lakeSheenStrength", "Sheen strength", water.sheenStrength, 0, 10)
+              slider("lakeSheenSharpness", "Sheen sharpness", water.sheenSharpness, 1, 64)
+              slider("lakeGlintStrength", "Glint strength", water.glintStrength, 0, 100)
+              slider("lakeGlintSharpness", "Glint sharpness", water.glintSharpness, 16, 4000)
+              h1text("Ripples")
+              slider("lakeWaveHeight", "Wave height", water.waveHeight, 0, 2)
+              slider("lakeWaveScale", "Wave scale", water.waveScale, 0.05, 20)
+              slider("lakeWaveSpeed", "Wave speed", water.waveSpeed, 0, 4)
+              slider("lakeWaveDrag", "Wave drag", water.waveDrag, 0, 1)
+              slider("lakeWaveCount", "Wave count", water.waveCount, 1, MaxWaves.float32)
+              slider("lakeRippleFade", "Ripple fade", water.rippleFade, 5, 400)
+              h1text("Refraction")
+              slider("lakeRefraction", "Refraction strength", water.refraction, 0, 0.5)
+              slider("lakeRefractionDepth", "Refraction depth", water.refractionDepth, 0.01, 2)
+              h1text("Shoreline")
+              text("Colour")
+              colorPicker(sk, window, foamColorPicker, water.foamColor, "lakeFoamColor")
+              slider("lakeShoreWidth", "Shoreline distance", water.foamDistance, 0, 6)
+              slider("lakeFoamOpacity", "Opacity", water.foamOpacity, 0, 1)
+              slider("lakeFoamSoftness", "Edge softness", water.foamSoftness, 0.01, 1)
+              slider("lakeFoamNoise", "Foam noise", water.foamNoise, 0, 1)
+              slider("lakeFoamScale", "Foam noise scale", water.foamScale, 0.1, 10)
+              slider("lakeFoamSpeed", "Foam speed toward shore", water.foamSpeed, -3, 3)
+              h1text("Shoreline fade")
+              slider("lakeFadeDistance", "Fade distance", water.fadeDistance, 0, 6)
+              slider("lakeFadeCurve", "Fade curve", water.fadeCurve, 0.1, 5)
           sk.endUi()
           drawStatsOverlay(sk, window)
       when defined(takeScreenshot) and ActiveTracePath.len == 0:
