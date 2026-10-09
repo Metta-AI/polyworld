@@ -1,7 +1,7 @@
 ## Deterministic AWM simulation shared by native, browser and server builds.
 import std/[algorithm, random]
-import core, baseset
-export core, baseset
+import core, cardset
+export core, cardset
 
 const
   PlayerCount* = 2
@@ -22,6 +22,9 @@ type
       ## once.
     canAttack*: bool
     hasAttacked*: bool
+    hiddenTurns*: int
+      ## It can't be attacked: for this many more of its owner's turns, or
+      ## for as long as it is in play when it is `Always`. 0 is in the open.
 
   PlayerState* = object
     heroClass*: HeroClass
@@ -205,6 +208,9 @@ proc beginTurn*(game: var GameState) =
   for minion in game.players[playerIndex].board.mitems:
     minion.canAttack = true
     minion.hasAttacked = false
+    # A hidden minion comes into the open as its owner's turns pass.
+    if minion.hiddenTurns > 0:
+      dec minion.hiddenTurns
   game.resolveTriggers()
 
 proc newGame*(
@@ -291,6 +297,14 @@ proc ruleContext(
         choice: creatureChoice(playerIndex, minion.id), card: minion.card,
         power: minion.power, toughness: minion.currentToughness)
 
+proc boardCards*(game: GameState): seq[BoardCard] =
+  ## The board as rules see it: what a pick names, for `repeat`.
+  for playerIndex in 0 ..< game.playerCount:
+    for minion in game.players[playerIndex].board:
+      result.add BoardCard(choice: creatureChoice(playerIndex, minion.id),
+        card: minion.card, power: minion.power,
+        toughness: minion.currentToughness)
+
 proc availableChoices*(
     game: GameState,
     card: Card,
@@ -298,8 +312,8 @@ proc availableChoices*(
 ): seq[Choice] =
   ## Legal choices for the card's next target, after the `picked` ones.
   var context = game.ruleContext()
-  context.targets = picked
-  result = card.choices(context, picked.len)
+  context.answer(picked)
+  result = card.choices(context, picked.len, picked)
   if card.kind != Spell and card.needsChoice():
     result.add NoTarget
 
@@ -331,6 +345,8 @@ proc choiceLabel*(game: GameState, choice: Choice,
     "Cancel"
   of NoTargetChoice:
     "No target"
+  of OptionChoice:
+    "Option " & $(choice.option + 1)
   of HeroChoice:
     game.playerName(choice.owner, names) & " " &
       game.players[choice.owner].heroClass.className() & " hero"
@@ -463,7 +479,8 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
         currentToughness:
           if effect.summonedCard.kind == Minion: effect.summonedCard.toughness
           else: 0,
-        enteredTurn: game.turnNumber)
+        enteredTurn: game.turnNumber,
+        hiddenTurns: effect.summonedCard.hiddenTurns())
       game.recordVisual(SummonVfx,
         creatureChoice(effect.summonedOwner, effect.summonedId))
       game.nextMinionId = max(game.nextMinionId, effect.summonedId + 1)
@@ -525,8 +542,8 @@ proc triggerChoices*(game: GameState, picked: seq[Choice] = @[]): seq[Choice] =
   if not source.found:
     return
   var context = game.triggerContext(pending)
-  context.targets = picked
-  result = source.rules.choices(context, picked.len)
+  context.answer(picked)
+  result = source.rules.choices(context, picked.len, picked)
   result.add NoTarget
 
 proc waitingTriggerRules*(game: GameState): tuple[card: Card, rules: Rules] =
@@ -550,13 +567,14 @@ proc advanceTriggers(game: var GameState) =
     if not source.found:
       game.pendingTriggers.delete(0)
       continue
-    if source.rules.targetCount() > 0:
+    if source.rules.targetCount(board = game.boardCards()) > 0:
       var context = game.triggerContext(pending)
       if source.rules.choices(context).len > 0:
         if not game.dead(pending.owner):
           return
         # The dead can't choose: the trigger resolves without targets.
-        var picks = newSeq[Choice](source.rules.targetCount())
+        var picks = newSeq[Choice](
+          source.rules.targetCount(board = game.boardCards()))
         for pick in picks.mitems:
           pick = NoTarget
         var answered = game.triggerContext(pending, picks)
@@ -635,7 +653,8 @@ proc resolveTriggers(game: var GameState) {.gcsafe.} =
           sourcePlayer = owner, sourceId = permanent.id)
         if trigger.trigger.firesAtTurnStart(context, game.currentPlayer,
             game.turnNumber, permanent.enteredTurn):
-          game.players[owner].board[slot].firedTurnTriggers.incl index.uint8
+          if trigger.trigger.firesOnce():
+            game.players[owner].board[slot].firedTurnTriggers.incl index.uint8
           game.pendingTriggers.add PendingTrigger(owner: owner,
             sourceId: permanent.id, trigger: index)
   game.advanceTriggers()
@@ -661,7 +680,8 @@ proc playMinion*(
     owner: playerIndex,
     card: card,
     currentToughness: if card.kind == Minion: card.toughness else: 0,
-    enteredTurn: game.turnNumber
+    enteredTurn: game.turnNumber,
+    hiddenTurns: card.hiddenTurns()
   )
   inc game.nextMinionId
 
@@ -767,7 +787,7 @@ proc attackTargets*(game: GameState, attackerId: int): seq[Choice] =
     if not game.dead(enemy):
       result.add heroChoice(enemy)
     for minion in game.players[enemy].board:
-      if minion.card.kind == Minion:
+      if minion.card.kind == Minion and minion.hiddenTurns == 0:
         result.add creatureChoice(enemy, minion.id)
 
 proc attackHero*(game: var GameState, minionId: int,
@@ -815,7 +835,7 @@ proc attack*(game: var GameState, attackerId: int, target: Choice): bool =
   case target.kind
   of HeroChoice: game.attackHero(attackerId, target.owner)
   of CreatureChoice: game.attackMinion(attackerId, target.creatureId)
-  of CanceledChoice, NoTargetChoice: false
+  of CanceledChoice, NoTargetChoice, OptionChoice: false
 
 proc eligibleAttackers*(game: GameState): seq[int] =
   if game.waitingChoice or game.gameOver or game.dead(game.currentPlayer):

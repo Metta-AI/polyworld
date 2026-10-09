@@ -6,7 +6,7 @@ export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 10
+  SnapshotSchemaVersion* = 12
 
 type
   SessionOptions* = object
@@ -127,6 +127,22 @@ proc botPick(game: GameState, choices: seq[Choice], player: int,
       return choice
   Canceled
 
+proc bestOption*(game: GameState, options: seq[Rules], player: int): Choice =
+  ## Picks a `choose` branch by the numbers: what it deals, less twice what
+  ## it costs your own hero, and never one that would finish you off.
+  var
+    best = -1
+    bestValue = low(int)
+  for index, option in options:
+    let cost = option.damageToSelf()
+    if cost >= game.players[player].life:
+      continue
+    let value = option.damageDealt() - cost * 2
+    if best < 0 or value > bestValue:
+      best = index
+      bestValue = value
+  optionChoice(max(best, 0))
+
 proc nextBotAction*(game: GameState, playsThisTurn = 0,
     maxPlaysPerTurn = 3): BotAction =
   ## The fixed hand order and target preferences make bots deterministic.
@@ -147,9 +163,15 @@ proc nextBotAction*(game: GameState, playsThisTurn = 0,
     let owner = game.actingPlayer()
     let rules = game.waitingTriggerRules().rules
     var picks: seq[Choice]
-    for step in 0 ..< rules.targetCount():
-      var pick = game.botPick(game.triggerChoices(picks), owner,
-        rules.helpsTarget(step))
+    let board = game.boardCards()
+    while picks.len < rules.targetCount(picks, board):
+      let options = rules.options(picks, board)
+      var pick =
+        if options.len > 0:
+          game.bestOption(options, owner)
+        else:
+          game.botPick(game.triggerChoices(picks), owner,
+            rules.helpsTarget(picks.len, picks, board))
       if pick.isCanceled:
         pick = NoTarget
       picks.add pick
@@ -162,13 +184,19 @@ proc nextBotAction*(game: GameState, playsThisTurn = 0,
     var picks = @[NoTarget]
     if card.needsChoice():
       picks.setLen(0)
-      for step in 0 ..< card.targetCount():
-        let pick = game.botPick(game.availableChoices(handIndex, picks),
-          game.currentPlayer, card.helpsTarget(step))
+      let board = game.boardCards()
+      while picks.len < card.targetCount(picks, board):
+        let options = card.options(picks, board)
+        let pick =
+          if options.len > 0:
+            game.bestOption(options, game.currentPlayer)
+          else:
+            game.botPick(game.availableChoices(handIndex, picks),
+              game.currentPlayer, card.helpsTarget(picks.len, picks, board))
         if pick.isCanceled:
           break
         picks.add pick
-      if picks.len < card.targetCount():
+      if picks.len < card.targetCount(picks, board):
         continue
     return BotAction(kind: PlayCardAction, handIndex: handIndex,
       choices: picks)
@@ -232,6 +260,8 @@ proc choiceToJson*(choice: Choice): JsonNode =
   result = %*{"kind": ord(choice.kind), "owner": choice.owner}
   if choice.kind == CreatureChoice:
     result["creatureId"] = %choice.creatureId
+  if choice.kind == OptionChoice:
+    result["option"] = %choice.option
 
 proc choiceFromJson*(node: JsonNode): Choice =
   let kind = ChoiceKind(node.field("kind").integer("choice kind",
@@ -250,6 +280,10 @@ proc choiceFromJson*(node: JsonNode): Choice =
     if owner < 0:
       raise newException(ValueError, "Invalid snapshot creature owner")
     creatureChoice(owner, node.field("creatureId").integer("creature ID", 1))
+  of OptionChoice:
+    if owner != -1:
+      raise newException(ValueError, "Invalid snapshot option owner")
+    optionChoice(node.field("option").integer("option", 0))
 
 proc keywordsToJson(keywords: set[Keyword]): JsonNode =
   result = newJArray()
@@ -370,7 +404,8 @@ proc gameToJson*(game: GameState): JsonNode =
         "enteredTurn": minion.enteredTurn,
         "firedTurnTriggers": firedToJson(minion.firedTurnTriggers),
         "canAttack": minion.canAttack,
-        "hasAttacked": minion.hasAttacked}
+        "hasAttacked": minion.hasAttacked,
+        "hiddenTurns": minion.hiddenTurns}
     players.add %*{"heroClass": player.heroClass.classId(),
       "life": player.life, "totalEnergy": player.totalEnergy,
       "energy": player.energy, "deck": cardsToJson(player.deck),
@@ -453,7 +488,9 @@ proc gameFromJson*(node: JsonNode): GameState =
         lostKeywords: if entry.hasKey("lostKeywords"):
           keywordsFromJson(entry["lostKeywords"]) else: {},
         canAttack: if entry.hasKey("canAttack"): entry["canAttack"].getBool(true) else: true,
-        hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false)
+        hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false,
+        hiddenTurns: if entry.hasKey("hiddenTurns"):
+          entry["hiddenTurns"].integer("hidden turns", Always) else: 0)
       # Trinkets have no toughness; minions always have some.
       if minion.owner != owner or minion.card.kind == Spell or
           (minion.card.kind == Minion and minion.currentToughness < 1) or

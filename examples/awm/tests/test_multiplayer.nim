@@ -221,7 +221,7 @@ suite "Multiplayer battlefield geometry and framing":
           fitted = layout.cameraEye(aspect)
           forward = normalize(layout.cameraTarget - fitted)
         check length(camera.eye - fitted) < Tolerance * 10
-        check length(normalize(camera.target - camera.eye) - forward) <
+        check length(normalize(camera.lookPoint - camera.eye) - forward) <
           Tolerance
         check camera.pitch > 0 and camera.pitch < PI.float32 / 2
 
@@ -250,7 +250,7 @@ suite "Multiplayer battlefield geometry and framing":
         layout = buildMultiplayerLayout(count)
         camera = layout.multiplayerView(1.6).camera
         viewProjection = perspective(42.0'f32, 1.6'f32, 0.1'f32, 200.0'f32) *
-          lookAt(camera.eye, camera.target, vec3(0, 1, 0))
+          lookAt(camera.eye, camera.lookPoint, vec3(0, 1, 0))
       var framed = true
       for balcony in layout.balconies:
         for point in [balcony.heroZone + vec3(0, 2.8, 0), balcony.deckZone,
@@ -609,7 +609,7 @@ suite "Opponents and defeated seats in a multiplayer match":
     match.seats[3].life = 0
     # Seat 1 goes down in the same resolution as everyone else.
     match.seats[1].hand = @[Card(name: "Pact", energyCost: 0, kind: Spell,
-      rules: rules(damage(5, target({Hero}))))]
+      rules: rules(damage(5, target({kind: {Hero}}))))]
     match.seats[1].life = 5
     check match.game.playCard(0, heroChoice(1))
     check match.game.gameOver
@@ -779,19 +779,20 @@ suite "An opponent, each opponent, and turn triggers":
     Card(name: "Probe", energyCost: 0, kind: Spell, rules: text)
 
   test "the wording tells one opponent from each opponent":
-    check spell(rules(draw(1, target({Opponent})))).ruleText() ==
+    check spell(rules(draw(1, target({kind: {Opponent}})))).ruleText() ==
       "An opponent draws 1 card."
-    check spell(rules(toss(1, target({Opponent})))).ruleText() ==
+    check spell(rules(toss(1, target({kind: {Opponent}})))).ruleText() ==
       "An opponent discards 1 card."
-    check spell(rules(summon(1, "Ooze", target({Opponent})))).ruleText() ==
+    check spell(rules(summon(1, "Ooze", target({kind: {Opponent}})))).ruleText() ==
       "Summon an Ooze for an opponent."
     check spell(rules(draw(1, AllOpponents))).ruleText() ==
       "Each opponent draws 1 card."
     check spell(rules(toss(1, AllOpponents))).ruleText() ==
       "Each opponent discards 1 card."
-    check spell(rules(draw(1, target({Opponent})))).targetPrompt(0).choose ==
+    check spell(rules(draw(1, target({kind: {Opponent}})))).targetPrompt(0).choose ==
       "Choose an opponent."
-    check spell(rules(damage(1, target({Hero}, Enemy)))).ruleText() ==
+    check spell(rules(damage(1,
+      target({kind: {Hero}, owner: AllOpponents})))).ruleText() ==
       "Deal 1 damage to an enemy hero."
     check Card(name: "Watch", kind: Trinket, rules: rules(
       on(attacked(AnyOpponent), draw(1)))).ruleText() ==
@@ -802,7 +803,7 @@ suite "An opponent, each opponent, and turn triggers":
 
   test "an opponent draws: only the one picked":
     var match = turnOf(0)
-    let card = spell(rules(draw(1, target({Opponent}))))
+    let card = spell(rules(draw(1, target({kind: {Opponent}}))))
     check card.needsChoice()
     let choices = match.game.availableChoices(card)
     check choices == @[heroChoice(1), heroChoice(2), heroChoice(3)]
@@ -816,7 +817,7 @@ suite "An opponent, each opponent, and turn triggers":
 
   test "an opponent discards: the picked one chooses what":
     var match = turnOf(0)
-    match.seats[0].hand = @[spell(rules(toss(1, target({Opponent}))))]
+    match.seats[0].hand = @[spell(rules(toss(1, target({kind: {Opponent}}))))]
     check match.game.playCard(0, heroChoice(3))
     check match.game.waitingToss
     check match.game.pendingToss.player == 3
@@ -826,7 +827,7 @@ suite "An opponent, each opponent, and turn triggers":
     var match = turnOf(0)
     match.seats[2].life = 0
     match.game.checkWinCondition()
-    let card = spell(rules(draw(1, target({Opponent}))))
+    let card = spell(rules(draw(1, target({kind: {Opponent}}))))
     check match.game.availableChoices(card) ==
       @[heroChoice(1), heroChoice(3)]
     match.seats[0].hand = @[card]
@@ -899,7 +900,7 @@ suite "An opponent, each opponent, and turn triggers":
 
   test "a bot picks its enemy for an opponent target":
     var match = turnOf(1)
-    let card = spell(rules(toss(1, target({Opponent}))))
+    let card = spell(rules(toss(1, target({kind: {Opponent}}))))
     match.seats[1].hand = @[card]
     let action = match.game.nextBotAction()
     check action.kind == PlayCardAction

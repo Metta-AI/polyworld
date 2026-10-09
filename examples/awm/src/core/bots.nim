@@ -132,6 +132,10 @@ proc arrayIndices(value: Value, count: int): seq[int32] =
   for i in 0 ..< count:
     result.add activeVm.runtime.getArray(name, i.int32)
 
+proc arrayIndex(value: Value, at: int): int32 =
+  ## One integer pick from a BASIC array.
+  activeVm.runtime.getArray(activeVm.runtime.getString(value), at.int32)
+
 proc cardPicks(handIndex: int, indices: openArray[int32]): seq[Choice] =
   ## Resolves choice indexes in order, including dependent later targets.
   for index in indices:
@@ -140,30 +144,44 @@ proc cardPicks(handIndex: int, indices: openArray[int32]): seq[Choice] =
       return @[]
     result.add choices[index]
 
-proc nextChoices(handIndex: int, arrayName: Value, count: int): seq[Choice] =
-  ## Offers the next target after the array's explicit prefix of choices.
-  var targets: int
+proc pickedChoices(handIndex: int, arrayName: Value,
+    count: int): tuple[ok: bool, picks: seq[Choice]] =
+  ## Turns the array's prefix of choice indexes into the choices they name.
   if handIndex == -1:
     if activeGame[].waitingToss:
-      return @[]
-    targets = activeGame[].waitingTriggerRules().rules.targetCount()
-  else:
-    let hand = activeGame[].players[activePlayer].hand
-    if handIndex notin 0 ..< hand.len:
-      return @[]
-    targets = hand[handIndex].targetCount()
-  if count notin 0 ..< targets:
-    return @[]
-  var picks: seq[Choice]
+      return (false, @[])
+  elif handIndex notin 0 ..< activeGame[].players[activePlayer].hand.len:
+    return (false, @[])
+  result.ok = true
   for index in arrayIndices(arrayName, count):
     let choices =
-      if handIndex == -1: activeGame[].triggerChoices(picks)
-      else: cardChoices(handIndex, picks)
+      if handIndex == -1: activeGame[].triggerChoices(result.picks)
+      else: cardChoices(handIndex, result.picks)
     if index.int notin 0 ..< choices.len:
-      return @[]
-    picks.add choices[index]
-  if handIndex == -1: activeGame[].triggerChoices(picks)
-  else: cardChoices(handIndex, picks)
+      return (false, @[])
+    result.picks.add choices[index]
+
+proc pickedRules(handIndex: int): Rules =
+  ## The rules the queries below describe: a hand card's, or the waiting
+  ## trigger's for hand index -1.
+  if handIndex == -1:
+    activeGame[].waitingTriggerRules().rules
+  elif handIndex in 0 ..< activeGame[].players[activePlayer].hand.len:
+    activeGame[].players[activePlayer].hand[handIndex].rules
+  else:
+    @[]
+
+proc nextChoices(handIndex: int, arrayName: Value, count: int): seq[Choice] =
+  ## Offers the next target after the array's explicit prefix of choices.
+  ## A card with options only reveals its later targets once one is picked.
+  let picked = pickedChoices(handIndex, arrayName, count)
+  if not picked.ok:
+    return @[]
+  if count notin 0 ..< pickedRules(handIndex).targetCount(picked.picks,
+      activeGame[].boardCards()):
+    return @[]
+  if handIndex == -1: activeGame[].triggerChoices(picked.picks)
+  else: cardChoices(handIndex, picked.picks)
 
 proc visibleCard(id: string): Card =
   ## Looks up a card by printed name or stable replay ID.
@@ -557,9 +575,35 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     let
       i = args[0].int
       hand = activeGame[].players[activePlayer].hand
-    if i < 0 or i >= hand.len: return 0
+    if i < 0:
+      return if activeGame[].waitingTriggerRules().rules.helpsTarget(
+        args[1].int): 1 else: 0
+    if i >= hand.len: return 0
     if hand[i].helpsTarget(args[1].int): 1 else: 0
   discard result.addFunction("helpsTarget", 2, helpsTargetProc, 3)
+
+  let targetIntentProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns what a target step does to its target, as TargetIntent.
+    let
+      i = args[0].int
+      hand = activeGame[].players[activePlayer].hand
+    if i < 0:
+      return activeGame[].waitingTriggerRules().rules.intent(args[1].int).int32
+    if i >= hand.len: return 0
+    hand[i].intent(args[1].int).int32
+  discard result.addFunction("targetIntent", 2, targetIntentProc, 3)
+
+  let targetAmountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns how much that intent is worth: damage dealt, stats changed.
+    let
+      i = args[0].int
+      hand = activeGame[].players[activePlayer].hand
+    if i < 0:
+      return activeGame[].waitingTriggerRules().rules.intentAmount(
+        args[1].int).int32
+    if i >= hand.len: return 0
+    hand[i].intentAmount(args[1].int).int32
+  discard result.addFunction("targetAmount", 2, targetAmountProc, 3)
 
   let targetChoiceCountProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns choices for a target step without a prefix.
@@ -746,11 +790,17 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     let i = args[0].asInt.int
     if not activeGame[].canPlay(i):
       return toValue(0)
-    let
-      count = activeGame[].players[activePlayer].hand[i].targetCount()
-      picks = cardPicks(i, arrayIndices(args[1], count))
-    if picks.len != count:
-      return toValue(0)
+    # The card asks for its choices one at a time: picking an option
+    # reveals that branch's own targets, so the list can still grow.
+    let card = activeGame[].players[activePlayer].hand[i]
+    var picks: seq[Choice]
+    while picks.len < card.targetCount(picks, activeGame[].boardCards()):
+      let
+        choices = cardChoices(i, picks)
+        index = arrayIndex(args[1], picks.len).int
+      if index notin 0 ..< choices.len:
+        return toValue(0)
+      picks.add choices[index]
     toValue(submitAction(ReplayAction(kind: ActionPlayCard,
       handIndex: i.int32, choices: picks.toReplay)))
   discard result.addFunction("playCardTargets", 2, playCardTargetsProc, 100)
@@ -759,6 +809,85 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     ## Returns targets after the chosen prefix; hand index -1 is a trigger.
     toValue(nextChoices(args[0].asInt.int, args[1], args[2].asInt.int).len)
   discard result.addFunction("nextChoiceCount", 3, nextCountProc, 8)
+
+  let nextTargetCountProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## How many targets the card is known to ask for after that prefix. A
+    ## card with options only reveals a branch's targets once it is picked.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    if not picked.ok:
+      return toValue(0)
+    toValue(pickedRules(handIndex).targetCount(picked.picks,
+      activeGame[].boardCards()))
+  discard result.addFunction("nextTargetCount", 3, nextTargetCountProc, 8)
+
+  let nextHelpsProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Whether the next target after the prefix should be one of yours.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    if not picked.ok:
+      return toValue(0)
+    toValue(if pickedRules(handIndex).helpsTarget(count, picked.picks,
+      activeGame[].boardCards()): 1 else: 0)
+  discard result.addFunction("nextHelpsTarget", 3, nextHelpsProc, 8)
+
+  let nextIntentProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## What the next target after the prefix has done to it.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    if not picked.ok:
+      return toValue(0)
+    toValue(pickedRules(handIndex).intent(count, picked.picks,
+      activeGame[].boardCards()).ord)
+  discard result.addFunction("nextIntent", 3, nextIntentProc, 8)
+
+  let nextAmountProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## How much of that intent the next target takes.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    if not picked.ok:
+      return toValue(0)
+    toValue(pickedRules(handIndex).intentAmount(count, picked.picks,
+      activeGame[].boardCards()))
+  discard result.addFunction("nextAmount", 3, nextAmountProc, 8)
+
+  let optionDamageProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Damage an offered option deals to what it is aimed at.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      option = args[3].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    if not picked.ok:
+      return toValue(0)
+    let options = pickedRules(handIndex).options(picked.picks)
+    if option notin 0 ..< options.len:
+      return toValue(0)
+    toValue(options[option].damageDealt())
+  discard result.addFunction("optionDamage", 4, optionDamageProc, 8)
+
+  let optionCostProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Damage an offered option deals to your own hero.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      option = args[3].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    if not picked.ok:
+      return toValue(0)
+    let options = pickedRules(handIndex).options(picked.picks)
+    if option notin 0 ..< options.len:
+      return toValue(0)
+    toValue(options[option].damageToSelf())
+  discard result.addFunction("optionSelfDamage", 4, optionCostProc, 8)
 
   let nextKindProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Returns a target kind after the explicit prefix of earlier picks.
@@ -826,13 +955,13 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     ## Selects the waiting trigger's targets from a BASIC index array.
     if not activeGame[].waitingTrigger or activeGame[].waitingToss:
       return toValue(0)
-    let
-      count = activeGame[].waitingTriggerRules().rules.targetCount()
-      indices = arrayIndices(args[0], count)
+    let rules = activeGame[].waitingTriggerRules().rules
     var picks: seq[Choice]
-    for index in indices:
-      let choices = activeGame[].triggerChoices(picks)
-      if index.int notin 0 ..< choices.len:
+    while picks.len < rules.targetCount(picks, activeGame[].boardCards()):
+      let
+        choices = activeGame[].triggerChoices(picks)
+        index = arrayIndex(args[0], picks.len).int
+      if index notin 0 ..< choices.len:
         return toValue(0)
       picks.add choices[index]
     toValue(submitAction(ReplayAction(kind: ActionResolveTrigger,

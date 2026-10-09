@@ -7,7 +7,7 @@ suite "AWM base set":
     check DeckSize == 40
     let deck = Mage.baseDeck()
     check deck.len == DeckSize
-    var bouncers, oozifications, plans, studies, summons, shields: int
+    var bouncers, oozifications, plans, studies, summons, shields, spirits: int
     for card in deck:
       check card.class == some(Mage)
       if card == baseCard("bouncer-1"): inc bouncers
@@ -16,38 +16,41 @@ suite "AWM base set":
       elif card == baseCard("study-2"): inc studies
       elif card == baseCard("summon-primordial-8"): inc summons
       elif card == baseCard("bubble-shield-2"): inc shields
+      elif card == baseCard("spirit-3"): inc spirits
       # Summoned-only cards never sit in the deck.
       check card != baseCard("bubble-0")
       check card != baseCard("primordial-8")
       check card != baseCard("ooze-0")
-    check (bouncers, oozifications, plans, studies, summons, shields) ==
-      (16, 4, 7, 7, 2, 4)
+    check (bouncers, oozifications, plans, studies, summons, shields,
+      spirits) == (12, 4, 7, 7, 2, 4, 4)
 
   test "the Warrior deck is forty cards of every Warrior card":
     let deck = Warrior.baseDeck()
     check deck.len == DeckSize
     var counts: seq[int]
     for id in ["bear-2", "swords-2", "shields-1", "duel-2", "tactician-2",
-        "footsoldier-1", "commander-5", "rally-5"]:
+        "footsoldier-1", "commander-5", "rally-5", "banner-3", "pillage-4"]:
       var count = 0
       for card in deck:
         if card == baseCard(id): inc count
       counts.add count
     for card in deck:
       check card.class == some(Warrior)
-    check counts == @[8, 5, 4, 5, 5, 6, 4, 3]
+    check counts == @[7, 4, 4, 4, 4, 5, 4, 2, 3, 3]
 
   test "the Archer deck is forty cards of every Archer card":
     let deck = Archer.baseDeck()
     check deck.len == DeckSize
-    var bolts, snipers, sharpshooters, hails: int
+    var counts: array[10, int]
+    const ids = ["bolt-1", "sniper-2", "sharpshooter-3", "hail-of-arrows-3",
+      "overcharge-3", "explode-3", "ambusher-3", "assassin-6", "reload-2",
+      "wildfire-6"]
     for card in deck:
       check card.class == some(Archer)
-      if card == baseCard("bolt-1"): inc bolts
-      elif card == baseCard("sniper-2"): inc snipers
-      elif card == baseCard("sharpshooter-3"): inc sharpshooters
-      elif card == baseCard("hail-of-arrows-3"): inc hails
-    check (bolts, snipers, sharpshooters, hails) == (10, 14, 10, 6)
+      for index, id in ids:
+        if card == baseCard(id):
+          inc counts[index]
+    check counts == [7, 7, 5, 4, 4, 3, 2, 2, 4, 2]
 
   test "Bolt is a targeted two-damage spell":
     let bolt = Archer.classCard()
@@ -285,23 +288,30 @@ suite "AWM card execution":
     check game.players[player].hand == @[bolt]
 
 suite "AWM target visual effects":
-  test "target effects are optional and obey relation restrictions":
-    check target({Hero}).vfx == NoVfx
-    check target({Minion}).vfx == NoVfx
+  test "a target obeys its relation, and the rule aiming it plays the visual":
+    # The visual belongs to the rule now, so a target takes no vfx at all.
+    check not compiles(target({kind: {Hero}}, vfx = LightningVfx))
     var context = RuleContext(sourcePlayer: 0,
       heroes: @[heroChoice(0), heroChoice(1)])
     context.selector = proc(prompt: string, choices: seq[Choice]): Choice =
       heroChoice(0)
-    let heroTarget = target({Hero}, Enemy, vfx = LightningVfx)
+    let heroTarget = target({kind: {Hero}, owner: AllOpponents})
     check heroTarget.choose(context).isCanceled
     check context.effects.len == 0
     context.selector = proc(prompt: string, choices: seq[Choice]): Choice =
       heroChoice(1)
     check heroTarget.choose(context) == heroChoice(1)
-    check context.effects.len == 1
-    check context.effects[0].kind == TargetVfxEffect
-    check context.effects[0].targetVfx == LightningVfx
-    check context.effects[0].visualTarget == heroChoice(1)
+    # Choosing emits nothing by itself.
+    check context.effects.len == 0
+    var aimed = RuleContext(sourcePlayer: 0,
+      heroes: @[heroChoice(0), heroChoice(1)])
+    aimed.selector = proc(prompt: string, choices: seq[Choice]): Choice =
+      heroChoice(1)
+    check damage(2, target({kind: {Hero}, owner: AllOpponents}), vfx = LightningVfx).run(
+      Card(kind: Spell), aimed)
+    check aimed.effects[0].kind == TargetVfxEffect
+    check aimed.effects[0].targetVfx == LightningVfx
+    check aimed.effects[0].visualTarget == heroChoice(1)
 
   test "Bolt emits lightning and damage flash on the chosen hero exactly once":
     var game = newGame(Archer, Mage, 101)
@@ -368,7 +378,7 @@ suite "AWM target visual effects":
     var game = newGame(Archer, Warrior, 113)
     let owner = (game.currentPlayer + 1) mod PlayerCount
     let strike = Card(name: "Strike", energyCost: 1, kind: Spell,
-      rules: rules(damage(2, target({Minion}))))
+      rules: rules(damage(2, target({kind: {Minion}}))))
     game.players[owner].board = @[
       MinionState(id: 88, owner: owner, card: Warrior.classCard(), currentToughness: 2)
     ]
@@ -388,8 +398,8 @@ suite "AWM target visual effects":
   test "later canceled rules roll back earlier damage and visual effects":
     let combo = Card(name: "Combo", energyCost: 1, kind: Spell,
       rules: rules(
-        damage(1, target({Hero}, vfx = LightningVfx)),
-        bounce(target({Minion}, vfx = BubbleVfx))))
+        damage(1, target({kind: {Hero}}), vfx = LightningVfx),
+        bounce(target({kind: {Minion}}), vfx = BubbleVfx)))
     var context = RuleContext(sourcePlayer: 0, heroes: @[heroChoice(1)])
     context.selector = proc(prompt: string, choices: seq[Choice]): Choice =
       heroChoice(1)
@@ -399,7 +409,7 @@ suite "AWM target visual effects":
   test "zero damage produces no damage flash":
     var game = newGame(Archer, Mage, 127)
     let harmless = Card(name: "Harmless", energyCost: 0, kind: Spell,
-      rules: rules(damage(0, target({Hero}))))
+      rules: rules(damage(0, target({kind: {Hero}}))))
     game.players[game.currentPlayer].hand = @[harmless]
     check game.playCard(0, heroChoice(0))
     check game.visualEvents.len == 0
@@ -513,24 +523,24 @@ proc baseCard(name: string, energyCost: int): Card =
 
 suite "AWM target kinds":
   test "kinds and relations read as rules text":
-    check target({Hero}).text() == "a hero"
-    check target({Hero}, Enemy).text() == "an enemy hero"
-    check target({Minion}).text() == "a minion"
-    check target({Minion}, Friendly).text() == "a friendly minion"
-    check target({Minion, Hero}).text() == "any target"
-    check target({Minion, Hero}, Enemy).text() == "an enemy target"
-    check target({Minion, Hero}, Friendly).text() == "a friendly target"
+    check target({kind: {Hero}}).text() == "a hero"
+    check target({kind: {Hero}, owner: AllOpponents}).text() == "an enemy hero"
+    check target({kind: {Minion}}).text() == "a minion"
+    check target({kind: {Minion}, owner: You}).text() == "a friendly minion"
+    check target({kind: {Minion, Hero}}).text() == "any target"
+    check target({kind: {Minion, Hero}, owner: AllOpponents}).text() == "an enemy target"
+    check target({kind: {Minion, Hero}, owner: You}).text() == "a friendly target"
 
   test "a minion-or-hero target offers heroes, then minions":
     let context = RuleContext(sourcePlayer: 0,
       heroes: @[heroChoice(0), heroChoice(1)],
       creatures: @[creatureChoice(0, 5), creatureChoice(1, 6)])
-    check target({Minion, Hero}).candidates(context) == @[
+    check target({kind: {Minion, Hero}}).candidates(context) == @[
       heroChoice(0), heroChoice(1), creatureChoice(0, 5), creatureChoice(1, 6)]
-    check target({Minion, Hero}, Enemy).candidates(context) ==
+    check target({kind: {Minion, Hero}, owner: AllOpponents}).candidates(context) ==
       @[heroChoice(1), creatureChoice(1, 6)]
-    check target({Hero}, Friendly).candidates(context) == @[heroChoice(0)]
-    check target({Minion}, Friendly).candidates(context) ==
+    check target({kind: {Hero}, owner: You}).candidates(context) == @[heroChoice(0)]
+    check target({kind: {Minion}, owner: You}).candidates(context) ==
       @[creatureChoice(0, 5)]
 
 suite "AWM Sharpshooter":
@@ -714,14 +724,14 @@ suite "AWM Hail of Arrows":
     check hail.ruleText() == "Deal 1 damage to all enemy minions."
 
   test "zone queries read as rules text":
-    check printed(rules(damage(1, game.board.choose(kind: Minion)))) ==
+    check printed(rules(damage(1, game.board.getCards({kind: {Minion}})))) ==
       "Deal 1 damage to all minions."
     check printed(rules(damage(2,
-      game.board.choose(kind: Minion, owner: You)))) ==
+      game.board.getCards({kind: {Minion}, owner: You})))) ==
       "Deal 2 damage to all friendly minions."
-    check printed(rules(damage(1, game.board.choose()))) ==
+    check printed(rules(damage(1, game.board.getCards({})))) ==
       "Deal 1 damage to all cards."
-    check not compiles(rules(damage(1, game.board.choose(color: Minion))))
+    check not compiles(rules(damage(1, game.board.getCards({color: Minion}))))
 
   test "Hail of Arrows hits every enemy minion and nothing else":
     var game = newGame(Archer, Warrior, 431)
@@ -821,9 +831,9 @@ suite "AWM Swords":
 
   test "stat changes read as rules text":
     check printed(rules(addPowerToughness(0, 2,
-      game.board.choose(kind: Minion)))) == "Give all minions +0/+2."
+      game.board.getCards({kind: {Minion}})))) == "Give all minions +0/+2."
     check printed(rules(addPowerToughness(-1, 0,
-      game.board.choose(kind: Minion, owner: AllOpponents)))) ==
+      game.board.getCards({kind: {Minion}, owner: AllOpponents})))) ==
       "Give all enemy minions -1/+0."
 
   test "Swords buffs every friendly minion and nothing else":
@@ -912,7 +922,7 @@ suite "AWM Swords":
       bear = Warrior.classCard()
       wither = Card(name: "Wither", energyCost: 0, kind: Spell,
         rules: rules(addPowerToughness(-5, -2,
-          game.board.choose(kind: Minion, owner: AllOpponents))))
+          game.board.getCards({kind: {Minion}, owner: AllOpponents}))))
     game.players[enemy].board = @[readyMinion(enemy, 1, bear)]
     game.nextMinionId = 2
     var sturdy = readyMinion(enemy, 2, bear)
@@ -1231,7 +1241,7 @@ suite "AWM Oozification":
       "Summon an Ooze for each opponent."
     check printed(rules(summon(2, "Ooze", You))) == "Summon 2 Oozes."
     # With several targets, getTarget says which one.
-    check printed(rules(destroy(target({Minion})), destroy(target({Minion})),
+    check printed(rules(destroy(target({kind: {Minion}})), destroy(target({kind: {Minion}})),
       summon(getTarget(1).toughness, "Ooze"))) ==
       "Destroy a minion.\nDestroy a minion.\n" &
       "Summon Oozes equal to the second target's toughness."
@@ -1290,16 +1300,16 @@ suite "AWM Oozification":
   test "computed numbers print and resolve wherever a number is taken":
     let
       toll = Card(name: "Toll", energyCost: 0, kind: Spell, rules: rules(
-        destroy(target({Minion})),
-        damage(getTarget().toughness, target({Hero}))))
+        destroy(target({kind: {Minion}})),
+        damage(getTarget().toughness, target({kind: {Hero}}))))
       grow = Card(name: "Grow", energyCost: 0, kind: Spell, rules: rules(
-        addPowerToughness(getTarget().toughness, 0, target({Minion}))))
+        addPowerToughness(getTarget().toughness, 0, target({kind: {Minion}}))))
     check toll.ruleText() == "Destroy a minion.\n" &
       "Deal the first target's toughness damage to a hero."
     check grow.ruleText() ==
       "Give a minion +X/+0, where X is the target's toughness."
     check printed(rules(removePowerToughness(getTarget().toughness, 1,
-      target({Minion})))) ==
+      target({kind: {Minion}})))) ==
       "Give a minion -X/-1, where X is the target's toughness."
     var (game, me, enemy) = oozeGame(823, 3)
     game.players[me].board = @[readyMinion(me, 2, Warrior.classCard())]
@@ -1314,8 +1324,8 @@ suite "AWM Oozification":
 
   test "getTarget can be both the number and the victim":
     let volley = Card(name: "Volley", energyCost: 0, kind: Spell, rules: rules(
-      damage(1, target({Minion})),
-      damage(1, target({Minion})),
+      damage(1, target({kind: {Minion}})),
+      damage(1, target({kind: {Minion}})),
       damage(getTarget(0).toughness, getTarget(1))))
     check volley.targetCount() == 2
     check volley.needsChoice()
@@ -1343,12 +1353,12 @@ suite "AWM computed query owners and card names":
 
   test "a board query can follow a target's owner":
     let purge = Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(
-      destroy(target({Minion})),
-      damage(1, game.board.choose(kind: Minion, owner: getTarget().owner))))
+      destroy(target({kind: {Minion}})),
+      damage(1, game.board.getCards({kind: {Minion}, owner: getTarget().owner}))))
     check purge.ruleText() == "Destroy a minion.\n" &
       "Deal 1 damage to all minions the target's owner controls."
     check printed(rules(damage(1,
-      game.board.choose(kind: Minion, owner: You)))) ==
+      game.board.getCards({kind: {Minion}, owner: You})))) ==
       "Deal 1 damage to all friendly minions."
     var game = newGame(Mage, Warrior, 901)
     let
@@ -1393,10 +1403,10 @@ suite "AWM rule values":
     check folded.fixed == 5
     let grown = getTarget().toughness + 1
     check grown.kind == Sum
-    check printed(rules(destroy(target({Minion})),
+    check printed(rules(destroy(target({kind: {Minion}})),
       summon(getTarget().toughness + 1, "Ooze"))) ==
       "Destroy a minion.\nSummon Oozes equal to the target's toughness plus 1."
-    check printed(rules(damage(1, target({Minion})), damage(1, target({Minion})),
+    check printed(rules(damage(1, target({kind: {Minion}})), damage(1, target({kind: {Minion}})),
       damage(getTarget(0).power - 1, getTarget(1)))) ==
       "Deal 1 damage to a minion.\nDeal 1 damage to a minion.\n" &
       "Deal the first target's power minus 1 damage to the second target."
@@ -1404,7 +1414,7 @@ suite "AWM rule values":
   test "a count reads how many cards a query matches":
     let rallyCry = Card(name: "Rally Cry", energyCost: 0, kind: Spell,
       rules: rules(damage(
-        game.board.choose(kind: Minion, owner: You).count, target({Hero}))))
+        game.board.getCards({kind: {Minion}, owner: You}).count, target({kind: {Hero}}))))
     check rallyCry.ruleText() ==
       "Deal the number of friendly minions damage to a hero."
     var game = newGame(Warrior, Mage, 911)
@@ -1422,8 +1432,8 @@ suite "AWM rule values":
 
   test "power and sums resolve against live stats":
     let hunt = Card(name: "Hunt", energyCost: 0, kind: Spell, rules: rules(
-      addPowerToughness(2, 0, target({Minion})),
-      damage(getTarget().power + 1, target({Hero}))))
+      addPowerToughness(2, 0, target({kind: {Minion}})),
+      damage(getTarget().power + 1, target({kind: {Hero}}))))
     var game = newGame(Warrior, Mage, 919)
     let
       me = game.currentPlayer
@@ -1461,7 +1471,7 @@ suite "AWM Plan, draws and triggers":
   test "draw and on read naturally":
     check printed(rules(draw(2))) == "Draw 2 cards."
     check printed(rules(draw(1, AllOpponents))) == "Each opponent draws 1 card."
-    check printed(rules(destroy(target({Minion})),
+    check printed(rules(destroy(target({kind: {Minion}})),
       draw(getTarget().toughness, getTarget().owner))) ==
       "Destroy a minion.\n" &
       "The target's owner draws cards equal to the target's toughness."
@@ -1576,7 +1586,7 @@ suite "AWM Plan, draws and triggers":
 
 suite "AWM triggers that choose targets":
   let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
-    rules: rules(on(nextTurn(You), damage(1, target({Minion})))))
+    rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
 
   proc snareGame(seed: int64): (GameState, int, int) =
     ## Snare in play for `me`, an enemy Bear on the board, and the game
@@ -1635,7 +1645,7 @@ suite "AWM triggers that choose targets":
 
   test "a trigger on the opponent's turn waits for its owner, not them":
     let trap = Card(name: "Trap", energyCost: 0, kind: Trinket,
-      rules: rules(on(nextTurn(AnyOpponent), damage(1, target({Minion})))))
+      rules: rules(on(nextTurn(AnyOpponent), damage(1, target({kind: {Minion}})))))
     var game = newGame(Mage, Warrior, 1107)
     let
       me = game.currentPlayer
@@ -1728,7 +1738,7 @@ suite "AWM Study and discards":
     check not study.needsChoice()
     check study.ruleText() == "Draw 2 cards.\nDiscard 1 card."
     check printed(rules(toss(2, AllOpponents))) == "Each opponent discards 2 cards."
-    check printed(rules(destroy(target({Minion})),
+    check printed(rules(destroy(target({kind: {Minion}})),
       toss(getTarget().toughness, getTarget().owner))) ==
       "Destroy a minion.\n" &
       "The target's owner discards cards equal to the target's toughness."
@@ -1839,52 +1849,503 @@ suite "AWM Study and discards":
     check not game.waitingChoice
     check game.players[me].hand.len == hand
 
+suite "AWM option faces":
+  test "every branch a card offers has a face of its own":
+    # The table shows one card per branch, so each needs its own baked
+    # face. Pillage's choice comes after a target, which is why the faces
+    # are collected from the whole card and not from the pick being made.
+    let pillage = baseCard("pillage-4")
+    check pillage.options().len == 0
+    check pillage.everyOption().len == 2
+    check baseCard("overcharge-3").everyOption().len == 2
+    check baseCard("bolt-1").everyOption().len == 0
+    # A face is baked per printed text, so each branch must read
+    # differently from its card and from the other branches.
+    for card in baseCards:
+      var printed = @[card.ruleText()]
+      for option in card.everyOption():
+        let branch = card.optionCard(option)
+        check branch.name == card.name
+        check branch.energyCost == card.energyCost
+        check branch.ruleText().len > 0
+        check branch.ruleText() notin printed
+        printed.add branch.ruleText()
+
+  test "a branch inside a trigger is found too":
+    let fickle = Card(name: "Fickle", energyCost: 0, kind: Trinket,
+      rules: rules(on(eachTurn(You),
+        choose(rules(draw(1)), rules(damage(1, target({kind: {Hero}})))))))
+    check fickle.everyOption().len == 2
+    check fickle.optionCard(fickle.everyOption()[0]).ruleText() ==
+      "Draw 1 card."
+
+suite "AWM hidden minions":
+  proc hiddenGame(card: Card, seed: int64): (GameState, int, int) =
+    ## That card in play for the player whose turn it is, with an enemy
+    ## Bear ready to attack it.
+    var game = newGame(Archer, Warrior, seed)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: card,
+      currentToughness: card.toughness, enteredTurn: game.turnNumber,
+      hiddenTurns: card.hiddenTurns())]
+    game.players[enemy].board = @[readyMinion(enemy, 2, baseCard("bear-2"))]
+    game.nextMinionId = 3
+    (game, me, enemy)
+
+  test "hidden prints its count, and hidden() prints none":
+    check baseCard("ambusher-3").ruleText() == "Hidden 1."
+    check Card(kind: Minion, rules: rules(hidden())).ruleText() == "Hidden."
+    check baseCard("ambusher-3").hiddenTurns() == 1
+    check Card(kind: Minion, rules: rules(hidden())).hiddenTurns() == Always
+    check baseCard("bear-2").hiddenTurns() == 0
+    check Card(kind: Minion, rules: rules(hidden(3))).hiddenTurns() == 3
+
+  test "a hidden minion can't be attacked, and comes out on its owner's turn":
+    var (game, me, enemy) = hiddenGame(baseCard("ambusher-3"), 2501)
+    game.finishTurn()
+    # The opponent can swing at the hero, but not at what it can't see.
+    check game.attackTargets(2) == @[heroChoice(me)]
+    check not game.attack(2, creatureChoice(me, 1))
+    check game.players[me].board[0].currentToughness == 2
+    # Hidden 1 runs out as its owner's next turn begins.
+    game.finishTurn()
+    check game.players[me].board[0].hiddenTurns == 0
+    game.finishTurn()
+    check game.attackTargets(2) ==
+      @[heroChoice(me), creatureChoice(me, 1)]
+    check game.attack(2, creatureChoice(me, 1))
+
+  test "a longer count hides it for that many of its owner's turns":
+    let lurker = Card(name: "Lurker", energyCost: 1, kind: Minion,
+      rules: rules(hidden(2)), power: 1, toughness: 3)
+    var (game, me, _) = hiddenGame(lurker, 2503)
+    for round in 0 ..< 2:
+      game.finishTurn()  # the opponent's turn: still hidden
+      check game.attackTargets(2) == @[heroChoice(me)]
+      game.finishTurn()  # its owner's turn: one turn less
+    check game.players[me].board[0].hiddenTurns == 0
+    game.finishTurn()
+    check creatureChoice(me, 1) in game.attackTargets(2)
+
+  test "hidden() never comes out":
+    let ghost = Card(name: "Ghost", energyCost: 1, kind: Minion,
+      rules: rules(hidden()), power: 1, toughness: 1)
+    var (game, me, _) = hiddenGame(ghost, 2505)
+    for round in 0 ..< 3:
+      game.finishTurn()  # the opponent's turn: the hero is all they can hit
+      check game.attackTargets(2) == @[heroChoice(me)]
+      check game.players[me].board[0].hiddenTurns == Always
+      game.finishTurn()  # its owner's turn: nothing runs down
+
+  test "spells still reach a hidden minion":
+    var (game, me, enemy) = hiddenGame(baseCard("ambusher-3"), 2507)
+    game.finishTurn()
+    game.players[enemy].hand = @[baseCard("sharpshooter-3")]
+    game.players[enemy].energy = 3
+    # Hiding is cover from attacks, not from a card that aims at it.
+    check creatureChoice(me, 1) in game.availableChoices(0)
+    check game.playCard(0, creatureChoice(me, 1))
+    check game.players[me].board[0].currentToughness == 1
+
+  test "a hidden minion attacks like any other, and summons hide too":
+    var (game, me, enemy) = hiddenGame(baseCard("ambusher-3"), 2509)
+    check game.players[me].board[0].hiddenTurns == 1
+    game.players[me].board[0].canAttack = true
+    check game.attack(1, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 2
+    # Still hidden after striking: its count runs on turns, not attacks.
+    check game.players[me].board[0].hiddenTurns == 1
+    # A summoned copy carries the same hiding.
+    game.players[me].hand = @[Card(name: "Call", energyCost: 0, kind: Spell,
+      rules: rules(summon(1, "Ambusher")))]
+    check game.playCard(0)
+    check game.players[me].board[^1].hiddenTurns == 1
+
+suite "AWM repeat and Reload":
+  test "Reload repeats the rules of a minion or trinket":
+    let reload = baseCard("reload-2")
+    check reload.kind == Spell
+    check reload.class == some(Archer)
+    check reload.ruleText() == "Repeat a minion or trinket's rules."
+    check reload.needsChoice()
+    # Only the card to repeat is known until it is picked.
+    check reload.targetCount() == 1
+    check reload.targetPrompt(0).choose == "Choose a minion or trinket."
+
+  test "the repeated rules aim fresh targets of their own":
+    var game = newGame(Archer, Warrior, 2301)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[baseCard("reload-2")]
+    game.players[me].energy = 2
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("sharpshooter-3"), currentToughness: 1)]
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: baseCard("bear-2"), currentToughness: 2)]
+    game.nextMinionId = 3
+    let picks = @[creatureChoice(me, 1)]
+    # Picking the Sharpshooter reveals the target its own rule asks for.
+    check baseCard("reload-2").targetCount(picks, game.boardCards()) == 2
+    check baseCard("reload-2").targetPrompt(1, picks,
+      game.boardCards()).choose == "Choose any target."
+    check game.playCard(0, picks & creatureChoice(enemy, 2))
+    check game.players[enemy].board[0].currentToughness == 1
+    # The Sharpshooter itself is untouched: only its rules ran again.
+    check game.players[me].board[0].currentToughness == 1
+    check game.players[me].energy == 0
+
+  test "a trinket's rules are repeated too":
+    var game = newGame(Archer, Mage, 2303)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("reload-2")]
+    game.players[me].energy = 2
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("plan-3"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    let hand = game.players[me].hand.len
+    check game.availableChoices(0) == @[creatureChoice(me, 1)]
+    check game.playCard(0, @[creatureChoice(me, 1)])
+    # Plan draws a card again, and is still in play.
+    check game.players[me].hand.len == hand
+    check game.players[me].board.len == 1
+
+  test "rules aimed at their own card do nothing when repeated":
+    let selfish = Card(name: "Selfish", energyCost: 0, kind: Minion,
+      rules: rules(draw(1), destroy(self())), power: 1, toughness: 1)
+    var game = newGame(Archer, Mage, 2305)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("reload-2")]
+    game.players[me].energy = 2
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: selfish,
+      currentToughness: 1)]
+    game.nextMinionId = 2
+    let hand = game.players[me].hand.len
+    check game.playCard(0, @[creatureChoice(me, 1)])
+    # The draw happens; the destroy has no card of its own to destroy.
+    check game.players[me].hand.len == hand
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].card == selfish
+
+  test "canceling the card to repeat pays nothing":
+    var game = newGame(Archer, Warrior, 2307)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCard("reload-2")]
+    game.players[me].energy = 2
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("sharpshooter-3"), currentToughness: 1)]
+    game.nextMinionId = 2
+    check not game.playCard(0, @[Canceled])
+    check not game.playCard(0, @[creatureChoice(me, 1), Canceled])
+    check game.players[me].hand.len == 1
+    check game.players[me].energy == 2
+    check game.takeVisualEvents().len == 0
+
+  test "a target's braces take a trinket beside minions":
+    check Card(kind: Spell, rules: rules(
+      destroy(target({kind: {Trinket}})))).ruleText() == "Destroy a trinket."
+    check Card(kind: Spell, rules: rules(destroy(
+      target({kind: {Trinket}, owner: AllOpponents})))).ruleText() ==
+      "Destroy an enemy trinket."
+    var game = newGame(Mage, Mage, 2309)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("plan-3")), MinionState(id: 2, owner: me,
+      card: baseCard("bouncer-1"), currentToughness: 1)]
+    game.players[enemy].board = @[MinionState(id: 3, owner: enemy,
+      card: baseCard("plan-3"))]
+    game.nextMinionId = 4
+    game.players[me].hand = @[Card(name: "Snap", energyCost: 0, kind: Spell,
+      rules: rules(destroy(target({kind: {Trinket}}))))]
+    # Trinkets, and no minions.
+    check game.availableChoices(0) ==
+      @[creatureChoice(me, 1), creatureChoice(enemy, 3)]
+    check game.playCard(0, creatureChoice(enemy, 3))
+    check game.players[enemy].board.len == 0
+
+suite "AWM eachTurn and Wildfire":
+  test "Wildfire burns every minion and every player, each of your turns":
+    let wildfire = baseCard("wildfire-6")
+    check wildfire.kind == Trinket
+    check wildfire.ruleText() == "At the start of each of your turns, " &
+      "deal 1 damage to all minions and deal 1 damage to each player."
+    check not wildfire.needsChoice()
+    var game = newGame(Archer, Warrior, 2401)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: wildfire,
+      enteredTurn: game.turnNumber), MinionState(id: 2, owner: me,
+      card: baseCard("bear-2"), currentToughness: 2)]
+    game.players[enemy].board = @[MinionState(id: 3, owner: enemy,
+      card: baseCard("sniper-2"), currentToughness: 1)]
+    game.nextMinionId = 4
+    # The opponent's turn passes without it firing.
+    game.finishTurn()
+    check game.players[me].life == StartingLife
+    check game.players[enemy].board.len == 1
+    # Back to its owner: everything takes 1.
+    game.finishTurn()
+    check game.players[me].life == StartingLife - 1
+    check game.players[enemy].life == StartingLife - 1
+    check game.players[me].board[1].currentToughness == 1
+    check game.players[enemy].board.len == 0
+    # And again next turn: an each-turn trigger is never spent.
+    game.finishTurn()
+    game.finishTurn()
+    check game.players[me].life == StartingLife - 2
+    check game.players[enemy].life == StartingLife - 2
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].card == wildfire
+
+  test "a next-turn trigger still fires only once":
+    check Card(kind: Trinket, rules: rules(on(nextTurn(You), draw(1))))
+      .ruleText() == "At the start of your next turn, draw 1 card."
+    var game = newGame(Mage, Warrior, 2403)
+    let me = game.currentPlayer
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: Card(name: "Once", energyCost: 0, kind: Trinket,
+        rules: rules(on(nextTurn(You), draw(1)))),
+      enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    var draws = 0
+    for turn in 0 ..< 6:
+      let before = game.players[me].hand.len
+      game.finishTurn()
+      if game.currentPlayer == me and game.players[me].hand.len > before + 1:
+        inc draws
+    check draws == 1
+
+  test "each player can be named as a whole":
+    check Card(kind: Spell, rules: rules(damage(2, game.players))).ruleText() ==
+      "Deal 2 damage to each player."
+    var game = newGame(Archer, Warrior, 2405)
+    let me = game.currentPlayer
+    game.players[me].hand = @[Card(name: "Storm", energyCost: 0, kind: Spell,
+      rules: rules(damage(2, game.players)))]
+    check game.playCard(0)
+    check game.players[me].life == StartingLife - 2
+    check game.players[1 - me].life == StartingLife - 2
+
+suite "AWM choose and Overcharge":
+  proc printed(list: Rules): string =
+    Card(kind: Spell, rules: list).ruleText()
+
+  proc overchargeGame(seed: int64): (GameState, int, int) =
+    ## Overcharge in hand, with an enemy Bear to aim it at.
+    var game = newGame(Archer, Warrior, seed)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[baseCard("overcharge-3")]
+    game.players[me].energy = 3
+    game.players[enemy].board = @[MinionState(id: 1, owner: enemy,
+      card: baseCard("bear-2"), currentToughness: 2)]
+    game.nextMinionId = 2
+    (game, me, enemy)
+
+  test "a choose rule prints its branches, one per line":
+    let card = baseCard("overcharge-3")
+    check card.ruleText() == "Choose:\n" &
+      "- Deal 1 damage to a minion. Deal 1 damage to the target's owner.\n" &
+      "- Deal 3 damage to a minion. Deal 3 damage to the target's owner. " &
+      "Deal 3 damage to yourself."
+    check printed(rules(choose(rules(draw(1)), rules(draw(2))))) ==
+      "Choose:\n- Draw 1 card.\n- Draw 2 cards."
+
+  test "the option comes first, and the branch's own targets follow it":
+    let card = baseCard("overcharge-3")
+    check card.needsChoice()
+    # Only the option is known until it is picked.
+    check card.targetCount() == 1
+    check card.targetPrompt(0).choose == "Choose an option."
+    check card.options().len == 2
+    check card.optionCard(card.options()[0]).ruleText() ==
+      "Deal 1 damage to a minion.\nDeal 1 damage to the target's owner."
+    for option in 0 .. 1:
+      let picks = @[optionChoice(option)]
+      check card.targetCount(picks) == 2
+      check card.options(picks).len == 0
+      check card.targetPrompt(1, picks).choose == "Choose a minion."
+    check card.intent(1, @[optionChoice(1)]) == DamageIntent
+    check card.intentAmount(1, @[optionChoice(1)]) == 3
+
+  test "the gentle branch spares you, the fierce one burns you too":
+    for option in 0 .. 1:
+      var (game, me, enemy) = overchargeGame(2101 + option.int64)
+      check game.availableChoices(0) ==
+        @[optionChoice(0), optionChoice(1)]
+      check game.availableChoices(0, @[optionChoice(option)]) ==
+        @[creatureChoice(enemy, 1)]
+      check game.playCard(0,
+        @[optionChoice(option), creatureChoice(enemy, 1)])
+      let dealt = if option == 0: 1 else: 3
+      check game.players[enemy].life == StartingLife - dealt
+      check game.players[me].life ==
+        (if option == 0: StartingLife else: StartingLife - 3)
+      check game.players[me].energy == 0
+      # 3 damage kills the Bear; 1 only wounds it.
+      check game.players[enemy].board.len == (if option == 0: 1 else: 0)
+      if option == 0:
+        check game.players[enemy].board[0].currentToughness == 1
+
+  test "each rule of the chosen branch plays on its own beat":
+    var (game, me, enemy) = overchargeGame(2103)
+    check game.playCard(0, @[optionChoice(1), creatureChoice(enemy, 1)])
+    var beats: seq[int]
+    for event in game.takeVisualEvents():
+      if event.kind == LightningVfx and event.beat notin beats:
+        beats.add event.beat
+    # The minion, then its owner, then yourself: three beats, in order.
+    check beats.len == 3
+    check beats == @[beats[0], beats[0] + 1, beats[0] + 2]
+
+  test "an unanswered or impossible option leaves the card in hand":
+    var (game, me, _) = overchargeGame(2105)
+    check not game.playCard(0, @[Canceled])
+    check not game.playCard(0, @[optionChoice(5), heroChoice(me)])
+    check not game.playCard(0, @[optionChoice(0), Canceled])
+    check game.players[me].hand.len == 1
+    check game.players[me].energy == 3
+    check game.takeVisualEvents().len == 0
+
+  test "damage can name players instead of targets":
+    check printed(rules(damage(3, You))) == "Deal 3 damage to yourself."
+    check printed(rules(damage(1, AllOpponents))) ==
+      "Deal 1 damage to each opponent."
+    check printed(rules(bounce(target({kind: {Minion}})), damage(2,
+      getTarget().owner))) == "Return a minion to its owner's hand.\n" &
+      "Deal 2 damage to the target's owner."
+    var game = newGame(Archer, Warrior, 2107)
+    let me = game.currentPlayer
+    game.players[me].hand = @[Card(name: "Sting", energyCost: 0, kind: Spell,
+      rules: rules(damage(2, AllOpponents), damage(1, You)))]
+    check game.playCard(0)
+    check game.players[me].life == StartingLife - 1
+    check game.players[1 - me].life == StartingLife - 2
+
+suite "AWM Explode":
+  test "Explode destroys one of yours and throws its power at any target":
+    let card = baseCard("explode-3")
+    check card.kind == Spell
+    check card.class == some(Archer)
+    check card.ruleText() == "Destroy a friendly minion.\n" &
+      "Deal the first target's power damage to any target."
+    check card.targetCount() == 2
+    check card.targetPrompt(0).choose == "Choose a friendly minion."
+    check card.targetPrompt(1).choose == "Choose any target."
+    var game = newGame(Archer, Warrior, 2201)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[card]
+    game.players[me].energy = 3
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("sharpshooter-3"), currentToughness: 1)]
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: baseCard("bear-2"), currentToughness: 2)]
+    game.nextMinionId = 3
+    # Only your own minions can be blown up.
+    check game.availableChoices(0) == @[creatureChoice(me, 1)]
+    check game.playCard(0,
+      @[creatureChoice(me, 1), creatureChoice(enemy, 2)])
+    check game.players[me].board.len == 0
+    check game.players[enemy].board.len == 0
+    check game.players[me].discardPile[^1] == card
+    var explosions = 0
+    for event in game.takeVisualEvents():
+      if event.kind == ExplosionVfx:
+        inc explosions
+    check explosions == 2
+
+  test "a target's braces take an owner filter beside its kinds":
+    check Card(kind: Spell, rules: rules(
+      destroy(target({kind: {Minion}, owner: You})))).ruleText() ==
+      "Destroy a friendly minion."
+    check Card(kind: Spell, rules: rules(
+      destroy(target({kind: {Minion}, owner: AllOpponents})))).ruleText() ==
+      "Destroy an enemy minion."
+    # The older positional form still reads the same.
+    check Card(kind: Spell, rules: rules(
+      destroy(target({kind: {Minion}, owner: AllOpponents})))).ruleText() ==
+      "Destroy an enemy minion."
+    check not compiles(target({kind: {Minion}, colour: You}))
+
+suite "AWM target intents":
+  test "every targeting rule says what it does to its target, and how much":
+    check baseCard("sharpshooter-3").intent(0) == DamageIntent
+    check baseCard("sharpshooter-3").intentAmount(0) == 1
+    check baseCard("bouncer-1").intent(0) == BounceIntent
+    check baseCard("oozification-4").intent(0) == DestroyIntent
+    check baseCard("tactician-2").intent(0) == WeakenIntent
+    check baseCard("tactician-2").intentAmount(0) == 1
+    # Duel buffs its first target and takes Ranged off its second.
+    check baseCard("duel-2").intent(0) == BuffIntent
+    check baseCard("duel-2").intentAmount(0) == 2
+    check baseCard("duel-2").intent(1) == KeywordIntent
+    # A card with nothing to judge, and a step past the end.
+    check baseCard("bolt-1").intent(0) == DamageIntent
+    check baseCard("plan-3").intent(0) == NoIntent
+    check baseCard("duel-2").intent(7) == NoIntent
+    check baseCard("duel-2").intentAmount(7) == 0
+
+  test "an amount only known on resolve counts as one":
+    let drain = Card(name: "Drain", energyCost: 1, kind: Spell,
+      rules: rules(damage(game.board.getCards({kind: {Minion}, owner: You}).count,
+        target({kind: {Hero}}))))
+    check drain.intent(0) == DamageIntent
+    check drain.intentAmount(0) == 1
+
 suite "AWM selections and Primordial":
   proc printed(list: Rules): string =
     Card(kind: Spell, rules: list).ruleText()
 
   test "targets and queries are interchangeable; text follows the form":
-    check printed(rules(bounce(target({Minion})))) ==
+    check printed(rules(bounce(target({kind: {Minion}})))) ==
       "Return a minion to its owner's hand."
     check printed(rules(bounce(
-      game.board.choose(kind: Minion, owner: AllOpponents)))) ==
+      game.board.getCards({kind: {Minion}, owner: AllOpponents})))) ==
       "Return all enemy minions to their owners' hands."
-    check printed(rules(destroy(game.board.choose(kind: Minion)))) ==
+    check printed(rules(destroy(game.board.getCards({kind: {Minion}})))) ==
       "Destroy all minions."
     check printed(rules(lose(ranged(),
-      game.board.choose(kind: Minion, owner: AllOpponents)))) ==
+      game.board.getCards({kind: {Minion}, owner: AllOpponents})))) ==
       "All enemy minions lose Ranged."
     check printed(rules(removePowerToughness(1, 0,
-      game.board.choose(kind: Minion, owner: AllOpponents)))) ==
+      game.board.getCards({kind: {Minion}, owner: AllOpponents})))) ==
       "Give all enemy minions -1/-0."
-    check printed(rules(addPowerToughness(1, 1, target({Minion})))) ==
+    check printed(rules(addPowerToughness(1, 1, target({kind: {Minion}})))) ==
       "Give a minion +1/+1."
 
   test "choose filters in braces, self: false and no filter at all":
-    check printed(rules(damage(1, game.board.choose({})))) ==
+    check printed(rules(damage(1, game.board.getCards({})))) ==
       "Deal 1 damage to all cards."
     check printed(rules(damage(1,
-      game.board.choose({self: false, kind: Minion})))) ==
+      game.board.getCards({kind: {Minion}, self: false})))) ==
       "Deal 1 damage to all other minions."
-    check printed(rules(damage(game.board.choose({self: false, owner: You}).count,
-      target({Hero})))) ==
+    check printed(rules(damage(game.board.getCards({owner: You, self: false}).count,
+      target({kind: {Hero}})))) ==
       "Deal the number of other friendly cards damage to a hero."
-    check not compiles(rules(damage(1, game.board.choose({color: Minion}))))
+    check not compiles(rules(damage(1, game.board.getCards({color: Minion}))))
 
   test "a query's owner filter is a pick, and reads as the hero itself":
-    check printed(rules(bounce(game.board.choose({owner: target({Hero})})))) ==
+    check printed(rules(bounce(game.board.getCards({owner: target({kind: {Hero}})})))) ==
       "Return all cards a hero controls to their owner's hand."
     check printed(rules(destroy(
-      game.board.choose({kind: Minion, owner: target({Opponent})})))) ==
+      game.board.getCards({kind: {Minion}, owner: target({kind: {Opponent}})})))) ==
       "Destroy all minions an opponent controls."
     # One owner keeps the possessive singular; several keep it plural.
-    check printed(rules(bounce(game.board.choose({kind: Minion, owner: You})))) ==
+    check printed(rules(bounce(game.board.getCards({kind: {Minion}, owner: You})))) ==
       "Return all friendly minions to their owner's hand."
-    check printed(rules(bounce(game.board.choose({self: false})))) ==
+    check printed(rules(bounce(game.board.getCards({self: false})))) ==
       "Return all other cards to their owners' hands."
     # A picked card still names its owner; only players speak for themselves.
-    check printed(rules(bounce(target({Minion})),
-      damage(1, game.board.choose({owner: getTarget().owner})))) ==
+    check printed(rules(bounce(target({kind: {Minion}})),
+      damage(1, game.board.getCards({owner: getTarget().owner})))) ==
       "Return a minion to its owner's hand.\n" &
       "Deal 1 damage to all cards the target's owner controls."
 
@@ -1978,10 +2439,10 @@ suite "AWM selections and Primordial":
 
   test "query forms act on every match, and a spell has no self to skip":
     let sweep = Card(name: "Sweep", energyCost: 0, kind: Spell, rules: rules(
-      lose(ranged(), game.board.choose(kind: Minion, owner: AllOpponents)),
+      lose(ranged(), game.board.getCards({kind: {Minion}, owner: AllOpponents})),
       removePowerToughness(1, 0,
-        game.board.choose(kind: Minion, owner: AllOpponents)),
-      destroy(game.board.choose({self: false, owner: You}))))
+        game.board.getCards({kind: {Minion}, owner: AllOpponents})),
+      destroy(game.board.getCards({owner: You, self: false}))))
     var game = newGame(Mage, Archer, 1403)
     let
       me = game.currentPlayer

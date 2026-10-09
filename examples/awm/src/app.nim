@@ -99,7 +99,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
   let
     cardAssets = artworkRoot() / "cards"
     atlasPath = appDir / "awm.atlas.png"
-    atlasBuilder = newHudAtlas(4096)
+    atlasBuilder = newHudAtlas(5120)
   initCardAssets(cardAssets)
   atlasBuilder.addBaseCardImages()
   atlasBuilder.addAwmHudAssets(cardAssets)

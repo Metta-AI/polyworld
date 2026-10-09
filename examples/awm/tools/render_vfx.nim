@@ -7,13 +7,16 @@ import ../src/core/core, ../src/paths, ../src/vfx/vfxrenderer
 const
   Width = 1536
   Height = 1024
-  CellWidth = Width div 3
+  Columns = 4
+  CellWidth = Width div Columns
   CellHeight = Height div 2
   Kinds = [SwordsIntoTheWindVfx, SwordAndShieldVfx, MeleeVfx,
-    SwordClashVfx, SwordBreakVfx, OozeSplatVfx]
+    SwordClashVfx, SwordBreakVfx, OozeSplatVfx, ExplosionVfx,
+    StabVfx]
   Names = ["SWORDS INTO THE WIND", "SWORD AND SHIELD", "MELEE",
-    "SWORD CLASH", "SWORD BREAK", "OOZE SPLAT"]
-  KeyAges = [0.55'f32, 0.48'f32, 0.38'f32, 0.35'f32, 0.54'f32, 0.72'f32]
+    "SWORD CLASH", "SWORD BREAK", "OOZE SPLAT", "EXPLOSION", "STAB"]
+  KeyAges = [0.55'f32, 0.48'f32, 0.38'f32, 0.35'f32, 0.54'f32, 0.72'f32,
+    0.14'f32, 0.22'f32]
 
 let
   root = currentSourcePath().parentDir.parentDir
@@ -41,8 +44,8 @@ for frame in 0 .. (if sequence: 74 else: 0):
   glEnable(GL_SCISSOR_TEST)
   for i, kind in Kinds:
     let
-      x = (i mod 3) * CellWidth
-      y = Height - ((i div 3) + 1) * CellHeight
+      x = (i mod Columns) * CellWidth
+      y = Height - ((i div Columns) + 1) * CellHeight
     glViewport(x.GLint, y.GLint, CellWidth.GLsizei, CellHeight.GLsizei)
     glScissor((x + 2).GLint, (y + 2).GLint,
       (CellWidth - 4).GLsizei, (CellHeight - 4).GLsizei)
@@ -61,8 +64,8 @@ for frame in 0 .. (if sequence: 74 else: 0):
   shot.flipVertical()
   for i, name in Names:
     let
-      x = (i mod 3) * CellWidth + 22
-      y = (i div 3) * CellHeight + 25
+      x = (i mod Columns) * CellWidth + 22
+      y = (i div Columns) * CellHeight + 25
     shot.fillText(font, name, translate(vec2(x.float32, y.float32)))
   shot.writeFile(if sequence: frames / &"frame-{frame:04}.png"
     else: output / "warrior-and-ooze.png")

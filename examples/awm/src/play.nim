@@ -61,6 +61,11 @@ type
     pendingChoices*: seq[Choice]
     pendingPicks*: seq[Choice]  ## Targets chosen so far for pendingCard.
     pendingTrigger*: bool  ## Targeting answers a waiting trigger.
+    chooseStart*: float32  ## When the offered options appeared.
+    choosePicked*: Option[int]
+      ## The option taken, while its animation plays. None until a player
+      ## picks one: a table reset must never start out holding a branch.
+    choosePickedAt*: float32
     tossPicking*: bool  ## The human is choosing cards to discard.
     tossPicks*: seq[int]  ## Hand positions picked so far.
     animations*: seq[CardAnimation]
@@ -100,8 +105,16 @@ proc drawFaceUp*(layout: TableLayout, player: int): bool =
   else: layout.drawVisible(player)
 
 const
+  ChooseAppearSeconds* = 0.3'f32  ## The offered cards rising into place.
+  ChoosePickSeconds* = 0.32'f32  ## The chosen card taking the table.
   AttackLungeDuration* = 0.22'f32
   AttackReturnDuration* = 0.30'f32
+
+proc choosing*(play: TablePlay): bool =
+  ## The pending card is offering branches to choose between, so the table
+  ## shows them instead of asking for a target on the board.
+  play.pendingTargeting and play.pendingChoices.len > 0 and
+    play.pendingChoices[0].kind == OptionChoice
 
 proc initTablePlay*(visualSeed: int64): TablePlay =
   TablePlay(pendingCardIndex: -1, attackTarget: Canceled,
@@ -635,7 +648,8 @@ proc playHandCard*(
         play.pendingTargeting = true
         play.selectedAttacker = 0
         play.statusMessage =
-          &"Click the highlighted avatar for {card.name}."
+          if play.choosing: &"{card.name}: choose one."
+          else: &"Click the highlighted avatar for {card.name}."
   else:
     let sourcePose = layout.handPoses(
       game.currentPlayer,
@@ -694,6 +708,119 @@ proc updateTossPicking*(
         if game.resolvePendingToss(picks): &"{pending.source}: discarded."
         else: "Those cards can't be discarded."
 
+proc pendingRules(play: TablePlay, game: GameState): Rules =
+  if play.pendingTrigger: game.waitingTriggerRules().rules
+  else: play.pendingCard.rules
+
+proc chooseOptions*(play: TablePlay, game: GameState): seq[Card] =
+  ## One card per offered branch, each showing that branch alone.
+  for option in play.pendingRules(game).options(play.pendingPicks,
+      game.boardCards()):
+    result.add play.pendingCard.optionCard(option)
+
+proc takePick*(
+    play: var TablePlay,
+    game: var GameState,
+    layout: TableLayout,
+    selected: Choice
+) =
+  ## Records one answered choice. The card resolves once its last choice is
+  ## in; a `choose` reveals the branch's own targets when its option lands.
+  let card = play.pendingCard
+  let picks = play.pendingPicks & selected
+  let board = game.boardCards()
+  if picks.len < play.pendingRules(game).targetCount(picks, board):
+    # More to choose (Duel's second target, or a chosen branch's): offer it.
+    play.pendingPicks = picks
+    play.pendingChoices =
+      if play.pendingTrigger:
+        game.triggerChoices(play.pendingPicks)
+      elif card.kind != Spell:
+        game.availableChoices(card, play.pendingPicks)
+      else:
+        game.availableChoices(play.pendingCardIndex, play.pendingPicks)
+    let prompt = play.pendingRules(game).targetPrompt(card, picks.len,
+      play.pendingPicks, board)
+    play.statusMessage =
+      if play.choosing: &"{card.name}: {prompt.choose}"
+      else:
+        &"Choose target {play.pendingPicks.len + 1} of " &
+          &"{play.pendingRules(game).targetCount(play.pendingPicks, board)} " &
+          &"for {card.name}."
+    return
+  var
+    spellAnimation = false
+    spellSourcePose: CardPose
+    spellClass: HeroClass
+  if card.kind == Spell and
+      play.pendingCardIndex >= 0 and
+      play.pendingCardIndex <
+        game.players[game.currentPlayer].hand.len:
+    spellAnimation = true
+    spellClass =
+      game.players[game.currentPlayer].heroClass
+    spellSourcePose = layout.handPoses(
+      game.currentPlayer,
+      game.players[game.currentPlayer].hand.len
+    )[play.pendingCardIndex]
+  let resolved =
+    if play.pendingTrigger:
+      game.resolvePendingTrigger(picks)
+    elif card.kind != Spell:
+      game.runMinionRules(card, picks)
+    else:
+      game.playCard(play.pendingCardIndex, picks)
+  if resolved and spellAnimation:
+    play.holdCastSpell(layout, card, spellClass, game.currentPlayer,
+      spellSourcePose)
+  if resolved:
+    play.statusMessage =
+      if play.pendingTrigger:
+        &"{card.name}'s trigger resolves."
+      elif card.kind != Spell:
+        if selected.isNoTarget:
+          &"{card.name}'s rule finishes without a target."
+        else:
+          &"{card.name}'s rule resolves."
+      else:
+        &"{card.name} resolves and is discarded."
+  else:
+    play.statusMessage = &"{card.name} could not resolve."
+  play.pendingTargeting = false
+  play.pendingTrigger = false
+  play.pendingCardIndex = -1
+  play.pendingPicks.setLen(0)
+  play.pendingChoices.setLen(0)
+
+proc updateChoosing*(
+    play: var TablePlay,
+    game: var GameState,
+    layout: TableLayout,
+    hovered: int,
+    pick,
+    cancel: bool,
+    time: float32
+) =
+  ## The choose screen: click one of the offered cards to take that branch,
+  ## or cancel the card. Picking plays the chosen card away first.
+  if play.choosePicked.isSome:
+    # The pick's animation is playing; take it once it finishes.
+    if time - play.choosePickedAt >= ChoosePickSeconds:
+      let option = play.choosePicked.get
+      play.choosePicked = none(int)
+      play.takePick(game, layout, optionChoice(option))
+    return
+  if cancel:
+    play.statusMessage = &"{play.pendingCard.name} canceled."
+    play.pendingTargeting = false
+    play.pendingCardIndex = -1
+    play.pendingPicks.setLen(0)
+    play.pendingChoices.setLen(0)
+    return
+  if pick and hovered >= 0 and hovered < play.pendingChoices.len:
+    play.choosePicked = some(hovered)
+    play.choosePickedAt = time
+
 proc updateTargeting*(
     play: var TablePlay,
     game: var GameState,
@@ -726,6 +853,7 @@ proc updateTargeting*(
       play.statusMessage = &"{card.name} canceled."
     play.pendingTargeting = false
     play.pendingCardIndex = -1
+    play.pendingPicks.setLen(0)
     play.pendingChoices.setLen(0)
   elif pick:
     var selectedChoice = result
@@ -735,67 +863,14 @@ proc updateTargeting*(
         mouseOverBoard(window, viewProjection, layout) and
         play.pendingChoices.choiceIsLegal(NoTarget):
       selectedChoice = NoTarget
-    if not selectedChoice.isCanceled and
-        play.pendingPicks.len + 1 < pendingRules.targetCount():
-      # More targets to choose (Duel): keep the pick, offer the next.
-      play.pendingPicks.add selectedChoice
-      play.pendingChoices =
-        if play.pendingTrigger:
-          game.triggerChoices(play.pendingPicks)
-        elif card.kind != Spell:
-          game.availableChoices(card, play.pendingPicks)
-        else:
-          game.availableChoices(play.pendingCardIndex, play.pendingPicks)
-      play.statusMessage =
-        &"Choose target {play.pendingPicks.len + 1} of " &
-          &"{pendingRules.targetCount()} for {card.name}."
-    elif not selectedChoice.isCanceled:
-      var
-        spellAnimation = false
-        spellSourcePose: CardPose
-        spellClass: HeroClass
-      if card.kind == Spell and
-          play.pendingCardIndex >= 0 and
-          play.pendingCardIndex <
-            game.players[game.currentPlayer].hand.len:
-        spellAnimation = true
-        spellClass =
-          game.players[game.currentPlayer].heroClass
-        spellSourcePose = layout.handPoses(
-          game.currentPlayer,
-          game.players[game.currentPlayer].hand.len
-        )[play.pendingCardIndex]
-      let resolved =
-        if play.pendingTrigger:
-          game.resolvePendingTrigger(play.pendingPicks & selectedChoice)
-        elif card.kind != Spell:
-          game.runMinionRules(card, play.pendingPicks & selectedChoice)
-        else:
-          game.playCard(play.pendingCardIndex, play.pendingPicks & selectedChoice)
-      if resolved and spellAnimation:
-        play.holdCastSpell(layout, card, spellClass, game.currentPlayer,
-          spellSourcePose)
-      if resolved:
-        play.statusMessage =
-          if play.pendingTrigger:
-            &"{card.name}'s trigger resolves."
-          elif card.kind != Spell:
-            if selectedChoice.isNoTarget:
-              &"{card.name}'s rule finishes without a target."
-            else:
-              &"{card.name}'s rule resolves."
-          else:
-            &"{card.name} resolves and is discarded."
-      else:
-        play.statusMessage = &"{card.name} could not resolve."
-      play.pendingTargeting = false
-      play.pendingTrigger = false
-      play.pendingCardIndex = -1
-      play.pendingChoices.setLen(0)
+    if not selectedChoice.isCanceled:
+      play.takePick(game, layout, selectedChoice)
 
 proc stopTargeting*(play: var TablePlay) =
   play.pendingTargeting = false
   play.pendingCardIndex = -1
+  play.choosePicked = none(int)
+  play.pendingPicks.setLen(0)
   play.pendingChoices.setLen(0)
 
 proc lungingMinion*(play: TablePlay): int =
@@ -1188,7 +1263,9 @@ proc addTableCards*(
         currentPower = minion.power,
         currentToughness = minion.currentToughness,
         damageFlash = play.activeVfx.flashStrength(minionChoice),
-        lostKeywords = minion.lostKeywords
+        lostKeywords = minion.lostKeywords,
+        # Hidden from everyone but its owner, who sees it as it is.
+        veiled = minion.hiddenTurns != 0 and playerIndex != viewer
       )
       vfx.addCardGlow(pose,
           hoveredBoard == minionChoice or attackerSelected,

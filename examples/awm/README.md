@@ -6,12 +6,13 @@ Card-game prototype in Nim + Polyworld. Native and browser.
 
 ```
 src/awm.nim          reads the command line and starts a game mode
+src/baseset.nim      the cards and decks: edit here to change the set
 src/app.nim          what every mode shares: window, renderers, heroes
 src/play.nim         playing on a table: targeting, attacks, bots, beats
 src/core/            the game itself: no window, no graphics
   core.nim           cards, rules and the rules DSL
   sim.nim            the match: players, turns, effects, deaths
-  baseset.nim        the cards and decks
+  cardset.nim        card lookups, wire IDs and dealing decks
   sessions.nim       saved games and the built-in bot
   bots.nim           BASIC bot scripts
 src/modes/           game modes, clients of the core
@@ -245,23 +246,50 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 - Cards with several targets (Duel) are aimed one target at a time. A
   fight is combat without an attack: both minions deal their power at
   once, Ranged applies, and it doesn't use up either minion's attack.
+- A hidden minion (Ambusher, Spirit) can't be attacked. `hidden(2)` lasts
+  until the start of its owner's second turn from now, counting down as
+  their turns begin; `hidden()` lasts as long as the minion is in play.
+  Spells and other card effects still reach it, it attacks as usual, and
+  attacking doesn't reveal it. Its owner sees it normally; everyone else
+  sees it in shadow.
+- `repeat` (Reload) runs another card in play's printed rules again. Its
+  targets are picked afresh, and anything the rules aim at their own card
+  (`self()`) finds nothing and does nothing. Picking no card cancels.
+- `on(eachTurn(...))` fires at the start of every one of that player's
+  turns, for as long as the card is in play; `on(nextTurn(...))` fires
+  once.
+- A card that offers a choice (Overcharge) asks for it first: the table
+  dims and shows one card per branch, each printing that branch alone.
+  Click one to take it, or cancel with the button, a click off the cards,
+  or a right-click. The branch's own targets are aimed afterwards, as
+  usual. Bots weigh a branch by what it deals against what it costs their
+  own hero, and never take one that would finish them off.
 - No victory condition yet.
 
 | Class | Card | Copies | Cost | Type | Stats | Effect |
 |---|---|---|---|---|---|---|
-| Archer | Bolt | 10 | 1 | Spell | — | 2 damage to either hero |
-| Archer | Sniper | 14 | 2 | Minion | 2/1 | Ranged |
-| Archer | Sharpshooter | 10 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
-| Archer | Hail of Arrows | 6 | 3 | Spell | — | 1 damage to all enemy minions |
-| Warrior | Bear | 8 | 2 | Minion | 3/2 | — |
-| Warrior | Swords | 5 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
+| Archer | Bolt | 7 | 1 | Spell | — | 2 damage to either hero |
+| Archer | Sniper | 7 | 2 | Minion | 2/1 | Ranged |
+| Archer | Sharpshooter | 5 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
+| Archer | Hail of Arrows | 4 | 3 | Spell | — | 1 damage to all enemy minions |
+| Archer | Overcharge | 4 | 3 | Spell | — | Choose: 1 damage to a minion and its owner; or 3 damage to a minion, its owner and yourself |
+| Archer | Explode | 3 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
+| Archer | Ambusher | 2 | 3 | Minion | 2/2 | Hidden 1 |
+| Archer | Assassin | 2 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
+| Archer | Reload | 4 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
+| Archer | Wildfire | 2 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
+| Warrior | Bear | 7 | 2 | Minion | 3/2 | — |
+| Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
 | Warrior | Shields | 4 | 1 | Spell | — | Friendly minions get +0/+1 permanently |
-| Warrior | Duel | 5 | 2 | Spell | — | A minion gets +1/+1, a minion loses Ranged, then they fight |
-| Warrior | Tactician | 5 | 2 | Minion | 1/2 | A minion gets -1/-0 permanently |
-| Warrior | Footsoldier | 6 | 1 | Minion | 1/2 | — |
+| Warrior | Duel | 4 | 2 | Spell | — | A minion gets +1/+1, a minion loses Ranged, then they fight |
+| Warrior | Tactician | 4 | 2 | Minion | 1/2 | A minion gets -1/-0 permanently |
+| Warrior | Footsoldier | 5 | 1 | Minion | 1/2 | — |
 | Warrior | Commander | 4 | 5 | Minion | 2/3 | Summons 2 Footsoldiers |
-| Warrior | Rally | 3 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
-| Mage | Bouncer | 16 | 1 | Minion | 1/1 | Return a minion to owner's hand |
+| Warrior | Rally | 2 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
+| Warrior | Banner | 3 | 3 | Trinket | — | At the start of each of your turns, summon a Footsoldier |
+| Warrior | Pillage | 3 | 4 | Spell | — | Destroy a trinket, then choose: friendly minions get +1/+0, or +0/+1 |
+| Mage | Bouncer | 12 | 1 | Minion | 1/1 | Return a minion to owner's hand |
+| Mage | Spirit | 4 | 3 | Minion | 1/3 | Hidden; Ranged |
 | Mage | Summon Primordial | 2 | 8 | Spell | — | Return all cards a hero controls to their owner's hand, then summon a Primordial |
 | Mage | Primordial | — | 8 | Minion | 10/10 | — (only summoned, by Summon Primordial) |
 | Mage | Study | 7 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
