@@ -16,7 +16,7 @@ COPY src src
 COPY examples examples
 ARG GAME
 ARG ENTRY
-RUN nim c -d:coworld --nimcache:/tmp/nimcache -o:/out/game examples/${GAME}/${ENTRY}.nim
+RUN nim c -d:coworld -d:lto --nimcache:/tmp/nimcache -o:/out/game examples/${GAME}/${ENTRY}.nim
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4t64 ca-certificates \
