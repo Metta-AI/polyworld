@@ -66,4 +66,24 @@ block:
   polyworld_replay_camera(9, 0, 0, 0, 0)
   doAssert camera.mode == FixedCamera
 
+echo "Testing frames that only simulate keep the drawn camera"
+block:
+  let
+    viewport = ivec2(1280, 576)
+    drawn =
+      perspective(45.0'f32, 1280 / 576, 0.1'f32, 1000.0'f32) *
+      lookAt(vec3(0, 30, 20), vec3(0, 0, 0), vec3(0, 1, 0))
+    moved =
+      perspective(45.0'f32, 1280 / 576, 0.1'f32, 1000.0'f32) *
+      lookAt(vec3(10, 30, 20), vec3(10, 0, 0), vec3(0, 1, 0))
+  publishReplayControlFrame(drawn, viewport)
+  doAssert polyworld_replay_project(0, 0, 0) == 1
+  let x = polyworld_replay_result(0)
+  publishReplayControlFrame(moved, ivec2(640, 288), drawn = false)
+  doAssert polyworld_replay_project(0, 0, 0) == 1
+  doAssert polyworld_replay_result(0) == x
+  publishReplayControlFrame(moved, viewport)
+  doAssert polyworld_replay_project(0, 0, 0) == 1
+  doAssert polyworld_replay_result(0) < x
+
 echo "Replay control tests passed"

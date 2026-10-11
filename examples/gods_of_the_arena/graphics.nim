@@ -22,6 +22,8 @@ when defined(takeScreenshot):
 
 const
   DefaultCameraDistance = 17.0'f / 1.2'f
+  SeekDrawSeconds = 0.25
+    ## While seeking, draw at most this often so the view still moves.
   ProfileWarmupFrames {.intdefine.} = 0
   AtlasPath = TmpRoot & "/gota.atlas.png"
   MossyStoneSurface = SurfaceNames.len
@@ -2057,6 +2059,8 @@ proc runGraphics*() =
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
+    frameDrawn = true
+    lastDrawTime = 0.0
   when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
     var profileWarmup = 0
 
@@ -2157,331 +2161,343 @@ proc runGraphics*() =
       updatePlayerSpells(viewProjection)
       updatePlayerOrder(viewProjection)
 
-      profileBlock "drawWorld":
-        # The clock changes palettes while the light stays fixed for
-        # readable silhouettes and shadows on both sides of the map.
-        scene.toon.setArenaHour(
-          clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
-        setEnvironmentPalette(scene.toon)
+      # While seeking, most frames only simulate: a draw costs about as much
+      # as a 33 ms seek slice, so skipping it cuts long seeks by a third.
+      let seekingNow =
+        transport.targetTick >= 0 or transport.restoreTick >= 0
+      frameDrawn = not seekingNow or
+        epochTime() - lastDrawTime >= SeekDrawSeconds
+      if frameDrawn:
+        lastDrawTime = epochTime()
+        profileBlock "drawWorld":
+          # The clock changes palettes while the light stays fixed for
+          # readable silhouettes and shadows on both sides of the map.
+          scene.toon.setArenaHour(
+            clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
+          setEnvironmentPalette(scene.toon)
 
-        profileBlock "prepare character poses":
-          var count = 0
-          for footman in run.world.footmen:
-            if not visibleInView(footman):
-              continue
-            let
-              model = creepModel(footman)
-              clip = creepClip(footman)
-              dead = footman.hp <= 0 or footman.state == Dying
-            creepEyes(footman, dead)
-            if count == worldCharacters.len:
-              worldCharacters.add WorldCharacter()
-            worldCharacters[count].id = footman.id
-            worldCharacters[count].living = not dead
-            worldCharacters[count].eyes = creepEyeState(footman)
-            scene.prepareCharacter(
-              worldCharacters[count].pose,
-              model,
-              unitRenderPoint(footman.id, footman.position),
-              unitRenderFacing(footman.id, footman.facing),
-              clip,
-              creepRenderTime(footman),
-              sizeFactor = creepSize(footman)
-            )
-            inc count
-          for hero in run.world.heroes:
-            if not visibleInView(hero.team, hero.position):
-              continue
-            let
-              pose = heroRenderPose(hero)
-              dead = hero.hp <= 0 or hero.state == Dying
-            heroEyes[hero.class].setDead(dead)
-            if count == worldCharacters.len:
-              worldCharacters.add WorldCharacter()
-            worldCharacters[count].id = hero.id
-            worldCharacters[count].living = not dead
-            worldCharacters[count].eyes = addr heroEyes[hero.class]
-            scene.prepareCharacter(
-              worldCharacters[count].pose,
-              heroModels[hero.class],
-              unitRenderPoint(hero.id, hero.position),
-              unitRenderFacing(hero.id, hero.facing),
-              pose.clip,
-              pose.time,
-              sizeFactor = hero.heroSizeFactor()
-            )
-            inc count
-          for god in gods:
-            if not visibleInView(
-                god.team, run.world.forts[god.team.ord].center):
-              continue
-            let
-              model = godModels[god.team]
-              clip = godRenderClips[god.team][god.godClip]
-              dead = run.world.forts[god.team.ord].hp <= 0
-            godEyes[god.team].setDead(dead)
-            var animTime = god.animTime
-            if run.world.gameOver and
-              (run.world.draw or god.team != run.world.winner):
-                animTime = min(animTime, clipDuration(model, clip))
-            if count == worldCharacters.len:
-              worldCharacters.add WorldCharacter()
-            worldCharacters[count].id = run.world.forts[god.team.ord].id
-            worldCharacters[count].living = not dead
-            worldCharacters[count].eyes = addr godEyes[god.team]
-            scene.prepareCharacter(
-              worldCharacters[count].pose,
-              model,
-              god.position,
-              god.facing,
-              clip,
-              animTime
-            )
-            inc count
-          worldCharacterCount = count
-
-        profileBlock "Shadow pass":
-          sunDepthPasses(window.size):
-            drawTerrainSunDepth()
-            for tower in run.world.buildings:
-              if tower.hp <= 0:
+          profileBlock "prepare character poses":
+            var count = 0
+            for footman in run.world.footmen:
+              if not visibleInView(footman):
                 continue
-              towerPacks[tower.team].drawPropSunDepth(
-                buildingPropName(tower),
-                renderPoint(tower.position),
-                renderFacing(tower.facing),
-                buildingScale(tower)
-              )
-            scene.sunDepthPass = true
-            profileBlock "Shadow characters":
-              drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
-            scene.sunDepthPass = false
-        profileBlock "Main pass":
-          when not defined(emscripten):
-            glEnable(GL_MULTISAMPLE)
-          glClearColor(0.05, 0.06, 0.09, 1.0)
-          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-          scene.toon.drawBackground()
-          updateTerrainVision()
-          if showTiles and (terrainEdgeWorld != run.world or
-              terrainEdgeRevision != run.world.navigationRevision):
-            updateTerrainEdges(navigationOpen)
-            terrainEdgeWorld = run.world
-            terrainEdgeRevision = run.world.navigationRevision
-          drawTerrain(viewProjection, showTiles)
-          for tower in run.world.buildings:
-            if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
-              continue
-            towerPacks[tower.team].drawProp(
-              buildingPropName(tower),
-              renderPoint(tower.position),
-              renderFacing(tower.facing),
-              buildingScale(tower),
-              viewProjection
-            )
-
-          if showOccludedCharacters:
-            profileBlock "Character outline pass":
-              occlusionOutline.beginMask(window.size)
-              beginCharacters(scene, window, view, projection, cameraEye)
-              drawWorldCharacters(
-                scene,
-                worldCharacters,
-                worldCharacterCount,
-                livingOnly = true
-              )
-              finishCharacters(scene)
-              # Only opaque scenery is in the window depth buffer here.
-              occlusionOutline.drawOutline(OccludedOutlineColor)
-
-          profileBlock "Main characters":
-            beginCharacters(scene, window, view, projection, cameraEye)
-            drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
-            finishCharacters(scene)
-
-        # The arena's lakes, each with its own reflection. The water mirrors the sky,
-        # terrain, towers and characters; particles, spells and markers stay out of it.
-        if lakes.len > 0:
-          captureScene(window.size)
-        for lake in lakes:
-          if lake.layer notin 0 ..< waterLayerRanges.len or
-            waterLayerRanges[lake.layer].len == 0:
-              continue
-          let reflected = lake.params.reflecting()
-          if reflected:
-            profileBlock "Water mirror pass":
               let
-                mirrored = reflectedCamera(
-                  cameraEye,
-                  view,
-                  projection,
-                  waterLayerSurfaces[lake.layer] + lake.params.lift
-                )
-                mirroredViewProjection = mirrored.projection * mirrored.view
-              beginReflection(window.size)
-              drawWaterSky(
-                mirroredViewProjection,
-                mirrored.eye,
-                scene.toon.skyColor,
-                scene.toon.horizonColor,
-                scene.toon.groundColor
+                model = creepModel(footman)
+                clip = creepClip(footman)
+                dead = footman.hp <= 0 or footman.state == Dying
+              creepEyes(footman, dead)
+              if count == worldCharacters.len:
+                worldCharacters.add WorldCharacter()
+              worldCharacters[count].id = footman.id
+              worldCharacters[count].living = not dead
+              worldCharacters[count].eyes = creepEyeState(footman)
+              scene.prepareCharacter(
+                worldCharacters[count].pose,
+                model,
+                unitRenderPoint(footman.id, footman.position),
+                unitRenderFacing(footman.id, footman.facing),
+                clip,
+                creepRenderTime(footman),
+                sizeFactor = creepSize(footman)
               )
-              drawTerrain(mirroredViewProjection, false)
+              inc count
+            for hero in run.world.heroes:
+              if not visibleInView(hero.team, hero.position):
+                continue
+              let
+                pose = heroRenderPose(hero)
+                dead = hero.hp <= 0 or hero.state == Dying
+              heroEyes[hero.class].setDead(dead)
+              if count == worldCharacters.len:
+                worldCharacters.add WorldCharacter()
+              worldCharacters[count].id = hero.id
+              worldCharacters[count].living = not dead
+              worldCharacters[count].eyes = addr heroEyes[hero.class]
+              scene.prepareCharacter(
+                worldCharacters[count].pose,
+                heroModels[hero.class],
+                unitRenderPoint(hero.id, hero.position),
+                unitRenderFacing(hero.id, hero.facing),
+                pose.clip,
+                pose.time,
+                sizeFactor = hero.heroSizeFactor()
+              )
+              inc count
+            for god in gods:
+              if not visibleInView(
+                  god.team, run.world.forts[god.team.ord].center):
+                continue
+              let
+                model = godModels[god.team]
+                clip = godRenderClips[god.team][god.godClip]
+                dead = run.world.forts[god.team.ord].hp <= 0
+              godEyes[god.team].setDead(dead)
+              var animTime = god.animTime
+              if run.world.gameOver and
+                (run.world.draw or god.team != run.world.winner):
+                  animTime = min(animTime, clipDuration(model, clip))
+              if count == worldCharacters.len:
+                worldCharacters.add WorldCharacter()
+              worldCharacters[count].id = run.world.forts[god.team.ord].id
+              worldCharacters[count].living = not dead
+              worldCharacters[count].eyes = addr godEyes[god.team]
+              scene.prepareCharacter(
+                worldCharacters[count].pose,
+                model,
+                god.position,
+                god.facing,
+                clip,
+                animTime
+              )
+              inc count
+            worldCharacterCount = count
+
+          profileBlock "Shadow pass":
+            sunDepthPasses(window.size):
+              drawTerrainSunDepth()
               for tower in run.world.buildings:
-                if tower.hp <= 0 or
-                  not visibleInView(tower.team, tower.position):
-                    continue
-                towerPacks[tower.team].drawProp(
+                if tower.hp <= 0:
+                  continue
+                towerPacks[tower.team].drawPropSunDepth(
                   buildingPropName(tower),
                   renderPoint(tower.position),
                   renderFacing(tower.facing),
-                  buildingScale(tower),
-                  mirroredViewProjection
+                  buildingScale(tower)
                 )
-              profileBlock "Water mirror characters":
-                beginCharacters(
-                  scene,
-                  window,
-                  mirrored.view,
-                  mirrored.projection,
-                  mirrored.eye
-                )
+              scene.sunDepthPass = true
+              profileBlock "Shadow characters":
                 drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
-                finishCharacters(scene)
-              glBindFramebuffer(GL_FRAMEBUFFER, 0)
-              glViewport(0, 0, window.size.x, window.size.y)
-          drawWaterBody(
-            lake,
-            viewProjection,
-            cameraEye,
-            window.size,
-            sunDirection,
-            scene.toon.highlightColor,
-            ivec4(0, 0, window.size.x, window.size.y),
-            reflected
-          )
-        profileBlock "World effects":
-          particles.drawParticles(
-            viewProjection,
-            barCameraRight,
-            barCameraUp,
-            cameraForward
-          )
-          spellEffects.drawSpells(
-            run.world, viewProjection, animationAlpha, viewMode
-          )
-          clickMarks.drawClickMarks(viewProjection)
-        worldShapes.clear()
-        for hero in run.world.heroes:
-          if hero.portalEnds <= run.world.tick or hero.hp <= 0:
-            continue
-          for point in [hero.position, hero.portalDestination]:
-            if not visibleInView(hero.team, point):
-              continue
-            var ring: array[49, Vec3]
-            let
-              center = renderPoint(point)
-              radius = 0.5'f + (hero.portalEnds - run.world.tick).float32 /
-                PortalChannelTicks.float32
-            for i in 0 .. ring.high:
-              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
-              ring[i] = center + vec3(cos(angle) * radius, 0.12'f,
-                sin(angle) * radius)
-            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.06'f)
-        if playerMode() and armedItem >= 0:
-          let hero = run.world.heroById(playerHeroId())
-          for tower in run.world.buildings:
-            if tower.kind != TowerBuilding or tower.hp <= 0 or
-              tower.team != hero.team:
+              scene.sunDepthPass = false
+          profileBlock "Main pass":
+            when not defined(emscripten):
+              glEnable(GL_MULTISAMPLE)
+            glClearColor(0.05, 0.06, 0.09, 1.0)
+            glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+            scene.toon.drawBackground()
+            updateTerrainVision()
+            if showTiles and (terrainEdgeWorld != run.world or
+                terrainEdgeRevision != run.world.navigationRevision):
+              updateTerrainEdges(navigationOpen)
+              terrainEdgeWorld = run.world
+              terrainEdgeRevision = run.world.navigationRevision
+            drawTerrain(viewProjection, showTiles)
+            for tower in run.world.buildings:
+              if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
                 continue
-            var ring: array[65, Vec3]
-            let
-              center = renderPoint(tower.position)
-              radius = TowerAttackRanges[tower.tier].float32 / WorldScale.float32
-            for i in 0 .. ring.high:
-              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
-              ring[i] = center + vec3(cos(angle) * radius, 0,
-                sin(angle) * radius)
-              ring[i].y = groundHeight(ring[i].x, ring[i].z) +
-                groundOffset(ring[i].x, ring[i].z) + 0.12'f
-            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.04'f)
-        if showPaths:
-          for hero in run.world.heroes:
-            if hero.state == Dying or hero.hp <= 0:
-              continue
-            if hero.movePathIndex >= hero.movePath.len:
-              continue
-            let color =
-              if hero.team == RedTeam:
-                rgbx(210, 72, 64, 255)
-              else:
-                rgbx(64, 120, 220, 255)
-            pathPoints.setLen(0)
-            let now = unitRenderPoint(hero.id, hero.position)
-            pathPoints.add vec3(now.x, now.y + 0.2'f, now.z)
-            for i in hero.movePathIndex ..< hero.movePath.len:
-              let p = renderPoint(hero.movePath[i])
-              pathPoints.add vec3(p.x, p.y + 0.2'f, p.z)
-            if pathPoints.len >= 2:
-              worldShapes.addPolyline(pathPoints, color)
-        worldShapes.draw(viewProjection)
-        if not cleanScreenshot:
-          drawWorldUnitBars(
-            worldBarRenderer,
-            viewProjection,
-            barCameraRight,
-            barCameraUp,
-            dt
-          )
-          drawSelectedOutline(view, projection, viewProjection)
-          drawCreepWaypoints(viewProjection, barCameraRight, barCameraUp)
+              towerPacks[tower.team].drawProp(
+                buildingPropName(tower),
+                renderPoint(tower.position),
+                renderFacing(tower.facing),
+                buildingScale(tower),
+                viewProjection
+              )
 
-      profileBlock "ui":
-        if not cleanScreenshot and not embedded:
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-          sk.beginUi(window, window.size)
-          drawUi(
-            sk,
+            if showOccludedCharacters:
+              profileBlock "Character outline pass":
+                occlusionOutline.beginMask(window.size)
+                beginCharacters(scene, window, view, projection, cameraEye)
+                drawWorldCharacters(
+                  scene,
+                  worldCharacters,
+                  worldCharacterCount,
+                  livingOnly = true
+                )
+                finishCharacters(scene)
+                # Only opaque scenery is in the window depth buffer here.
+                occlusionOutline.drawOutline(OccludedOutlineColor)
+
+            profileBlock "Main characters":
+              beginCharacters(scene, window, view, projection, cameraEye)
+              drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
+              finishCharacters(scene)
+
+          # The arena's lakes, each with its own reflection. The water mirrors the sky,
+          # terrain, towers and characters; particles, spells and markers stay out of it.
+          if lakes.len > 0:
+            captureScene(window.size)
+          for lake in lakes:
+            if lake.layer notin 0 ..< waterLayerRanges.len or
+              waterLayerRanges[lake.layer].len == 0:
+                continue
+            let reflected = lake.params.reflecting()
+            if reflected:
+              profileBlock "Water mirror pass":
+                let
+                  mirrored = reflectedCamera(
+                    cameraEye,
+                    view,
+                    projection,
+                    waterLayerSurfaces[lake.layer] + lake.params.lift
+                  )
+                  mirroredViewProjection = mirrored.projection * mirrored.view
+                beginReflection(window.size)
+                drawWaterSky(
+                  mirroredViewProjection,
+                  mirrored.eye,
+                  scene.toon.skyColor,
+                  scene.toon.horizonColor,
+                  scene.toon.groundColor
+                )
+                drawTerrain(mirroredViewProjection, false)
+                for tower in run.world.buildings:
+                  if tower.hp <= 0 or
+                    not visibleInView(tower.team, tower.position):
+                      continue
+                  towerPacks[tower.team].drawProp(
+                    buildingPropName(tower),
+                    renderPoint(tower.position),
+                    renderFacing(tower.facing),
+                    buildingScale(tower),
+                    mirroredViewProjection
+                  )
+                profileBlock "Water mirror characters":
+                  beginCharacters(
+                    scene,
+                    window,
+                    mirrored.view,
+                    mirrored.projection,
+                    mirrored.eye
+                  )
+                  drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
+                  finishCharacters(scene)
+                glBindFramebuffer(GL_FRAMEBUFFER, 0)
+                glViewport(0, 0, window.size.x, window.size.y)
+            drawWaterBody(
+              lake,
+              viewProjection,
+              cameraEye,
+              window.size,
+              sunDirection,
+              scene.toon.highlightColor,
+              ivec4(0, 0, window.size.x, window.size.y),
+              reflected
+            )
+          profileBlock "World effects":
+            particles.drawParticles(
+              viewProjection,
+              barCameraRight,
+              barCameraUp,
+              cameraForward
+            )
+            spellEffects.drawSpells(
+              run.world, viewProjection, animationAlpha, viewMode
+            )
+            clickMarks.drawClickMarks(viewProjection)
+          worldShapes.clear()
+          for hero in run.world.heroes:
+            if hero.portalEnds <= run.world.tick or hero.hp <= 0:
+              continue
+            for point in [hero.position, hero.portalDestination]:
+              if not visibleInView(hero.team, point):
+                continue
+              var ring: array[49, Vec3]
+              let
+                center = renderPoint(point)
+                radius = 0.5'f + (hero.portalEnds - run.world.tick).float32 /
+                  PortalChannelTicks.float32
+              for i in 0 .. ring.high:
+                let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+                ring[i] = center + vec3(cos(angle) * radius, 0.12'f,
+                  sin(angle) * radius)
+              worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.06'f)
+          if playerMode() and armedItem >= 0:
+            let hero = run.world.heroById(playerHeroId())
+            for tower in run.world.buildings:
+              if tower.kind != TowerBuilding or tower.hp <= 0 or
+                tower.team != hero.team:
+                  continue
+              var ring: array[65, Vec3]
+              let
+                center = renderPoint(tower.position)
+                radius = TowerAttackRanges[tower.tier].float32 / WorldScale.float32
+              for i in 0 .. ring.high:
+                let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+                ring[i] = center + vec3(cos(angle) * radius, 0,
+                  sin(angle) * radius)
+                ring[i].y = groundHeight(ring[i].x, ring[i].z) +
+                  groundOffset(ring[i].x, ring[i].z) + 0.12'f
+              worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.04'f)
+          if showPaths:
+            for hero in run.world.heroes:
+              if hero.state == Dying or hero.hp <= 0:
+                continue
+              if hero.movePathIndex >= hero.movePath.len:
+                continue
+              let color =
+                if hero.team == RedTeam:
+                  rgbx(210, 72, 64, 255)
+                else:
+                  rgbx(64, 120, 220, 255)
+              pathPoints.setLen(0)
+              let now = unitRenderPoint(hero.id, hero.position)
+              pathPoints.add vec3(now.x, now.y + 0.2'f, now.z)
+              for i in hero.movePathIndex ..< hero.movePath.len:
+                let p = renderPoint(hero.movePath[i])
+                pathPoints.add vec3(p.x, p.y + 0.2'f, p.z)
+              if pathPoints.len >= 2:
+                worldShapes.addPolyline(pathPoints, color)
+          worldShapes.draw(viewProjection)
+          if not cleanScreenshot:
+            drawWorldUnitBars(
+              worldBarRenderer,
+              viewProjection,
+              barCameraRight,
+              barCameraUp,
+              dt
+            )
+            drawSelectedOutline(view, projection, viewProjection)
+            drawCreepWaypoints(viewProjection, barCameraRight, barCameraUp)
+
+        profileBlock "ui":
+          if not cleanScreenshot and not embedded:
+            glDisable(GL_DEPTH_TEST)
+            glDisable(GL_CULL_FACE)
+            glDisable(GL_BLEND)
+            when not defined(emscripten):
+              glDisable(GL_MULTISAMPLE)
+            glActiveTexture(GL_TEXTURE0)
+            glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+            sk.beginUi(window, window.size)
+            drawUi(
+              sk,
+              window,
+              transport,
+              cameraTarget,
+              cameraDistance,
+              viewMode,
+              primaryId,
+              selectedIds,
+              followSelection,
+              actionCam,
+              focusPlayerHero
+            )
+            sk.endUi()
+            drawStatsOverlay(sk, window)
+        when defined(takeScreenshot) and ActiveTracePath.len == 0:
+          captureScreenshot(
             window,
-            transport,
-            cameraTarget,
-            cameraDistance,
-            viewMode,
-            primaryId,
-            selectedIds,
-            followSelection,
-            actionCam,
-            focusPlayerHero
+            screenshotFrame,
+            30,
+            screenshotPath
           )
-          sk.endUi()
-          drawStatsOverlay(sk, window)
-      when defined(takeScreenshot) and ActiveTracePath.len == 0:
-        captureScreenshot(
-          window,
-          screenshotFrame,
-          30,
-          screenshotPath
-        )
       profileBlock "present":
-        window.presentFrame(framePaceHz)
+        if frameDrawn:
+          window.presentFrame(framePaceHz)
         reportDirectorFrame(
           actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
         )
         reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
-        publishReplayControlFrame(viewProjection, window.size)
+        publishReplayControlFrame(viewProjection, window.size, frameDrawn)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true
 
   while not window.closeRequested:
     pollEvents()
-    waitForDisplay()
+    # Undrawn seek frames only yield, so the seek resumes without waiting
+    # for the next display refresh.
+    if frameDrawn:
+      waitForDisplay()
 
   if not run.replayMode:
     saveRecording()

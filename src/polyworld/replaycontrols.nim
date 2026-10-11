@@ -146,13 +146,20 @@ proc unprojectToGround*(
   point.y = y
   true
 
-proc publishReplayControlFrame*(viewProjection: Mat4, viewport: IVec2) =
+proc publishReplayControlFrame*(
+    viewProjection: Mat4,
+    viewport: IVec2,
+    drawn = true
+) =
   ## Records the presented camera and reports the frame to the page.
-  ## Call it after presenting, next to `reportReplayFrame`.
+  ## Call it after presenting, next to `reportReplayFrame`. A frame that only
+  ## simulated (`drawn` false) reports its tick but keeps the last drawn
+  ## camera, so projection and picking still match the pixels on screen.
   if not installed():
     return
-  control.viewProjection = viewProjection
-  control.viewport = viewport.vec2
+  if drawn:
+    control.viewProjection = viewProjection
+    control.viewport = viewport.vec2
   when defined(emscripten):
     let
       matrix = cast[ptr UncheckedArray[float32]](control.viewProjection.addr)
@@ -163,8 +170,8 @@ proc publishReplayControlFrame*(viewProjection: Mat4, viewport: IVec2) =
       seeking = transport.targetTick >= 0 or transport.restoreTick >= 0
       speed = transport.speed
       looping = transport.repeating
-      width = viewport.x
-      height = viewport.y
+      width = control.viewport.x.int32
+      height = control.viewport.y.int32
       current = transport.seekSerial == control.seekSerial
       seekId = if current: control.seekId else: 0'i32
       seekTick = if current: control.seekTick else: -1'i32
@@ -175,10 +182,10 @@ proc publishReplayControlFrame*(viewProjection: Mat4, viewport: IVec2) =
       Module.polyworldControlFrame({
         tick: $1, endTick: $2, playing: !!$3, seeking: !!$4, speed: $5,
         loop: !!$6, width: $7, height: $8, seekId: $9, seekTick: $10,
-        viewProjection: viewProjection
+        drawn: !!$11, viewProjection: viewProjection
       });
     }, `matrix`, `tick`, `endTick`, `playing`, `seeking`, `speed`, `looping`,
-      `width`, `height`, `seekId`, `seekTick`);
+      `width`, `height`, `seekId`, `seekTick`, `drawn`);
     """.}
 
 proc polyworld_replay_ready*(): int32 {.replayExport.} =

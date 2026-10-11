@@ -21,9 +21,19 @@ Options are read from the hash, then the query, like `replay`.
 | `loop=0` or `loop=1` | Overrides looping. Replay builds loop by default. |
 | `seekSlice=MS` | Simulation time per frame while seeking. The default is 100 ms, or 33 ms with `embed=1`. |
 
-Shorter slices keep the page responsive during long seeks but finish them later.
-On an M-series Mac with a GPU, a cold seek over a 28,909-tick GotA match took
-28 s at 12 ms, 17 s at 33 ms and 12 s at 100 ms.
+While a seek is in flight the viewer draws at most four frames a second; the
+frames between only simulate and report their tick, without waiting for the next
+display refresh. Shorter slices keep the page more responsive during long seeks
+and cost little seek time now that most frames are not drawn. A cold seek to the
+end of a 23,642-tick GotA replay, in headless Chromium on an M-series Mac with
+Metal, with a 10 ms timer in the host page:
+
+| Slice | Seek time | Host timer gap p90 | Cancel |
+| --- | --- | --- | --- |
+| 10 ms | 11.7 s | 23 ms | 54 ms |
+| 20 ms | 9.8 s | 47 ms | 30 ms |
+| 33 ms (embed default) | 9.0 s | 75 ms | 27 ms |
+| 100 ms | 9.1 s | 224 ms | 23 ms |
 
 ## Same-origin hosts
 
@@ -34,7 +44,7 @@ GotA that is `simulation / WorldScale`, centred on the map, with y up.
 | Call | Result |
 | --- | --- |
 | `ready()` | `true` once the first controlled frame has been drawn. |
-| `state()` | The latest frame: `tick`, `endTick`, `playing`, `seeking`, `speed`, `loop`, `seekId`, `seekTick`, `viewProjection` (16 floats, column-major), framebuffer `width`/`height`, `cssWidth`/`cssHeight`. |
+| `state()` | The latest frame: `tick`, `endTick`, `playing`, `seeking`, `speed`, `loop`, `seekId`, `seekTick`, `drawn`, `viewProjection` (16 floats, column-major), framebuffer `width`/`height`, `cssWidth`/`cssHeight`. A frame with `drawn` false only simulated during a seek: its `tick` is simulation progress, and its camera and size are those of the last drawn frame, which is still on screen. The frame that lands a seek is always drawn. |
 | `onFrame(fn)` | Calls `fn(state)` after every presented frame. Returns an unsubscribe function. |
 | `onKey(fn)` | With `embed=1`, calls `fn({event, key, code, altKey, ctrlKey, metaKey, shiftKey, repeat})` for key presses. |
 | `seek(tick, seekId = 0)` | Starts an exact seek and keeps the play state. Frames report `seekId` and `seekTick` until another seek replaces it; the seek has landed when `seekId` matches, `seeking` is false and `tick === seekTick`. |
