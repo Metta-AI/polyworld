@@ -13,6 +13,10 @@ const
   TransportHeight* = 80.0'f32
   PlayerSpeeds* = [1'i32, 2, 4, 16]
   CatchUpSeconds* = 0.1
+  PlaybackLagSeconds* = 0.25
+    ## Wall-clock time realtime playback may fall behind before it drops
+    ## time. Scaling the simulated backlog by speed lets fast speeds keep up
+    ## when frames are slower than ticks.
   IconSize = 64.0'f32
   IconGap = 8.0'f32
   GroupGap = 24.0'f32
@@ -203,7 +207,7 @@ proc startFrame*(player: var Player, dt: float32, tickRate: int32) =
     return
   player.accumulator = min(
     player.accumulator + dt * player.speed.float32,
-    0.25'f32
+    PlaybackLagSeconds * player.speed.float32
   )
 
 proc shouldTick*(
@@ -211,8 +215,8 @@ proc shouldTick*(
     frameStart: float64
 ): bool =
   ## Returns whether one more simulation tick belongs in this frame.
-  ## Seeks yield after `catchUpSeconds` so the page stays responsive, and
-  ## paused seeks stop exactly on their target.
+  ## Seeks and realtime playback yield after `catchUpSeconds` so the page
+  ## stays responsive, and paused seeks stop exactly on their target.
   if player.reachedEnd:
     if player.repeating:
       player.seekTo(0, automatic = true)
@@ -228,7 +232,8 @@ proc shouldTick*(
   if not player.playing:
     return false
   let step = 1.0'f32 / max(player.tickRate, 1).float32
-  if player.accumulator >= step:
+  if player.accumulator >= step and
+      epochTime() - frameStart < player.catchUpSeconds:
     player.accumulator -= step
     return true
   false
