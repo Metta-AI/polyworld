@@ -182,7 +182,25 @@ def check_control(base, executable, output, gpu=False):
         frame.evaluate(replay + '.pause()')
         assert state['playing'] and state['speed'] == 2 and state['tick'] > first, state
         report['ticks_per_second_at_2x'] = (state['tick'] - first) / 2
-        print('control: speed passed', flush=True)
+        # Fast speeds deliver what they report: frames slower than ticks
+        # carry a larger backlog instead of dropping time.
+        for speed in (4, 16):
+            assert frame.evaluate(f'{replay}.setSpeed({speed})') == speed
+            frame.evaluate(replay + '.play()')
+            frame.evaluate('nextFrames(5)')
+            first = frame.evaluate(replay + '.state().tick')
+            started = time.monotonic()
+            page.wait_for_timeout(3000)
+            state = frame.evaluate(replay + '.state()')
+            elapsed = time.monotonic() - started
+            frame.evaluate(replay + '.pause()')
+            achieved = (state['tick'] - first) / elapsed / 24
+            report[f'achieved_speed_at_{speed}x'] = round(achieved, 2)
+            assert state['playing'] and state['tick'] > first, state
+            if gpu:
+                assert achieved >= speed * 0.85, report
+        frame.evaluate(replay + '.setSpeed(2)')
+        print('control: speed passed', {k: v for k, v in report.items() if 'speed' in k}, flush=True)
 
         # A frozen camera holds still while playing; projection round-trips.
         frame.evaluate(replay + ".camera({mode: 'fixed', x: 0, z: 0, distance: 40})")

@@ -40,7 +40,7 @@ GotA that is `simulation / WorldScale`, centred on the map, with y up.
 | `seek(tick, seekId = 0)` | Starts an exact seek and keeps the play state. Frames report `seekId` and `seekTick` until another seek replaces it; the seek has landed when `seekId` matches, `seeking` is false and `tick === seekTick`. |
 | `cancelSeek()` | Stops a seek, including a pending backward restore, on the last simulated tick. |
 | `play()`, `pause()` | Play rewinds first when already at the end. |
-| `setSpeed(x)` | Applies the fastest of 1, 2, 4 or 16 at or below `x` and returns it. |
+| `setSpeed(x)` | Applies the fastest of 1, 2, 4 or 16 at or below `x` and returns it. Playback runs at that speed while the machine keeps up: slow frames simulate several ticks each, within the seek slice, and playback drops time only after falling a quarter second of wall time behind. |
 | `setLoop(on)`, `setSeekSlice(ms)` | As the URL options. |
 | `camera({mode, ...})` | `director`; `fixed` with `x`, `z` and optional `distance`; `follow` with unit `id`; `freeze` holds the current view. Every mode except `director` stops the automatic camera. |
 | `freezeCamera()` | Same as `camera({mode: 'freeze'})`. |
@@ -98,6 +98,7 @@ transport changes and the exports natively. The browser test
 (`coworld/tools/test_browser_with_playwright.py`, or `--control-only` for just
 this part) checks a cold seek to the last tick for progress, exact seeks, cancel,
 pause, speed, frozen cameras, projection round trips, picking, the postMessage
-bridge and embed input handling. Page responsiveness during the seek is asserted
+bridge and embed input handling. With `--gpu`, 4× and 16× playback must reach
+85% of the requested speed. Page responsiveness during the seek is asserted
 only with `--gpu` (hardware rendering through Metal): SwiftShader takes seconds
 per frame late in a match, so there the timer gaps are only recorded.

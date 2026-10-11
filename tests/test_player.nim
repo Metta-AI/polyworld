@@ -61,9 +61,36 @@ block:
   p.startFrame(0.02, 24)
   doAssert p.takeRestore() == -1
   doAssert p.accumulator > 0
-  doAssert not p.shouldTick(0)
+  doAssert not p.shouldTick(epochTime())
   p.startFrame(0.03, 24)
-  doAssert p.shouldTick(0)
+  doAssert p.shouldTick(epochTime())
+
+echo "Testing fast playback keeps up when frames are slow"
+block:
+  var p = initPlayer(live = false, durationTicks = 10000, speed = 16)
+  p.sync(0, 10000, false)
+  # Ten frames a second at 16x owe 1.6 s, 38 ticks, each frame.
+  p.startFrame(0.1, 24)
+  var ticks = 0
+  while p.shouldTick(epochTime()):
+    inc ticks
+  doAssert ticks == 38
+  # The backlog stops at a quarter second of wall time.
+  for i in 0 ..< 10:
+    p.startFrame(0.1, 24)
+  doAssert p.accumulator == PlaybackLagSeconds * 16
+  p.setSpeed(0)
+  p.startFrame(0.1, 24)
+  doAssert p.accumulator == PlaybackLagSeconds
+
+echo "Testing realtime playback yields after the frame budget"
+block:
+  var p = initPlayer(live = false, durationTicks = 10000, speed = 16)
+  p.sync(0, 10000, false)
+  p.startFrame(0.1, 24)
+  let owed = p.accumulator
+  doAssert not p.shouldTick(epochTime() - p.catchUpSeconds - 0.01)
+  doAssert p.accumulator == owed
 
 echo "Testing play/pause stops catch-up"
 block:
