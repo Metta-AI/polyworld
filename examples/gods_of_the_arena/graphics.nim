@@ -14,8 +14,8 @@ import
   polyworld/quadterrain,
   polyworld/shadows,
   polyworld/terrainsurfaces, polyworld/waters,
-  polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
-    visions, worldbars, worldtexts]
+  polyworld/[chrome, inputs, replaycontrols, rtscameras, selectionoutlines,
+    shapes, viewers, visions, worldbars, worldtexts]
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -897,11 +897,12 @@ proc runGraphics*() =
         sk.atlasTextureId()
       )
 
-  proc pickEntity(viewProjection: Mat4): int32 =
+  proc pickEntity(viewProjection: Mat4,
+      mouse = window.mousePos.vec2): int32 =
     ## Finds the closest visible mesh under the pointer by triangle hit.
     let
       (origin, dir) = mouseRay(
-        window.mousePos.vec2,
+        mouse,
         window.size.vec2,
         viewProjection
       )
@@ -1999,6 +2000,60 @@ proc runGraphics*() =
       followSelection = false
       actionCam.takeManual()
 
+  proc controlGroundY(x, z: float32): float32 =
+    ## Returns the drawn height of the topmost surface for replay control.
+    surfaceHeight(x, z) + groundOffset(x, z)
+
+  proc controlUnit(id: int32): ReplayUnit =
+    ## Reports where replay control should find one selectable object.
+    let target = selectionTarget(id)
+    result = ReplayUnit(
+      found: target.found,
+      alive: target.found,
+      position: target.position,
+      seat: -1
+    )
+    for slot, hero in run.world.heroes:
+      if hero.id == id:
+        result.seat = int32(slot)
+        result.alive = target.found and hero.state != Dying and hero.hp > 0
+    let footman = footmanById(run.world, id)
+    if footman.id != 0:
+      result.alive = target.found and footman.state != Dying and
+        footman.hp > 0
+
+  proc applyControlCamera(request: ReplayCameraRequest) =
+    ## Hands the camera to the director, a fixed view, or a followed unit.
+    cancelCameraEase(cameraEase)
+    case request.mode
+    of DirectorCamera:
+      if not actionCam.enabled:
+        actionCam.toggle(followSelection)
+    of FixedCamera:
+      actionCam.takeManual()
+      followSelection = false
+      cameraTarget = vec3(
+        request.target.x,
+        controlGroundY(request.target.x, request.target.y),
+        request.target.y
+      )
+      if request.distance > 0:
+        cameraDistance = request.distance
+    of FollowCamera:
+      selectEntity(request.id)
+    of FrozenCamera:
+      actionCam.takeManual()
+      followSelection = false
+
+  let embedded = replayEmbedded()
+  installReplayControl(transport, ReplayControlHooks(
+    groundY: controlGroundY,
+    pick: proc(screen: Vec2, viewProjection: Mat4): int32 =
+      pickEntity(viewProjection, screen),
+    unit: controlUnit,
+    camera: applyControlCamera
+  ))
+
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
@@ -2382,7 +2437,7 @@ proc runGraphics*() =
           drawCreepWaypoints(viewProjection, barCameraRight, barCameraUp)
 
       profileBlock "ui":
-        if not cleanScreenshot:
+        if not cleanScreenshot and not embedded:
           glDisable(GL_DEPTH_TEST)
           glDisable(GL_CULL_FACE)
           glDisable(GL_BLEND)
@@ -2419,6 +2474,7 @@ proc runGraphics*() =
           actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
         )
         reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
+        publishReplayControlFrame(viewProjection, window.size)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

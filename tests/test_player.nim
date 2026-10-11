@@ -102,18 +102,41 @@ block:
   doAssert p.accumulator == 0
   discard p.takeRestore()
   p.sync(24, 50, false)
-  doAssert p.shouldTick(0)
+  doAssert p.shouldTick(epochTime())
   p.sync(48, 50, false)
-  doAssert p.shouldTick(0)
+  doAssert p.shouldTick(epochTime())
   p.sync(49, 50, false)
-  doAssert not p.shouldTick(0)
+  doAssert not p.shouldTick(epochTime())
   p.stepForward()
   doAssert not p.playing
   doAssert p.restoreTick == -1
   doAssert p.targetTick == 50
-  doAssert p.shouldTick(0)
+  doAssert p.shouldTick(epochTime())
   p.sync(50, 50, false)
-  doAssert not p.shouldTick(0)
+  doAssert not p.shouldTick(epochTime())
+
+echo "Testing paused seeks yield after the frame budget"
+block:
+  var p = initPlayer(live = false, durationTicks = 1000, playing = false)
+  p.sync(0, 1000, false)
+  p.seekTo(900, play = false)
+  doAssert p.shouldTick(epochTime())
+  doAssert not p.shouldTick(epochTime() - p.catchUpSeconds - 0.01)
+  doAssert p.targetTick == 900
+  doAssert not p.playing
+
+echo "Testing cancel seek clears the target and a pending restore"
+block:
+  var p = initPlayer(live = false, durationTicks = 1000, playing = false)
+  p.sync(500, 1000, false)
+  p.seekTo(100, play = false)
+  doAssert p.restoreTick == 100
+  p.cancelSeek()
+  doAssert p.targetTick == -1
+  doAssert p.restoreTick == -1
+  doAssert p.takeRestore() == -1
+  doAssert not p.shouldTick(epochTime())
+  doAssert p.tick == 500
 
 echo "Testing speed buttons clamp to 1, 2, 4, 16"
 block:

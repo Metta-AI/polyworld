@@ -89,6 +89,7 @@ import
   test_pathing,
   test_picking,
   test_player,
+  test_replaycontrols,
   test_profiles,
   test_prop_batches,
   test_props,
