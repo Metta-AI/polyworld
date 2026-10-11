@@ -263,6 +263,51 @@ def check_control(base, executable, output, gpu=False):
         assert any(k['event'] == 'keydown' and k['code'] == 'Space' for k in keys), keys
         page.screenshot(path=str(output / 'gota-embed.png'))
         print('control: embed input and key forwarding passed', flush=True)
+
+        # Native camera input lets pointer gestures reach the camera only.
+        frame.evaluate(replay + ".camera({mode: 'fixed', x: 0, z: 0, distance: 60})")
+        frame.evaluate('nextFrames(2)')
+        assert frame.evaluate(replay + '.setNativeCamera(true)')
+        frame.evaluate('nextFrames(1)')
+        assert frame.evaluate(replay + '.state().nativeCamera')
+        north = frame.evaluate(replay + '.state().viewProjection')
+
+        def drag(button, dx, dy):
+            page.mouse.move(640, 288)
+            page.mouse.down(button=button)
+            for step in range(1, 9):
+                page.mouse.move(640 + dx * step / 8, 288 + dy * step / 8)
+                frame.evaluate('nextFrames(1)')
+            page.mouse.up(button=button)
+            frame.evaluate('nextFrames(2)')
+
+        center = frame.evaluate(replay + '.unproject({x: 640, y: 288})')
+        drag('left', 160, 0)
+        panned = frame.evaluate(replay + '.unproject({x: 640, y: 288})')
+        assert panned['x'] < center['x'] - 10, (center, panned)
+        matrix = frame.evaluate(replay + '.state().viewProjection')
+        drag('right', 200, 40)
+        orbited = frame.evaluate(replay + '.state().viewProjection')
+        # The camera turned: the view matrix's x axis now has a z component.
+        assert abs(orbited[2]) > abs(matrix[2]) + 0.1, (matrix, orbited)
+        page.mouse.wheel(0, -400)
+        frame.evaluate('nextFrames(3)')
+        assert frame.evaluate(replay + '.state().viewProjection') != orbited
+        page.keyboard.press('Space')
+        frame.evaluate('nextFrames(2)')
+        assert not frame.evaluate(replay + '.state().playing')
+        frame.evaluate(replay + ".camera({mode: 'fixed', x: 0, z: 0, distance: 60, yaw: 0, pitch: 0.92})")
+        frame.evaluate('nextFrames(2)')
+        restored = frame.evaluate(replay + '.state().viewProjection')
+        assert max(abs(a - b) for a, b in zip(restored, north)) < 1e-4, (north, restored)
+        page.screenshot(path=str(output / 'gota-native-camera.png'))
+        page.evaluate("() => sendReplay({type: 'nativeCamera', on: false})")
+        frame.evaluate('nextFrames(2)')
+        assert not frame.evaluate(replay + '.state().nativeCamera')
+        page.mouse.wheel(0, -400)
+        drag('left', 160, 0)
+        assert frame.evaluate(replay + '.state().viewProjection') == restored
+        print('control: native camera input passed', flush=True)
         assert not errors, errors
         assert not frame.evaluate('failed')
         browser.close()

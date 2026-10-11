@@ -34,6 +34,8 @@ type
       ## Render-space x and z for `FixedCamera`.
     distance*: float32
       ## Camera distance for `FixedCamera`; zero or less keeps the current one.
+    yaw*, pitch*: float32
+      ## Orbit angles in radians for `FixedCamera`; NaN keeps the current one.
     id*: int32
       ## Unit for `FollowCamera`.
 
@@ -84,6 +86,16 @@ proc replayEmbedded*(): bool =
     var embedded: cint
     {.emit: "`embedded` = EM_ASM_INT({ return Module.polyworldEmbed ? 1 : 0; });".}
     embedded != 0
+  else:
+    false
+
+proc replayNativeCamera*(): bool =
+  ## Returns whether the host lets pointer input through to an embedded
+  ## viewer's camera, so it can pan, orbit and zoom natively.
+  when defined(emscripten):
+    var native: cint
+    {.emit: "`native` = EM_ASM_INT({ return Module.polyworldNativeCamera ? 1 : 0; });".}
+    native != 0
   else:
     false
 
@@ -244,16 +256,19 @@ proc polyworld_replay_set_seek_slice*(milliseconds: float32) {.replayExport.} =
 
 proc polyworld_replay_camera*(
     mode, id: int32,
-    x, z, distance: float32
+    x, z, distance, yaw, pitch: float32
 ) {.replayExport.} =
   ## Selects the director (0), a fixed view over x and z (1), follows
-  ## unit `id` (2), or holds the current view (3).
+  ## unit `id` (2), or holds the current view (3). A fixed view also takes
+  ## orbit angles; NaN keeps the current ones.
   if not installed() or mode notin 0'i32 .. ReplayCameraMode.high.ord.int32:
     return
   control.hooks.camera(ReplayCameraRequest(
     mode: ReplayCameraMode(mode),
     target: vec2(x, z),
     distance: distance,
+    yaw: yaw,
+    pitch: pitch,
     id: id
   ))
 

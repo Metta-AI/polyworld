@@ -1,4 +1,5 @@
 import
+  std/math,
   vmath,
   polyworld/rtscameras
 
@@ -89,5 +90,26 @@ block:
   let tile = groundTile(vec3(-63.2, 0, 4.1), 64, 128)
   doAssert tile[0] == 0
   doAssert tile[1] == 68
+
+echo "Testing orbited camera eyes and drag pans"
+block:
+  let target = vec3(1, 0, 2)
+  doAssert rtsCameraEye(target, 10) ==
+    rtsCameraEye(target, 10, RtsCameraYaw, RtsCameraPitch)
+  let side = rtsCameraEye(target, 10, PI.float32 / 2, RtsCameraPitch)
+  doAssert abs(side.z - target.z) < 1e-4 and side.x > target.x
+  let top = rtsCameraEye(target, 10, 0, PI.float32 / 2)
+  doAssert abs(top.y - 10) < 1e-4
+  var
+    north = vec3(0, 0, 0)
+    turned = vec3(0, 0, 0)
+  north.rtsDragPan(vec2(10, 0), 100, 0, 64)
+  doAssert abs(north.x + 1.5) < 1e-4 and north.z == 0
+  # Turned a quarter, a rightward drag moves the target along +z.
+  turned.rtsDragPan(vec2(10, 0), 100, PI.float32 / 2, 64)
+  doAssert abs(turned.z - 1.5) < 1e-4 and abs(turned.x) < 1e-4
+  var edge = vec3(63.9, 0, 0)
+  edge.rtsDragPan(vec2(-1000, 0), 100, 0, 64)
+  doAssert edge.x == 64
 
 echo "RTS camera tests passed"

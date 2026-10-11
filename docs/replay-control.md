@@ -18,12 +18,33 @@ Options are read from the hash, then the query, like `replay`.
 | Option | Effect |
 | --- | --- |
 | `embed=1` | Hides the in-canvas HUD (transport bar, scoreboard, minimap, panels) and keeps mouse, wheel, touch and key input from the game. Key presses are forwarded to the host instead. Seeks use 33 ms slices. |
+| `nativeCamera=1` | With `embed=1`, lets mouse, wheel and touch input through to the camera, as `setNativeCamera(true)` does. Keys stay with the host. |
 | `loop=0` or `loop=1` | Overrides looping. Replay builds loop by default. |
 | `seekSlice=MS` | Simulation time per frame while seeking. The default is 100 ms, or 33 ms with `embed=1`. |
 
 Shorter slices keep the page responsive during long seeks but finish them later.
 On an M-series Mac with a GPU, a cold seek over a 28,909-tick GotA match took
 28 s at 12 ms, 17 s at 33 ms and 12 s at 100 ms.
+
+### Native camera input
+
+An embedded viewer ignores the pointer by default, so the host can draw over it.
+A host that wants the game's own camera controls, for example while a camera
+tool is active, turns them on with `nativeCamera=1` or `setNativeCamera(true)`
+and off again with `setNativeCamera(false)`. While on, pointer input moves only
+the camera; it never selects units, and key presses still go to the host.
+
+| Gesture | Effect in GotA |
+| --- | --- |
+| Drag (left or middle button) | Pans; the ground follows the pointer. |
+| Right-drag | Orbits around the camera target: sideways turns, up and down tilts. |
+| Wheel or pinch | Zooms. |
+
+Any gesture stops the director. A pan also stops following a unit; an orbit or
+zoom keeps following it. GotA's camera otherwise always faces north, so the
+director resets the orbit, and `camera({mode: 'fixed', yaw: 0, pitch: 0.92})`
+restores the default angle.
+The browser test's `--control-only` run drives these gestures with a real mouse.
 
 ## Same-origin hosts
 
@@ -42,7 +63,8 @@ GotA that is `simulation / WorldScale`, centred on the map, with y up.
 | `play()`, `pause()` | Play rewinds first when already at the end. |
 | `setSpeed(x)` | Applies the fastest of 1, 2, 4 or 16 at or below `x` and returns it. |
 | `setLoop(on)`, `setSeekSlice(ms)` | As the URL options. |
-| `camera({mode, ...})` | `director`; `fixed` with `x`, `z` and optional `distance`; `follow` with unit `id`; `freeze` holds the current view. Every mode except `director` stops the automatic camera. |
+| `setNativeCamera(on)` | Lets pointer input through to the camera (see above). Returns the applied value, which is always `false` without `embed=1`; `state().nativeCamera` reports it. |
+| `camera({mode, ...})` | `director`; `fixed` with `x`, `z` and optional `distance`, `yaw` and `pitch` (radians; omitted values keep the current view); `follow` with unit `id`; `freeze` holds the current view. Every mode except `director` stops the automatic camera. |
 | `freezeCamera()` | Same as `camera({mode: 'freeze'})`. |
 | `project({x, y, z})` | Screen `{x, y}` in the last drawn frame, or `null` behind the camera. |
 | `unproject({x, y})` | The drawn ground point `{x, y, z}` under a screen position, or `null`. |
@@ -75,6 +97,7 @@ ready run once it is.
 | `speed` | `speed` |
 | `loop` | `loop` |
 | `seekSlice` | `milliseconds` |
+| `nativeCamera` | `on` |
 | `camera` | as `camera()` above |
 | `project`, `unproject`, `pick`, `unit`, `state` | as above; `unit` takes `id` |
 | `subscribe` | `tick: true` for tick events, `frame: true` for frame events |

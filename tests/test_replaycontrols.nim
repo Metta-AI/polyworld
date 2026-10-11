@@ -58,12 +58,16 @@ block:
   doAssert polyworld_replay_result(2) == 3
   doAssert polyworld_replay_result(3) == 4
   doAssert polyworld_replay_result(4) == 0
-  polyworld_replay_camera(3, 0, 0, 0, 0)
+  polyworld_replay_camera(3, 0, 0, 0, 0, NaN, NaN)
   doAssert camera.mode == FrozenCamera
-  polyworld_replay_camera(1, 0, 5, 6, 30)
+  polyworld_replay_camera(1, 0, 5, 6, 30, NaN, NaN)
   doAssert camera.mode == FixedCamera and camera.target == vec2(5, 6)
   doAssert camera.distance == 30
-  polyworld_replay_camera(9, 0, 0, 0, 0)
-  doAssert camera.mode == FixedCamera
+  doAssert camera.yaw.isNaN and camera.pitch.isNaN
+  polyworld_replay_camera(1, 0, 5, 6, 30, 1.5, 0.75)
+  doAssert camera.yaw == 1.5 and camera.pitch == 0.75
+  polyworld_replay_camera(9, 0, 0, 0, 0, NaN, NaN)
+  doAssert camera.yaw == 1.5
+  doAssert not replayNativeCamera()
 
 echo "Replay control tests passed"

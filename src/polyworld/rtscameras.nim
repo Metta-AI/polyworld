@@ -20,6 +20,9 @@ const
     ## GOTA's HUD is shorter, so the hero sits closer to center.
   RtsPortraitEase* = 0.55'f32
     ## Ease-in-out duration when a HUD portrait pans to a hero.
+  RtsOrbitPitchMin* = 0.35'f32
+  RtsOrbitPitchMax* = 1.45'f32
+    ## Pitch range for an orbited camera: low oblique to nearly top down.
 
 type
   MinimapViewRect* = object
@@ -33,12 +36,17 @@ type
     elapsed*: float32
     duration*: float32
 
-proc rtsCameraEye*(target: Vec3, distance: float32): Vec3 =
-  ## Returns the locked north-facing RTS camera position.
+proc rtsCameraEye*(
+    target: Vec3,
+    distance: float32,
+    yaw = RtsCameraYaw,
+    pitch = RtsCameraPitch
+): Vec3 =
+  ## Returns the RTS camera position, north-facing unless orbited.
   target + vec3(
-    sin(RtsCameraYaw) * cos(RtsCameraPitch),
-    sin(RtsCameraPitch),
-    cos(RtsCameraYaw) * cos(RtsCameraPitch)
+    sin(yaw) * cos(pitch),
+    sin(pitch),
+    cos(yaw) * cos(pitch)
   ) * distance
 
 proc rtsFollowFrame*(
@@ -265,6 +273,21 @@ proc applyRtsPan*(
     halfSpan
   )
   true
+
+proc rtsDragPan*(
+    target: var Vec3,
+    delta: Vec2,
+    distance, yaw, halfSpan: float32
+) =
+  ## Moves the target so the ground follows a pointer drag of `delta`
+  ## pixels, for a camera orbited to `yaw`.
+  let
+    speed = distance * 0.0015'f32
+    right = vec3(cos(yaw), 0, -sin(yaw))
+    forward = vec3(-sin(yaw), 0, -cos(yaw))
+  target += (forward * delta.y - right * delta.x) * speed
+  target.x = clamp(target.x, -halfSpan, halfSpan)
+  target.z = clamp(target.z, -halfSpan, halfSpan)
 
 proc rtsEaseT*(t: float32): float32 =
   ## Smoothstep ease-in-out in 0 .. 1.

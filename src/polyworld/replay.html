@@ -32,17 +32,21 @@ function option(name) {
 }
 // embed=1 hides the viewer's HUD and keeps input from the viewer, so the host
 // page drives it through polyworldReplay or postMessage. Key presses go to the
-// host instead, so it can own every shortcut. loop=0|1 overrides looping;
+// host instead, so it can own every shortcut. nativeCamera=1 (or
+// setNativeCamera) lets pointer input through to the camera only: drag pans,
+// right-drag orbits, wheel or pinch zooms. loop=0|1 overrides looping;
 // seekSlice=MS sets how long each frame may simulate while seeking.
 const embed = option('embed') === '1';
 const loop = option('loop');
 const seekSlice = option('seekSlice');
 const keyListeners = new Set();
+const keyTypes = ['keydown', 'keyup', 'keypress'];
 if (embed) {
-  for (const type of ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup',
-      'mousemove', 'click', 'dblclick', 'wheel', 'pointerdown', 'pointerup',
-      'pointermove', 'touchstart', 'touchmove', 'touchend']) {
+  for (const type of [...keyTypes, 'mousedown', 'mouseup', 'mousemove', 'click',
+      'dblclick', 'wheel', 'pointerdown', 'pointerup', 'pointermove',
+      'touchstart', 'touchmove', 'touchend']) {
     window.addEventListener(type, event => {
+      if (Module.polyworldNativeCamera && !keyTypes.includes(type)) return;
       event.stopImmediatePropagation();
       if (type !== 'keydown' && type !== 'keyup') return;
       const {key, code, altKey, ctrlKey, metaKey, shiftKey, repeat} = event;
@@ -67,6 +71,7 @@ window.addEventListener('unhandledrejection', event => fail(event.reason));
 var Module = {
   canvas: document.getElementById('canvas'),
   polyworldEmbed: embed,
+  polyworldNativeCamera: embed && option('nativeCamera') === '1',
   polyworldLoop: loop === null ? undefined : loop !== '0',
   arguments: ['--replay', '/episode.replay'],
   print: text => console.info(text),
@@ -136,7 +141,8 @@ const control = (() => {
   const listeners = new Set();
   let state = null;
   Module.polyworldControlFrame = frame => {
-    state = {...frame, cssWidth: Module.canvas.clientWidth, cssHeight: Module.canvas.clientHeight};
+    state = {...frame, cssWidth: Module.canvas.clientWidth, cssHeight: Module.canvas.clientHeight,
+      nativeCamera: Module.polyworldNativeCamera};
     for (const listener of listeners) listener(state);
   };
   return {
@@ -151,11 +157,13 @@ const control = (() => {
     setSpeed: speed => call('set_speed', Math.round(speed)),
     setLoop: on => call('set_loop', on ? 1 : 0),
     setSeekSlice: milliseconds => call('set_seek_slice', milliseconds),
-    camera: ({mode, id = 0, x = 0, z = 0, distance = 0}) => {
+    // Only embedded viewers block input, so only they can switch it on.
+    setNativeCamera: on => (Module.polyworldNativeCamera = embed && !!on),
+    camera: ({mode, id = 0, x = 0, z = 0, distance = 0, yaw = NaN, pitch = NaN}) => {
       if (!(mode in cameraModes)) throw new Error('Unknown camera mode: ' + mode);
-      call('camera', cameraModes[mode], id, x, z, distance);
+      call('camera', cameraModes[mode], id, x, z, distance, yaw, pitch);
     },
-    freezeCamera: () => call('camera', cameraModes.freeze, 0, 0, 0, 0),
+    freezeCamera: () => call('camera', cameraModes.freeze, 0, 0, 0, 0, NaN, NaN),
     project: ({x, y, z}) => {
       if (!call('project', x, y, z)) return null;
       const s = scale();
@@ -190,6 +198,7 @@ window.polyworldReplay = control;
     speed: data => control.setSpeed(data.speed),
     loop: data => control.setLoop(data.loop),
     seekSlice: data => control.setSeekSlice(data.milliseconds),
+    nativeCamera: data => control.setNativeCamera(data.on),
     camera: data => control.camera(data),
     project: data => control.project(data),
     unproject: data => control.unproject(data),
