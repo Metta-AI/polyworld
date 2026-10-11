@@ -137,7 +137,12 @@ def check_control(base, executable, output, gpu=False):
             heartbeat.last = now;
           }, 10);
           window.seekTicks = new Set();
-          polyworldReplay.onFrame(s => { if (s.seeking) seekTicks.add(s.tick); });
+          window.seekDrawn = 0;
+          polyworldReplay.onFrame(s => {
+            if (!s.seeking) return;
+            seekTicks.add(s.tick);
+            seekDrawn += s.drawn;
+          });
         }''')
         frame.evaluate('nextFrames(2)')
         frame.evaluate('() => { heartbeat.worst = 0; }')
@@ -147,8 +152,12 @@ def check_control(base, executable, output, gpu=False):
         report['cold_end_seek'] = {
             'seconds': round(time.monotonic() - started, 1),
             'worst_timer_gap_ms': round(frame.evaluate('heartbeat.worst')),
-            'progress_frames': frame.evaluate('seekTicks.size')}
-        assert not state['playing'], state
+            'progress_frames': frame.evaluate('seekTicks.size'),
+            'drawn_frames': frame.evaluate('seekDrawn')}
+        assert not state['playing'] and state['drawn'], state
+        # Seek frames mostly simulate; a few draws (four a second) show progress.
+        seek = report['cold_end_seek']
+        assert seek['drawn_frames'] <= seek['seconds'] * 4 + 2, report
         assert report['cold_end_seek']['progress_frames'] >= 3, report
         if gpu:
             # Unsliced, this seek blocked the page for the whole seek.
