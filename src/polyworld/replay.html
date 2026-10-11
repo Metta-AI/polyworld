@@ -26,6 +26,32 @@ let failed = false, ready = false;
 function message(type, extra = {}) {
   if (window.parent !== window) window.parent.postMessage({src:'coworld-replay', type, ...extra}, '*');
 }
+function option(name) {
+  return new URLSearchParams(location.hash.slice(1)).get(name) ||
+    new URLSearchParams(location.search).get(name);
+}
+// embed=1 hides the viewer's HUD and keeps input from the viewer, so the host
+// page drives it through polyworldReplay or postMessage. Key presses go to the
+// host instead, so it can own every shortcut. loop=0|1 overrides looping;
+// seekSlice=MS sets how long each frame may simulate while seeking.
+const embed = option('embed') === '1';
+const loop = option('loop');
+const seekSlice = option('seekSlice');
+const keyListeners = new Set();
+if (embed) {
+  for (const type of ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup',
+      'mousemove', 'click', 'dblclick', 'wheel', 'pointerdown', 'pointerup',
+      'pointermove', 'touchstart', 'touchmove', 'touchend']) {
+    window.addEventListener(type, event => {
+      event.stopImmediatePropagation();
+      if (type !== 'keydown' && type !== 'keyup') return;
+      const {key, code, altKey, ctrlKey, metaKey, shiftKey, repeat} = event;
+      const press = {event: type, key, code, altKey, ctrlKey, metaKey, shiftKey, repeat};
+      for (const listener of keyListeners) listener(press);
+      message('key', press);
+    }, {capture: true});
+  }
+}
 function fail(reason) {
   if (failed) return;
   failed = true;
@@ -40,6 +66,8 @@ window.addEventListener('error', event => fail(event.error || event.message));
 window.addEventListener('unhandledrejection', event => fail(event.reason));
 var Module = {
   canvas: document.getElementById('canvas'),
+  polyworldEmbed: embed,
+  polyworldLoop: loop === null ? undefined : loop !== '0',
   arguments: ['--replay', '/episode.replay'],
   print: text => console.info(text),
   printErr: text => { console.error(text); if (/Error|Exception|mismatch|fatal/i.test(text)) fail(text); },
@@ -61,8 +89,7 @@ var Module = {
     addRunDependency('episode-replay');
     (async () => {
       message('phase', {phase:'bundle_ready'});
-      const uri = new URLSearchParams(location.hash.slice(1)).get('replay') ||
-        new URLSearchParams(location.search).get('replay');
+      const uri = option('replay');
       if (!uri) throw new Error('No replay was supplied. Open a completed episode replay.');
       message('phase', {phase:'replay_fetch_start'});
       const response = await fetch(uri);
@@ -95,6 +122,117 @@ var Module = {
     })().catch(fail);
   }]
 };
+
+// Replay control for host pages. Positions are CSS pixels in this document.
+// Same-origin hosts call window.polyworldReplay; others use postMessage.
+const control = (() => {
+  const call = (name, ...args) => Module['_polyworld_replay_' + name](...args);
+  const result = index => call('result', index);
+  const scale = () => ({
+    x: Module.canvas.width / (Module.canvas.clientWidth || 1),
+    y: Module.canvas.height / (Module.canvas.clientHeight || 1)
+  });
+  const cameraModes = {director: 0, fixed: 1, follow: 2, freeze: 3};
+  const listeners = new Set();
+  let state = null;
+  Module.polyworldControlFrame = frame => {
+    state = {...frame, cssWidth: Module.canvas.clientWidth, cssHeight: Module.canvas.clientHeight};
+    for (const listener of listeners) listener(state);
+  };
+  return {
+    ready: () => state !== null,
+    state: () => state,
+    onFrame: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+    onKey: listener => { keyListeners.add(listener); return () => keyListeners.delete(listener); },
+    seek: (tick, seekId = 0) => call('seek', Math.round(tick), seekId | 0),
+    cancelSeek: () => call('cancel_seek'),
+    play: () => call('play'),
+    pause: () => call('pause'),
+    setSpeed: speed => call('set_speed', Math.round(speed)),
+    setLoop: on => call('set_loop', on ? 1 : 0),
+    setSeekSlice: milliseconds => call('set_seek_slice', milliseconds),
+    camera: ({mode, id = 0, x = 0, z = 0, distance = 0}) => {
+      if (!(mode in cameraModes)) throw new Error('Unknown camera mode: ' + mode);
+      call('camera', cameraModes[mode], id, x, z, distance);
+    },
+    freezeCamera: () => call('camera', cameraModes.freeze, 0, 0, 0, 0),
+    project: ({x, y, z}) => {
+      if (!call('project', x, y, z)) return null;
+      const s = scale();
+      return {x: result(0) / s.x, y: result(1) / s.y};
+    },
+    unproject: ({x, y}) => {
+      const s = scale();
+      if (!call('unproject', x * s.x, y * s.y)) return null;
+      return {x: result(0), y: result(1), z: result(2)};
+    },
+    groundY: (x, z) => call('ground_y', x, z),
+    pick: ({x, y}) => { const s = scale(); return call('pick', x * s.x, y * s.y); },
+    unit: id => {
+      if (!call('unit', id)) return null;
+      return {x: result(0), y: result(1), z: result(2), seat: result(3), alive: result(4) !== 0};
+    }
+  };
+})();
+window.polyworldReplay = control;
+
+// postMessage bridge: {dst:'coworld-replay', type, ...} from the parent window.
+// Commands queue until control is ready. Queries reply with a result message.
+(() => {
+  const TickIntervalMs = 100;
+  const queue = [];
+  let tickEvents = false, frameEvents = false, lastTick = null, lastTickAt = 0;
+  const commands = {
+    seek: data => control.seek(data.tick, data.seekId),
+    cancelSeek: () => control.cancelSeek(),
+    play: () => control.play(),
+    pause: () => control.pause(),
+    speed: data => control.setSpeed(data.speed),
+    loop: data => control.setLoop(data.loop),
+    seekSlice: data => control.setSeekSlice(data.milliseconds),
+    camera: data => control.camera(data),
+    project: data => control.project(data),
+    unproject: data => control.unproject(data),
+    pick: data => control.pick(data),
+    unit: data => control.unit(data.id),
+    state: () => control.state()
+  };
+  function run(data) {
+    try {
+      const value = commands[data.type](data);
+      if (data.requestId !== undefined) message('result', {requestId: data.requestId, result: value ?? null});
+    } catch (error) {
+      message('result', {requestId: data.requestId, error: String(error?.message || error)});
+    }
+  }
+  window.addEventListener('message', event => {
+    const data = event.data;
+    if (event.source !== window.parent || data?.dst !== 'coworld-replay') return;
+    if (data.type === 'subscribe') {
+      tickEvents = !!data.tick;
+      frameEvents = !!data.frame;
+      lastTick = null;
+    } else if (data.type in commands) {
+      if (control.ready()) run(data); else queue.push(data);
+    }
+  });
+  if (seekSlice) queue.push({type: 'seekSlice', milliseconds: Number(seekSlice)});
+  control.onFrame(frame => {
+    while (queue.length) run(queue.shift());
+    if (frameEvents) message('frame', frame);
+    if (!tickEvents) return;
+    // Discrete changes post at once; tick advances post at most every 100 ms.
+    const {tick, endTick, playing, seeking, speed, loop, seekId, seekTick} = frame;
+    const next = {tick, endTick, playing, seeking, speed, loop, seekId, seekTick};
+    const now = performance.now();
+    const changed = lastTick === null || Object.keys(next).some(key => key !== 'tick' && next[key] !== lastTick[key]);
+    if (changed || (tick !== lastTick.tick && now - lastTickAt >= TickIntervalMs)) {
+      lastTick = next;
+      lastTickAt = now;
+      message('tick', next);
+    }
+  });
+})();
 Module.canvas.addEventListener('webglcontextlost', event => {
   event.preventDefault(); fail('The graphics context was lost. Reload the replay.');
 });

@@ -56,6 +56,8 @@ type
     accumulator*: float32
     seekSerial*: int
     automaticSeek*: bool
+    catchUpSeconds*: float64
+      ## Simulation time budget per frame while seeking.
     tickRate: int32
 
 proc speed*(player: Player): int32 =
@@ -97,6 +99,7 @@ proc initPlayer*(
   result.speedIndex = speedIndexOf(speed)
   result.restoreTick = -1
   result.targetTick = -1
+  result.catchUpSeconds = CatchUpSeconds
 
 proc sync*(
     player: var Player,
@@ -160,6 +163,13 @@ proc play*(player: var Player) =
   else:
     player.playing = true
 
+proc cancelSeek*(player: var Player) =
+  ## Abandons a seek, including a pending restore, on the last simulated
+  ## tick. The play state is unchanged.
+  player.targetTick = -1
+  player.restoreTick = -1
+  player.accumulator = 0
+
 proc togglePlay*(player: var Player) =
   ## Flips between play and pause, including during catch-up.
   if player.playing or player.targetTick >= 0:
@@ -201,7 +211,8 @@ proc shouldTick*(
     frameStart: float64
 ): bool =
   ## Returns whether one more simulation tick belongs in this frame.
-  ## Paused seeks run until they land so single-tick steps stay exact.
+  ## Seeks yield after `catchUpSeconds` so the page stays responsive, and
+  ## paused seeks stop exactly on their target.
   if player.reachedEnd:
     if player.repeating:
       player.seekTo(0, automatic = true)
@@ -211,9 +222,9 @@ proc shouldTick*(
     player.accumulator = 0
     return false
   if player.targetTick >= 0:
-    if not player.playing:
-      return player.tick < player.targetTick
-    return epochTime() - frameStart < CatchUpSeconds
+    if not player.playing and player.tick >= player.targetTick:
+      return false
+    return epochTime() - frameStart < player.catchUpSeconds
   if not player.playing:
     return false
   let step = 1.0'f32 / max(player.tickRate, 1).float32
