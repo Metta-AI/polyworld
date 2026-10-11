@@ -1000,6 +1000,8 @@ proc runGraphics*() =
       hashCheck: run.hashCheck
     )
 
+  # A host page drives an embedded viewer; its HUD and direct input are off.
+  let embedded = replayEmbedded()
   var
     cameraDistance = DefaultCameraDistance
     cameraTarget = vec3(0, 0, 0)
@@ -1018,6 +1020,11 @@ proc runGraphics*() =
     cameraEase: CameraEase
     focusPlayerHero = false
     groupCameraScale = 1.0'f32
+    cameraYaw = RtsCameraYaw
+    cameraPitch = RtsCameraPitch
+      ## Orbit set by an embedding host; the director always faces north.
+    embeddedPanning = false
+    embeddedOrbiting = false
     viewingDt = 0.0'f
     viewingSeeking = false
     actionCam = initActionCam(
@@ -1435,6 +1442,83 @@ proc runGraphics*() =
   if playerMode():
     cameraTarget = playerHeroFrame()
 
+  proc followSelectedCamera(dt: float32) =
+    ## Eases the camera onto the followed selection unless the director owns it.
+    if actionCam.enabled:
+      return
+    let targetCount = selectedTargetCount()
+    if followSelection and targetCount == 1:
+      let target = selectionTarget(selectedIds[0])
+      cameraTarget = mix(
+        cameraTarget,
+        target.position + vec3(0, target.focusHeight, 0),
+        damping(5.0'f32, dt)
+      )
+    elif followSelection and targetCount > 1:
+      let
+        groupCenter = selectedCenter()
+        groupDistance = clamp(
+          12.0'f32 + selectedRadius(groupCenter) * 2.8'f32,
+          20.0'f32,
+          400.0'f32
+        ) * groupCameraScale
+      cameraTarget = mix(
+        cameraTarget,
+        groupCenter,
+        damping(4.0'f32, dt)
+      )
+      cameraDistance = mix(
+        cameraDistance,
+        groupDistance,
+        damping(2.0'f32, dt)
+      )
+    elif followSelection:
+      followSelection = false
+
+  proc updateEmbeddedCamera() =
+    ## Applies pointer input that an embedding host lets through: drag pans,
+    ## right-drag orbits, and the wheel or a pinch zooms. Nothing selects.
+    const OrbitRadiansPerPixel = 0.004'f32
+    if not replayNativeCamera():
+      embeddedPanning = false
+      embeddedOrbiting = false
+      return
+    # Drags start only on a press seen while input is enabled, so a button
+    # released while the host blocked input cannot leave a drag running.
+    if window.buttonPressed[MouseLeft] or window.buttonPressed[MouseMiddle]:
+      embeddedPanning = true
+    elif window.buttonPressed[MouseRight]:
+      embeddedOrbiting = true
+    if not window.buttonDown[MouseLeft] and not window.buttonDown[MouseMiddle]:
+      embeddedPanning = false
+    if not window.buttonDown[MouseRight]:
+      embeddedOrbiting = false
+    let delta = window.mouseDelta.vec2
+    if embeddedPanning and delta != vec2(0):
+      followSelection = false
+      actionCam.takeManual()
+      cancelCameraEase(cameraEase)
+      cameraTarget.rtsDragPan(delta, cameraDistance, cameraYaw, mapHalfSize())
+    elif embeddedOrbiting and delta != vec2(0):
+      actionCam.takeManual()
+      cancelCameraEase(cameraEase)
+      cameraYaw -= delta.x * OrbitRadiansPerPixel
+      cameraPitch = clamp(
+        cameraPitch + delta.y * OrbitRadiansPerPixel,
+        RtsOrbitPitchMin,
+        RtsOrbitPitchMax
+      )
+    if window.scrollDelta.y != 0:
+      actionCam.takeManual()
+      cancelCameraEase(cameraEase)
+      # Gentler than the native 0.92 per 3 steps: a macOS wheel notch reports
+      # about 100 steps, which would jump straight to the closest zoom.
+      cameraDistance = clamp(
+        cameraDistance * exp(-window.scrollDelta.y * 0.002'f32),
+        5.0'f32,
+        400.0'f32
+      )
+
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
@@ -1447,6 +1531,10 @@ proc runGraphics*() =
     if focusPlayerHero:
       focusPlayerHero = false
       startCameraEase(cameraEase, cameraTarget)
+    if embedded:
+      updateEmbeddedCamera()
+      followSelectedCamera(dt)
+      return
     updateMinimapCamera(
       window,
       sk.mousePos,
@@ -1498,11 +1586,7 @@ proc runGraphics*() =
         )
       if panning:
         cancelCameraEase(cameraEase)
-        let panSpeed = cameraDistance * 0.0015
-        cameraTarget.x -= delta.x * panSpeed
-        cameraTarget.z -= delta.y * panSpeed
-        cameraTarget.x = clamp(cameraTarget.x, -mapHalfSize(), mapHalfSize())
-        cameraTarget.z = clamp(cameraTarget.z, -mapHalfSize(), mapHalfSize())
+        cameraTarget.rtsDragPan(delta, cameraDistance, cameraYaw, mapHalfSize())
       elif applyRtsPan(
           cameraTarget,
           rtsPanDir(window),
@@ -1522,12 +1606,7 @@ proc runGraphics*() =
     if panning:
       followSelection = false
       actionCam.takeManual()
-      let
-        panSpeed = cameraDistance * 0.0015
-      cameraTarget.x -= delta.x * panSpeed
-      cameraTarget.z -= delta.y * panSpeed
-      cameraTarget.x = clamp(cameraTarget.x, -mapHalfSize(), mapHalfSize())
-      cameraTarget.z = clamp(cameraTarget.z, -mapHalfSize(), mapHalfSize())
+      cameraTarget.rtsDragPan(delta, cameraDistance, cameraYaw, mapHalfSize())
     if not minimapPanning and
         applyRtsPan(
           cameraTarget,
@@ -1558,37 +1637,7 @@ proc runGraphics*() =
           5.0'f32,
           400.0'f32
         )
-
-    if actionCam.enabled:
-      return
-    let targetCount = selectedTargetCount()
-    if followSelection and targetCount == 1:
-      let target = selectionTarget(selectedIds[0])
-      cameraTarget = mix(
-        cameraTarget,
-        target.position + vec3(0, target.focusHeight, 0),
-        damping(5.0'f32, dt)
-      )
-    elif followSelection and targetCount > 1:
-      let
-        groupCenter = selectedCenter()
-        groupDistance = clamp(
-          12.0'f32 + selectedRadius(groupCenter) * 2.8'f32,
-          20.0'f32,
-          400.0'f32
-        ) * groupCameraScale
-      cameraTarget = mix(
-        cameraTarget,
-        groupCenter,
-        damping(4.0'f32, dt)
-      )
-      cameraDistance = mix(
-        cameraDistance,
-        groupDistance,
-        damping(2.0'f32, dt)
-      )
-    elif followSelection:
-      followSelection = false
+    followSelectedCamera(dt)
 
   proc issueGroundOrder(viewProjection: Mat4, attackMove: bool) =
     ## Walks or attack-moves the human hero onto the tile under the pointer.
@@ -1752,7 +1801,11 @@ proc runGraphics*() =
 
   proc cameraView(): Mat4 =
     ## Updates the camera eye and returns its view matrix.
-    cameraEye = rtsCameraEye(cameraTarget, cameraDistance)
+    if actionCam.enabled:
+      cameraYaw = RtsCameraYaw
+      cameraPitch = RtsCameraPitch
+    cameraEye = rtsCameraEye(cameraTarget, cameraDistance, cameraYaw,
+      cameraPitch)
     lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
 
   ## Frame
@@ -2039,13 +2092,16 @@ proc runGraphics*() =
       )
       if request.distance > 0:
         cameraDistance = request.distance
+      if not math.isNaN(request.yaw):
+        cameraYaw = request.yaw
+      if not math.isNaN(request.pitch):
+        cameraPitch = clamp(request.pitch, RtsOrbitPitchMin, RtsOrbitPitchMax)
     of FollowCamera:
       selectEntity(request.id)
     of FrozenCamera:
       actionCam.takeManual()
       followSelection = false
 
-  let embedded = replayEmbedded()
   installReplayControl(transport, ReplayControlHooks(
     groundY: controlGroundY,
     pick: proc(screen: Vec2, viewProjection: Mat4): int32 =
