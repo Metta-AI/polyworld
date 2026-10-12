@@ -95,7 +95,7 @@ proc present(replayer: Replayer, play: var TablePlay, game: var GameState,
       else: replayer.playerName(game.currentPlayer) & " is thinking..."
   of ActionPlayCard:
     discard game.applyAction(action)
-    play.animateTransition(layout, before, game)
+    play.animateTransition(layout, before, game, action.choices.toChoices)
     play.statusMessage = name & " is playing..."
   else:
     discard game.applyAction(action)

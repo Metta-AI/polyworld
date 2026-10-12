@@ -6,7 +6,7 @@ export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 12
+  SnapshotSchemaVersion* = 13
 
 type
   SessionOptions* = object
@@ -155,7 +155,8 @@ proc nextBotAction*(game: GameState, playsThisTurn = 0,
     for index in 0 ..< hand.len:
       order.add index
     order.sort(proc(a, b: int): int =
-      cmp((hand[b].energyCost, b), (hand[a].energyCost, a)))
+      cmp((game.playCost(game.pendingToss.player, hand[b]), b),
+        (game.playCost(game.pendingToss.player, hand[a]), a)))
     return BotAction(kind: TossAction, handIndex: -1,
       tossIndices: order[0 ..< game.pendingToss.count])
   if game.waitingTrigger:
@@ -343,6 +344,8 @@ proc effectToJson(effect: Effect): JsonNode =
   of TargetVfxEffect:
     result["targetVfx"] = %ord(effect.targetVfx)
     result["visualTarget"] = choiceToJson(effect.visualTarget)
+    if effect.vfxCard.name.len > 0:
+      result["vfxCard"] = cardToJson(effect.vfxCard)
 
 proc effectFromJson(node: JsonNode): Effect =
   let kind = parseEnum[EffectKind](node.field("kind").stringValue("effect kind"))
@@ -388,7 +391,9 @@ proc effectFromJson(node: JsonNode): Effect =
     of TargetVfxEffect:
       Effect(kind: kind, targetVfx: VfxKind(node.field("targetVfx").integer(
           "effect VFX", ord(low(VfxKind)), ord(high(VfxKind)))),
-        visualTarget: choiceFromJson(node.field("visualTarget")))
+        visualTarget: choiceFromJson(node.field("visualTarget")),
+        vfxCard: if node.hasKey("vfxCard"): cardFromJson(node["vfxCard"])
+          else: Card())
   result.beat = int("beat")
 
 proc gameToJson*(game: GameState): JsonNode =

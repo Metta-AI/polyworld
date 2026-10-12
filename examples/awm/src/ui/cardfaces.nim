@@ -21,6 +21,18 @@ const
   StatMargin* = 10'f32  ## Room around a stat box for glyph overhang.
   # The type line ("MINION"), restated over a live minion that lost keywords.
   TypeLine* = Rect(x: 109, y: 532, w: 382, h: 32)
+  # The cost crystal, top right. A card of another class shows its
+  # surcharge outside it, which moves the cost one slot to the left; both
+  # crystals are then redrawn together over the printed one.
+  CrystalSize* = 120'f32
+  CrystalGap* = 6'f32
+  CostBox* = Rect(x: CardFaceWidth.float32 - 26 - CrystalSize, y: 15,
+    w: CrystalSize, h: CrystalSize)
+  CostPairBox* = Rect(x: CostBox.x - CrystalSize - CrystalGap, y: CostBox.y,
+    w: CrystalSize * 2 + CrystalGap, h: CrystalSize)
+  MaxBakedCost* = 12  ## The highest printed cost a surcharge is drawn with.
+  # The gem inside a crystal, where its number is centred.
+  CrystalGem* = Rect(x: 14, y: 13, w: CrystalSize - 28, h: 94)
 
 type
   StatSlot* = enum
@@ -35,6 +47,7 @@ type
 
 var
   statBackdrop: Image  ## A minion frame with stat icons and no numbers.
+  headerBackdrop: Image  ## A frame with no cost crystal, to redraw over.
   assetsRoot: string
   assetImages: Table[string, Image]
   titleTypeface, rulesTypeface: Typeface
@@ -88,20 +101,31 @@ proc drawText(
   let bounds = arrangement.computeBounds()
   image.fillText(arrangement, translate(vec2(x, y + (height - bounds.h) / 2 - bounds.y)))
 
+proc cardArt(relativePath: string): Image =
+  ## A card's illustration, scaled once to the window it is drawn into and
+  ## kept at that size. The source art is several times larger than the
+  ## window, and no view ever shows it bigger, so holding the original
+  ## would cost memory for the whole session and buy nothing.
+  let key = "art:" & relativePath
+  if key notin assetImages:
+    let source =
+      if fileExists(assetsRoot / relativePath):
+        readImage(assetsRoot / relativePath)
+      else:
+        readImage(assetsRoot / "art/unknown.svg")
+    let
+      scaleFactor = max(ArtWidth.float32 / source.width.float32,
+        ArtHeight.float32 / source.height.float32)
+      crop = newImage(ArtWidth, ArtHeight)
+      x = (ArtWidth.float32 - source.width.float32 * scaleFactor) / 2
+      y = (ArtHeight.float32 - source.height.float32 * scaleFactor) / 2
+    crop.draw(source, translate(vec2(x, y)) * scale(vec2(scaleFactor)))
+    assetImages[key] = crop
+  assetImages[key]
+
 proc drawArt(image: Image, card: Card) =
-  let
-    relativePath = "art/" & card.name.toLowerAscii().replace(" ", "-") & ".png"
-    source = if fileExists(assetsRoot / relativePath):
-      assetImage(relativePath)
-    else:
-      assetImage("art/unknown.svg")
-    scaleFactor = max(ArtWidth.float32 / source.width.float32,
-      ArtHeight.float32 / source.height.float32)
-    crop = newImage(ArtWidth, ArtHeight)
-    x = (ArtWidth.float32 - source.width.float32 * scaleFactor) / 2
-    y = (ArtHeight.float32 - source.height.float32 * scaleFactor) / 2
-  crop.draw(source, translate(vec2(x, y)) * scale(vec2(scaleFactor)))
-  image.draw(crop, translate(vec2(ArtX, ArtY)))
+  let relativePath = "art/" & card.name.toLowerAscii().replace(" ", "-") & ".png"
+  image.draw(cardArt(relativePath), translate(vec2(ArtX, ArtY)))
 
 proc statInk*(value, printed: int): StatInk =
   if value < printed: LoweredStat
@@ -151,6 +175,42 @@ proc renderLostKeywords*(lost: set[Keyword]): Image =
   result.drawText("MINION · LOST " & names.join(", "), 0, 0, TypeLine.w,
     TypeLine.h, 31, LoweredStat.color, true, minimumSize = 18)
 
+proc renderSurcharge(extra: int): Image =
+  ## The off-class surcharge: a purple crystal reading "+2".
+  ensureAssets()
+  result = newImage(int(CrystalSize), int(CrystalSize))
+  let crystal = assetImage("icons/energy.svg")
+  var purple = newImage(crystal.width, crystal.height)
+  purple.draw(crystal)
+  for pixel in purple.data.mitems:
+    # The gem turns violet; the gold rim, where red leads, stays as it is.
+    if pixel.b.int >= pixel.r.int:
+      let shade = (pixel.r.int + pixel.g.int + pixel.b.int) div 3
+      pixel.r = uint8(min(255, shade * 115 div 100))
+      pixel.g = uint8(shade * 45 div 100)
+      pixel.b = uint8(min(255, shade * 150 div 100))
+  result.draw(purple)
+  # Three quarters of the printed cost's size: "+2" is two glyphs wide
+  # and has to sit inside the same gem.
+  result.drawText("+" & $extra, CrystalGem.x, CrystalGem.y, CrystalGem.w,
+    CrystalGem.h, 56, "#f3e6ff", true, minimumSize = 30)
+
+proc renderCostPair*(cost, extra: int): Image =
+  ## What a hero of another class sees in place of the printed cost: the
+  ## cost moved one slot left, with the surcharge outside it. Drawn on a
+  ## patch of the frame, so it covers the printed crystal underneath.
+  ensureAssets()
+  if headerBackdrop.isNil:
+    headerBackdrop = newImage(CardFaceWidth, CardFaceHeight)
+    headerBackdrop.draw(assetImage("frames/creature.svg"))
+  result = headerBackdrop.subImage(int(CostPairBox.x), int(CostPairBox.y),
+    int(CostPairBox.w), int(CostPairBox.h))
+  result.draw(assetImage("icons/energy.svg"))
+  result.drawText($cost, CrystalGem.x, CrystalGem.y, CrystalGem.w,
+    CrystalGem.h, 75, "#fff4d5", true)
+  result.draw(renderSurcharge(extra),
+    translate(vec2(CrystalSize + CrystalGap, 0)))
+
 proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
     showStats = true): Image =
   ensureAssets()
@@ -158,10 +218,16 @@ proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
   result.drawArt(card)
   result.draw(assetImage(if card.kind == Minion:
     "frames/creature.svg" else: "frames/spell.svg"))
-  result.draw(assetImage("icons/energy.svg"), translate(vec2(26, 15)))
-  result.drawText($card.energyCost, 40, 33, 92, 73, 75, "#fff4d5", true)
-  result.drawText(card.name, 154, 40, 390, 58, 60, "#f7e6be", true,
-    minimumSize = 35)
+  result.draw(assetImage("icons/energy.svg"),
+    translate(vec2(CostBox.x, CostBox.y)))
+  result.drawText($card.energyCost, CostBox.x + CrystalGem.x,
+    CostBox.y + CrystalGem.y, CrystalGem.w, CrystalGem.h, 75,
+    "#fff4d5", true)
+  # The name stops short of both crystal slots: a card of another class
+  # shows a second one, which moves the cost left over this space. Its box
+  # is the header panel itself, so the name sits in the middle of it.
+  result.drawText(card.name, 42, 21, CostPairBox.x - 42 - 8, 90, 60,
+    "#f7e6be", true, LeftAlign, minimumSize = 30)
   result.drawText(($card.kind).toUpperAscii(),
     109, 532, 382, 32, 31, "#e1c792", true)
 

@@ -448,7 +448,8 @@ proc addCard*(
     currentToughness = -1,
     damageFlash = 0.0'f32,
     lostKeywords: set[Keyword] = {},
-    veiled = false
+    veiled = false,
+    extraCost = 0
 ) =
   ## A minion on the battlefield passes its live stats (currentToughness
   ## >= 0); they are drawn over a stat-less face. A `veiled` minion is
@@ -487,7 +488,7 @@ proc addCard*(
       vec3(halfWidth, surfaceY, -halfDepth)
     ]
     liveStats = not hidden and card.name.len > 0 and
-      card.kind == Minion and currentToughness >= 0
+      (extraCost > 0 or (card.kind == Minion and currentToughness >= 0))
     imageKey =
       if hidden or card.name.len == 0: CardBackKey
       else: sk.bakedCardImage(card)
@@ -500,9 +501,14 @@ proc addCard*(
     corners[i] = raised + pose.transformCardVector(local[i])
   faces.addSurface(sk, corners, imageKey, brightness, damageFlash)
   if liveStats:
-    faces.addMinionOverlays(sk, corners, card,
-      if currentPower >= 0: currentPower else: card.power,
-      currentToughness, lostKeywords, brightness, damageFlash)
+    # Only a minion has printed stats to fall back on; a spell or trinket
+    # draws the surcharge alone.
+    let printedPower =
+      if currentPower >= 0: currentPower
+      elif card.kind == Minion: card.power
+      else: 0
+    faces.addMinionOverlays(sk, corners, card, printedPower,
+      currentToughness, lostKeywords, brightness, damageFlash, extraCost)
 
 
 proc addCardStack*(

@@ -148,6 +148,30 @@ block:
   doAssert action.kind == ActionPlayCard
   doAssert action.choices[0].toChoice == creatureChoice(1, 2)
 
+echo "The reference script answers a trigger that offers a choice"
+block:
+  # The branch worth more comes first, then that branch's own target: with
+  # a stale count the script would answer the option alone.
+  let fickle = Card(name: "Fickle", energyCost: 0, kind: Trinket,
+    class: some(Mage), rules: rules(on(eachTurn(You),
+      choose(rules(draw(1)), rules(damage(3, target({kind: {Minion}})))))))
+  var played = fixture(31)
+  played.game.players[2].board = @[MinionState(id: 1, owner: 2, card: fickle)]
+  # The first candidate is a cheap body; the Bear further down is the one
+  # worth burning, so an answer taken from an unwritten slot shows up.
+  played.game.players[0].board = @[ready(0, 2, "Footsoldier")]
+  played.game.players[3].board = @[ready(3, 3, "Bear")]
+  played.game.pendingTriggers = @[
+    PendingTrigger(owner: 2, sourceId: 1, trigger: 0)]
+  played.game.nextMinionId = 4
+  doAssert played.step()
+  let action = played.bots[2].action
+  doAssert action.kind == ActionResolveTrigger
+  doAssert action.choices.len == 2
+  doAssert action.choices[0].toChoice == optionChoice(1)
+  doAssert action.choices[1].toChoice == creatureChoice(3, 3)
+  doAssert not played.game.waitingTrigger
+
 echo "The reference script picks the option it is better off with"
 block:
   # 6 damage for 3 of its own is worse than 2 for nothing.

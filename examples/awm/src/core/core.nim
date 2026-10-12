@@ -83,6 +83,8 @@ type
     ExplosionVfx
     # A blade thrusts out of the dark and flicks back.
     StabVfx
+    # A hero levels up in a class: its icon rises beside them.
+    LevelUpVfx
     # Presentation cue, not a card VFX: a card moved from a deck to a hand.
     # The UI plays the regular draw animation into that hand slot.
     DrawVfx
@@ -258,6 +260,7 @@ type
     of TargetVfxEffect:
       targetVfx*: VfxKind
       visualTarget*: Choice
+      vfxCard*: Card  ## The card the visual belongs to, when it needs one.
 
   BoardCard* = object
     choice*: Choice
@@ -409,6 +412,12 @@ type
     ## Two minions fight each other, as in combat, without attacking.
     fighter*, opponent*: Target
     vfx*: VfxKind
+
+  LevelUpRule* = ref object of Rule
+    ## A class card: it makes that class's cards cheaper for a hero of
+    ## another class, by `levels` each while it is in play.
+    levels*: int
+    heroClass*: HeroClass
 
   HiddenRule* = ref object of Rule
     ## A minion that can't be attacked: for `turns` of its owner's turns,
@@ -1414,6 +1423,18 @@ method run*(rule: DamagePlayerRule, card: Card, context: var RuleContext): bool 
       heroPlayer: player, heroDamage: amount)
   true
 
+method text*(rule: LevelUpRule, card: Card): string =
+  ## "Off-class Archer cards cost 1 less."
+  discard card
+  "Off-class " & rule.heroClass.className() & " cards cost " &
+    $rule.levels & " less."
+
+method run*(rule: LevelUpRule, card: Card, context: var RuleContext): bool =
+  ## It changes no game object; it only announces itself over the hero.
+  context.effects.add Effect(kind: TargetVfxEffect, targetVfx: LevelUpVfx,
+    visualTarget: heroChoice(context.sourcePlayer), vfxCard: card)
+  true
+
 method text*(rule: HiddenRule, card: Card): string =
   discard card
   if rule.turns == Always: "Hidden." else: "Hidden " & $rule.turns & "."
@@ -1489,6 +1510,12 @@ proc damage*(amount: RuleValue[int], players: RuleValue[Owner],
   ## `damage(1, getTarget().owner)`, `damage(1, AllOpponents)`.
   DamagePlayerRule(amount: amount, players: players.effectOwner("damage"),
     vfx: vfx)
+
+proc levelUp*(levels: int, heroClass: HeroClass): Rule =
+  ## `levelUp(1, Archer)`: while this card is in play, its owner's
+  ## off-class Archer cards cost one less.
+  doAssert levels > 0, "levelUp: a class card raises a hero by a level"
+  LevelUpRule(levels: levels, heroClass: heroClass)
 
 proc hidden*(turns: int): Rule =
   ## `hidden(2)`: it can't be attacked until the start of its owner's
@@ -1924,6 +1951,30 @@ proc ruleText*(card: Card): string =
       lines.add line
   lines.join("\n")
 
+const OffClassCost* = 3
+  ## What a card of another class costs on top of its printed cost, before
+  ## the hero's levels in that class bring it down.
+
+proc levels*(card: Card, heroClass: HeroClass): int =
+  ## How far this card raises a hero in `heroClass`: 0 for most cards.
+  for rule in card.rules:
+    if rule of LevelUpRule and LevelUpRule(rule).heroClass == heroClass:
+      result += LevelUpRule(rule).levels
+
+proc levelUpClass*(card: Card): Option[HeroClass] =
+  ## The class a class card teaches, for its visual.
+  for rule in card.rules:
+    if rule of LevelUpRule:
+      return some(LevelUpRule(rule).heroClass)
+
+proc extraCost*(card: Card, heroClass: HeroClass, levels: int): int =
+  ## What a hero pays on top of the printed cost: nothing for their own
+  ## class or a card of no class, else the off-class cost less their levels
+  ## in that class.
+  if card.class.isNone or card.class == some(heroClass):
+    return 0
+  max(0, OffClassCost - levels)
+
 proc hiddenTurns*(card: Card): int =
   ## How long the card is hidden once in play: 0 when it never is,
   ## `Always` when it always is, else that many of its owner's turns.
@@ -2127,6 +2178,27 @@ proc everyOption*(rules: Rules): seq[Rules] =
 proc everyOption*(card: Card): seq[Rules] =
   card.rules.everyOption()
 
+proc optionCard*(card: Card, option: Rules): Card =
+  ## The same card showing one branch alone, for the table to offer.
+  result = card
+  result.rules = option
+
+proc pickedOption*(card: Card, picks: seq[Choice],
+    board: seq[BoardCard] = @[]): Rules =
+  ## The branch these picks took, empty when the card offered no choice.
+  for index, pick in picks:
+    if pick.kind == OptionChoice:
+      let offered = card.options(picks[0 ..< index], board)
+      if pick.option in 0 ..< offered.len:
+        return offered[pick.option]
+
+proc pickedFace*(card: Card, picks: seq[Choice],
+    board: seq[BoardCard] = @[]): Card =
+  ## The card as it was played: a card that offered a choice shows the
+  ## branch that was taken, so every player sees which one it was.
+  let branch = card.pickedOption(picks, board)
+  if branch.len > 0: card.optionCard(branch) else: card
+
 proc answer*(context: var RuleContext, picks: seq[Choice]) =
   ## Treats `picks` as choices already made, so the next one is asked for
   ## in the right place and `getTarget` sees the objects they named.
@@ -2135,11 +2207,6 @@ proc answer*(context: var RuleContext, picks: seq[Choice]) =
   for pick in picks:
     if pick.kind != OptionChoice:
       context.targets.add pick
-
-proc optionCard*(card: Card, option: Rules): Card =
-  ## The same card showing one branch alone, for the table to offer.
-  result = card
-  result.rules = option
 
 proc targetPrompt*(card: Card, step: int, picks: seq[Choice] = @[],
     board: seq[BoardCard] = @[]): tuple[rule, choose: string] =

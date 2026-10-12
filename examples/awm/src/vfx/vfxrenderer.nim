@@ -251,6 +251,23 @@ proc addBillboard(renderer: var VfxRenderer, center: Vec3, radius: float32,
     center + right - up, center + right + up],
     [vec2(-1, -1), vec2(-1, 1), vec2(1, 1), vec2(1, -1)], ink, style)
 
+proc addLevelUpArrow*(renderer: var VfxRenderer, base, eye: Vec3,
+    size, alpha: float32, ink: Vec4) =
+  ## A glowing arrow pointing up, drawn beside a hero that levelled up.
+  if alpha <= 0.01'f32:
+    return
+  let
+    forward = normalize(eye - base)
+    right = normalize(cross(vec3(0, 1, 0), forward)) * size
+    up = vec3(0, size, 0)
+    tip = base + up
+    glow = vec4(ink.xyz, ink.w * alpha)
+  renderer.addGlowLine(base - up * 0.6'f32, tip, eye, size * 0.1'f32, glow)
+  renderer.addGlowLine(tip, tip - up * 0.55'f32 - right * 0.5'f32, eye,
+    size * 0.1'f32, glow)
+  renderer.addGlowLine(tip, tip - up * 0.55'f32 + right * 0.5'f32, eye,
+    size * 0.1'f32, glow)
+
 proc addTargetRing*(renderer: var VfxRenderer, center, eye: Vec3,
     radius: float32, strength: float32) =
   for i in 0 ..< 64:
@@ -278,8 +295,9 @@ proc newVfx*(kind: VfxKind, target: Choice, position: Vec3, seed: int): ActiveVf
       of OozeSplatVfx: 1.8'f32
       of ExplosionVfx: 0.95'f32
       of StabVfx: 0.6'f32
+      # Presentation cues the table draws itself, not particle effects.
       of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
-          HeroDeathVfx: 0.0'f32)
+          HeroDeathVfx, LevelUpVfx: 0.0'f32)
 
 proc advance*(effects: var seq[ActiveVfx], dt: float32) =
   for effect in effects.mitems:
@@ -631,7 +649,7 @@ proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
       renderer.addBillboard(effect.position, 1.2'f32 + t * 0.8'f32, eye,
         vec4(1, 0.025, 0.05, (1 - t) * 0.38'f32), 4)
     of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
-        HeroDeathVfx: discard
+        HeroDeathVfx, LevelUpVfx: discard
 
 proc draw*(renderer: var VfxRenderer, viewProjection: Mat4,
     additive = true, depthTest = true) =

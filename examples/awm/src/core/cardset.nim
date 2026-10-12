@@ -49,9 +49,11 @@ for card in baseCards:
   card.checkCardNames(baseCardNamed)
 
 proc baseDeck*(heroClass: HeroClass): seq[Card] =
-  ## The class's deck, dealt from its list in baseset.nim.
+  ## The class's deck, dealt from its list in baseset.nim. A list may name
+  ## cards of another class, or the class cards of no class: they cost
+  ## more to play, which `playCost` works out at the table.
   for (name, count) in baseDeckLists[heroClass]:
-    let card = heroClass.classCardNamed(name)
+    let card = baseCardNamed(name)
     for _ in 0 ..< count:
       result.add card
   doAssert result.len == DeckSize

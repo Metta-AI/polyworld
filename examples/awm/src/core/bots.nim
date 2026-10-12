@@ -76,7 +76,8 @@ proc cardChoices(handIndex: int, picked: seq[Choice] = @[]): seq[Choice] =
     return activeGame[].availableChoices(handIndex, picked)
   var preview = activeGame[].copyGameState()
   preview.players[activePlayer].energy = max(
-    preview.players[activePlayer].energy, card.energyCost)
+    preview.players[activePlayer].energy,
+    preview.playCost(activePlayer, card))
   discard preview.playMinion(handIndex)
   preview.availableChoices(card, picked)
 
@@ -485,7 +486,8 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
       i = args[0].int
       hand = activeGame[].players[activePlayer].hand
     if i < 0 or i >= hand.len: return -1
-    hand[i].energyCost.int32
+    # What it costs this hero now, the off-class surcharge included.
+    activeGame[].playCost(activePlayer, hand[i]).int32
   discard result.addFunction("handCost", 1, handCostProc, 3)
 
   let handKindProc: HostProc = proc(args: openArray[int32]): int32 =

@@ -2,6 +2,16 @@ import
   std/[options, strutils, unittest],
   ../src/awm
 
+proc leads(game: var GameState, heroClass: HeroClass): int =
+  ## Hands the turn to the seat of that class and returns it. Card tests
+  ## play a card of their own hero's class, so the off-class surcharge
+  ## stays out of what they are measuring.
+  for seat, player in game.players:
+    if player.heroClass == heroClass:
+      game.currentPlayer = seat
+      break
+  game.currentPlayer
+
 suite "AWM base set":
   test "the Mage deck is Bouncers and Oozifications, without Oozes":
     check DeckSize == 40
@@ -105,7 +115,7 @@ suite "AWM turns":
   test "finishing passes the turn, gains energy, replenishes, and draws":
     var game = newGame(Archer, Mage, 17)
     let
-      first = game.currentPlayer
+      first = game.leads(Archer)
       second = (first + 1) mod PlayerCount
       secondHand = game.players[second].hand.len
     game.finishTurn()
@@ -117,7 +127,7 @@ suite "AWM turns":
 
   test "energy grows on each of a player's turns and fully replenishes":
     var game = newGame(Archer, Mage, 43)
-    let first = game.currentPlayer
+    let first = game.leads(Archer)
     game.players[first].energy = 0
     game.finishTurn()
     game.finishTurn()
@@ -129,7 +139,7 @@ suite "AWM card execution":
   test "Bolt offers both heroes and deals two damage":
     var game = newGame(Archer, Warrior, 23)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = (caster + 1) mod PlayerCount
       bolt = Archer.classCard()
     game.players[caster].hand = @[bolt]
@@ -148,7 +158,7 @@ suite "AWM card execution":
   test "Bolt can target its own hero":
     var game = newGame(Archer, Warrior, 27)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       bolt = Archer.classCard()
     game.players[caster].hand = @[bolt]
     game.players[caster].energy = 1
@@ -159,7 +169,7 @@ suite "AWM card execution":
   test "canceling or supplying an invalid target cancels the play":
     var game = newGame(Archer, Warrior, 29)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       bolt = Archer.classCard()
     game.players[caster].hand = @[bolt]
     game.players[caster].energy = 1
@@ -172,7 +182,7 @@ suite "AWM card execution":
   test "Bear remains on the board as a three-two minion":
     var game = newGame(Warrior, Mage, 31)
     let
-      player = game.currentPlayer
+      player = game.leads(Warrior)
       bear = Warrior.classCard()
     game.players[player].hand = @[bear]
     game.players[player].energy = 2
@@ -188,7 +198,7 @@ suite "AWM card execution":
   test "Bouncer returns the selected minion and remains on the board":
     var game = newGame(Mage, Warrior, 37)
     let
-      magePlayer = game.currentPlayer
+      magePlayer = game.leads(Mage)
       otherPlayer = (magePlayer + 1) mod PlayerCount
       bear = Warrior.classCard()
       bouncer = Mage.classCard()
@@ -218,7 +228,7 @@ suite "AWM card execution":
   test "Bouncer enters play before its target is chosen":
     var game = newGame(Mage, Archer, 39)
     let
-      player = game.currentPlayer
+      player = game.leads(Mage)
       bouncer = Mage.classCard()
     game.players[player].hand = @[bouncer]
     game.players[player].energy = 1
@@ -241,7 +251,7 @@ suite "AWM card execution":
   test "Bouncer can be played without a minion target":
     var game = newGame(Mage, Archer, 41)
     let
-      player = game.currentPlayer
+      player = game.leads(Mage)
       bouncer = Mage.classCard()
     game.players[player].hand = @[bouncer]
     game.players[player].energy = 1
@@ -256,7 +266,7 @@ suite "AWM card execution":
   test "Bouncer may decline a target even when a minion is available":
     var game = newGame(Mage, Warrior, 43)
     let
-      player = game.currentPlayer
+      player = game.leads(Mage)
       otherPlayer = (player + 1) mod PlayerCount
       bear = Warrior.classCard()
       bouncer = Mage.classCard()
@@ -279,7 +289,7 @@ suite "AWM card execution":
   test "No target cannot be used to cast a spell":
     var game = newGame(Archer, Mage, 47)
     let
-      player = game.currentPlayer
+      player = game.leads(Archer)
       bolt = Archer.classCard()
     game.players[player].hand = @[bolt]
     game.players[player].energy = 1
@@ -315,7 +325,7 @@ suite "AWM target visual effects":
 
   test "Bolt emits lightning and damage flash on the chosen hero exactly once":
     var game = newGame(Archer, Mage, 101)
-    let target = heroChoice((game.currentPlayer + 1) mod PlayerCount)
+    let target = heroChoice((game.leads(Archer) + 1) mod PlayerCount)
     game.players[game.currentPlayer].hand = @[Archer.classCard()]
     game.players[game.currentPlayer].energy = 1
     check game.playCard(0, target)
@@ -340,7 +350,7 @@ suite "AWM target visual effects":
   test "Bouncer snapshots a removed target for its bubble":
     var game = newGame(Mage, Warrior, 107)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Mage)
       owner = (caster + 1) mod PlayerCount
       target = creatureChoice(owner, 75)
     game.players[owner].board = @[
@@ -422,7 +432,7 @@ suite "AWM combat":
   test "attack targets are the enemy hero, then enemy minions":
     var game = newGame(Warrior, Warrior, 301)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[me].board = @[readyMinion(me, 1, bear), readyMinion(me, 2, bear)]
@@ -436,7 +446,7 @@ suite "AWM combat":
 
   test "a freshly played minion cannot attack":
     var game = newGame(Warrior, Mage, 303)
-    let me = game.currentPlayer
+    let me = game.leads(Warrior)
     game.players[me].hand = @[Warrior.classCard()]
     game.players[me].energy = 2
     let id = game.playMinion(0)
@@ -447,7 +457,7 @@ suite "AWM combat":
   test "minions deal their power to each other and both can die":
     var game = newGame(Warrior, Warrior, 307)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[me].board = @[readyMinion(me, 1, bear)]
@@ -475,7 +485,7 @@ suite "AWM combat":
   test "damage stays on a surviving minion and each minion attacks once":
     var game = newGame(Warrior, Mage, 311)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
       bouncer = Mage.classCard()
@@ -499,7 +509,7 @@ suite "AWM combat":
   test "attacking the enemy hero damages it; illegal targets are rejected":
     var game = newGame(Warrior, Warrior, 313)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[me].board = @[readyMinion(me, 1, bear), readyMinion(me, 2, bear)]
@@ -567,7 +577,7 @@ suite "AWM Sharpshooter":
   test "Sharpshooter may target either hero, any minion, or nothing":
     var game = newGame(Archer, Warrior, 211)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = (caster + 1) mod PlayerCount
       bear = Warrior.classCard()
     game.players[enemy].board = @[
@@ -583,7 +593,7 @@ suite "AWM Sharpshooter":
   test "Sharpshooter shoots the enemy hero with an arrow":
     var game = newGame(Archer, Warrior, 223)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = (caster + 1) mod PlayerCount
       sharpshooter = baseCard("Sharpshooter", 3)
     game.players[caster].hand = @[sharpshooter]
@@ -602,7 +612,7 @@ suite "AWM Sharpshooter":
   test "Sharpshooter damages and destroys minions":
     var game = newGame(Archer, Mage, 227)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = (caster + 1) mod PlayerCount
       bear = Warrior.classCard()
       bouncer = Mage.classCard()
@@ -626,7 +636,7 @@ suite "AWM Sharpshooter":
 
   test "Sharpshooter can enter play without shooting":
     var game = newGame(Archer, Warrior, 229)
-    let caster = game.currentPlayer
+    let caster = game.leads(Archer)
     game.players[caster].hand = @[baseCard("Sharpshooter", 3)]
     game.players[caster].energy = 3
     check game.playCard(0, NoTarget)
@@ -639,7 +649,7 @@ suite "AWM ranged":
   test "a ranged attacker takes no damage from a non-ranged defender":
     var game = newGame(Archer, Warrior, 401)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
       sniper = baseCard("Sniper", 2)
       bear = Warrior.classCard()
@@ -657,7 +667,7 @@ suite "AWM ranged":
   test "a non-ranged attacker deals no damage to a ranged defender":
     var game = newGame(Warrior, Archer, 409)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       sniper = baseCard("Sniper", 2)
       bear = Warrior.classCard()
@@ -676,7 +686,7 @@ suite "AWM ranged":
   test "ranged minions fight each other normally":
     var game = newGame(Archer, Archer, 419)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
       sniper = baseCard("Sniper", 2)
       sharpshooter = baseCard("Sharpshooter", 3)
@@ -690,7 +700,7 @@ suite "AWM ranged":
   test "on-play damage still hits ranged minions":
     var game = newGame(Archer, Archer, 421)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = 1 - caster
       sniper = baseCard("Sniper", 2)
     game.players[enemy].board = @[readyMinion(enemy, 70, sniper)]
@@ -736,7 +746,7 @@ suite "AWM Hail of Arrows":
   test "Hail of Arrows hits every enemy minion and nothing else":
     var game = newGame(Archer, Warrior, 431)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = 1 - caster
       hail = baseCard("Hail of Arrows", 3)
       bear = Warrior.classCard()
@@ -770,7 +780,7 @@ suite "AWM Hail of Arrows":
   test "Hail of Arrows into an empty enemy board still resolves":
     var game = newGame(Archer, Warrior, 433)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       bear = Warrior.classCard()
       hail = baseCard("Hail of Arrows", 3)
     game.players[caster].board = @[readyMinion(caster, 1, bear)]
@@ -786,7 +796,7 @@ suite "AWM Hail of Arrows":
   test "several minions on one board can die together":
     var game = newGame(Archer, Archer, 437)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Archer)
       enemy = 1 - caster
       sniper = baseCard("Sniper", 2)
     game.players[enemy].board =
@@ -811,7 +821,7 @@ suite "AWM Swords":
     ## enemy has one Bear.
     var game = newGame(Warrior, Warrior, seed)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Warrior)
       enemy = 1 - caster
       bear = Warrior.classCard()
     game.players[caster].board =
@@ -896,7 +906,8 @@ suite "AWM Swords":
     var (game, caster, _) = swordsGame(541)
     check game.playCard(0)
     game.players[caster].hand = @[Mage.classCard()]
-    game.players[caster].energy = 1
+    # A Warrior reaching for a Mage card pays the off-class surcharge.
+    game.players[caster].energy = game.playCost(caster, Mage.classCard())
     check game.playCard(0, creatureChoice(caster, 1))
     check game.players[caster].hand == @[Warrior.classCard()]
     game.players[caster].energy = 2
@@ -907,7 +918,7 @@ suite "AWM Swords":
 
   test "Swords with no friendly minions still resolves":
     var game = newGame(Warrior, Warrior, 547)
-    let caster = game.currentPlayer
+    let caster = game.leads(Warrior)
     game.players[caster].hand = @[baseCard("Swords", 2)]
     game.players[caster].energy = 2
     check game.playCard(0)
@@ -917,7 +928,7 @@ suite "AWM Swords":
   test "lowered toughness kills and power never drops below zero":
     var game = newGame(Warrior, Warrior, 557)
     let
-      caster = game.currentPlayer
+      caster = game.leads(Warrior)
       enemy = 1 - caster
       bear = Warrior.classCard()
       wither = Card(name: "Wither", energyCost: 0, kind: Spell,
@@ -944,7 +955,7 @@ suite "AWM Duel and Shields":
     ## Duel in hand; minion 1 on our side, minion 2 on theirs.
     var game = newGame(Warrior, Archer, seed)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, mine)]
     game.players[enemy].board = @[readyMinion(enemy, 2, theirs)]
@@ -1027,7 +1038,7 @@ suite "AWM Duel and Shields":
 
   test "Duel needs a minion on the board":
     var game = newGame(Warrior, Warrior, 623)
-    let me = game.currentPlayer
+    let me = game.leads(Warrior)
     game.players[me].hand = @[baseCard("Duel", 2)]
     game.players[me].energy = 2
     check game.availableChoices(0).len == 0
@@ -1049,7 +1060,7 @@ suite "AWM Duel and Shields":
   test "Shields raises every friendly minion's toughness":
     var game = newGame(Warrior, Warrior, 631)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[me].board = @[readyMinion(me, 1, bear)]
@@ -1103,7 +1114,7 @@ suite "AWM Tactician, Footsoldier, Commander and Rally":
   test "Tactician lowers a minion's power for good":
     var game = newGame(Warrior, Warrior, 701)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[enemy].board = @[readyMinion(enemy, 1, bear)]
@@ -1124,7 +1135,7 @@ suite "AWM Tactician, Footsoldier, Commander and Rally":
 
   test "Tactician can weaken nothing or a friendly minion":
     var game = newGame(Warrior, Warrior, 709)
-    let me = game.currentPlayer
+    let me = game.leads(Warrior)
     game.players[me].hand =
       @[baseCard("Tactician", 2), baseCard("Tactician", 2)]
     game.players[me].energy = 4
@@ -1137,7 +1148,7 @@ suite "AWM Tactician, Footsoldier, Commander and Rally":
 
   test "Commander enters with two Footsoldiers that can't attack yet":
     var game = newGame(Warrior, Warrior, 719)
-    let me = game.currentPlayer
+    let me = game.leads(Warrior)
     game.players[me].board = @[readyMinion(me, 1, Warrior.classCard())]
     game.nextMinionId = 2
     game.players[me].hand = @[baseCard("Commander", 5)]
@@ -1164,7 +1175,7 @@ suite "AWM Tactician, Footsoldier, Commander and Rally":
   test "Rally summons first, so its buff reaches the Footsoldiers":
     var game = newGame(Warrior, Warrior, 727)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
       rally = baseCard("Rally", 5)
@@ -1192,7 +1203,7 @@ suite "AWM Tactician, Footsoldier, Commander and Rally":
   test "summons can enter under the opponent's control":
     var game = newGame(Warrior, Warrior, 733)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
     game.nextMinionId = 7
     game.players[me].hand = @[Card(name: "Gift", energyCost: 0, kind: Spell,
@@ -1212,7 +1223,7 @@ suite "AWM Oozification":
     ## Oozification in hand; an enemy Bear (id 1) at `toughness`.
     var game = newGame(Mage, Warrior, seed)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     var bear = readyMinion(enemy, 1, Warrior.classCard())
     bear.currentToughness = toughness
@@ -1288,7 +1299,7 @@ suite "AWM Oozification":
 
   test "Oozification without a target is canceled":
     var game = newGame(Mage, Warrior, 821)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[baseCard("Oozification", 4)]
     game.players[me].energy = 4
     check game.availableChoices(0).len == 0
@@ -1334,7 +1345,7 @@ suite "AWM Oozification":
       "Deal the first target's toughness damage to the second target."
     var game = newGame(Mage, Warrior, 827)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[enemy].board =
@@ -1362,7 +1373,7 @@ suite "AWM computed query owners and card names":
       "Deal 1 damage to all friendly minions."
     var game = newGame(Mage, Warrior, 901)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[me].board = @[readyMinion(me, 1, bear)]
@@ -1419,7 +1430,7 @@ suite "AWM rule values":
       "Deal the number of friendly minions damage to a hero."
     var game = newGame(Warrior, Mage, 911)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
       bear = Warrior.classCard()
     game.players[me].board =
@@ -1436,7 +1447,7 @@ suite "AWM rule values":
       damage(getTarget().power + 1, target({kind: {Hero}}))))
     var game = newGame(Warrior, Mage, 919)
     let
-      me = game.currentPlayer
+      me = game.leads(Warrior)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, Warrior.classCard())]
     game.nextMinionId = 2
@@ -1453,7 +1464,7 @@ suite "AWM Plan, draws and triggers":
   proc planGame(seed: int64): (GameState, int, int) =
     ## Plan alone in hand, with energy for it.
     var game = newGame(Mage, Warrior, seed)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[baseCard("Plan", 3)]
     game.players[me].energy = 3
     (game, me, 1 - me)
@@ -1514,7 +1525,8 @@ suite "AWM Plan, draws and triggers":
     game.finishTurn()
     game.players[enemy].hand =
       @[Mage.classCard(), baseCard("Hail of Arrows", 3)]
-    game.players[enemy].energy = 4
+    # Both are off-class for this hero, surcharge included.
+    game.players[enemy].energy = 10
     check game.availableChoices(0) == @[NoTarget]
     check game.playCard(1)
     check game.players[me].board.len == 1
@@ -1539,7 +1551,7 @@ suite "AWM Plan, draws and triggers":
       rules: rules(on(nextTurn(AnyOpponent), draw(1, AllOpponents))))
     var game = newGame(Mage, Warrior, 1009)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].hand = @[omen]
     check game.playCard(0)
@@ -1556,7 +1568,7 @@ suite "AWM Plan, draws and triggers":
       rules: rules(destroy(self())), power: 1, toughness: 1)
     check fleeting.ruleText() == "Destroy this card."
     var game = newGame(Mage, Warrior, 1011)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].board = @[readyMinion(me, 1, fleeting)]
     game.nextMinionId = 2
     game.players[me].hand = @[fleeting]
@@ -1593,7 +1605,7 @@ suite "AWM triggers that choose targets":
     ## advanced to the start of my next turn.
     var game = newGame(Mage, Warrior, seed)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].hand = @[snare]
     check game.playCard(0)
@@ -1635,7 +1647,7 @@ suite "AWM triggers that choose targets":
 
   test "with nothing legal to target, a trigger resolves by itself":
     var game = newGame(Mage, Warrior, 1105)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[snare]
     check game.playCard(0)
     game.finishTurn()
@@ -1648,7 +1660,7 @@ suite "AWM triggers that choose targets":
       rules: rules(on(nextTurn(AnyOpponent), damage(1, target({kind: {Minion}})))))
     var game = newGame(Mage, Warrior, 1107)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].hand = @[trap]
     check game.playCard(0)
@@ -1663,7 +1675,7 @@ suite "AWM presentation beats":
   test "Oozification's Oozes come a beat after its splat and destroy":
     var game = newGame(Mage, Warrior, 1201)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[enemy].board = @[readyMinion(enemy, 1, Warrior.classCard())]
     game.nextMinionId = 2
@@ -1688,7 +1700,7 @@ suite "AWM presentation beats":
 
   test "Plan's turn draw, its draw and its destroy are beats in that order":
     var game = newGame(Mage, Warrior, 1203)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[baseCard("Plan", 3)]
     game.players[me].energy = 3
     check game.playCard(0)
@@ -1707,7 +1719,7 @@ suite "AWM presentation beats":
 
   test "each card of a multi-card draw is its own beat":
     var game = newGame(Mage, Warrior, 1205)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[Card(name: "Study", energyCost: 0, kind: Spell,
       rules: rules(draw(2)))]
     check game.playCard(0)
@@ -1725,7 +1737,7 @@ suite "AWM Study and discards":
   proc studyGame(seed: int64): (GameState, int, int) =
     ## Study plus two cards in hand, energy for Study.
     var game = newGame(Mage, Warrior, seed)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand =
       @[baseCard("Study", 2), baseCard("Bouncer", 1), baseCard("Plan", 3)]
     game.players[me].energy = 2
@@ -1787,7 +1799,7 @@ suite "AWM Study and discards":
 
   test "a discard takes at most the hand, and none from an empty hand":
     var game = newGame(Mage, Warrior, 1305)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[
       Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(toss(3))),
       baseCard("Bouncer", 1)]
@@ -1803,7 +1815,7 @@ suite "AWM Study and discards":
   test "rules after a discard wait until it's chosen":
     var game = newGame(Mage, Warrior, 1307)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       deck = game.players[me].deck.len
     game.players[me].hand = @[
       Card(name: "Swap", energyCost: 0, kind: Spell,
@@ -1822,7 +1834,7 @@ suite "AWM Study and discards":
   test "an opponent's discard waits for the opponent":
     var game = newGame(Mage, Warrior, 1309)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].hand = @[Card(name: "Rot", energyCost: 0, kind: Spell,
       rules: rules(toss(1, AllOpponents)))]
@@ -1837,7 +1849,7 @@ suite "AWM Study and discards":
     let grind = Card(name: "Grind", energyCost: 0, kind: Trinket,
       rules: rules(on(nextTurn(You), toss(1), draw(1))))
     var game = newGame(Mage, Warrior, 1311)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[grind]
     check game.playCard(0)
     game.finishTurn()
@@ -1848,6 +1860,95 @@ suite "AWM Study and discards":
     check game.resolvePendingToss(@[0])
     check not game.waitingChoice
     check game.players[me].hand.len == hand
+
+suite "AWM class cards and off-class costs":
+  test "a class card belongs to no class and prints what it teaches":
+    for (id, heroClass) in [("archer-0", Archer), ("warrior-0", Warrior),
+        ("mage-0", Mage)]:
+      let card = baseCard(id)
+      check card.kind == Trinket
+      check card.class.isNone
+      check card.energyCost == 0
+      check card.ruleText() ==
+        "Off-class " & heroClass.className() & " cards cost 1 less."
+      check card.levels(heroClass) == 1
+      check card.levelUpClass() == some(heroClass)
+    check baseCard("bolt-1").levels(Archer) == 0
+    check baseCard("bolt-1").levelUpClass().isNone
+
+  test "a card of another class costs three more, your own costs nothing":
+    var game = newGame(Mage, Warrior, 2601)
+    let me = game.leads(Mage)
+    check game.extraCost(me, baseCard("bouncer-1")) == 0
+    check game.playCost(me, baseCard("bouncer-1")) == 1
+    check game.extraCost(me, baseCard("bolt-1")) == OffClassCost
+    check game.playCost(me, baseCard("bolt-1")) == 1 + OffClassCost
+    # A card of no class is nobody's off-class card.
+    check game.extraCost(me, baseCard("archer-0")) == 0
+
+  test "each class card in play takes one off that class's surcharge":
+    var game = newGame(Mage, Warrior, 2603)
+    let me = game.leads(Mage)
+    let bolt = baseCard("bolt-1")
+    for level in 0 .. 3:
+      check game.playCost(me, bolt) == 1 + max(0, OffClassCost - level)
+      # A Warrior card never gets cheaper from Archer class cards.
+      check game.playCost(me, baseCard("bear-2")) == 2 + OffClassCost
+      game.players[me].board.add MinionState(id: level + 1, owner: me,
+        card: baseCard("archer-0"), enteredTurn: game.turnNumber)
+      game.nextMinionId = level + 2
+    # A fourth never takes it below the printed cost.
+    game.players[me].board.add MinionState(id: 5, owner: me,
+      card: baseCard("archer-0"), enteredTurn: game.turnNumber)
+    check game.playCost(me, bolt) == 1
+
+  test "only your own class cards help you":
+    var game = newGame(Mage, Warrior, 2605)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[enemy].board = @[MinionState(id: 1, owner: enemy,
+      card: baseCard("archer-0"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    check game.playCost(me, baseCard("bolt-1")) == 1 + OffClassCost
+
+  test "the surcharge is paid, and shows up in what you can afford":
+    var game = newGame(Mage, Warrior, 2607)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].hand = @[baseCard("bolt-1")]
+    game.players[me].energy = 3
+    check not game.canPlay(0)
+    game.players[me].energy = 4
+    check game.canPlay(0)
+    check game.playCard(0, heroChoice(enemy))
+    check game.players[me].energy == 0
+    check game.players[enemy].life == StartingLife - 2
+
+  test "playing a class card announces the class over its hero":
+    var game = newGame(Mage, Warrior, 2609)
+    let me = game.leads(Mage)
+    game.players[me].hand = @[baseCard("archer-0")]
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.levels(me, Archer) == 1
+    check game.levels(me, Warrior) == 0
+    var announced = 0
+    for event in game.takeVisualEvents():
+      if event.kind == LevelUpVfx:
+        inc announced
+        check event.target == heroChoice(me)
+        check event.card.levelUpClass() == some(Archer)
+    check announced == 1
+
+  test "a deck list may name cards of another class":
+    # Decks are unchanged, but the builder no longer insists on one class.
+    for heroClass in HeroClass:
+      let deck = heroClass.baseDeck()
+      check deck.len == DeckSize
+      for card in deck:
+        check card.class == some(heroClass)
 
 suite "AWM option faces":
   test "every branch a card offers has a face of its own":
@@ -1885,7 +1986,7 @@ suite "AWM hidden minions":
     ## Bear ready to attack it.
     var game = newGame(Archer, Warrior, seed)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
     game.players[me].board = @[MinionState(id: 1, owner: me, card: card,
       currentToughness: card.toughness, enteredTurn: game.turnNumber,
@@ -1943,7 +2044,8 @@ suite "AWM hidden minions":
     var (game, me, enemy) = hiddenGame(baseCard("ambusher-3"), 2507)
     game.finishTurn()
     game.players[enemy].hand = @[baseCard("sharpshooter-3")]
-    game.players[enemy].energy = 3
+    game.players[enemy].energy =
+      game.playCost(enemy, baseCard("sharpshooter-3"))
     # Hiding is cover from attacks, not from a card that aims at it.
     check creatureChoice(me, 1) in game.availableChoices(0)
     check game.playCard(0, creatureChoice(me, 1))
@@ -1977,7 +2079,7 @@ suite "AWM repeat and Reload":
   test "the repeated rules aim fresh targets of their own":
     var game = newGame(Archer, Warrior, 2301)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
     game.players[me].hand = @[baseCard("reload-2")]
     game.players[me].energy = 2
@@ -1999,7 +2101,7 @@ suite "AWM repeat and Reload":
 
   test "a trinket's rules are repeated too":
     var game = newGame(Archer, Mage, 2303)
-    let me = game.currentPlayer
+    let me = game.leads(Archer)
     game.players[me].hand = @[baseCard("reload-2")]
     game.players[me].energy = 2
     game.players[me].board = @[MinionState(id: 1, owner: me,
@@ -2016,7 +2118,7 @@ suite "AWM repeat and Reload":
     let selfish = Card(name: "Selfish", energyCost: 0, kind: Minion,
       rules: rules(draw(1), destroy(self())), power: 1, toughness: 1)
     var game = newGame(Archer, Mage, 2305)
-    let me = game.currentPlayer
+    let me = game.leads(Archer)
     game.players[me].hand = @[baseCard("reload-2")]
     game.players[me].energy = 2
     game.players[me].board = @[MinionState(id: 1, owner: me, card: selfish,
@@ -2031,7 +2133,7 @@ suite "AWM repeat and Reload":
 
   test "canceling the card to repeat pays nothing":
     var game = newGame(Archer, Warrior, 2307)
-    let me = game.currentPlayer
+    let me = game.leads(Archer)
     game.players[me].hand = @[baseCard("reload-2")]
     game.players[me].energy = 2
     game.players[me].board = @[MinionState(id: 1, owner: me,
@@ -2051,7 +2153,7 @@ suite "AWM repeat and Reload":
       "Destroy an enemy trinket."
     var game = newGame(Mage, Mage, 2309)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].board = @[MinionState(id: 1, owner: me,
       card: baseCard("plan-3")), MinionState(id: 2, owner: me,
@@ -2076,7 +2178,7 @@ suite "AWM eachTurn and Wildfire":
     check not wildfire.needsChoice()
     var game = newGame(Archer, Warrior, 2401)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
     game.players[me].board = @[MinionState(id: 1, owner: me, card: wildfire,
       enteredTurn: game.turnNumber), MinionState(id: 2, owner: me,
@@ -2106,7 +2208,7 @@ suite "AWM eachTurn and Wildfire":
     check Card(kind: Trinket, rules: rules(on(nextTurn(You), draw(1))))
       .ruleText() == "At the start of your next turn, draw 1 card."
     var game = newGame(Mage, Warrior, 2403)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].board = @[MinionState(id: 1, owner: me,
       card: Card(name: "Once", energyCost: 0, kind: Trinket,
         rules: rules(on(nextTurn(You), draw(1)))),
@@ -2124,7 +2226,7 @@ suite "AWM eachTurn and Wildfire":
     check Card(kind: Spell, rules: rules(damage(2, game.players))).ruleText() ==
       "Deal 2 damage to each player."
     var game = newGame(Archer, Warrior, 2405)
-    let me = game.currentPlayer
+    let me = game.leads(Archer)
     game.players[me].hand = @[Card(name: "Storm", energyCost: 0, kind: Spell,
       rules: rules(damage(2, game.players)))]
     check game.playCard(0)
@@ -2139,7 +2241,7 @@ suite "AWM choose and Overcharge":
     ## Overcharge in hand, with an enemy Bear to aim it at.
     var game = newGame(Archer, Warrior, seed)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
     game.players[me].hand = @[baseCard("overcharge-3")]
     game.players[me].energy = 3
@@ -2221,7 +2323,7 @@ suite "AWM choose and Overcharge":
       getTarget().owner))) == "Return a minion to its owner's hand.\n" &
       "Deal 2 damage to the target's owner."
     var game = newGame(Archer, Warrior, 2107)
-    let me = game.currentPlayer
+    let me = game.leads(Archer)
     game.players[me].hand = @[Card(name: "Sting", energyCost: 0, kind: Spell,
       rules: rules(damage(2, AllOpponents), damage(1, You)))]
     check game.playCard(0)
@@ -2240,7 +2342,7 @@ suite "AWM Explode":
     check card.targetPrompt(1).choose == "Choose any target."
     var game = newGame(Archer, Warrior, 2201)
     let
-      me = game.currentPlayer
+      me = game.leads(Archer)
       enemy = 1 - me
     game.players[me].hand = @[card]
     game.players[me].energy = 3
@@ -2361,7 +2463,7 @@ suite "AWM selections and Primordial":
     check spell.targetPrompt(0).choose == "Choose a hero."
     var game = newGame(Mage, Warrior, 1401)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, Mage.classCard())]
     game.players[enemy].board = @[readyMinion(enemy, 2, baseCard("Sniper", 2)),
@@ -2401,7 +2503,7 @@ suite "AWM selections and Primordial":
     let spell = baseCard("summon-primordial-8")
     var game = newGame(Mage, Warrior, 1402)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, Mage.classCard()),
       MinionState(id: 2, owner: me, card: baseCard("Plan", 3),
@@ -2419,7 +2521,7 @@ suite "AWM selections and Primordial":
 
   test "canceling the hero pick pays nothing and summons nothing":
     var game = newGame(Mage, Warrior, 1403)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[baseCard("summon-primordial-8")]
     game.players[me].energy = 8
     check not game.playCard(0, Canceled)
@@ -2445,7 +2547,7 @@ suite "AWM selections and Primordial":
       destroy(game.board.getCards({owner: You, self: false}))))
     var game = newGame(Mage, Archer, 1403)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, Warrior.classCard())]
     game.players[enemy].board = @[readyMinion(enemy, 2, baseCard("Sniper", 2)),
@@ -2467,7 +2569,7 @@ suite "AWM attack triggers and Bubble Shield":
     ## My Bubble Shield resolved, then the enemy's turn with two ready Bears.
     var game = newGame(Mage, Warrior, seed)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].hand = @[baseCard("Bubble Shield", 2)]
     game.players[me].energy = 2
@@ -2496,7 +2598,7 @@ suite "AWM attack triggers and Bubble Shield":
 
   test "Bubble Shield summons two Trinkets":
     var game = newGame(Mage, Warrior, 1501)
-    let me = game.currentPlayer
+    let me = game.leads(Mage)
     game.players[me].hand = @[baseCard("Bubble Shield", 2)]
     game.players[me].energy = 2
     check game.playCard(0)
@@ -2542,7 +2644,7 @@ suite "AWM attack triggers and Bubble Shield":
       power: 1, toughness: 5)
     var game = newGame(Mage, Warrior, 1507)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, thorns)]
     game.nextMinionId = 2
@@ -2560,7 +2662,7 @@ suite "AWM attack triggers and Bubble Shield":
       power: 5, toughness: 5)
     var game = newGame(Mage, Warrior, 1509)
     let
-      me = game.currentPlayer
+      me = game.leads(Mage)
       enemy = 1 - me
     game.players[me].board = @[readyMinion(me, 1, spite)]
     game.nextMinionId = 2

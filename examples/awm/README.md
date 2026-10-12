@@ -246,6 +246,13 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 - Cards with several targets (Duel) are aimed one target at a time. A
   fight is combat without an attack: both minions deal their power at
   once, Ranged applies, and it doesn't use up either minion's attack.
+- A deck may carry cards of another class. An off-class card costs 3 more
+  energy, shown as a purple `+X` beside its printed cost, and the surcharge
+  never takes a card below its printed price. The class cards (Archer,
+  Warrior, Mage) belong to no class, cost nothing, and stay in play as
+  trinkets: each one you control takes 1 off the surcharge on cards of the
+  class it names, and announces itself with that class's icon beside your
+  hero. No deck carries them yet.
 - A hidden minion (Ambusher, Spirit) can't be attacked. `hidden(2)` lasts
   until the start of its owner's second turn from now, counting down as
   their turns begin; `hidden()` lasts as long as the minion is in play.
@@ -268,6 +275,9 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 
 | Class | Card | Copies | Cost | Type | Stats | Effect |
 |---|---|---|---|---|---|---|
+| — | Archer | — | 0 | Trinket | — | Off-class Archer cards cost 1 less (in no deck yet) |
+| — | Warrior | — | 0 | Trinket | — | Off-class Warrior cards cost 1 less (in no deck yet) |
+| — | Mage | — | 0 | Trinket | — | Off-class Mage cards cost 1 less (in no deck yet) |
 | Archer | Bolt | 7 | 1 | Spell | — | 2 damage to either hero |
 | Archer | Sniper | 7 | 2 | Minion | 2/1 | Ranged |
 | Archer | Sharpshooter | 5 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |

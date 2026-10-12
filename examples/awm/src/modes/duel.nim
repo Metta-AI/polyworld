@@ -171,7 +171,9 @@ proc drawCardReadingView(
   if not inspected.found:
     return
   sk.drawCardReading(window, inspected.card, inspected.power,
-    inspected.toughness, inspected.lost)
+    inspected.toughness, inspected.lost,
+    game.extraCost(if handOwner >= 0: handOwner else: game.currentPlayer,
+      inspected.card))
 
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
@@ -490,6 +492,31 @@ proc runDuel*(app: App) =
         game.nextMinionId = 8
         play.selectedAttacker = 5
         play.statusMessage = "Demo: hidden minions."
+      if getEnv("AWM_DEMO_MULTICLASS") == "1":
+        # A Mage holding Archer cards: the purple +X shows what the
+        # off-class surcharge is, and an Archer class card in play has
+        # already taken one off it.
+        play.animations.setLen(0)
+        game.currentPlayer = 0
+        game.players[0].heroClass = Mage
+        game.players[0].hand = @[baseCard("bolt-1"), baseCard("bouncer-1"),
+          baseCard("sharpshooter-3"), baseCard("archer-0")]
+        game.players[0].energy = 10
+        game.players[0].totalEnergy = 10
+        game.players[0].board = @[MinionState(id: 5, owner: 0,
+          card: baseCard("archer-0"), enteredTurn: game.turnNumber)]
+        game.nextMinionId = 6
+        play.statusMessage = "Demo: off-class costs."
+      if getEnv("AWM_DEMO_LEVELUP") == "1":
+        # Playing a class card: its icon rises beside the hero.
+        play.animations.setLen(0)
+        game.currentPlayer = 0
+        game.players[0].heroClass = Mage
+        game.players[0].hand = @[baseCard("archer-0")]
+        game.players[0].energy = 2
+        game.players[0].totalEnergy = 2
+        if game.playCard(0):
+          play.statusMessage = "Demo: level up."
       if getEnv("AWM_DEMO_RELOAD") == "1":
         # Reload repeats a Sharpshooter: once it is picked, the table asks
         # for the repeated shot's own target.
@@ -785,7 +812,7 @@ proc runDuel*(app: App) =
       addTableCards(solid, cardSurfaces, vfx, sk, play, game, duelLayout,
         animationTime, cameraPlayer(), hoverIndex, hoveredBoard,
         humanTurn(), attackChoices, play.selectedAttacker,
-        play.lungingMinion())
+        play.lungingMinion(), cameraEye)
       addAttackCard(solid, cardSurfaces, vfx, sk, play, game, duelLayout,
         animationTime)
 

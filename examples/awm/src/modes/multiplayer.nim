@@ -372,6 +372,16 @@ when not defined(headless):
             play.stopTargeting()
           of "sharpshooter":
             discard play.playHandCard(game, table, 1)
+          of "choose", "chosen":
+            # Overcharge offers its branches on the ring; "chosen" plays
+            # one, so every seat sees the branch that was taken.
+            play.animations.setLen(0)
+            game.players[0].hand = @[baseCardNamed("Overcharge")]
+            discard play.playHandCard(game, table, 0)
+            if demo == "chosen" and play.choosing:
+              play.takePick(game, table, optionChoice(1))
+              play.takePick(game, table,
+                creatureChoice(2, game.players[2].board[0].id))
           of "death", "win":
             # Bolts at players at 2 life: one death, or every opponent.
             play.animations.setLen(0)
@@ -535,7 +545,7 @@ when not defined(headless):
         addTableCards(solid, cardSurfaces, vfx, sk, play, match.game, table,
           previewTime, match.viewedSeat, hoverIndex, hoveredBoard,
           match.humanTurn, attackChoices, play.selectedAttacker,
-          play.lungingMinion())
+          play.lungingMinion(), eye)
         addAttackCard(solid, cardSurfaces, vfx, sk, play, match.game, table,
           previewTime)
         solid.draw(stageVp)
@@ -614,7 +624,8 @@ when not defined(headless):
         if inspected.found:
           discard sk.drawCardReading(
             cardReadingColumnRect(window, panelsBottom), inspected.card,
-            inspected.power, inspected.toughness, inspected.lost)
+            inspected.power, inspected.toughness, inspected.lost,
+            match.game.extraCost(match.viewedSeat, inspected.card))
         else:
           sk.drawPlayerPanelColumn(window, match.seats, match.current,
             match.humanSeat, panelsBottom, hudTime, names)

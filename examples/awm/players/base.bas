@@ -16,7 +16,7 @@
 '   playerClass(p) returns any seat's class.
 '
 ' HAND QUERIES (index 0 to handSize - 1)
-'   handCost(i)       energy cost
+'   handCost(i)       energy to play it now, off-class surcharge included
 '   handKind(i)       0 = minion, 1 = spell, 2 = trinket
 '   handPower(i)      attack (minions only)
 '   handToughness(i)  toughness (minions only)
@@ -134,11 +134,14 @@ IF triggerTargets > 0 THEN
   ' With nothing worth aiming at, every legal choice stays eligible,
   ' including declining the target.
   s = 0
-  WHILE s < triggerTargets
+  count = nextTargetCount(-1, "picks", 0)
+  WHILE s < count
     n = nextChoiceCount(-1, "picks", s)
     IF n = 0 THEN STOP
     i = -1
     GOSUB aim
+    ' A trigger that offers a choice reveals more targets once it is made.
+    count = nextTargetCount(-1, "picks", s + 1)
     s = s + 1
   WEND
   resolveTrigger("picks")

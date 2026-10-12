@@ -88,8 +88,12 @@ proc cardImageKey*(card: Card): string =
     result.add "/" & $card.power & "/" & $card.toughness
 
 const
+  SurchargeKeyPrefix = "surcharge/"
   CardBackKey* = "card/back"
   MaxBakedStat* = 40  ## Larger live stats show as this value.
+
+proc surchargeImageKey*(cost, extra: int): string =
+  SurchargeKeyPrefix & $cost & "/" & $extra
 
 proc statImageKey*(value: int, ink: StatInk, slot: StatSlot): string =
   "stat/" & $slot & "/" & $ink & "/" & $clamp(value, 0, MaxBakedStat)
@@ -129,6 +133,10 @@ proc addBaseCardImages*(builder: AtlasBuilder) =
           renderStat(value, ink, slot))
   for lost in keywordSets():
     builder.add(lostKeywordsKey(lost), renderLostKeywords(lost))
+  # Every surcharge a hero can pay, beside every cost it can sit next to.
+  for cost in 0 .. MaxBakedCost:
+    for extra in 1 .. OffClassCost:
+      builder.add(surchargeImageKey(cost, extra), renderCostPair(cost, extra))
 
 proc bakedCardImage*(sk: Silky, card: Card): string =
   ## Never packs at runtime (see addBaseCardImages). A face that was not baked
@@ -138,25 +146,30 @@ proc bakedCardImage*(sk: Silky, card: Card): string =
     result = CardBackKey
 
 iterator overlayImages(card: Card, power, toughness: int,
-    lost: set[Keyword]): (Rect, string) =
+    lost: set[Keyword], extraCost = 0): (Rect, string) =
   ## Each live overlay's atlas image and where it goes on the face, in
-  ## pixels: both stats, and the type line when keywords were lost.
-  for (slot, value, printed) in [(PowerSlot, power, card.power),
-      (ToughnessSlot, toughness, card.toughness)]:
-    let box = slot.box()
-    yield (Rect(x: box.x - StatMargin, y: box.y - StatMargin,
-      w: box.w + StatMargin * 2, h: box.h + StatMargin * 2),
-      statImageKey(value, statInk(value, printed), slot))
-  if lost.len > 0:
-    yield (TypeLine, lostKeywordsKey(lost))
+  ## pixels: both stats, the type line when keywords were lost, and the
+  ## surcharge a hero pays for a card of another class.
+  if card.kind == Minion:
+    for (slot, value, printed) in [(PowerSlot, power, card.power),
+        (ToughnessSlot, toughness, card.toughness)]:
+      let box = slot.box()
+      yield (Rect(x: box.x - StatMargin, y: box.y - StatMargin,
+        w: box.w + StatMargin * 2, h: box.h + StatMargin * 2),
+        statImageKey(value, statInk(value, printed), slot))
+    if lost.len > 0:
+      yield (TypeLine, lostKeywordsKey(lost))
+  if extraCost > 0:
+    yield (CostPairBox, surchargeImageKey(card.energyCost, extraCost))
 
 proc clear*(renderer: var CardRenderer) =
   renderer.vertices.setLen(0)
 
 proc addSurface*(renderer: var CardRenderer, sk: Silky,
     corners: array[4, Vec3], imageKey: string, brightness = 1.0'f32,
-    damageFlash = 0.0'f32) =
+    damageFlash = 0.0'f32, tint = vec3(1, 1, 1)) =
   ## Corners are top-left, bottom-left, bottom-right, top-right in card space.
+  ## `tint` colours the image, for sprites that aren't card faces.
   let
     entry = sk.atlas.entries[imageKey]
     left = entry.x.float32 + 0.5'f32
@@ -168,15 +181,17 @@ proc addSurface*(renderer: var CardRenderer, sk: Silky,
   for i in [0, 1, 2, 0, 2, 3]:
     let p = corners[i]
     renderer.vertices.add [p.x, p.y, p.z, uvs[i].x, uvs[i].y,
-      brightness, brightness, brightness, damageFlash]
+      brightness * tint.x, brightness * tint.y, brightness * tint.z,
+      damageFlash]
 
 proc addMinionOverlays*(renderer: var CardRenderer, sk: Silky,
     corners: array[4, Vec3], card: Card, power, toughness: int,
-    lost: set[Keyword] = {}, brightness = 1.0'f32, damageFlash = 0.0'f32) =
-  ## Draws live power, toughness and lost keywords over a printed face
-  ## with these corners, lifted just off it so they win the depth test.
-  ## Only minions have stats; anything else draws nothing.
-  if card.kind != Minion:
+    lost: set[Keyword] = {}, brightness = 1.0'f32, damageFlash = 0.0'f32,
+    extraCost = 0) =
+  ## Draws live power, toughness, lost keywords and an off-class surcharge
+  ## over a printed face with these corners, lifted just off it so they win
+  ## the depth test. Only minions have stats; any card may have a surcharge.
+  if card.kind != Minion and extraCost <= 0:
     return
   let
     across = corners[3] - corners[0]
@@ -185,7 +200,7 @@ proc addMinionOverlays*(renderer: var CardRenderer, sk: Silky,
   proc at(x, y: float32): Vec3 =
     corners[0] + across * (x / CardFaceWidth.float32) +
       down * (y / CardFaceHeight.float32) + lift
-  for (area, key) in overlayImages(card, power, toughness, lost):
+  for (area, key) in overlayImages(card, power, toughness, lost, extraCost):
     if key notin sk.atlas.entries: continue
     renderer.addSurface(sk, [at(area.x, area.y), at(area.x, area.y + area.h),
       at(area.x + area.w, area.y + area.h), at(area.x + area.w, area.y)],
@@ -222,12 +237,12 @@ proc drawCardImage*(sk: Silky, imageKey: string, origin, size: Vec2,
     vec2(entry.width.float32, entry.height.float32), tint)
 
 proc drawMinionOverlays*(sk: Silky, card: Card, power, toughness: int,
-    lost: set[Keyword], origin, size: Vec2) =
+    lost: set[Keyword], origin, size: Vec2, extraCost = 0) =
   ## The 2D counterpart of addMinionOverlays, over a face at origin/size.
-  if card.kind != Minion:
+  if card.kind != Minion and extraCost <= 0:
     return
   let scaleFactor = size / vec2(CardFaceWidth.float32, CardFaceHeight.float32)
-  for (area, key) in overlayImages(card, power, toughness, lost):
+  for (area, key) in overlayImages(card, power, toughness, lost, extraCost):
     if key notin sk.atlas.entries: continue
     sk.drawCardImage(key, origin + vec2(area.x, area.y) * scaleFactor,
       vec2(area.w, area.h) * scaleFactor)

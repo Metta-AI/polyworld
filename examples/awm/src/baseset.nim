@@ -5,6 +5,24 @@ import
   std/options,
   core/core
 
+let classCards = [
+  Card(
+    name: "Archer", energyCost: 0,
+    class: none(HeroClass), kind: Trinket,
+    rules: rules(levelUp(1, Archer))
+  ),
+  Card(
+    name: "Warrior", energyCost: 0,
+    class: none(HeroClass), kind: Trinket,
+    rules: rules(levelUp(1, Warrior))
+  ),
+  Card(
+    name: "Mage", energyCost: 0,
+    class: none(HeroClass), kind: Trinket,
+    rules: rules(levelUp(1, Mage))
+  )
+]
+
 let archer = [
   Card(
     name: "Sniper", energyCost: 2,
@@ -256,7 +274,7 @@ let mage = [
   )
 ]
 
-let baseCards* = archer & warrior & mage
+let baseCards* = classCards & archer & warrior & mage
 
 const
   DeckSize* = 40

@@ -1,5 +1,5 @@
 ## Deterministic AWM simulation shared by native, browser and server builds.
-import std/[algorithm, random]
+import std/[algorithm, options, random]
 import core, cardset
 export core, cardset
 
@@ -253,12 +253,30 @@ proc actingPlayer*(game: GameState): int =
   elif game.waitingTrigger: game.pendingTriggers[0].owner
   else: game.currentPlayer
 
+proc levels*(game: GameState, player: int, heroClass: HeroClass): int =
+  ## How far the player's class cards in play have raised them in a class.
+  for permanent in game.players[player].board:
+    result += permanent.card.levels(heroClass)
+
+proc extraCost*(game: GameState, player: int, card: Card): int =
+  ## What this player pays on top of the printed cost: a card of another
+  ## class costs more, less one for each of their class cards in play that
+  ## names its class.
+  if card.class.isNone:
+    return 0
+  card.extraCost(game.players[player].heroClass,
+    game.levels(player, card.class.get))
+
+proc playCost*(game: GameState, player: int, card: Card): int =
+  ## What playing the card costs this player right now.
+  card.energyCost + game.extraCost(player, card)
+
 proc canPlay*(game: GameState, cardIndex: int): bool =
   let player = game.players[game.currentPlayer]
   not game.waitingChoice and not player.dead and not game.gameOver and
     cardIndex >= 0 and
     cardIndex < player.hand.len and
-    player.hand[cardIndex].energyCost <= player.energy
+    game.playCost(game.currentPlayer, player.hand[cardIndex]) <= player.energy
 
 proc minionLocation*(
     game: GameState,
@@ -429,7 +447,8 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
       inc game.visualBeat
     case effect.kind
     of TargetVfxEffect:
-      game.recordVisual(effect.targetVfx, effect.visualTarget)
+      game.recordVisual(effect.targetVfx, effect.visualTarget,
+        card = effect.vfxCard)
     of DamageHeroEffect:
       if effect.heroDamage > 0 and game.players[effect.heroPlayer].life > 0:
         game.recordVisual(DamageFlashVfx, heroChoice(effect.heroPlayer))
@@ -673,7 +692,7 @@ proc playMinion*(
   if card.kind == Spell:
     return
   result = game.nextMinionId
-  game.players[playerIndex].energy -= card.energyCost
+  game.players[playerIndex].energy -= game.playCost(playerIndex, card)
   game.players[playerIndex].hand.delete(cardIndex)
   game.players[playerIndex].board.add MinionState(
     id: result,
@@ -733,7 +752,7 @@ proc playCard*(
     var context = game.ruleContext(choices)
     if not card.runRules(context):
       return false
-    game.players[playerIndex].energy -= card.energyCost
+    game.players[playerIndex].energy -= game.playCost(playerIndex, card)
     game.players[playerIndex].hand.delete(cardIndex)
     game.applyEffects(context.effects)
     game.players[playerIndex].discardPile.add card

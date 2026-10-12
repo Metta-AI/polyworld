@@ -46,6 +46,13 @@ type
       ## flies to hand instead of the discard pile.
     lungePoint*: Vec3
 
+  LevelUpBadge* = object
+    ## A class card just raised this player: their class icon rises beside
+    ## their hero for a moment.
+    player*: int
+    heroClass*: HeroClass
+    startedAt*: float32
+
   CastSpell* = object
     ## A played spell floating above its caster's board. It's already in the
     ## discard pile in the rules; it flies there once the table settles.
@@ -79,6 +86,8 @@ type
       ## the last cards on that board and take no room until they appear.
     lastBeatWasDraw*: bool
     lastDrawStart*: float32
+    levelUps*: seq[LevelUpBadge]
+      ## Class icons rising beside the heroes that just levelled up.
     heroDeaths*: seq[float32]
       ## When each player's hero started dying, or -1 while alive.
     deathDiscard*: seq[float32]
@@ -105,6 +114,12 @@ proc drawFaceUp*(layout: TableLayout, player: int): bool =
   else: layout.drawVisible(player)
 
 const
+  LevelUpSeconds* = 1.4'f32  ## A class icon rising beside its hero.
+  LevelUpIcon*: array[HeroClass, string] = [
+    "hud/class-archer", "hud/class-warrior", "hud/class-mage"]
+  LevelUpInk*: array[HeroClass, Vec4] = [
+    vec4(0.56, 0.78, 0.57, 1), vec4(0.89, 0.50, 0.41, 1),
+    vec4(0.61, 0.69, 0.92, 1)]  ## The HUD's class colours.
   ChooseAppearSeconds* = 0.3'f32  ## The offered cards rising into place.
   ChoosePickSeconds* = 0.32'f32  ## The chosen card taking the table.
   AttackLungeDuration* = 0.22'f32
@@ -411,8 +426,10 @@ proc holdCastSpell*(play: var TablePlay, layout: TableLayout, card: Card,
     heroClass: heroClass, owner: owner))
 
 proc animateTransition*(play: var TablePlay, layout: TableLayout,
-    before, after: GameState) =
+    before, after: GameState, choices: seq[Choice] = @[]) =
   ## The server and local bot use the same card movement as human input.
+  ## `choices` are the answers the acting player gave, so a card that
+  ## offered a choice floats as the branch they took.
   if after.turnNumber != before.turnNumber:
     # Draws animate from their DrawVfx events.
     return
@@ -424,7 +441,7 @@ proc animateTransition*(play: var TablePlay, layout: TableLayout,
     # contain one card type, so locating a played face is unambiguous.
     var playedIndex = 0
     for i, card in oldPlayer.hand:
-      if card.energyCost <= oldPlayer.energy:
+      if before.playCost(owner, card) <= oldPlayer.energy:
         playedIndex = i
         break
     let source = layout.handPoses(owner, oldPlayer.hand.len)[playedIndex]
@@ -440,7 +457,9 @@ proc animateTransition*(play: var TablePlay, layout: TableLayout,
         newPlayer.hand.len < oldPlayer.hand.len:
       let played = newPlayer.discardPile[^1]
       if played.kind == Spell:
-        play.holdCastSpell(layout, played, newPlayer.heroClass, owner, source)
+        play.holdCastSpell(layout,
+          played.pickedFace(choices, before.boardCards()),
+          newPlayer.heroClass, owner, source)
       else:
         play.animations.add newCardAnimation(played,
           newPlayer.heroClass, source,
@@ -593,7 +612,7 @@ proc playHandCard*(
   let
     player = game.players[game.currentPlayer]
     card = player.hand[handIndex]
-  if card.energyCost > player.energy:
+  if game.playCost(game.currentPlayer, card) > player.energy:
     play.statusMessage =
       &"Not enough energy to play {card.name}."
   elif card.needsChoice():
@@ -771,8 +790,9 @@ proc takePick*(
     else:
       game.playCard(play.pendingCardIndex, picks)
   if resolved and spellAnimation:
-    play.holdCastSpell(layout, card, spellClass, game.currentPlayer,
-      spellSourcePose)
+    # A card that offered a choice floats as the branch that was taken.
+    play.holdCastSpell(layout, card.pickedFace(picks, board), spellClass,
+      game.currentPlayer, spellSourcePose)
   if resolved:
     play.statusMessage =
       if play.pendingTrigger:
@@ -1087,6 +1107,11 @@ proc presentVisualEvents*(
             break
       of SummonVfx:
         discard  # Leaving the queue is what reveals the minion.
+      of LevelUpVfx:
+        let heroClass = event.card.levelUpClass()
+        if heroClass.isSome:
+          play.levelUps.add LevelUpBadge(player: event.target.owner,
+            heroClass: heroClass.get, startedAt: time)
       of HeroDeathVfx:
         let owner = event.target.owner
         while play.heroDeaths.len <= owner:
@@ -1182,6 +1207,30 @@ proc presentVisualEvents*(
       suppressDiscardOwner = held.owner)
     play.castSpell = none(CastSpell)
 
+proc addLevelUps(faces: var CardRenderer, vfx: var VfxRenderer, sk: Silky,
+    play: TablePlay, layout: TableLayout, eye: Vec3, time: float32) =
+  ## A class icon and an arrow rise beside each hero that just levelled up.
+  for badge in play.levelUps:
+    let age = time - badge.startedAt
+    if age < 0 or age >= LevelUpSeconds:
+      continue
+    let
+      step = age / LevelUpSeconds
+      fade = clamp((1 - step) * 2.5'f32, 0.0'f32, 1.0'f32)
+      ink = LevelUpInk[badge.heroClass]
+      centre = layout.heroPosition(badge.player) +
+        vec3(0, HeroHeight + 0.55'f32 + step * 0.8'f32, 0)
+      forward = normalize(eye - centre)
+      right = normalize(cross(vec3(0, 1, 0), forward)) * 0.5'f32
+      up = normalize(cross(forward, right)) * 0.5'f32
+      corners = [centre - right + up, centre - right - up,
+        centre + right - up, centre + right + up]
+    # The class icon in its own colour, with an arrow rising beside it.
+    faces.addSurface(sk, corners, LevelUpIcon[badge.heroClass], fade,
+      tint = vec3(ink.x, ink.y, ink.z))
+    vfx.addLevelUpArrow(centre + right * 1.9'f32 - up * 0.5'f32, eye,
+      0.45'f32, fade, ink)
+
 proc addTableCards*(
     solid: var SolidRenderer,
     faces: var CardRenderer,
@@ -1197,7 +1246,8 @@ proc addTableCards*(
     viewerActs: bool,
     attackChoices: openArray[Choice] = [],
     selectedAttacker = 0,
-    lungingMinion = 0
+    lungingMinion = 0,
+    eye = vec3(0, 6, 8)
 ) =
   ## Every player's deck, discard pile and board, then the viewer's hand
   ## and the others', the cards in flight and the slain ones still shown.
@@ -1273,6 +1323,8 @@ proc addTableCards*(
           play.pendingTargeting or attackerSelected,
           time)
 
+  addLevelUps(faces, vfx, sk, play, layout, eye, time)
+
   let viewerHand = play.presentedHand(game, viewer)
   for i, pose in layout.handPoses(viewer, viewerHand.len):
     if play.animations.handCardSuppressed(viewer, i) or
@@ -1287,14 +1339,17 @@ proc addTableCards*(
       pose,
       game.players[viewer].heroClass,
       not layout.handVisible(viewer),
-      (viewerActs and card.energyCost <= game.players[viewer].energy) or
+      (viewerActs and
+        game.playCost(viewer, card) <= game.players[viewer].energy) or
         tossingHere,
       (
         i == hoverIndex or
         (play.pendingTargeting and i == play.pendingCardIndex)
       ),
       targetable = picked,
-      card = card
+      card = card,
+      # What this hero pays on top for a card of another class.
+      extraCost = game.extraCost(viewer, card)
     )
     vfx.addCardGlow(pose,
         i == hoverIndex or
@@ -1542,7 +1597,8 @@ proc updateBots*(
             play.statusMessage = name & " is attacking..."
           of BotPlayedCard, BotResolvedTrigger, BotTossed, BotEndedTurn:
             if game.applyAction(vm.action):
-              play.animateTransition(layout, before, game)
+              play.animateTransition(layout, before, game,
+                vm.action.choices.toChoices)
               play.statusMessage = name & " is playing..."
               if decision == BotEndedTurn:
                 play.statusMessage = bots.botTurnStatus(game.currentPlayer,
