@@ -1,0 +1,56 @@
+{
+  "name": "gota",
+  "runtime": "gota-local",
+  "roles": [
+    {
+      "id": "seat-0",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-1",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-2",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-3",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-4",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-5",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-6",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-7",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-8",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    },
+    {
+      "id": "seat-9",
+      "policyFormat": "basic-source-v1",
+      "control": "embedded"
+    }
+  ]
+}

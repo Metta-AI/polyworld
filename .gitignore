@@ -47,6 +47,8 @@ coworld/evidence/
 !Dockerfile
 !.dockerignore
 coworld/**/__pycache__/
+!coworld/gota/conductor/.contracts/
+!coworld/gota/conductor/.contracts/**
 
 # Python conversion helpers.
 __pycache__/
