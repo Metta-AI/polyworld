@@ -75,4 +75,19 @@ block:
   batch.stepTicks(1)
   doAssert batch.currentMatch(0).world.tick == before + 10
 
+echo "Testing cuts 10 and 11: regeneration and weak towers"
+block:
+  let batch = newBatch(0)
+  batch.setCuts((1'u16 shl 10) or (1'u16 shl 11))
+  let world = batch.currentMatch(0).world
+  for building in world.buildings:
+    if building.kind == TowerBuilding:
+      doAssert building.hp == WeakTowerHp and building.maxHp == WeakTowerHp
+  batch.stepTicks(20)
+  let hero = world.heroes[0]
+  hero.hp = hero.maxHp div 2
+  let before = hero.hp
+  batch.stepTicks(20)
+  doAssert hero.hp > before, "cut 10 regenerates"
+
 echo "Simplify cuts take effect"

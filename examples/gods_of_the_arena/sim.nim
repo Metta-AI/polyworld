@@ -310,7 +310,11 @@ type
       ## Q, W and E fixed at rank 1 and no R, 5 a fixed roster, 6 no fog of
       ## war, 7 every structure and the god open to attack, 8 basic hits and
       ## spells land on the tick they start, 9 move keys go one tile.
-      ## Lockstep applies 1, the time scale.
+      ## Lockstep applies 1, the time scale. Single-feature tests on the
+      ## full game: 10 passive regeneration (0.4% of health and mana every
+      ## 10 ticks, moba's rate at the ladder's time scale), 11 weak towers
+      ## (every tower WeakTowerHp, moba's toughness in GotA units), 12
+      ## hero XP x 4 (moba's creep XP relative to GotA's).
     drafting*: bool
       ## Preserves the initial setup when capturing a replay after drafting.
     draftOrder*: seq[int]
@@ -1372,6 +1376,7 @@ proc gainRewards(
     cause = KillReward
 ) =
   ## Grants rewards and links them to their lethal event.
+  let xp = if world.cut(12): xp * 4 else: xp
   when defined(replayEvents):
     let related = world.deathEvent(victim)
     world.valueEvent(XpGained, victim, hero.id, cause, 0,
@@ -4068,6 +4073,17 @@ const SimpleRoster = [
   ## Simplify 5's roster for both teams, in spawn order: moba's support,
   ## assassin, burst, tank and carry.
 
+const WeakTowerHp* = 1064'i32
+  ## Cut 11: moba's tower health (2,000) over its hero damage (50) times
+  ## GotA's mean hero damage, for every tower and guard.
+
+proc weakenTowers*(world: World) =
+  ## Cut 11: every tower and god guard at WeakTowerHp.
+  for building in world.buildings.mitems:
+    if building.kind == TowerBuilding:
+      building.hp = WeakTowerHp
+      building.maxHp = WeakTowerHp
+
 proc fixRoster*(world: World) =
   ## Simplify 5: skips the draft and gives each team SimpleRoster.
   var next: array[Team, int]
@@ -5167,6 +5183,9 @@ proc updateHero(world: World, hero: Hero) =
     return
 
   world.recoverHero(hero)
+  if world.cut(10) and world.tick mod 10 == 0:
+    hero.hp = min(hero.maxHp, hero.hp + max(1'i32, hero.maxHp div 250))
+    hero.mana = min(hero.maxMana, hero.mana + max(1'i32, hero.maxMana div 250))
   if hero.portalEnds > 0:
     hero.animClip = heroIdleClip
     inc hero.animTicks

@@ -498,6 +498,8 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
   game.world.cuts = batch.cuts
   if batch.cut(5):
     game.world.fixRoster()
+  if batch.cut(11):
+    game.world.weakenTowers()
   if batch.cut(4):
     # Training lanes start without a draft, so the kit is fixed here.
     for hero in game.world.heroes:
@@ -600,7 +602,7 @@ proc reset*(batch: StepBatch, seed: int) =
 proc setCuts*(batch: StepBatch, cuts: uint16) =
   ## Sets the cut mask (bit n for cut n) and restarts every lane on its
   ## seed.
-  doAssert (cuts and not 0x3fe'u16) == 0, "cuts are bits 1 to 9"
+  doAssert (cuts and not 0x1ffe'u16) == 0, "cuts are bits 1 to 12"
   batch.cuts = cuts
   for i in 0 ..< batch.lanes.len:
     batch.startLane(batch.lanes[i].addr, batch.lanes[i].seed)
