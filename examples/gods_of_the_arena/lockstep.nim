@@ -695,10 +695,13 @@ proc step*(
         tickWorld(game, proc() = runBotDecisions(game))
       of NimHarness:
         tickWorld(game, proc() = runLaneDecisions(lane))
-      if t == 0:
-        for i in 0 ..< lane.actions.len:
-          for head in 0 ..< ActionCount:
-            lane.actions[i][head] = 0
+      # Keys press once; moba's heads hold, as moba re-reads them every
+      # tick.
+      when not defined(gotaMobaShape):
+        if t == 0:
+          for i in 0 ..< lane.actions.len:
+            for head in 0 ..< ActionCount:
+              lane.actions[i][head] = 0
     for vm in game.heroVms:
       doAssert vm == nil or not vm.failed, vm.lastError
     let

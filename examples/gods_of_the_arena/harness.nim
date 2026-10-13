@@ -75,8 +75,20 @@ const
     ## Minimap cells per side, covering the 116-tile map.
   MiniCells = MiniSide * MiniSide
   MiniStart = StructureStart + StructureSlots
-  ObservationSize* = MiniStart + 4 * MiniCells
-  ActionSizes* = [22'i32]
+  MobaReach = 5'i32
+    ## gotaMobaShape: tiles seen in each direction, as moba's vision 5.
+  MobaSide = int(2 * MobaReach + 1)
+  MobaCells = MobaSide * MobaSide
+  MobaScalars = 26
+  ObservationSize* =
+    when defined(gotaMobaShape): 4 * MobaCells + MobaScalars
+    else: MiniStart + 4 * MiniCells
+  ActionSizes* =
+    when defined(gotaMobaShape): [7'i32, 7, 3, 2, 2, 2]
+    else: [22'i32]
+    ## gotaMobaShape uses moba's six heads: move dy and dx (-3 to 3
+    ## tiles), target filter (0 and 1 the nearest enemy, 2 the nearest
+    ## hero, structure or god), and Q, W and E.
   ActionCount* = ActionSizes.len
   BuildItems = [[8'i32, 1], [1, 2], [21, 2], [22, 2]]
     ## base.bas's shopping list for every hero, as item and count: ranger
@@ -160,6 +172,8 @@ type
     retreating*: bool
     shopCursor*, inventoryCursor*: int32
     focus*: int32
+    lastHp*: int32
+      ## gotaMobaShape: health at the last think, for the is-hit scalar.
       ## The attack focus set by keys 9 and 10: 1 the nearest enemy, 2 the
       ## nearest enemy hero, structure or god (0 before the first press).
       ## The menu head's cursors: an item to buy (1 to 22, 0 before the
@@ -799,6 +813,178 @@ proc initialize(harness: var Harness, turn: Turn) =
   harness.homeY = turn.data.y
   harness.retreating = false
 
+proc readMoba(
+  harness: var Harness,
+  turn: Turn,
+  value: WorldObject,
+  observer: Team,
+  observation: var array[ObservationSize, int32]
+) =
+  ## gotaMobaShape: marks one visible object in the 11 x 11 window (code,
+  ## health tenths, mana tenths, level) and updates the target candidates.
+  let hp = max(value.hp, 0'i32)
+  if hp <= 0:
+    return
+  let
+    kind = value.kind
+    team = value.faction
+    x = mapCoordinate(value.position.x, observer)
+    y = mapCoordinate(value.position.z, observer)
+    dx = harness.side * (x - turn.data.x)
+    dy = harness.side * (y - turn.data.y)
+    ally = team == turn.data.team
+  if abs(dx) <= MobaReach and abs(dy) <= MobaReach:
+    let cell = int((dy + MobaReach) * int32(MobaSide) + dx + MobaReach)
+    observation[cell] =
+      case kind
+      of 1: 8'i32
+      of 2: (if ally: 6'i32 else: 7'i32)
+      of 3: (if ally: 3'i32 else: 4'i32)
+      of 6: 5'i32
+      else: 2'i32
+    if value.maxHp > 0:
+      observation[MobaCells + cell] = min(hp * 10 div value.maxHp, 10'i32)
+    if kind == 2:
+      observation[2 * MobaCells + cell] =
+        min(max(value.mana, 0'i32) div 30, 10'i32)
+    observation[3 * MobaCells + cell] = value.level
+  if ally or not value.alive or value.id == turn.data.id:
+    return
+  let distance = dx * dx + dy * dy
+  if distance < harness.enemyDistance:
+    harness.enemyDistance = distance
+    harness.enemyId = value.id
+    harness.enemyX = x
+    harness.enemyY = y
+  if kind != 6 and distance < harness.laneDistance:
+    harness.laneDistance = distance
+  if kind != 3 and kind != 6 and distance < harness.priorityDistance:
+    harness.priorityDistance = distance
+    harness.priorityId = value.id
+    harness.priorityX = x
+    harness.priorityY = y
+
+proc observeMoba(
+  harness: var Harness,
+  turn: Turn,
+  observation: var array[ObservationSize, int32]
+) =
+  ## gotaMobaShape: writes the 11 x 11 x 4 window (walls as code 1) and 26
+  ## scalars, mirrored for team 1, like moba's 510-value observation.
+  let
+    data = turn.data
+    hero = turn.hero
+    side = harness.side
+  for cell in 0 ..< ObservationSize:
+    observation[cell] = 0
+  for row in 0 ..< MobaSide:
+    let tileY = data.y + side * (int32(row) - MobaReach)
+    for column in 0 ..< MobaSide:
+      let tileX = data.x + side * (int32(column) - MobaReach)
+      var wall = true
+      if tileX >= 0 and tileY >= 0 and tileX < mapSize() and
+        tileY < mapSize():
+          wall = terrainValue(tileX, tileY, hero.navLayer,
+            TerrainWalkableField) == 0
+      if wall:
+        observation[row * MobaSide + column] = 1
+  harness.enemyId = 0
+  harness.enemyDistance = TargetReach
+  harness.priorityId = 0
+  harness.priorityDistance = TargetReach
+  harness.laneDistance = TargetReach
+  var observer = hero.team
+  for index in 0 ..< turn.world.worldObjectCount(data.id):
+    let value = turn.world.scriptObject(data.id, index, observer)
+    harness.readMoba(turn, value[], observer, observation)
+  var scalars: array[MobaScalars, int32]
+  if side == 1:
+    scalars[0] = data.x
+    scalars[1] = data.y
+  else:
+    scalars[0] = mapSize() - 1 - data.x
+    scalars[1] = mapSize() - 1 - data.y
+  scalars[2] = data.level
+  if data.maxHp > 0:
+    scalars[3] = data.hp * 10 div data.maxHp
+  if data.maxMana > 0:
+    scalars[4] = data.mana * 10 div data.maxMana
+  scalars[5] = hero.heroAttackDamage() div 10
+  scalars[6] = hero.heroMoveSpeed() div 100
+  scalars[8] = data.stunTicks div TickRate
+  scalars[9] = data.rootTicks div TickRate
+  for slot in 0 .. 2:
+    scalars[10 + slot] = hero.cooldowns[HeroAbilitySlot(slot)] div TickRate
+  scalars[13] = turn.world.heroAttackCooldown(hero)
+  scalars[14] = turn.world.heroAttackTicks(hero)
+  scalars[15] = int32(data.hp < harness.lastHp)
+  harness.lastHp = data.hp
+  scalars[16] = data.team
+  let role = classRole(data.class)
+  if role >= 0 and role <= 4:
+    scalars[17 + role] = 1
+  scalars[22] = data.deaths
+  scalars[23] = int32(turn.inOwnSpawn())
+  scalars[24] = data.tick div (TickRate * 60)
+  scalars[25] = max(harness.focus, 1'i32)
+  for i, value in scalars:
+    observation[4 * MobaCells + i] = value
+
+proc thinkMoba(
+  harness: var Harness,
+  turn: Turn,
+  actions: array[ActionCount, int32],
+  observation: var array[ObservationSize, int32]
+) =
+  ## gotaMobaShape: moba's control. Q, W or E casts at the focus target;
+  ## otherwise standing still attacks it and a move attack-moves up to 3
+  ## tiles in the chosen direction (no new order during a swing).
+  let data = turn.data
+  harness.side = 1 - data.team * 2
+  harness.observeMoba(turn, observation)
+  if data.hp <= 0:
+    harness.initialized = false
+    return
+  if data.channelTicks > 0 or data.stunTicks > 0:
+    return
+  if not harness.initialized:
+    harness.initialize(turn)
+  turn.learnAbilities()
+  if harness.walking:
+    harness.walkLane(turn)
+    if harness.walking:
+      return
+  when ActionCount == 6:
+    let
+      moveY = actions[0] - 3
+      moveX = actions[1] - 3
+    harness.focus = if actions[2] == 2: 2'i32 else: 1'i32
+    if harness.focus == 2:
+      harness.bestId = harness.priorityId
+      harness.bestX = harness.priorityX
+      harness.bestY = harness.priorityY
+      harness.bestDistance = harness.priorityDistance
+    else:
+      harness.bestId = harness.enemyId
+      harness.bestX = harness.enemyX
+      harness.bestY = harness.enemyY
+      harness.bestDistance = harness.enemyDistance
+    harness.casted = false
+    for slot in 0'i32 .. 2'i32:
+      if actions[3 + slot] == 1 and not harness.casted:
+        harness.castSpells(turn, slot)
+    if harness.casted:
+      return
+    if moveX == 0 and moveY == 0:
+      if harness.bestId != 0 and data.target != harness.bestId:
+        discard turn.attackTarget(harness.bestId)
+    elif data.rootTicks == 0 and data.target == 0:
+      turn.travel(
+        data.x + harness.side * moveX,
+        data.y + harness.side * moveY,
+        true
+      )
+
 proc think*(
   harness: var Harness,
   game: Game,
@@ -821,6 +1007,9 @@ proc think*(
     data = turn.data
   if data.drafting:
     turn.chooseHero()
+    return
+  when defined(gotaMobaShape):
+    harness.thinkMoba(turn, actions, observation)
     return
   harness.side = 1 - data.team * 2
   harness.observe(turn, observation)
