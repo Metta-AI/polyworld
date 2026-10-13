@@ -12,7 +12,7 @@
 ##   trainer's latest heads into act(), so scripts never block.
 ## `step` applies one action per agent, runs one tick of every lane, and
 ## returns each agent's newest observation and team reward.
-## Three rewards, picked by RewardMode:
+## Five rewards, picked by RewardMode:
 ## - LeaderboardReward follows Emmett's Glory: each hero's whole XP per
 ##   elapsed minute, averaged over the team and divided by 1000. Steps reward
 ##   the change in that potential; a loss, draw, or timeout cancels it, so the
@@ -21,11 +21,37 @@
 ##   tick penalty and no reset on a loss, so a policy learns from scratch.
 ## - XpOutcomeReward is XpReward plus OutcomeBonus for a win and minus it
 ##   for a loss or timeout, so surviving matters beyond the next XP.
+## - MobaReward copies PufferLib's moba (config/moba.ini): each hero is paid
+##   for its own events, MobaXpWeight per XP it gains, minus MobaDeathWeight
+##   when it dies (or `setDeathWeight`'s weight), plus MobaStructureWeight
+##   per structure it last-hits, and nothing for winning or losing.
+## - MobaWinReward is MobaReward plus a win bonus (MobaWinBonus unless
+##   `setWinBonus` changes it) to each hero of a team that wins. GotA
+##   matches run long and a draw pays almost as much XP as a win, so without
+##   it policies settle for farming until the clock runs out.
 ## With `selfPlay` both teams run the policy (10 agents per lane);
 ## otherwise one team plays a bundled opponent (5 agents per lane).
+## Opponents are listed easiest first. By default each match draws one
+## of them for its whole team from a hash of the seed. With a curriculum
+## (`setLevel`, which the trainer raises as the policy wins) the opposing
+## heroes are a blend: level L puts L mod 5 heroes of the next opponent in
+## the list among those of opponent L div 5, so with null, dumb, base and
+## khors the levels run 5 null, 4 null and 1 dumb, ..., 5 dumb, 4 dumb and
+## 1 base, ..., 5 khors. A match plays an easier level in `setEasier`
+## percent of matches (25 by default) and the current level otherwise, so
+## the policy keeps what it learned.
+## `setWalk` sets the chance that a spawned or respawned hero is walked to
+## its lane by script (harness.nim), and `setReach` how much of the way, so
+## training can wean it off the walk. `setBuild` makes the buy head follow
+## base.bas's shopping list (harness.nim), and `setRetreat` sends heroes
+## home below a share of their health. `setShaping` adds potential-based
+## shaping to the per-hero rewards: gamma * phi(next) - phi(now), with phi
+## minus `weight` per tile to the nearest living enemy tower or barracks,
+## which pays every tile walked toward a fight without changing the best
+## policy.
 ## Finished lanes restart with the next seed inside the same step.
 import
-  std/strutils,
+  std/[math, os, strutils],
   harness
 include bots
 
@@ -42,10 +68,21 @@ const
     ## Array cells for BASIC policies; obs() alone needs 4392.
   XpDenominator = 100
   OutcomeBonus = 50'f32
+  MobaXpWeight = 0.00665677'f32
+    ## PufferLib moba.ini reward_xp, per XP point.
+  MobaDeathWeight = 0.163764'f32
+    ## PufferLib moba.ini reward_death, taken per death.
+  MobaStructureWeight = 0.642119'f32
+  GodStructures = 5'f32
+    ## With `finish`, the structure reward counts a whole god as this many
+    ## structures.
+    ## PufferLib moba.ini reward_tower, per structure last-hit.
+  MobaWinBonus = 10'f32
+    ## MobaWinReward's bonus per hero for a win, worth about 1,500 XP.
 
 type
   RewardMode* = enum
-    LeaderboardReward, XpReward, XpOutcomeReward
+    LeaderboardReward, XpReward, XpOutcomeReward, MobaReward, MobaWinReward
 
   HarnessMode* = enum
     ## How policy heroes think: a BASIC policy in one bassy VM per hero,
@@ -55,12 +92,33 @@ type
   LaneStats* {.bycopy.} = object
     ## Summary of one finished match, from the first policy team's side.
     finished*, outcome*, tick*, selfPlay*: int32
+    played*, level*: int32
+      ## The match's curriculum level (or its opponent's index in a static
+      ## mix) and the current level (-1 for a static mix).
     potential*: int64
       ## Leaderboard score numerator at the end; points = potential / 7200.
 
   StepLane = object
     game: Game
     seed: int
+    played: int
+      ## This match's curriculum level, or its opponent in a static mix.
+    walkPercent: int
+      ## Chance that a spawned hero walks to its lane by script.
+    walkReach: int
+      ## Percent of the way to its lane that the walk covers.
+    build: bool
+      ## The buy head follows base.bas's shopping list.
+    finish: int
+      ## Shaping and the structure reward follow the path to the enemy god
+      ## (1), and before a lane falls focus the weakest enemy lane (2).
+    retreat: int
+      ## Percent of health below which heroes walk home to heal.
+    lastGame: Game
+      ## The lane's previous match, kept after a restart for its replay.
+    labels, lastLabels: seq[string]
+      ## Per hero index: "policy" or the opponent file, for this match and
+      ## the previous one.
     team: Team
       ## The first policy team; selfPlay lanes also control the other.
     agents: seq[int]
@@ -68,6 +126,16 @@ type
     observations: seq[array[ObservationSize, int32]]
     actions: seq[array[ActionCount, int32]]
     potentials: array[Team, int64]
+    heroXp, heroDeaths, heroStructures: seq[int64]
+    heroPotentials: seq[float32]
+    heroHealth: seq[float32]
+      ## Per hero index: its share of full health at the last step.
+    buildingHp: seq[int32]
+      ## Per building: its health at the last step, for the structure reward.
+    fortHp: array[Team, int32]
+      ## Each god's health at the last step, for the structure reward.
+      ## Per hero index: the shaping potential at the last step.
+      ## Per hero index: XP, deaths and structures at the last step.
     harnesses: seq[Harness]
       ## Native hero state of each agent under NimHarness.
     agentOf: seq[int]
@@ -82,6 +150,33 @@ type
     rewardMode: RewardMode
     harness: HarnessMode
     agentsPerLane*: int
+    level: int
+      ## Curriculum level, or -1 for a static mix of whole-team opponents.
+    walkPercent: int
+      ## Chance in percent that a spawned hero walks to its lane by script.
+    walkReach: int
+      ## Percent of the way to its lane that the walk covers.
+    build: bool
+      ## The buy head follows base.bas's shopping list (harness.nim).
+    easier: int
+      ## Percent of curriculum matches played at an easier level.
+    retreat: int
+      ## Percent of health below which heroes walk home to heal (0 off).
+    winBonus: float32
+      ## MobaWinReward's bonus to each winning hero (`setWinBonus`).
+    structureWeight: float32
+    deathWeight: float32
+    finish: int
+      ## Reward per whole structure of health the enemy loses, and penalty
+      ## per whole structure the hero's team loses (`setStructureWeight`).
+    shapingWeight, shapingGamma: float32
+    healthWeight: float32
+      ## Shaping reward per tile walked toward the enemy, and the trainer's
+      ## discount; weight 0 turns shaping off.
+    exact: bool
+      ## Evaluation: every match plays the current level, none easier.
+    recording: bool
+      ## Records every match so `lastReplay` can save it.
 
 proc teamPotential(world: World, team: Team): int64 =
   ## Scales whole XP per minute into the training API's score numerator.
@@ -156,6 +251,225 @@ proc installPolicy(batch: StepBatch, lane: ptr StepLane, index: int) =
     lane.harnesses.add Harness()
     lane.game.heroVms[index] = nil
 
+proc enemyDistance(world: World, hero: Hero, finish: int): float32 =
+  ## Tiles from the hero to the nearest living enemy tower or barracks, or
+  ## 0 once none is left. With `finish` 1 or more the target follows the
+  ## path to the win: the nearest exposed god guard once a lane has fallen,
+  ## then the enemy god. With 2, before that, every hero aims at the next
+  ## tower of the enemy lane with the fewest towers standing.
+  let
+    x = mapCoordinate(hero.position.x)
+    y = mapCoordinate(hero.position.z)
+    enemy = Team(1 - hero.team.ord)
+  if finish >= 1 and world.fortExposed(enemy) and
+    world.forts[enemy.ord].hp > 0:
+    let
+      dx = mapCoordinate(world.forts[enemy.ord].center.x) - x
+      dy = mapCoordinate(world.forts[enemy.ord].center.z) - y
+    return sqrt(float32(dx * dx + dy * dy))
+  var best = -1'i32
+  if finish >= 1:
+    for building in world.buildings:
+      if building.team == enemy and building.guardsGod and
+        world.buildingExposed(building):
+          let
+            dx = mapCoordinate(building.position.x) - x
+            dy = mapCoordinate(building.position.z) - y
+            distance = dx * dx + dy * dy
+          if best < 0 or distance < best:
+            best = distance
+    if best >= 0:
+      return sqrt(float32(best))
+  if finish >= 2:
+    # The lane with the fewest towers standing, then the middle lane (the
+    # same lane from both sides), then the hero's nearest; its next tower.
+    var bestKey = (high(int), 2, high(int32))
+    for laneIndex in 0 .. 2:
+      var
+        standing = 0
+        next = -1'i32
+      for building in world.buildings:
+        if building.team == enemy and building.kind == TowerBuilding and
+          not building.guardsGod and building.lane == laneIndex and
+          building.hp > 0:
+            inc standing
+            if world.buildingExposed(building):
+              let
+                dx = mapCoordinate(building.position.x) - x
+                dy = mapCoordinate(building.position.z) - y
+              next = dx * dx + dy * dy
+      if standing > 0 and next >= 0:
+        let key = (standing, int(laneIndex != 1), next)
+        if key < bestKey:
+          bestKey = key
+          best = next
+    if best >= 0:
+      return sqrt(float32(best))
+  for building in world.buildings:
+    if building.team != hero.team and building.hp > 0:
+      let
+        dx = mapCoordinate(building.position.x) - x
+        dy = mapCoordinate(building.position.z) - y
+        distance = dx * dx + dy * dy
+      if best < 0 or distance < best:
+        best = distance
+  if best < 0: 0'f32 else: sqrt(float32(best))
+
+proc healthShare(hero: Hero): float32 =
+  ## The hero's share of full health, 0 while dead.
+  if hero.hp <= 0 or hero.maxHp <= 0: 0'f32
+  else: float32(hero.hp) / float32(hero.maxHp)
+
+proc snapshotHeroes(lane: ptr StepLane) =
+  ## Records every hero's XP, deaths, structures and shaping potential.
+  let world = lane.game.world
+  lane.heroXp.setLen(world.heroes.len)
+  lane.heroDeaths.setLen(world.heroes.len)
+  lane.heroStructures.setLen(world.heroes.len)
+  lane.heroPotentials.setLen(world.heroes.len)
+  lane.heroHealth.setLen(world.heroes.len)
+  for index, hero in world.heroes:
+    lane.heroXp[index] = int64(hero.totalXp)
+    lane.heroDeaths[index] = int64(hero.deaths)
+    lane.heroStructures[index] = world.stats.values[index][StructuresMetric]
+    lane.heroPotentials[index] = -enemyDistance(world, hero, lane.finish)
+    lane.heroHealth[index] = healthShare(hero)
+  lane.buildingHp.setLen(world.buildings.len)
+  for b, building in world.buildings:
+    lane.buildingHp[b] = max(building.hp, 0'i32)
+  for team in Team:
+    lane.fortHp[team] = max(world.forts[team.ord].hp, 0'i32)
+
+proc mobaReward(lane: ptr StepLane, index: int, deathWeight: float32): float32 =
+  ## One hero's MobaReward since the last snapshot, charging `deathWeight`
+  ## per death.
+  let
+    world = lane.game.world
+    hero = world.heroes[index]
+    xp = int64(hero.totalXp) - lane.heroXp[index]
+    deaths = int64(hero.deaths) - lane.heroDeaths[index]
+    structures = world.stats.values[index][StructuresMetric] -
+      lane.heroStructures[index]
+  float32(xp) * MobaXpWeight - float32(deaths) * deathWeight +
+    float32(structures) * MobaStructureWeight
+
+proc seedHash(seed: int): uint32 =
+  ## Mixes a lane seed into well-spread bits.
+  uint32(seed and 0x7fffffff) * 2654435761'u32
+
+proc maxLevel(batch: StepBatch): int =
+  ## The hardest curriculum level: five heroes of the last opponent.
+  (batch.opponents.len - 1) * TeamSize
+
+proc pickLevel(batch: StepBatch, seed: int): int =
+  ## A match's level: an easier one in `easier` percent of matches (25 by
+  ## default), else the current one.
+  if batch.level <= 0 or batch.exact:
+    return max(batch.level, 0)
+  let hash = seedHash(seed)
+  if int((hash shr 16) mod 100) >= batch.easier:
+    batch.level
+  else:
+    int((hash shr 8) mod uint32(batch.level))
+
+proc opponentGroups(batch: StepBatch, seed: int): (int, seq[BotGroup]) =
+  ## The opposing team's bots for a match, and the level or index played.
+  let hash = seedHash(seed)
+  if batch.level < 0:
+    let index = int((hash shr 8) mod uint32(batch.opponents.len))
+    return (index, @[BotGroup(path: batch.opponents[index], count: TeamSize)])
+  let level = min(batch.pickLevel(seed), batch.maxLevel)
+  var
+    tier = level div TeamSize
+    harder = level mod TeamSize
+  if tier >= batch.opponents.len - 1:
+    tier = batch.opponents.len - 1
+    harder = 0
+  # One group per hero slot; the harder heroes rotate across lanes.
+  let rotation = int((hash shr 4) mod uint32(TeamSize))
+  var groups: seq[BotGroup]
+  for slot in 0 ..< TeamSize:
+    let
+      hard = (slot - rotation + TeamSize) mod TeamSize < harder
+      path = batch.opponents[if hard: tier + 1 else: tier]
+    groups.add BotGroup(path: path, count: 1)
+  (level, groups)
+
+proc setLevel*(batch: StepBatch, level: int) =
+  ## Sets the curriculum level; -1 is a static mix.
+  batch.level = min(level, batch.maxLevel)
+
+proc setExactLevel*(batch: StepBatch, level: int) =
+  ## Evaluation: every match plays exactly this level.
+  batch.setLevel(level)
+  batch.exact = true
+
+proc setRecording*(batch: StepBatch, recording: bool) =
+  ## Records the matches that start from now on, for `lastReplay`.
+  batch.recording = recording
+
+proc setWalk*(batch: StepBatch, percent: int) =
+  ## Sets the chance that a spawned hero walks to its lane by script.
+  batch.walkPercent = percent
+  for lane in batch.lanes.mitems:
+    lane.walkPercent = percent
+
+proc setRetreat*(batch: StepBatch, percent: int) =
+  ## Sends heroes home to heal below `percent` of their health; 0 is off.
+  batch.retreat = percent
+  for lane in batch.lanes.mitems:
+    lane.retreat = percent
+
+proc setEasier*(batch: StepBatch, percent: int) =
+  ## Sets the percent of curriculum matches played at an easier level.
+  batch.easier = percent
+
+proc setBuild*(batch: StepBatch, build: bool) =
+  ## Makes any nonzero buy choice buy the next item of base.bas's list.
+  batch.build = build
+  for lane in batch.lanes.mitems:
+    lane.build = build
+
+proc setWinBonus*(batch: StepBatch, bonus: float32) =
+  ## Sets MobaWinReward's bonus to each hero of a winning team.
+  batch.winBonus = bonus
+
+proc setStructureWeight*(batch: StepBatch, weight: float32) =
+  ## Pays each hero `weight` per whole structure of health its team takes
+  ## off the enemy and charges it the same per whole structure its team
+  ## loses, every tick; 0 is off.
+  batch.structureWeight = weight
+
+proc setDeathWeight*(batch: StepBatch, weight: float32) =
+  ## Sets what the per-hero rewards charge a hero for each death; moba's
+  ## weight is MobaDeathWeight.
+  batch.deathWeight = weight
+
+proc setHealthWeight*(batch: StepBatch, weight: float32) =
+  ## Adds potential-based shaping of `weight` times each hero's share of
+  ## full health, discounted like the walking shaping; 0 is off.
+  batch.healthWeight = weight
+
+proc setFinish*(batch: StepBatch, finish: int) =
+  ## With 1 or more, points shaping at the exposed god guards and then the
+  ## enemy god once a lane has fallen, and counts god damage in the
+  ## structure reward; with 2, before that, at the weakest enemy lane.
+  batch.finish = finish
+  for lane in batch.lanes.mitems:
+    lane.finish = finish
+
+proc setShaping*(batch: StepBatch, weight, gamma: float32) =
+  ## Sets the shaping reward per tile walked toward the nearest living
+  ## enemy structure and the discount it is matched to; weight 0 is off.
+  batch.shapingWeight = weight
+  batch.shapingGamma = gamma
+
+proc setReach*(batch: StepBatch, percent: int) =
+  ## Sets how much of the way to its lane the scripted walk covers.
+  batch.walkReach = percent
+  for lane in batch.lanes.mitems:
+    lane.walkReach = percent
+
 proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
   ## Builds a fresh match for one lane and installs the policy scripts.
   let
@@ -165,14 +479,11 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
       gameMap, config.spawnIntervalTicks, 10, false, ReplayData(), false
     )
     team = Team((seed mod 10) div 5)
-    opponent = batch.opponents[(seed div 10) mod batch.opponents.len]
+    (played, opponents) = batch.opponentGroups(seed)
+    learners = @[BotGroup(path: batch.bot, count: TeamSize)]
     groups =
-      if team == RedTeam:
-        @[BotGroup(path: batch.bot, count: TeamSize),
-          BotGroup(path: opponent, count: TeamSize)]
-      else:
-        @[BotGroup(path: opponent, count: TeamSize),
-          BotGroup(path: batch.bot, count: TeamSize)]
+      if team == RedTeam: learners & opponents
+      else: opponents & learners
   if batch.harness == NimHarness and batch.selfPlay:
     # Every hero is an agent, so no bundled bot needs compiling.
     game.heroVms = newSeq[HeroVm](game.world.heroes.len)
@@ -183,6 +494,16 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
   )
   lane.game = game
   lane.seed = seed
+  lane.played = played
+  lane.walkPercent = batch.walkPercent
+  lane.walkReach = batch.walkReach
+  lane.build = batch.build
+  lane.finish = batch.finish
+  lane.retreat = batch.retreat
+  if batch.recording:
+    game.recorder = initReplayRecorder(
+      currentSetup(game, uint32(batch.maxTicks))
+    )
   lane.team = team
   lane.agents.setLen(0)
   lane.observations.setLen(0)
@@ -198,12 +519,21 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     for index, hero in game.world.heroes:
       if hero.team != team:
         batch.installPolicy(lane, index)
+  lane.labels.setLen(0)
+  for group in groups:
+    for _ in 0 ..< group.count:
+      lane.labels.add group.path.extractFilename
+  for index in 0 ..< lane.labels.len:
+    if index < lane.agentOf.len and lane.agentOf[index] >= 0:
+      lane.labels[index] = "policy"
   doAssert lane.agents.len == batch.agentsPerLane
   for side in Team:
     lane.potentials[side] =
       case batch.rewardMode
       of LeaderboardReward: teamPotential(game.world, side)
-      of XpReward, XpOutcomeReward: teamXp(game.world, side)
+      of XpReward, XpOutcomeReward, MobaReward, MobaWinReward:
+        teamXp(game.world, side)
+  lane.snapshotHeroes()
 
 proc newStepBatch*(
     configPath, bot, opponent, policy: string,
@@ -225,7 +555,13 @@ proc newStepBatch*(
     selfPlay: selfPlay,
     rewardMode: rewardMode,
     harness: harness,
-    agentsPerLane: if selfPlay: 2 * TeamSize else: TeamSize
+    agentsPerLane: if selfPlay: 2 * TeamSize else: TeamSize,
+    level: -1,
+    walkPercent: 100,
+    walkReach: 100,
+    winBonus: MobaWinBonus,
+    deathWeight: MobaDeathWeight,
+    easier: 25
   )
   result.lanes.setLen(count)
   for i in 0 ..< count:
@@ -247,6 +583,10 @@ proc thinkHero(lane: ptr StepLane, index: int) =
   ## Runs one hero's decision natively for an agent, else through its VM.
   if index >= 0 and lane.agentOf[index] >= 0:
     let agent = lane.agentOf[index]
+    lane.harnesses[agent].walkPercent = int32(lane.walkPercent)
+    lane.harnesses[agent].walkReach = int32(lane.walkReach)
+    lane.harnesses[agent].build = lane.build
+    lane.harnesses[agent].retreatPercent = int32(lane.retreat)
     lane.harnesses[agent].think(
       lane.game,
       index,
@@ -332,7 +672,7 @@ proc step*(
         reward[side] = float32(potential - lane.potentials[side]) /
           float32(ScoreDenominator)
         lane.potentials[side] = potential
-      of XpReward, XpOutcomeReward:
+      of XpReward, XpOutcomeReward, MobaReward, MobaWinReward:
         let xp = teamXp(world, side)
         reward[side] = float32(xp - lane.potentials[side]) /
           float32(XpDenominator)
@@ -347,18 +687,85 @@ proc step*(
         outcome: outcome(world, lane.team, true),
         tick: world.tick,
         selfPlay: int32(batch.selfPlay),
+        played: int32(lane.played),
+        level: int32(batch.level),
         potential:
           if outcome(world, lane.team, true) == 1:
             teamPotential(world, lane.team)
           else:
             0
       )
+    let perHero = batch.rewardMode in {MobaReward, MobaWinReward}
+    # Structure health each team lost this tick, in whole structures.
+    var lost: array[Team, float32]
+    if perHero and batch.structureWeight > 0:
+      for b, building in world.buildings:
+        if b < lane.buildingHp.len and building.maxHp > 0:
+          let drop = lane.buildingHp[b] - max(building.hp, 0'i32)
+          if drop > 0:
+            lost[building.team] += float32(drop) / float32(building.maxHp)
+      if lane.finish > 0:
+        for team in Team:
+          let drop = lane.fortHp[team] - max(world.forts[team.ord].hp, 0'i32)
+          if drop > 0:
+            lost[team] += GodStructures * float32(drop) / float32(FortHp)
     for i, index in lane.agents:
-      rewards[agent + i] = reward[world.heroes[index].team]
+      rewards[agent + i] =
+        if perHero: mobaReward(lane, index, batch.deathWeight)
+        else: reward[world.heroes[index].team]
+      if batch.rewardMode == MobaWinReward and done and
+        outcome(world, world.heroes[index].team, true) == 1:
+          rewards[agent + i] += batch.winBonus
+      if perHero and batch.structureWeight > 0:
+        let team = world.heroes[index].team
+        rewards[agent + i] += batch.structureWeight *
+          (lost[Team(1 - team.ord)] - lost[team])
+      if perHero and batch.shapingWeight > 0:
+        # The terminal state's potential is 0, which keeps the shaping
+        # potential-based across matches.
+        let next =
+          if done: 0'f32
+          else: -enemyDistance(world, world.heroes[index], lane.finish)
+        rewards[agent + i] += batch.shapingWeight *
+          (batch.shapingGamma * next - lane.heroPotentials[index])
+      if perHero and batch.healthWeight > 0 and
+        index < lane.heroHealth.len:
+          # Health as a potential: damage costs at once and healing pays
+          # it back; 0 at the end keeps it potential-based across matches.
+          let next =
+            if done: 0'f32
+            else: healthShare(world.heroes[index])
+          rewards[agent + i] += batch.healthWeight *
+            (batch.shapingGamma * next - lane.heroHealth[index])
       terminals[agent + i] = uint8(done)
+    if perHero:
+      lane.snapshotHeroes()
     if done:
+      lane.lastGame = game
+      lane.lastLabels = lane.labels
       batch.startLane(lane, lane.seed + batch.lanes.len)
     agent += lane.agents.len
+
+proc lastMatch*(
+  batch: StepBatch,
+  lane: int
+): tuple[world: World, labels: seq[string]] =
+  ## The world of a lane's most recently finished match and, per hero
+  ## index, "policy" or the opponent file that played it.
+  doAssert batch.lanes[lane].lastGame != nil, "no finished match yet"
+  (batch.lanes[lane].lastGame.world, batch.lanes[lane].lastLabels)
+
+proc currentMatch*(
+  batch: StepBatch,
+  lane: int
+): tuple[world: World, labels: seq[string]] =
+  ## The world of a lane's match in progress and its per-hero labels.
+  (batch.lanes[lane].game.world, batch.lanes[lane].labels)
+
+proc lastReplay*(batch: StepBatch, lane: int): ReplayData =
+  ## The recording of a lane's most recently finished match.
+  doAssert batch.lanes[lane].lastGame != nil, "no finished match yet"
+  batch.lanes[lane].lastGame.recorder.data
 
 proc gota_source_commit(): cstring {.cdecl, exportc, dynlib.} =
   GotaSourceCommit.cstring
@@ -389,6 +796,57 @@ proc gota_create(
       RewardMode(rewardMode), harness)
   GC_ref(batch)
   cast[pointer](batch)
+
+proc gota_set_level(handle: pointer, level: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setLevel(int(level))
+
+proc gota_set_walk(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setWalk(int(percent))
+
+proc gota_set_reach(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setReach(int(percent))
+
+proc gota_set_retreat(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setRetreat(int(percent))
+
+proc gota_set_easier(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setEasier(int(percent))
+
+proc gota_set_build(handle: pointer, build: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setBuild(build != 0)
+
+proc gota_set_win_bonus(handle: pointer, bonus: cfloat) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setWinBonus(float32(bonus))
+
+proc gota_set_structure_weight(
+  handle: pointer,
+  weight: cfloat
+) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setStructureWeight(float32(weight))
+
+proc gota_set_finish(handle: pointer, finish: cint) {.cdecl, exportc, dynlib.} =
+  ## Turns the path-to-the-god shaping and god damage reward on or off.
+  cast[StepBatch](handle).setFinish(int(finish))
+
+proc gota_set_health_weight(
+  handle: pointer,
+  weight: cfloat
+) {.cdecl, exportc, dynlib.} =
+  ## Sets the health shaping weight; 0 is off.
+  cast[StepBatch](handle).setHealthWeight(float32(weight))
+
+proc gota_set_death_weight(
+  handle: pointer,
+  weight: cfloat
+) {.cdecl, exportc, dynlib.} =
+  ## Sets the per-hero death charge (moba's is about 0.164).
+  cast[StepBatch](handle).setDeathWeight(float32(weight))
+
+proc gota_set_shaping(
+  handle: pointer,
+  weight, gamma: cfloat
+) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setShaping(float32(weight), float32(gamma))
 
 proc gota_agents(handle: pointer): cint {.cdecl, exportc, dynlib.} =
   cint(cast[StepBatch](handle).agentCount)
