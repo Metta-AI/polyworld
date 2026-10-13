@@ -29,10 +29,15 @@
 ##   Arcanist, Vanguard Knight and Ranger's stats, attack reach and rate;
 ##   GotA's XP curve (100, then 75 more per level, to level 20) and kill XP
 ##   (creep 15, hero 150, tower 200, the god 1,000 to each winner).
+## - 1 GotA's map: its arena (gota_map.nim, written by gen_gota_map.nim)
+##   centered in the 128 x 128 grid, with GotA's towers, guards and gods in
+##   moba's tower slots, its three lane routes, team spawns and 14 camps.
 ## GotA's numbers enter moba's units with health x 1.40 and damage x 1.88,
 ## the ratios of the five roles' average health and damage.
 
-import std/math
+import
+  std/math,
+  gota_map
 
 const
   MapSize* = 128
@@ -284,15 +289,26 @@ type
       ## Each tower's lane (0 to 2 on its team's side), for the gates.
     creepSlots: int
       ## Creep slots in use: moba's 100, or all for trait 3.
+    campCount: int
+      ## Neutral camps in use: moba's 18, or GotA's for trait 1.
 
-var pathCache: seq[seq[uint8]]
-  ## Per destination cell, the BFS action toward it from every cell (255
-  ## unreached, 8 at a wall or the destination), built on first use. The
-  ## walls are static, so every match shares it.
+var pathCaches: array[2, seq[seq[uint8]]]
+  ## Per map (0 moba's, 1 GotA's) and destination cell, the BFS action
+  ## toward it from every cell (255 unreached, 8 at a wall or the
+  ## destination), built on first use. The walls are static, so every
+  ## match on a map shares it.
 
 proc trait*(game: Moba, n: int): bool {.inline.} =
   ## Whether GotA trait n is on.
   (game.traits and (1'u16 shl n)) != 0
+
+proc waypointAt(game: Moba, lane, i: int): array[2, float32] {.inline.} =
+  ## A lane waypoint (y, x) on the current map.
+  if game.trait(1): GotaWaypoints[lane][i] else: Waypoints[lane][i]
+
+proc waypointCount(game: Moba, lane: int): int {.inline.} =
+  ## Waypoints in a lane on the current map.
+  if game.trait(1): GotaWaypointCounts[lane] else: WaypointCounts[lane]
 
 proc mapOffset(y, x: int): int {.inline.} =
   ## Grid index of a cell.
@@ -318,7 +334,11 @@ proc fastRng(game: Moba): float32 =
   if game.pathRngIndex >= PathRngCount - 1:
     game.pathRngIndex = 0
 
-proc bfs(dest: int): seq[uint8] =
+proc wallAt(map, cell: int): bool {.inline.} =
+  ## Whether a cell is a static wall on map 0 (moba's) or 1 (GotA's).
+  if map == 1: GotaGrid[cell] == '1' else: uint8(MapData[cell]) == WallTile
+
+proc bfs(map, dest: int): seq[uint8] =
   ## moba's bfs from one destination over the static walls.
   result = newSeq[uint8](MapSize * MapSize)
   for cell in result.mitems:
@@ -326,7 +346,7 @@ proc bfs(dest: int): seq[uint8] =
   let
     destY = dest div MapSize
     destX = dest mod MapSize
-  if uint8(MapData[dest]) == WallTile:
+  if wallAt(map, dest):
     return
   var queue = newSeqOfCap[array[3, int]](8 * MapSize * MapSize)
   queue.add [0, destY, destX]
@@ -342,7 +362,7 @@ proc bfs(dest: int): seq[uint8] =
     let cell = mapOffset(y, x)
     if result[cell] != 255:
       continue
-    if uint8(MapData[cell]) == WallTile:
+    if wallAt(map, cell):
       result[cell] = 8
       continue
     result[cell] = uint8(atn)
@@ -356,18 +376,18 @@ proc bfs(dest: int): seq[uint8] =
     queue.add [7, y - 1, x - 1]
   result[dest] = 8
 
-proc pathAction(destY, destX, srcY, srcX: int): int =
+proc pathAction(map, destY, destX, srcY, srcX: int): int =
   ## The BFS action from (srcY, srcX) toward (destY, destX), or 8 or more
   ## when there is none.
   if destY < 0 or destY >= MapSize or destX < 0 or destX >= MapSize or
     srcY < 0 or srcY >= MapSize or srcX < 0 or srcX >= MapSize:
       return 8
-  if pathCache.len == 0:
-    pathCache.setLen(MapSize * MapSize)
+  if pathCaches[map].len == 0:
+    pathCaches[map].setLen(MapSize * MapSize)
   let dest = mapOffset(destY, destX)
-  if pathCache[dest].len == 0:
-    pathCache[dest] = bfs(dest)
-  int(pathCache[dest][mapOffset(srcY, srcX)])
+  if pathCaches[map][dest].len == 0:
+    pathCaches[map][dest] = bfs(map, dest)
+  int(pathCaches[map][dest][mapOffset(srcY, srcX)])
 
 proc moveTo(game: Moba, entity: var Entity, destY, destX: float32): int =
   ## moba's move_to: 0 when the entity moved, 1 when the cell is taken.
@@ -410,7 +430,7 @@ proc moveTowards(
   let
     srcY = int(entity.y)
     srcX = int(entity.x)
-    atn = pathAction(destY, destX, srcY, srcX)
+    atn = pathAction(if game.trait(1): 1 else: 0, destY, destX, srcY, srcX)
   if atn >= 8:
     return 0
   let
@@ -700,8 +720,9 @@ proc spawnCreep(game: Moba, slot, lane: int) =
   if game.trait(2):
     creep.xpOnKill = GotaCreepXp
   let
-    spawnY = int(Waypoints[lane][0][0])
-    spawnX = int(Waypoints[lane][0][1])
+    start = game.waypointAt(lane, 0)
+    spawnY = int(start[0])
+    spawnX = int(start[1])
   var y, x: int
   for i in 0 ..< 10:
     y = spawnY + game.rand() mod 7 - 3
@@ -876,12 +897,13 @@ proc creepAi(game: Moba, index: int) =
     let
       lane = game.entities[index].lane
       waypoint = game.entities[index].waypoint
-      destY = Waypoints[lane][waypoint][0]
-      destX = Waypoints[lane][waypoint][1]
+      point = game.waypointAt(lane, waypoint)
+      destY = point[0]
+      destX = point[1]
     discard game.moveTowards(game.entities[index], int(destY), int(destX),
       game.agentSpeed)
     if l1(game.entities[index].y, game.entities[index].x, destY, destX) < 2 and
-      waypoint < WaypointCounts[lane] - 1:
+      waypoint < game.waypointCount(lane) - 1:
         inc game.entities[index].waypoint
 
 proc neutralAi(game: Moba, index: int) =
@@ -1088,7 +1110,7 @@ proc stepCreeps(game: Moba) =
 proc stepNeutrals(game: Moba) =
   ## moba's step_neutrals: every camp respawns every 600 ticks.
   if game.tick mod 600 == 0:
-    for camp in 0 ..< 18:
+    for camp in 0 ..< game.campCount:
       for i in 0 ..< 4:
         game.spawnNeutral(4 * camp + i)
   for slot in 0 ..< NumNeutrals:
@@ -1317,7 +1339,12 @@ proc step*(game: Moba): array[NumPlayers, float32] =
     game.reset()
 
 proc assignTowerLanes(game: Moba) =
-  ## Each tower's lane: the team's lane whose waypoints come nearest.
+  ## Each tower's lane: the team's lane whose waypoints come nearest (on
+  ## GotA's map, its own lanes).
+  if game.trait(1):
+    for slot in 0 ..< NumTowers:
+      game.towerLanes[slot] = GotaTowerLanes[slot]
+    return
   for slot in 0 ..< NumTowers:
     let first = TowerTeam[slot] * 3
     var best = Inf.float32
@@ -1336,6 +1363,7 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
     traits: traits,
     creepSlots: if (traits and (1'u16 shl 3)) != 0: NumCreeps
       else: MobaCreepSlots,
+    campCount: if (traits and (1'u16 shl 1)) != 0: GotaCampCount else: 18,
     visionRange: 5,
     agentSpeed: 1,
     rewardDeath: -0.163764,
@@ -1346,7 +1374,9 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
     rngState: seed or 1
   )
   for i in 0 ..< MapSize * MapSize:
-    result.origGrid[i] = uint8(MapData[i])
+    result.origGrid[i] =
+      if result.trait(1): uint8(ord(GotaGrid[i]) - ord('0'))
+      else: uint8(MapData[i])
   result.grid = result.origGrid
   for cell in result.pids.mitems:
     cell = -1
@@ -1374,8 +1404,14 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
     ]
   for team in 0 .. 1:
     let
-      spawnY = if team == 0: float32(MapSize - 15) else: 15'f32
-      spawnX = if team == 0: 12'f32 else: float32(MapSize - 12)
+      spawnY =
+        if result.trait(1): GotaSpawns[team][0]
+        elif team == 0: float32(MapSize - 15)
+        else: 15'f32
+      spawnX =
+        if result.trait(1): GotaSpawns[team][1]
+        elif team == 0: 12'f32
+        else: float32(MapSize - 12)
     for role in 0 ..< 5:
       let pid = team * 5 + role
       var player = Entity(
@@ -1418,8 +1454,8 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
       gridId: TowerTile,
       basicAttackCd: 5,
       team: TowerTeam[slot],
-      spawnY: TowerY[slot],
-      spawnX: TowerX[slot],
+      spawnY: if result.trait(1): GotaTowerY[slot] else: TowerY[slot],
+      spawnX: if result.trait(1): GotaTowerX[slot] else: TowerX[slot],
       maxHealth:
         if result.trait(4): GotaTowerHealth[TowerTier[slot] - 1]
         else: TowerHealth[slot],
@@ -1440,8 +1476,10 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
         gridId: NeutralTile,
         maxHealth: 500,
         team: 2,
-        spawnY: NeutralCampY[camp],
-        spawnX: NeutralCampX[camp],
+        spawnY:
+          if result.trait(1): GotaCamps[camp][0] else: NeutralCampY[camp],
+        spawnX:
+          if result.trait(1): GotaCamps[camp][1] else: NeutralCampX[camp],
         xpOnKill: 35,
         basicAttackCd: 5,
         damage: 22,
