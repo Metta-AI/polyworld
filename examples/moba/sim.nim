@@ -258,6 +258,15 @@ type
   Reward* = object
     death*, xp*, distance*, tower*: float32
 
+  MatchSummary* = object
+    ## A finished match, from each team's side (0 Radiant, 1 Dire).
+    towersAlive*: array[2, int]
+    ancientHealth*: array[2, float32]
+    meanLevel*: array[2, float32]
+    deaths*: array[2, int]
+    manaShare*: array[2, float32]
+      ## Mean hero mana as a share of its maximum at the end.
+
   Moba* = ref object
     grid*: array[MapSize * MapSize, uint8]
     pids*: array[MapSize * MapSize, int32]
@@ -282,6 +291,8 @@ type
     finishedTick*: int
     traits*: uint16
       ## GotA traits for the cut ladder, bit n for trait n (0 = moba).
+    summary*: MatchSummary
+      ## The last finished match, taken just before the reset.
     dead: array[NumPlayers, bool]
     respawnTimers: array[NumPlayers, int]
     deaths: array[NumPlayers, int]
@@ -569,7 +580,6 @@ proc killPlayer(game: Moba, pid: int) =
   if game.pids[cell] == int32(pid):
     game.grid[cell] = EmptyTile
     game.pids[cell] = -1
-  inc game.deaths[pid]
   game.dead[pid] = true
   game.respawnTimers[pid] = min(RespawnMax,
     RespawnBase + (game.deaths[pid] - 1) * RespawnGrowth)
@@ -606,6 +616,7 @@ proc attack(game: Moba, attacker, target: int, damage: float32): int =
   case kind
   of PlayerEntity:
     game.rewards[game.entities[target].pid].death = game.rewardDeath
+    inc game.deaths[target]
     if game.trait(6):
       game.killPlayer(target)
     else:
@@ -1336,6 +1347,19 @@ proc step*(game: Moba): array[NumPlayers, float32] =
     game.radiantVictory = radiantWins
     game.direVictory = direWins
     game.finishedTick = game.tick
+    var summary: MatchSummary
+    for slot in 0 ..< NumTowers:
+      if game.towerAlive(slot) and TowerTier[slot] < 5:
+        inc summary.towersAlive[TowerTeam[slot]]
+    summary.ancientHealth[0] = max(radiant.health, 0)
+    summary.ancientHealth[1] = max(dire.health, 0)
+    for pid in 0 ..< NumPlayers:
+      let team = pid div 5
+      summary.meanLevel[team] += float32(game.entities[pid].level) / 5
+      summary.deaths[team] += game.deaths[pid]
+      summary.manaShare[team] += game.entities[pid].mana /
+        game.entities[pid].maxMana / 5
+    game.summary = summary
     game.reset()
 
 proc assignTowerLanes(game: Moba) =
