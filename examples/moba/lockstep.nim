@@ -20,6 +20,7 @@ type
 
   StepBatch = ref object
     lanes: seq[Moba]
+    traits: uint16
 
 proc seedFor(seed: int64, lane: int): uint32 =
   ## A nonzero xorshift seed per lane.
@@ -74,7 +75,7 @@ proc gota_reset(
 ) {.cdecl, exportc, dynlib.} =
   let batch = cast[StepBatch](handle)
   for i in 0 ..< batch.lanes.len:
-    batch.lanes[i] = newMoba(seedFor(seed, i))
+    batch.lanes[i] = newMoba(seedFor(seed, i), batch.traits)
   batch.writeObservations(observations, seats)
 
 proc gota_step(
@@ -100,7 +101,10 @@ proc gota_step(
     if lane.finished:
       stats[i] = LaneStats(
         finished: 1,
-        outcome: if lane.radiantVictory: 1 else: -1,
+        outcome:
+          if lane.radiantVictory: 1
+          elif lane.direVictory: -1
+          else: 0,
         tick: int32(lane.finishedTick),
         level: -1
       )
@@ -146,8 +150,12 @@ proc gota_set_structure_weight(
   discard
 
 proc gota_set_cuts(handle: pointer, cuts: cint) {.cdecl, exportc, dynlib.} =
-  ## Reserved for the GotA traits of ladder rungs 11 to 19.
-  discard
+  ## The GotA traits of ladder rungs 11 to 18 (sim.nim), bit n for trait n;
+  ## restarts every lane.
+  let batch = cast[StepBatch](handle)
+  batch.traits = uint16(cuts)
+  for i in 0 ..< batch.lanes.len:
+    batch.lanes[i] = newMoba(seedFor(0, i), batch.traits)
 
 proc gota_set_simplify(
   handle: pointer,

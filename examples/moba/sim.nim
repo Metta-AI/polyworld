@@ -9,9 +9,18 @@
 ## needed instead of one 256 MB table, and moves off the map fail instead
 ## of reading out of bounds.
 ##
-## Cut-ladder traits (World.traits, bit n for trait n) put Gods of the
-## Arena rules back into the engine for the ladder's rungs 11 to 19; 0 is
-## exact moba. They are applied in later commits as they are built.
+## Cut-ladder traits (Moba.traits, bit n for trait n) put Gods of the
+## Arena rules back into the engine for ladder rungs 11 to 18; 0 is exact
+## moba. Rung r keeps traits r - 10 to 8:
+## - 8 GotA's 20-minute clock (2,880 steps at 10 ticks per step); a match
+##   that reaches it is a draw.
+## - 7 Gates: a lane's towers fall in tier order (1 outer to 3), the two
+##   tier-4 guards only after one whole lane fell, the ancient only after
+##   both guards, as GotA's lanes, god guards and god.
+## - 6 Respawn timers: 9 s plus 5 s per earlier death, at most 60 s (22,
+##   +12, 144 steps); a dead hero is off the map.
+## - 5 Spawn-only healing: no passive regeneration; within 10 cells of its
+##   spawn a hero heals 5% of its health and mana per step.
 
 import std/math
 
@@ -43,6 +52,11 @@ const
   CreepVision = 7
   NeutralVision = 3
   XpRange = 7'f32
+  ClockSteps = 2880
+  RespawnBase = 22
+  RespawnGrowth = 12
+  RespawnMax = 144
+  SpawnHealRange = 10'f32
   ScanSlots = 121
     ## moba reads at most 121 scanned targets per entity.
   ScanCapacity = 226
@@ -219,11 +233,22 @@ type
       ## Set by `step` when an ancient fell this tick (before the reset).
     radiantVictory*, direVictory*: bool
     finishedTick*: int
+    traits*: uint16
+      ## GotA traits for the cut ladder, bit n for trait n (0 = moba).
+    dead: array[NumPlayers, bool]
+    respawnTimers: array[NumPlayers, int]
+    deaths: array[NumPlayers, int]
+    towerLanes: array[NumTowers, int]
+      ## Each tower's lane (0 to 2 on its team's side), for the gates.
 
 var pathCache: seq[seq[uint8]]
   ## Per destination cell, the BFS action toward it from every cell (255
   ## unreached, 8 at a wall or the destination), built on first use. The
   ## walls are static, so every match shares it.
+
+proc trait*(game: Moba, n: int): bool {.inline.} =
+  ## Whether GotA trait n is on.
+  (game.traits and (1'u16 shl n)) != 0
 
 proc mapOffset(y, x: int): int {.inline.} =
   ## Grid index of a cell.
@@ -411,11 +436,65 @@ proc calcLevel(xp: int): int =
       return i + 1
   30
 
+proc towerAlive(game: Moba, slot: int): bool =
+  ## Whether a tower stands.
+  let tower = game.entities[TowerOffset + slot]
+  tower.pid != -1 and tower.health > 0
+
+proc exposed(game: Moba, slot: int): bool =
+  ## Trait 7: whether a tower can be damaged under GotA's gates.
+  let
+    team = TowerTeam[slot]
+    tier = TowerTier[slot]
+  case tier
+  of 1 .. 3:
+    for other in 0 ..< NumTowers:
+      if TowerTeam[other] == team and TowerTier[other] < tier and
+        TowerTier[other] >= 1 and game.towerLanes[other] ==
+          game.towerLanes[slot] and game.towerAlive(other):
+            return false
+    true
+  of 4:
+    for lane in 0 .. 2:
+      var standing = false
+      for other in 0 ..< NumTowers:
+        if TowerTeam[other] == team and TowerTier[other] in 1 .. 3 and
+          game.towerLanes[other] == lane and game.towerAlive(other):
+            standing = true
+      if not standing:
+        return true
+    false
+  else:
+    for other in 0 ..< NumTowers:
+      if TowerTeam[other] == team and TowerTier[other] == 4 and
+        game.towerAlive(other):
+          return false
+    true
+
+proc killPlayer(game: Moba, pid: int) =
+  ## Trait 6: takes a dead hero off the map until its respawn timer ends.
+  let cell = mapOffset(int(game.entities[pid].y), int(game.entities[pid].x))
+  if game.pids[cell] == int32(pid):
+    game.grid[cell] = EmptyTile
+    game.pids[cell] = -1
+  inc game.deaths[pid]
+  game.dead[pid] = true
+  game.respawnTimers[pid] = min(RespawnMax,
+    RespawnBase + (game.deaths[pid] - 1) * RespawnGrowth)
+  game.entities[pid].health = 0
+  game.entities[pid].y = game.entities[pid].spawnY
+  game.entities[pid].x = game.entities[pid].spawnX
+
 proc attack(game: Moba, attacker, target: int, damage: float32): int =
   ## moba's attack: damages a hostile target in L1 range 12 and pays kill
   ## XP, death and tower rewards. 0 on a hit, 1 otherwise.
   if game.entities[target].pid == -1 or
     game.entities[target].team == game.entities[attacker].team:
+      return 1
+  if target < NumPlayers and game.dead[target]:
+    return 1
+  if game.trait(7) and game.entities[target].kind == TowerEntity and
+    not game.exposed(target - TowerOffset):
       return 1
   if l1(game.entities[attacker].y, game.entities[attacker].x,
     game.entities[target].y, game.entities[target].x) > 12:
@@ -435,7 +514,10 @@ proc attack(game: Moba, attacker, target: int, damage: float32): int =
   case kind
   of PlayerEntity:
     game.rewards[game.entities[target].pid].death = game.rewardDeath
-    game.spawnPlayer(target)
+    if game.trait(6):
+      game.killPlayer(target)
+    else:
+      game.spawnPlayer(target)
   else:
     game.killEntity(game.entities[target])
   if game.entities[attacker].kind != PlayerEntity:
@@ -489,6 +571,8 @@ proc basicAttack(game: Moba, attacker, target: int): int =
 
 proc heal(game: Moba, healer, target: int, amount: float32): int =
   ## moba's heal: allied players only.
+  if target < NumPlayers and game.dead[target]:
+    return 1
   if game.entities[target].pid == -1 or
     game.entities[target].team != game.entities[healer].team:
       return 1
@@ -936,12 +1020,29 @@ proc stepPlayers(game: Moba): array[NumPlayers, float32] =
   for pid in 0 ..< NumPlayers:
     game.rewards[pid] = Reward()
   for pid in 0 ..< NumPlayers:
+    if game.dead[pid]:
+      dec game.respawnTimers[pid]
+      if game.respawnTimers[pid] > 0:
+        continue
+      game.dead[pid] = false
+      game.spawnPlayer(pid)
+    var
+      manaGain = 2'f32
+      healthGain = 2'f32
+    if game.trait(5):
+      manaGain = 0
+      healthGain = 0
+      if l1(game.entities[pid].y, game.entities[pid].x,
+        game.entities[pid].spawnY, game.entities[pid].spawnX) <=
+          SpawnHealRange:
+            manaGain = 0.05 * game.entities[pid].maxMana
+            healthGain = 0.05 * game.entities[pid].maxHealth
     if game.entities[pid].mana < game.entities[pid].maxMana:
-      game.entities[pid].mana += 2
+      game.entities[pid].mana += manaGain
     if game.entities[pid].mana > game.entities[pid].maxMana:
       game.entities[pid].mana = game.entities[pid].maxMana
     if game.entities[pid].health < game.entities[pid].maxHealth:
-      game.entities[pid].health += 2
+      game.entities[pid].health += healthGain
     if game.entities[pid].health > game.entities[pid].maxHealth:
       game.entities[pid].health = game.entities[pid].maxHealth
     updateStatus(game.entities[pid])
@@ -1075,6 +1176,9 @@ proc reset*(game: Moba) =
     game.entities[pid].targetPid = -1
     game.entities[pid].xp = 0
     game.entities[pid].level = 1
+    game.dead[pid] = false
+    game.respawnTimers[pid] = 0
+    game.deaths[pid] = 0
     game.spawnPlayer(pid)
 
 proc step*(game: Moba): array[NumPlayers, float32] =
@@ -1099,17 +1203,32 @@ proc step*(game: Moba): array[NumPlayers, float32] =
     radiantWins = dire.health <= 0 or dire.pid == -1
     direWins = radiant.health <= 0 or radiant.pid == -1
   game.shouldReset = false
-  if radiantWins or direWins:
+  let clockOut = game.trait(8) and game.tick >= ClockSteps
+  if radiantWins or direWins or clockOut:
     game.finished = true
     game.radiantVictory = radiantWins
     game.direVictory = direWins
     game.finishedTick = game.tick
     game.reset()
 
-proc newMoba*(seed: uint32): Moba =
+proc assignTowerLanes(game: Moba) =
+  ## Each tower's lane: the team's lane whose waypoints come nearest.
+  for slot in 0 ..< NumTowers:
+    let first = TowerTeam[slot] * 3
+    var best = Inf.float32
+    for lane in first .. first + 2:
+      for i in 0 ..< WaypointCounts[lane]:
+        let distance = l1(TowerY[slot], TowerX[slot], Waypoints[lane][i][0],
+          Waypoints[lane][i][1])
+        if distance < best:
+          best = distance
+          game.towerLanes[slot] = lane - first
+
+proc newMoba*(seed: uint32, traits = 0'u16): Moba =
   ## moba's init_moba with moba.ini's [env]: vision 5, speed 1, scripted
-  ## opponents and its reward weights.
+  ## opponents and its reward weights, plus the cut-ladder GotA traits.
   result = Moba(
+    traits: traits,
     visionRange: 5,
     agentSpeed: 1,
     rewardDeath: -0.163764,
@@ -1208,4 +1327,5 @@ proc newMoba*(seed: uint32): Moba =
       inc index
   for slot in 0 ..< NumCreeps:
     result.entities[CreepOffset + slot] = Entity(pid: -1, targetPid: -1)
+  result.assignTowerLanes()
   result.reset()
