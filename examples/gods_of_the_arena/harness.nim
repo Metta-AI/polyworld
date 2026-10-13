@@ -10,13 +10,35 @@
 ## bassy with decimals disabled. No value comes near the int32 range, so
 ## bassy's wrapping never applies. The script calls no random functions.
 ##
-## The observation is 4392 int32 values. obs[0 ..< 4356] is a 33 x 33 grid
+## The observation is 5967 int32 values. obs[0 ..< 4356] is a 33 x 33 grid
 ## of the tiles within the 16-tile vision radius in four channels, stored
 ## at channel * 1089 + row * 33 + column, mirrored for team 1: walkable
 ## tile, occupant code, occupant health tenths, and object count. The 36
-## self scalars from obs[4356] are listed in `observe`. The action heads
+## self scalars from obs[4356] are listed in `observe`. obs[4392 ..< 5967]
+## is a 15 x 15 minimap of the whole map, 8 x 8 tiles per cell, mirrored
+## the same way, of everything the team can see, as the scripted bots read
+## it: in seven channels at 4392 + channel * 225 + row * 15 + column, ally
+## and enemy heroes (counts up to 9), ally and enemy creeps (counts up to
+## 9), ally and enemy structures and gods (the healthiest one's health
+## tenths plus 1), and 1 on the hero's own cell. The action heads
 ## have sizes `ActionSizes`: move dy, move dx, target filter, one cast flag
 ## per ability slot, item to buy, inventory slot to use, and buyback.
+##
+## Standing still with target 0 retreats: the hero walks back to the spot
+## it last spawned at, where the spawn room heals it, as base.bas does
+## below a quarter of its health.
+##
+## The target head also picks how the hero moves: 0 walks past enemies
+## (to retreat), 1 and 2 attack-move, so the hero fights what it meets the
+## way the scripted bots and moba's always-on attacks do. While it fights,
+## no new move order interrupts the swing.
+##
+## After spawn and after every respawn a scripted walk takes the hero to
+## its lane (`walkLane`), as Dota bots script their opening, with chance
+## `walkPercent` and for `walkReach` percent of the way, so that training
+## can wean the policy off it. Until an enemy other than a camp creep is
+## within 8 tiles the policy only shops and buys back; the move, target and
+## cast heads apply once the walk ends.
 
 import
   fixxy,
@@ -30,15 +52,40 @@ const
   GridCells = GridSide * GridSide
   ScalarStart = 4 * GridCells
   ScalarCount = 36
-  ObservationSize* = ScalarStart + ScalarCount
+  MiniTiles = 8'i32
+    ## Map tiles per minimap cell side.
+  MiniSide = 15
+    ## Minimap cells per side, covering the 116-tile map.
+  MiniCells = MiniSide * MiniSide
+  MiniStart = ScalarStart + ScalarCount
+  ObservationSize* = MiniStart + 7 * MiniCells
   ActionSizes* = [7'i32, 7, 3, 2, 2, 2, 2, 23, 7, 2]
   ActionCount* = ActionSizes.len
+  BuildItems = [[8'i32, 1], [1, 2], [21, 2], [22, 2]]
+    ## base.bas's shopping list for every hero, as item and count: ranger
+    ## boots, health potions, portal scrolls and mana potions.
+  RoleBuilds = [
+    [[16'i32, 1], [2, 2]],
+    [[19'i32, 1], [4, 2]],
+    [[20'i32, 1], [3, 2]]
+  ]
+    ## Then by role: knight armor and vitality elixirs for frontline and
+    ## fighters, a rune crossbow and poison potions for carries, an arcane
+    ## spellbook and mana elixirs for mages and supports.
   MoveTiles = 3'i32
     ## Tiles per step of the move heads.
   TargetReach = 65'i32
     ## One more than the squared 8-tile target radius.
   CodeRanks = [0'i32, 3, 3, 1, 1, 1, 2, 2, 4, 4]
     ## Occupant priority by code: god, hero, structure, then creep.
+  LaneSlots = [0'i32, 0, 1, 2, 2]
+    ## The game's HeroLanes: two heroes top, one mid, two bottom.
+  LaneOrderTicks = 24'i32
+    ## Ticks between scripted lane walk orders, one per second.
+  LaneWalkTicks = 2160'i32
+    ## The longest scripted lane walk, 90 seconds.
+  LaneArrival = 16'i32
+    ## Squared tiles from the lane point that end the walk.
 
 type
   HeroData = object
@@ -65,9 +112,29 @@ type
     castRange*: array[5, int32]
     side*: int32
     enemyId*, enemyX*, enemyY*, enemyDistance*: int32
+    laneDistance*: int32
+      ## Squared distance to the nearest enemy that is not a camp creep.
     priorityId*, priorityX*, priorityY*, priorityDistance*: int32
     bestId*, bestX*, bestY*, bestDistance*: int32
     casted*: bool
+    walking*: bool
+    laneX*, laneY*, orderTick*, walkUntil*, walkStop*: int32
+    homeX*, homeY*: int32
+      ## Where the hero last spawned, the goal of a retreat.
+    walkPercent*: int32
+      ## Chance that a spawned hero walks to its lane; the trainer lowers
+      ## it to wean the policy off the walk (harness.bas: 100).
+    walkReach*: int32
+      ## Percent of the way from spawn to the lane point that the walk
+      ## covers; the trainer lowers it to wean gradually (harness.bas: 100).
+    build*: bool
+      ## Any nonzero buy choice buys the next item of base.bas's shopping
+      ## list instead of that item (harness.bas: off).
+    retreatPercent*: int32
+      ## Below this share of its health the hero walks home and heals to
+      ## 90% before the policy moves it again, as base.bas does below a
+      ## quarter; 0 is off (harness.bas: 0).
+    retreating*: bool
 
 proc heroData(world: World, hero: Hero): HeroData =
   ## Captures the host data runHeroScript sets before each VM run.
@@ -142,6 +209,19 @@ proc walkTo(turn: Turn, x, y: int32): bool =
     offset
   )
   result = turn.world.applyWalkTo(turn.data.id, tileX, tileY, offset)
+  turn.countCommand(result)
+
+proc attackMove(turn: Turn, x, y: int32): bool =
+  ## Records and applies an attack-move order like the attackMove host call.
+  let (tileX, tileY, offset) = splitTilePoint(fixedVec2(fixed(x), fixed(y)))
+  turn.game.recorder.recordAttackMove(
+    uint32(turn.world.tick),
+    turn.data.id,
+    tileX,
+    tileY,
+    offset
+  )
+  result = turn.world.applyAttackMove(turn.data.id, tileX, tileY, offset)
   turn.countCommand(result)
 
 proc attackTarget(turn: Turn, target: int32): bool =
@@ -262,6 +342,17 @@ proc learnAbilities(turn: Turn) =
     else:
       return
 
+proc miniCell(side, x, y: int32): int =
+  ## The minimap cell of map tile (x, y), mirrored for team 1.
+  var
+    column = x
+    row = y
+  if side != 1:
+    column = mapSize() - 1 - x
+    row = mapSize() - 1 - y
+  min(int(row div MiniTiles), MiniSide - 1) * MiniSide +
+    min(int(column div MiniTiles), MiniSide - 1)
+
 proc readObject(
   harness: var Harness,
   turn: Turn,
@@ -280,6 +371,23 @@ proc readObject(
     y = mapCoordinate(value.position.z, observer)
     dx = harness.side * (x - turn.data.x)
     dy = harness.side * (y - turn.data.y)
+  if kind != 6:
+    let
+      ally = int(team == turn.data.team)
+      cell = miniCell(harness.side, x, y)
+    case kind
+    of 2, 3:
+      let index = MiniStart + (if kind == 2: 1 - ally else: 3 - ally) *
+        MiniCells + cell
+      if observation[index] < 9:
+        observation[index] = observation[index] + 1
+    else:
+      var health = 0'i32
+      if value.maxHp > 0:
+        health = min(hp * 10 div value.maxHp, 10'i32)
+      let index = MiniStart + (5 - ally) * MiniCells + cell
+      if health + 1 > observation[index]:
+        observation[index] = health + 1
   if dx >= -GridReach and dx <= GridReach and
     dy >= -GridReach and dy <= GridReach:
       let cell = int(dy + GridReach) * GridSide + int(dx + GridReach)
@@ -312,6 +420,8 @@ proc readObject(
     harness.enemyId = value.id
     harness.enemyX = x
     harness.enemyY = y
+  if kind != 6 and distance < harness.laneDistance:
+    harness.laneDistance = distance
   if kind != 3 and kind != 6:
     if distance < harness.priorityDistance:
       harness.priorityDistance = distance
@@ -330,6 +440,8 @@ proc observe(
     hero = turn.hero
     side = harness.side
   for cell in 0 ..< ScalarStart:
+    observation[cell] = 0
+  for cell in MiniStart ..< ObservationSize:
     observation[cell] = 0
   # terrainWalkable per tile: terrain, then the footprints of buildings the
   # team believes alive, marked once here instead of scanned per tile.
@@ -364,6 +476,7 @@ proc observe(
   harness.enemyDistance = TargetReach
   harness.priorityId = 0
   harness.priorityDistance = TargetReach
+  harness.laneDistance = TargetReach
   var observer = hero.team
   let objects = turn.world.worldObjectCount(data.id)
   for index in 0 ..< objects:
@@ -400,9 +513,46 @@ proc observe(
   scalars[35] = data.tick div (TickRate * 60)
   for i, value in scalars:
     observation[ScalarStart + i] = value
+  observation[MiniStart + 6 * MiniCells + miniCell(side, data.x, data.y)] = 1
 
-proc shop(turn: Turn, actions: array[ActionCount, int32]) =
-  ## Uses the chosen inventory slot, then buys the chosen affordable item.
+proc buildItem(turn: Turn): int32 =
+  ## The first item of base.bas's list the hero has fewer of than listed,
+  ## can afford and has room for, or 0.
+  let
+    hero = turn.hero
+    role =
+      case classRole(turn.data.class)
+      of int32(Frontline.ord), int32(Fighter.ord): 0
+      of int32(Carry.ord): 1
+      else: 2
+  var empty = 0
+  for slot in 0 ..< InventorySlots:
+    if hero.inventory[slot] == NoItem:
+      inc empty
+  var entries: seq[array[2, int32]]
+  for entry in BuildItems:
+    entries.add entry
+  for entry in RoleBuilds[role]:
+    entries.add entry
+  for entry in entries:
+    let item = entry[0]
+    var owned = 0'i32
+    for slot in 0 ..< InventorySlots:
+      if hero.inventory[slot].ord == item:
+        owned += hero.itemCounts[slot]
+    if owned >= entry[1] or (owned == 0 and empty == 0):
+      continue
+    if turn.data.gold >= ItemSpecs[Item(item)].cost:
+      return item
+  0
+
+proc shop(
+  harness: Harness,
+  turn: Turn,
+  actions: array[ActionCount, int32]
+) =
+  ## Uses the chosen inventory slot, then buys the chosen affordable item,
+  ## or with `build` the next item of base.bas's list.
   let hero = turn.hero
   if actions[8] > 0:
     let itemSlot = actions[8] - 1
@@ -411,8 +561,11 @@ proc shop(turn: Turn, actions: array[ActionCount, int32]) =
         discard turn.useItem(itemSlot)
   if actions[7] > 0:
     if turn.world.phase != Drafting and hero.canShop:
-      if turn.data.gold >= ItemSpecs[Item(actions[7])].cost:
-        discard turn.buyItem(actions[7])
+      let item =
+        if harness.build: turn.buildItem()
+        else: actions[7]
+      if item > 0 and turn.data.gold >= ItemSpecs[Item(item)].cost:
+        discard turn.buyItem(item)
 
 proc castSpells(
   harness: var Harness,
@@ -447,27 +600,9 @@ proc castSpells(
             harness.casted = true
             return
 
-proc move(
-  harness: var Harness,
-  turn: Turn,
-  actions: array[ActionCount, int32]
-) =
-  ## Walks a move cells away, or else attacks the chosen target.
-  let
-    data = turn.data
-    moveY = actions[0] - 3
-    moveX = actions[1] - 3
-  if moveX == 0 and moveY == 0:
-    if harness.bestId != 0:
-      if data.target != harness.bestId:
-        discard turn.attackTarget(harness.bestId)
-    return
-  if data.rootTicks > 0:
-    return
-  let
-    goalX = data.x + harness.side * moveX * MoveTiles
-    goalY = data.y + harness.side * moveY * MoveTiles
-  # The same fallbacks as hero.bas travel(): the goal, then 3 tiles off it.
+proc travel(turn: Turn, goalX, goalY: int32, marching: bool) =
+  ## Walks or attack-moves to the goal, or 3 tiles off it when the goal is
+  ## not walkable, the same fallbacks as hero.bas travel().
   for attempt in 0 .. 4:
     var
       tryX = goalX
@@ -488,11 +623,65 @@ proc move(
     tryX = min(tryX, mapSize() - 2)
     tryY = min(tryY, mapSize() - 2)
     if turn.terrainWalkable(tryX, tryY):
-      if turn.walkTo(tryX, tryY):
+      let accepted =
+        if marching:
+          turn.attackMove(tryX, tryY)
+        else:
+          turn.walkTo(tryX, tryY)
+      if accepted:
         return
 
+proc move(
+  harness: var Harness,
+  turn: Turn,
+  actions: array[ActionCount, int32]
+) =
+  ## Moves a move cells away, or else attacks the chosen target. A target
+  ## head of 1 or 2 attack-moves and leaves a fight in progress alone.
+  let
+    data = turn.data
+    moveY = actions[0] - 3
+    moveX = actions[1] - 3
+  if moveX == 0 and moveY == 0:
+    if harness.bestId != 0:
+      if data.target != harness.bestId:
+        discard turn.attackTarget(harness.bestId)
+    elif actions[2] == 0 and data.rootTicks == 0 and
+      data.tick >= harness.orderTick:
+        harness.orderTick = data.tick + LaneOrderTicks
+        turn.travel(harness.homeX, harness.homeY, false)
+    return
+  if data.rootTicks > 0:
+    return
+  let marching = actions[2] != 0
+  if marching and data.target != 0:
+    return
+  turn.travel(
+    data.x + harness.side * moveX * MoveTiles,
+    data.y + harness.side * moveY * MoveTiles,
+    marching
+  )
+
+proc walkLane(harness: var Harness, turn: Turn) =
+  ## Walks to the lane until an enemy other than a camp creep is within 8
+  ## tiles, the walk has covered its reach, or it runs out of time; then the
+  ## policy takes over.
+  let
+    data = turn.data
+    dx = data.x - harness.laneX
+    dy = data.y - harness.laneY
+  if harness.laneDistance < TargetReach or
+    dx * dx + dy * dy <= max(LaneArrival, harness.walkStop) or
+    data.tick >= harness.walkUntil:
+      harness.walking = false
+      return
+  if data.rootTicks > 0 or data.tick < harness.orderTick:
+    return
+  harness.orderTick = data.tick + LaneOrderTicks
+  turn.travel(harness.laneX, harness.laneY, false)
+
 proc initialize(harness: var Harness, turn: Turn) =
-  ## Sets per-class cast reach in whole tiles.
+  ## Sets per-class cast reach in whole tiles and starts the lane walk.
   harness.initialized = true
   harness.castRange[0 .. 3] = [0'i32, 1, 2, 2]
   case turn.data.class
@@ -516,6 +705,32 @@ proc initialize(harness: var Harness, turn: Turn) =
     harness.castRange[3] = 5
   else:
     discard
+  # Lane midpoints, where both teams' creeps meet: two corners and the centre.
+  case LaneSlots[(turn.data.id - FirstHeroId) mod 5]
+  of 0:
+    harness.laneX = mapSize() div 10
+    harness.laneY = mapSize() div 10
+  of 1:
+    harness.laneX = mapSize() div 2
+    harness.laneY = mapSize() div 2
+  else:
+    harness.laneX = mapSize() * 9 div 10
+    harness.laneY = mapSize() * 9 div 10
+  # A fixed hash of the hero, its deaths and the tick decides the walk.
+  let roll = (turn.data.id * 7919 + turn.data.deaths * 104729 +
+    turn.data.tick) mod 100
+  harness.walking = roll < harness.walkPercent
+  # The walk stops (100 - walkReach) percent of the way short of the lane.
+  let
+    startX = turn.data.x - harness.laneX
+    startY = turn.data.y - harness.laneY
+    rest = 100 - harness.walkReach
+  harness.walkStop = (startX * startX + startY * startY) * rest * rest div 10000
+  harness.orderTick = 0
+  harness.walkUntil = turn.data.tick + LaneWalkTicks
+  harness.homeX = turn.data.x
+  harness.homeY = turn.data.y
+  harness.retreating = false
 
 proc think*(
   harness: var Harness,
@@ -554,7 +769,22 @@ proc think*(
   if not harness.initialized:
     harness.initialize(turn)
   turn.learnAbilities()
-  turn.shop(actions)
+  harness.shop(turn, actions)
+  if harness.retreatPercent > 0 and data.maxHp > 0:
+    if data.hp * 100 < data.maxHp * harness.retreatPercent:
+      harness.retreating = true
+    if harness.retreating:
+      if turn.inOwnSpawn() and data.hp * 10 >= data.maxHp * 9:
+        harness.retreating = false
+      else:
+        if data.rootTicks == 0 and data.tick >= harness.orderTick:
+          harness.orderTick = data.tick + LaneOrderTicks
+          turn.travel(harness.homeX, harness.homeY, false)
+        return
+  if harness.walking:
+    harness.walkLane(turn)
+    if harness.walking:
+      return
   harness.bestId = 0
   if actions[2] == 1:
     harness.bestId = harness.enemyId
