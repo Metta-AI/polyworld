@@ -4109,6 +4109,8 @@ proc rewardDeath(world: World, target, source: int32) =
     gold = if victim >= 0: HeroGoldReward else: TowerGoldReward
   world.gainRewards(world.heroes[killer], xp, gold, target)
   world.stats.add(killer, GoldMetric, gold)
+  if victim < 0:
+    world.stats.add(killer, StructuresMetric, 1)
 
 proc hitTarget(
     world: World, kind: HitKind, target, damage, source: int32,

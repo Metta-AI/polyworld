@@ -6,10 +6,10 @@
 ' policy fills act() where the METTA_DECISION marker sits: the training
 ' lane swaps in a chooseAction(obs, act) host call. The draft and ability
 ' levelling are hero.bas's scripted subs, unchanged. Integer arithmetic
-' only: the training VM disables decimals. obs() alone holds 4392 cells,
+' only: the training VM disables decimals. obs() alone holds 5967 cells,
 ' above the 4096 array cells a default hero VM allows.
 
-dim obs(4391)
+dim obs(5979)
 dim act(9)
 dim castRange(4)
 dim codeRank(9)
@@ -30,6 +30,14 @@ dim touched(1088)
 '   Channel 3: objects on the tile, at most 9.
 '   Objects count while their hp is above zero, so towers and gods that
 '   cannot be hit yet still show.
+' obs(4392..5966) is a 15 x 15 minimap of the whole map, 8 x 8 tiles per
+' cell, mirrored like the grid, of everything the team can see, as the
+' scripted bots read it: obs(4392 + channel * 225 + row * 15 + column) for
+' ally and enemy heroes (counts up to 9), ally and enemy creeps (counts up
+' to 9), ally and enemy structures and gods (the healthiest one's health
+' tenths plus 1), and 1 on the hero's own cell.
+' obs(5967..5972) are the six inventory item codes, obs(5973..5978) their
+' counts, and obs(5979) the gold.
 ' obs(4356..4391) are self scalars: tile x and y (mirrored for team 1),
 ' level, hp * 10 \ max hp, mana * 10 \ max mana, gold \ 100 (at most 255),
 ' level, charges and cooldown seconds of ability slots 0..3, ability
@@ -42,6 +50,15 @@ dim touched(1088)
 ' 1..22 (0 none), act(8) uses inventory slot act(8) - 1 (0 none), and
 ' act(9) = 1 buys the hero back while dead. Each tick: buyback, use, buy,
 ' then cast, else move, else attack.
+' The target head also picks how the hero moves: 0 walks past enemies (to
+' retreat), 1 and 2 attack-move, so the hero fights what it meets the way
+' the scripted bots and moba's always-on attacks do. While it fights, no new
+' move order interrupts the swing.
+' After spawn and after every respawn a scripted walk takes the hero to its
+' lane, as Dota bots script their opening: slots 0 and 1 top, 2 mid, 3 and
+' 4 bottom. Until an enemy other than a camp creep is within 8 tiles the
+' policy only shops and buys back; the move, target and cast heads apply
+' once the walk ends.
 
 sub chooseHero()
   if draftTurnId <> selfId then
@@ -91,6 +108,58 @@ sub learnAbilities()
       exit sub
     end if
   next upgrade
+end sub
+
+' Adds one visible object to the minimap; camp creeps are left out.
+sub mapObject(index)
+  mapHp = objectHp(index)
+  if mapHp <= 0 then
+    exit sub
+  end if
+  mapKind = objectKind(index)
+  if mapKind = 6 then
+    exit sub
+  end if
+  mapX = objectX(index)
+  mapY = objectY(index)
+  if side <> 1 then
+    mapX = mapWidth - 1 - mapX
+    mapY = mapHeight - 1 - mapY
+  end if
+  mapX = mapX \ 8
+  mapY = mapY \ 8
+  if mapX > 14 then
+    mapX = 14
+  end if
+  if mapY > 14 then
+    mapY = 14
+  end if
+  mapAlly = 0
+  if objectTeam(index) = selfTeam then
+    mapAlly = 1
+  end if
+  if mapKind = 2 or mapKind = 3 then
+    mapIndex = 4392 + (3 - mapAlly) * 225 + mapY * 15 + mapX
+    if mapKind = 2 then
+      mapIndex = 4392 + (1 - mapAlly) * 225 + mapY * 15 + mapX
+    end if
+    if obs(mapIndex) < 9 then
+      obs(mapIndex) = obs(mapIndex) + 1
+    end if
+  else
+    mapHealth = 0
+    mapMax = objectInfo(index, 2)
+    if mapMax > 0 then
+      mapHealth = mapHp * 10 \ mapMax
+    end if
+    if mapHealth > 10 then
+      mapHealth = 10
+    end if
+    mapIndex = 4392 + (5 - mapAlly) * 225 + mapY * 15 + mapX
+    if mapHealth + 1 > obs(mapIndex) then
+      obs(mapIndex) = mapHealth + 1
+    end if
+  end if
 end sub
 
 sub readObject(index)
@@ -147,6 +216,9 @@ sub readObject(index)
     enemyId = objectId(index)
     enemyX = x
     enemyY = y
+  end if
+  if kind <> 6 and distance < laneDistance then
+    laneDistance = distance
   end if
   if kind <> 3 and kind <> 6 then
     if distance < priorityDistance then
@@ -230,8 +302,13 @@ sub observe()
   enemyDistance = 65
   priorityId = 0
   priorityDistance = 65
+  laneDistance = 65
+  for i = 4392 to 5979
+    obs(i) = 0
+  next i
   objects = objectCount()
   for index = 0 to objects - 1
+    mapObject(index)
     x = objectX(index)
     dx = side * (x - selfX)
     if dx >= -16 and dx <= 16 then
@@ -281,6 +358,26 @@ sub observe()
   obs(4389) = selfDeaths
   obs(4390) = inOwnSpawn()
   obs(4391) = worldTick \ (tickRate * 60)
+  mapX = selfX
+  mapY = selfY
+  if side <> 1 then
+    mapX = mapWidth - 1 - mapX
+    mapY = mapHeight - 1 - mapY
+  end if
+  mapX = mapX \ 8
+  mapY = mapY \ 8
+  if mapX > 14 then
+    mapX = 14
+  end if
+  if mapY > 14 then
+    mapY = 14
+  end if
+  obs(4392 + 6 * 225 + mapY * 15 + mapX) = 1
+  for i = 0 to 5
+    obs(5967 + i) = itemId(i)
+    obs(5973 + i) = itemCount(i)
+  next i
+  obs(5979) = selfGold
 end sub
 
 sub shop()
@@ -331,23 +428,10 @@ sub castSpells()
   next spellSlot
 end sub
 
-sub move()
-  moveY = act(0) - 3
-  moveX = act(1) - 3
-  if moveX = 0 and moveY = 0 then
-    if bestId <> 0 then
-      if selfTarget <> bestId then
-        accepted = attackTarget(bestId)
-      end if
-    end if
-    exit sub
-  end if
-  if selfRootTicks > 0 then
-    exit sub
-  end if
-  goalX = selfX + side * moveX * 3
-  goalY = selfY + side * moveY * 3
-  ' The same fallbacks as hero.bas travel(): the goal, then 3 tiles off it.
+' Walks (marching = 0) or attack-moves (marching = 1) to (goalX, goalY), or
+' 3 tiles off it when the goal is not walkable, the same fallbacks as
+' hero.bas travel().
+sub travel()
   for attempt = 0 to 4
     tryX = goalX
     tryY = goalY
@@ -373,7 +457,11 @@ sub move()
       tryY = mapHeight - 2
     end if
     if terrainWalkable(tryX, tryY) then
-      accepted = walkTo(tryX, tryY)
+      if marching then
+        accepted = attackMove(tryX, tryY)
+      else
+        accepted = walkTo(tryX, tryY)
+      end if
       if accepted then
         exit sub
       end if
@@ -381,6 +469,59 @@ sub move()
   next attempt
 end sub
 
+sub move()
+  moveY = act(0) - 3
+  moveX = act(1) - 3
+  if moveX = 0 and moveY = 0 then
+    if bestId <> 0 then
+      if selfTarget <> bestId then
+        accepted = attackTarget(bestId)
+      end if
+    end if
+    exit sub
+  end if
+  if selfRootTicks > 0 then
+    exit sub
+  end if
+  ' Target 1 or 2 attack-moves and leaves a fight in progress alone.
+  marching = 0
+  if act(2) <> 0 then
+    marching = 1
+    if selfTarget <> 0 then
+      exit sub
+    end if
+  end if
+  goalX = selfX + side * moveX * 3
+  goalY = selfY + side * moveY * 3
+  travel()
+end sub
+
+' Walks to the lane until an enemy other than a camp creep is within 8
+' tiles, the walk has covered its reach, or it runs out of time; then the
+' policy takes over.
+sub walkLane()
+  dx = selfX - laneX
+  dy = selfY - laneY
+  laneLeft = dx * dx + dy * dy
+  if laneDistance < 65 or laneLeft <= 16 or laneLeft <= walkStop or worldTick >= walkUntil then
+    walking = 0
+    exit sub
+  end if
+  if selfRootTicks > 0 or worldTick < orderTick then
+    exit sub
+  end if
+  orderTick = worldTick + 24
+  goalX = laneX
+  goalY = laneY
+  marching = 0
+  travel()
+end sub
+
+' Chance in percent that a spawned or respawned hero walks to its lane by
+' script; training lowers harness.nim's walkPercent to wean the policy off.
+walkPercent = 100
+' Percent of the way from spawn to the lane point that the walk covers.
+walkReach = 100
 if drafting then
   chooseHero()
   end
@@ -441,10 +582,41 @@ if initialized = 0 then
     castRange(2) = 4
     castRange(3) = 5
   end if
+  ' Lane midpoints, where both teams' creeps meet: two corners and the
+  ' centre. Hero ids start at 100 for red and 105 for blue.
+  laneSlot = (selfId - 100) mod 5
+  if laneSlot < 2 then
+    laneX = mapWidth \ 10
+    laneY = mapHeight \ 10
+  elseif laneSlot = 2 then
+    laneX = mapWidth \ 2
+    laneY = mapHeight \ 2
+  else
+    laneX = mapWidth * 9 \ 10
+    laneY = mapHeight * 9 \ 10
+  end if
+  ' A fixed hash of the hero, its deaths and the tick decides the walk.
+  walkRoll = (selfId * 7919 + selfDeaths * 104729 + worldTick) mod 100
+  walking = 0
+  if walkRoll < walkPercent then
+    walking = 1
+  end if
+  ' The walk stops (100 - walkReach) percent of the way short of the lane.
+  dx = selfX - laneX
+  dy = selfY - laneY
+  walkStop = (dx * dx + dy * dy) * (100 - walkReach) * (100 - walkReach) \ 10000
+  orderTick = 0
+  walkUntil = worldTick + 2160
 end if
 
 learnAbilities()
 shop()
+if walking then
+  walkLane()
+end if
+if walking then
+  end
+end if
 ' The chosen target for casts and attacks.
 bestId = 0
 if act(2) = 1 then
