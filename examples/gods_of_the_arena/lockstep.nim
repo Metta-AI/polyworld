@@ -78,6 +78,10 @@ const
     ## structures.
     ## PufferLib moba.ini reward_tower, per structure last-hit.
   MobaWinBonus = 10'f32
+  SimpleTicksPerStep = 10
+    ## Simplify 1: ticks per step, so a hero moves about a tile per step
+    ## like moba's one cell per tick. The action applies on the first tick;
+    ## later ticks press nothing and let the order run.
     ## MobaWinReward's bonus per hero for a win, worth about 1,500 XP.
 
 type
@@ -175,6 +179,9 @@ type
       ## discount; weight 0 turns shaping off.
     exact: bool
       ## Evaluation: every match plays the current level, none easier.
+    simplify: int
+      ## Cumulative cuts toward PufferLib moba (sim.nim World.simplify);
+      ## 1 and up also runs SimpleTicksPerStep ticks per step.
     recording: bool
       ## Records every match so `lastReplay` can save it.
 
@@ -484,6 +491,13 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     groups =
       if team == RedTeam: learners & opponents
       else: opponents & learners
+  game.world.simplify = batch.simplify
+  if batch.simplify >= 5:
+    game.world.fixRoster()
+  if batch.simplify >= 4:
+    # Training lanes start without a draft, so the kit is fixed here.
+    for hero in game.world.heroes:
+      hero.fixKit()
   if batch.harness == NimHarness and batch.selfPlay:
     # Every hero is an agent, so no bundled bot needs compiling.
     game.heroVms = newSeq[HeroVm](game.world.heroes.len)
@@ -579,6 +593,13 @@ proc reset*(batch: StepBatch, seed: int) =
       else: seed * batch.lanes.len + i
     batch.startLane(batch.lanes[i].addr, next)
 
+proc setSimplify*(batch: StepBatch, level: int) =
+  ## Sets the cut level (0 to 8) and restarts every lane on its seed.
+  doAssert level in 0 .. 8
+  batch.simplify = level
+  for i in 0 ..< batch.lanes.len:
+    batch.startLane(batch.lanes[i].addr, batch.lanes[i].seed)
+
 proc thinkHero(lane: ptr StepLane, index: int) =
   ## Runs one hero's decision natively for an agent, else through its VM.
   if index >= 0 and lane.agentOf[index] >= 0:
@@ -649,14 +670,22 @@ proc step*(
         let action = actions[(agent + i) * ActionCount + head]
         doAssert action in 0'i32 ..< ActionSizes[head]
         lane.actions[i][head] = action
-    let game = lane.game
-    if not game.world.gameOver and game.world.tick < batch.maxTicks:
+    let
+      game = lane.game
+      ticks = if batch.simplify >= 1: SimpleTicksPerStep else: 1
+    for t in 0 ..< ticks:
+      if game.world.gameOver or game.world.tick >= batch.maxTicks:
+        break
       activeGame = game
       case batch.harness
       of BasicHarness:
         tickWorld(game, proc() = runBotDecisions(game))
       of NimHarness:
         tickWorld(game, proc() = runLaneDecisions(lane))
+      if t == 0:
+        for i in 0 ..< lane.actions.len:
+          for head in 0 ..< ActionCount:
+            lane.actions[i][head] = 0
     for vm in game.heroVms:
       doAssert vm == nil or not vm.failed, vm.lastError
     let
@@ -823,6 +852,12 @@ proc gota_set_structure_weight(
   weight: cfloat
 ) {.cdecl, exportc, dynlib.} =
   cast[StepBatch](handle).setStructureWeight(float32(weight))
+
+proc gota_set_simplify(
+  handle: pointer,
+  level: cint
+) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setSimplify(int(level))
 
 proc gota_set_finish(handle: pointer, finish: cint) {.cdecl, exportc, dynlib.} =
   ## Turns the path-to-the-god shaping and god damage reward on or off.

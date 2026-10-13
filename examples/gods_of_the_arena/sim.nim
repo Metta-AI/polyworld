@@ -304,6 +304,13 @@ type
     tick*: int32
     phase*: MatchPhase
     draftMode*: DraftMode
+    simplify*: int
+      ## Training rungs toward PufferLib moba, cumulative, 0 for the real
+      ## game: 2 instant respawn and no buyback, 3 no shop or items, 4 Q, W
+      ## and E fixed at rank 1 and no R, 5 a fixed roster and no draft, 6 no
+      ## fog of war, 7 every structure and the god open to attack, 8 basic
+      ## hits and spells land on the tick they start. Lockstep applies 1,
+      ## the time scale.
     drafting*: bool
       ## Preserves the initial setup when capturing a replay after drafting.
     draftOrder*: seq[int]
@@ -802,6 +809,8 @@ proc rebuildVision*(world: World) {.measure.} =
 proc visible*(world: World, team: Team, position: WorldPoint): bool =
   ## Returns whether a position is currently visible to one team.
   ## Same cells as sightTiles, unrolled because this runs per unit pair.
+  if world.simplify >= 6:
+    return true
   let tiles = mapTiles()
   if world.teamVisible[team.ord].len != tiles * tiles:
     return false
@@ -1145,6 +1154,8 @@ proc buildingExposed*(world: World, tower: Building): bool =
   ## Exposes lane structures in order and god guards after any lane falls.
   if tower.id == 0 or tower.hp <= 0:
     return false
+  if world.simplify >= 7:
+    return true
   if tower.guardsGod:
     return world.laneCleared(tower.team)
   for otherSlot in 0 ..< world.buildings.len:
@@ -1194,6 +1205,8 @@ proc nextEnemyBuilding(
           result = building
 
 proc fortExposed*(world: World, team: Team): bool =
+  if world.simplify >= 7:
+    return true
   ## Keeps a god invulnerable until both of its own guard towers are dead.
   for towerSlot in 0 ..< world.buildings.len:
     let tower {.cursor.} = world.buildings[towerSlot]
@@ -1307,7 +1320,9 @@ proc applyLevelAbility*(world: World, heroId, slotId: int32): bool =
     let
       hero = world.heroes[index]
       slot = HeroAbilitySlot(slotId)
-    error = hero.abilityLevelError(slot)
+    error =
+      if world.simplify >= 4: ActionAbilityMaxLevel
+      else: hero.abilityLevelError(slot)
     if error == NoActionError:
       inc hero.abilityLevels[slot]
       if hero.abilityLevels[slot] == 1:
@@ -1326,6 +1341,8 @@ proc heroAttackTicks*(world: World, hero: Hero): int32 =
 
 proc heroHitTicks*(world: World, hero: Hero): int32 =
   ## Returns the basic-attack impact tick shared with its visual animation.
+  if world.simplify >= 8:
+    return 0
   world.heroAttackTicks(hero) * 45 div 100
 
 proc heroAttackCooldown*(world: World, hero: Hero): int32 =
@@ -3092,6 +3109,8 @@ proc buybackPrice*(world: World, heroId: int32): int32 =
 
 proc buybackError(world: World, heroId: int32): ActionError =
   ## Validates a buyback without changing the hero or spending gold.
+  if world.simplify >= 2:
+    return ActionNotDead
   if world.phase == Drafting:
     return ActionDrafting
   let index = world.heroIndex(heroId)
@@ -3111,7 +3130,9 @@ proc buybackReason*(world: World, heroId: int32): string =
 
 proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
   ## Spends gold to put one validated shop item into a hero inventory.
-  let error = world.purchaseError(heroId, itemId)
+  let error =
+    if world.simplify >= 3: ActionOutsideKeep
+    else: world.purchaseError(heroId, itemId)
   if error != NoActionError:
     return world.finishAction(heroId, ActionBuyItem, 0, itemId, 0, error)
   let
@@ -3992,6 +4013,16 @@ proc initDraft(world: World) =
   if world.draftOrder.len == 0:
     world.phase = Playing
 
+proc fixKit*(hero: Hero) =
+  ## Simplify 4: Q, W and E learned at rank 1 with full charges, R locked.
+  for slot in HeroAbilitySlot:
+    if slot.ord < 3:
+      hero.abilityLevels[slot] = 1
+      hero.charges[slot] = heroAbility(hero.class, slot).abilitySpec.charges
+    else:
+      hero.abilityLevels[slot] = 0
+      hero.charges[slot] = 0
+
 proc applyDraft*(
     world: World, heroId, classId: int32, cause = Command
 ): bool =
@@ -4012,6 +4043,8 @@ proc applyDraft*(
   hero.maxMana = heroMaxMana(hero.class, hero.level)
   hero.mana = hero.maxMana
   hero.initHeroCharges()
+  if world.simplify >= 4:
+    hero.fixKit()
   world.scriptObjectsTick = [-1'i32, -1]
   inc world.draftTurn
   world.draftTurnTicks = 0
@@ -4024,6 +4057,32 @@ proc applyDraft*(
       target: world.eventEntity(heroId), detail: classId, related: -1
     )
   world.finishAction(heroId, ActionDraft, 0, classId, 0, NoActionError)
+
+const SimpleRoster = [
+  DruidWarden, DemonHunter, Arcanist, VanguardKnight, Ranger
+]
+  ## Simplify 5's roster for both teams, in spawn order: moba's support,
+  ## assassin, burst, tank and carry.
+
+proc fixRoster*(world: World) =
+  ## Simplify 5: skips the draft and gives each team SimpleRoster.
+  var next: array[Team, int]
+  for hero in world.heroes:
+    hero.class = SimpleRoster[next[hero.team] mod SimpleRoster.len]
+    inc next[hero.team]
+    hero.drafted = true
+    hero.maxHp = heroMaxHp(hero.class, hero.level)
+    hero.hp = hero.maxHp
+    hero.maxMana = heroMaxMana(hero.class, hero.level)
+    hero.mana = hero.maxMana
+    hero.initHeroCharges()
+    if world.simplify >= 4:
+      hero.fixKit()
+  world.scriptObjectsTick = [-1'i32, -1]
+  world.draftTurn = world.draftOrder.len
+  world.draftTurnTicks = 0
+  world.phase = Playing
+  world.heroTurnTicks = 0
 
 proc tickHeroCooldowns(world: World, hero: Hero) =
   ## Advances spell cooldowns and restores spent charges one at a time.
@@ -4333,6 +4392,10 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
     return world.finishAction(
       heroId, ActionUseItem, slotId, slotId, 0, ActionDrafting
     )
+  if world.simplify >= 3:
+    return world.finishAction(
+      heroId, ActionUseItem, slotId, slotId, 0, ActionOutsideKeep
+    )
   let
     index = heroIndex(world, heroId)
     slot = int(slotId)
@@ -4510,6 +4573,10 @@ proc applyUseItemAt*(
   if world.phase == Drafting:
     return world.finishAction(
       heroId, ActionUseItemAt, slotId, mapX, mapY, ActionDrafting, offset
+    )
+  if world.simplify >= 3:
+    return world.finishAction(
+      heroId, ActionUseItemAt, slotId, mapX, mapY, ActionOutsideKeep, offset
     )
   let hero = world.heroById(heroId)
   var error = world.heroActionError(hero, movement = true)
@@ -4856,6 +4923,8 @@ proc castAbility(
     spell.impact += max(1'i32, int32((integerSqrt(
       distanceSquared(spell.origin, point)) + spec.projectileSpeed - 1) div
       max(spec.projectileSpeed, 1)))
+  if world.simplify >= 8:
+    spell.impact = world.tick
   spell.ends = spell.impact + 12
   when defined(replayEvents):
     world.emit GameEvent(
@@ -5085,7 +5154,7 @@ proc updateHero(world: World, hero: Hero) =
     inc hero.deathTicks
     hero.animClip = heroDeathClip
     hero.animTicks = min(hero.deathTicks, HeroDeathTicks)
-    if hero.respawnTicks() == 0:
+    if hero.respawnTicks() == 0 or world.simplify >= 2:
       world.respawn(hero)
     return
 
