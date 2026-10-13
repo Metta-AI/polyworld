@@ -713,9 +713,11 @@ proc press(harness: var Harness, turn: Turn, key: int32) =
         discard turn.attackTarget(harness.bestId)
   of 1 .. 8:
     if data.rootTicks == 0 and data.target == 0:
+      # Cut 9 moves one tile per key, like moba's one cell per tick.
+      let tiles = if turn.world.cut(9): 1'i32 else: MoveTiles
       turn.travel(
-        data.x + harness.side * MoveSteps[key][0] * MoveTiles,
-        data.y + harness.side * MoveSteps[key][1] * MoveTiles,
+        data.x + harness.side * MoveSteps[key][0] * tiles,
+        data.y + harness.side * MoveSteps[key][1] * tiles,
         true
       )
   of 9, 10:

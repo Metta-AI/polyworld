@@ -179,9 +179,9 @@ type
       ## discount; weight 0 turns shaping off.
     exact: bool
       ## Evaluation: every match plays the current level, none easier.
-    simplify: int
-      ## Cumulative cuts toward PufferLib moba (sim.nim World.simplify);
-      ## 1 and up also runs SimpleTicksPerStep ticks per step.
+    cuts: uint16
+      ## Cuts toward PufferLib moba (sim.nim World.cuts); cut 1 also runs
+      ## SimpleTicksPerStep ticks per step.
     recording: bool
       ## Records every match so `lastReplay` can save it.
 
@@ -477,6 +477,10 @@ proc setReach*(batch: StepBatch, percent: int) =
   for lane in batch.lanes.mitems:
     lane.walkReach = percent
 
+proc cut(batch: StepBatch, n: int): bool =
+  ## Whether cut n is on for this batch.
+  (batch.cuts and (1'u16 shl n)) != 0
+
 proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
   ## Builds a fresh match for one lane and installs the policy scripts.
   let
@@ -491,10 +495,10 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     groups =
       if team == RedTeam: learners & opponents
       else: opponents & learners
-  game.world.simplify = batch.simplify
-  if batch.simplify >= 5:
+  game.world.cuts = batch.cuts
+  if batch.cut(5):
     game.world.fixRoster()
-  if batch.simplify >= 4:
+  if batch.cut(4):
     # Training lanes start without a draft, so the kit is fixed here.
     for hero in game.world.heroes:
       hero.fixKit()
@@ -593,12 +597,21 @@ proc reset*(batch: StepBatch, seed: int) =
       else: seed * batch.lanes.len + i
     batch.startLane(batch.lanes[i].addr, next)
 
-proc setSimplify*(batch: StepBatch, level: int) =
-  ## Sets the cut level (0 to 8) and restarts every lane on its seed.
-  doAssert level in 0 .. 8
-  batch.simplify = level
+proc setCuts*(batch: StepBatch, cuts: uint16) =
+  ## Sets the cut mask (bit n for cut n) and restarts every lane on its
+  ## seed.
+  doAssert (cuts and not 0x3fe'u16) == 0, "cuts are bits 1 to 9"
+  batch.cuts = cuts
   for i in 0 ..< batch.lanes.len:
     batch.startLane(batch.lanes[i].addr, batch.lanes[i].seed)
+
+proc setSimplify*(batch: StepBatch, level: int) =
+  ## Turns on cuts 1 to `level`, the cumulative ladder.
+  doAssert level in 0 .. 9
+  var cuts = 0'u16
+  for n in 1 .. level:
+    cuts = cuts or (1'u16 shl n)
+  batch.setCuts(cuts)
 
 proc thinkHero(lane: ptr StepLane, index: int) =
   ## Runs one hero's decision natively for an agent, else through its VM.
@@ -672,7 +685,7 @@ proc step*(
         lane.actions[i][head] = action
     let
       game = lane.game
-      ticks = if batch.simplify >= 1: SimpleTicksPerStep else: 1
+      ticks = if batch.cut(1): SimpleTicksPerStep else: 1
     for t in 0 ..< ticks:
       if game.world.gameOver or game.world.tick >= batch.maxTicks:
         break
@@ -852,6 +865,9 @@ proc gota_set_structure_weight(
   weight: cfloat
 ) {.cdecl, exportc, dynlib.} =
   cast[StepBatch](handle).setStructureWeight(float32(weight))
+
+proc gota_set_cuts(handle: pointer, cuts: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setCuts(uint16(cuts))
 
 proc gota_set_simplify(
   handle: pointer,

@@ -304,13 +304,13 @@ type
     tick*: int32
     phase*: MatchPhase
     draftMode*: DraftMode
-    simplify*: int
-      ## Training rungs toward PufferLib moba, cumulative, 0 for the real
-      ## game: 2 instant respawn and no buyback, 3 no shop or items, 4 Q, W
-      ## and E fixed at rank 1 and no R, 5 a fixed roster and no draft, 6 no
-      ## fog of war, 7 every structure and the god open to attack, 8 basic
-      ## hits and spells land on the tick they start. Lockstep applies 1,
-      ## the time scale.
+    cuts*: uint16
+      ## Training cuts toward PufferLib moba, bit n for cut n, 0 for the
+      ## real game: 2 instant respawn and no buyback, 3 no shop or items, 4
+      ## Q, W and E fixed at rank 1 and no R, 5 a fixed roster, 6 no fog of
+      ## war, 7 every structure and the god open to attack, 8 basic hits and
+      ## spells land on the tick they start, 9 move keys go one tile.
+      ## Lockstep applies 1, the time scale.
     drafting*: bool
       ## Preserves the initial setup when capturing a replay after drafting.
     draftOrder*: seq[int]
@@ -806,10 +806,14 @@ proc rebuildVision*(world: World) {.measure.} =
         world.teamExplored[team.ord][i] = 255
   copyVisionKeys(world.visionSkipKeys, visionSkipNow)
 
+proc cut*(world: World, n: int): bool =
+  ## Whether training cut n (World.cuts) is on.
+  (world.cuts and (1'u16 shl n)) != 0
+
 proc visible*(world: World, team: Team, position: WorldPoint): bool =
   ## Returns whether a position is currently visible to one team.
   ## Same cells as sightTiles, unrolled because this runs per unit pair.
-  if world.simplify >= 6:
+  if world.cut(6):
     return true
   let tiles = mapTiles()
   if world.teamVisible[team.ord].len != tiles * tiles:
@@ -1154,7 +1158,7 @@ proc buildingExposed*(world: World, tower: Building): bool =
   ## Exposes lane structures in order and god guards after any lane falls.
   if tower.id == 0 or tower.hp <= 0:
     return false
-  if world.simplify >= 7:
+  if world.cut(7):
     return true
   if tower.guardsGod:
     return world.laneCleared(tower.team)
@@ -1205,7 +1209,7 @@ proc nextEnemyBuilding(
           result = building
 
 proc fortExposed*(world: World, team: Team): bool =
-  if world.simplify >= 7:
+  if world.cut(7):
     return true
   ## Keeps a god invulnerable until both of its own guard towers are dead.
   for towerSlot in 0 ..< world.buildings.len:
@@ -1321,7 +1325,7 @@ proc applyLevelAbility*(world: World, heroId, slotId: int32): bool =
       hero = world.heroes[index]
       slot = HeroAbilitySlot(slotId)
     error =
-      if world.simplify >= 4: ActionAbilityMaxLevel
+      if world.cut(4): ActionAbilityMaxLevel
       else: hero.abilityLevelError(slot)
     if error == NoActionError:
       inc hero.abilityLevels[slot]
@@ -1341,7 +1345,7 @@ proc heroAttackTicks*(world: World, hero: Hero): int32 =
 
 proc heroHitTicks*(world: World, hero: Hero): int32 =
   ## Returns the basic-attack impact tick shared with its visual animation.
-  if world.simplify >= 8:
+  if world.cut(8):
     return 0
   world.heroAttackTicks(hero) * 45 div 100
 
@@ -3109,7 +3113,7 @@ proc buybackPrice*(world: World, heroId: int32): int32 =
 
 proc buybackError(world: World, heroId: int32): ActionError =
   ## Validates a buyback without changing the hero or spending gold.
-  if world.simplify >= 2:
+  if world.cut(2):
     return ActionNotDead
   if world.phase == Drafting:
     return ActionDrafting
@@ -3131,7 +3135,7 @@ proc buybackReason*(world: World, heroId: int32): string =
 proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
   ## Spends gold to put one validated shop item into a hero inventory.
   let error =
-    if world.simplify >= 3: ActionOutsideKeep
+    if world.cut(3): ActionOutsideKeep
     else: world.purchaseError(heroId, itemId)
   if error != NoActionError:
     return world.finishAction(heroId, ActionBuyItem, 0, itemId, 0, error)
@@ -4043,7 +4047,7 @@ proc applyDraft*(
   hero.maxMana = heroMaxMana(hero.class, hero.level)
   hero.mana = hero.maxMana
   hero.initHeroCharges()
-  if world.simplify >= 4:
+  if world.cut(4):
     hero.fixKit()
   world.scriptObjectsTick = [-1'i32, -1]
   inc world.draftTurn
@@ -4076,7 +4080,7 @@ proc fixRoster*(world: World) =
     hero.maxMana = heroMaxMana(hero.class, hero.level)
     hero.mana = hero.maxMana
     hero.initHeroCharges()
-    if world.simplify >= 4:
+    if world.cut(4):
       hero.fixKit()
   world.scriptObjectsTick = [-1'i32, -1]
   world.draftTurn = world.draftOrder.len
@@ -4392,7 +4396,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
     return world.finishAction(
       heroId, ActionUseItem, slotId, slotId, 0, ActionDrafting
     )
-  if world.simplify >= 3:
+  if world.cut(3):
     return world.finishAction(
       heroId, ActionUseItem, slotId, slotId, 0, ActionOutsideKeep
     )
@@ -4574,7 +4578,7 @@ proc applyUseItemAt*(
     return world.finishAction(
       heroId, ActionUseItemAt, slotId, mapX, mapY, ActionDrafting, offset
     )
-  if world.simplify >= 3:
+  if world.cut(3):
     return world.finishAction(
       heroId, ActionUseItemAt, slotId, mapX, mapY, ActionOutsideKeep, offset
     )
@@ -4923,7 +4927,7 @@ proc castAbility(
     spell.impact += max(1'i32, int32((integerSqrt(
       distanceSquared(spell.origin, point)) + spec.projectileSpeed - 1) div
       max(spec.projectileSpeed, 1)))
-  if world.simplify >= 8:
+  if world.cut(8):
     spell.impact = world.tick
   spell.ends = spell.impact + 12
   when defined(replayEvents):
@@ -5154,7 +5158,7 @@ proc updateHero(world: World, hero: Hero) =
     inc hero.deathTicks
     hero.animClip = heroDeathClip
     hero.animTicks = min(hero.deathTicks, HeroDeathTicks)
-    if hero.respawnTicks() == 0 or world.simplify >= 2:
+    if hero.respawnTicks() == 0 or world.cut(2):
       world.respawn(hero)
     return
 

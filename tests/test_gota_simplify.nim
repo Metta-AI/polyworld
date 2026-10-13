@@ -42,7 +42,7 @@ echo "Testing simplify 8 applies every cut"
 block:
   let batch = newBatch(8)
   let world = batch.currentMatch(0).world
-  doAssert world.simplify == 8
+  doAssert world.cut(8) and not world.cut(9)
   doAssert world.phase == Playing
   for hero in world.heroes:
     doAssert hero.drafted
@@ -63,5 +63,16 @@ block:
   batch.stepTicks(1)
   doAssert hero.state != Dying and hero.hp == hero.maxHp,
     "simplify 2 respawns at once"
+
+echo "Testing a cut mask turns on only its cuts"
+block:
+  let batch = newBatch(0)
+  batch.setCuts((1'u16 shl 1) or (1'u16 shl 9))
+  let world = batch.currentMatch(0).world
+  doAssert world.cut(1) and world.cut(9)
+  doAssert not world.cut(2) and not world.cut(7)
+  let before = world.tick
+  batch.stepTicks(1)
+  doAssert batch.currentMatch(0).world.tick == before + 10
 
 echo "Simplify cuts take effect"
