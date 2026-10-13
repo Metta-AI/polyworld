@@ -21,13 +21,25 @@
 ##   +12, 144 steps); a dead hero is off the map.
 ## - 5 Spawn-only healing: no passive regeneration; within 10 cells of its
 ##   spawn a hero heals 5% of its health and mana per step.
+## - 4 GotA towers: tiers 1 to 3 (and the guards, as tier 3) with GotA's
+##   health and damage, a 752-health god, and 9 to 10 cell reach.
+## - 3 GotA waves: every 48 steps (20 s) 6 melee and 2 ranged creeps per
+##   lane with GotA's health and damage; ranged creeps hit at 4 cells.
+## - 2 GotA heroes and XP: the roles get Druid Warden, Demon Hunter,
+##   Arcanist, Vanguard Knight and Ranger's stats, attack reach and rate;
+##   GotA's XP curve (100, then 75 more per level, to level 20) and kill XP
+##   (creep 15, hero 150, tower 200, the god 1,000 to each winner).
+## GotA's numbers enter moba's units with health x 1.40 and damage x 1.88,
+## the ratios of the five roles' average health and damage.
 
 import std/math
 
 const
   MapSize* = 128
   NumPlayers* = 10
-  NumCreeps = 100
+  NumCreeps = 300
+    ## Creep slots stored; moba cycles through the first 100.
+  MobaCreepSlots = 100
   NumNeutrals = 72
   NumTowers = 24
   NumEntities* = NumPlayers + NumCreeps + NumNeutrals + NumTowers
@@ -57,6 +69,32 @@ const
   RespawnGrowth = 12
   RespawnMax = 144
   SpawnHealRange = 10'f32
+  GotaWaveSteps = 48
+  GotaMeleePerLane = 6
+  GotaRangedPerLane = 2
+  GotaCreepHealth = 113'f32
+  GotaCreepDamage = 39'f32
+  GotaCreepRange = 4'f32
+  GotaCreepXp = 15
+  GotaTowerHealth = [3572'f32, 4888, 7332, 7332, 752]
+    ## By tier 1 to 5 (4 the god guards, 5 the god).
+  GotaTowerDamage = [50'f32, 67, 84, 84, 0]
+  GotaTowerReach = [9, 10, 10, 10, 0]
+  GotaHeroKillXp = 150
+  GotaTowerXp = 200
+  GotaGodXp = 1000
+  GotaMaxLevel = 20
+  GotaHeroes = [
+    # health, health/level, mana, mana/level, damage, damage/level,
+    # reach in tenths of a cell, attack steps: Druid Warden, Demon Hunter,
+    # Arcanist, Vanguard Knight, Ranger (moba's support, assassin, burst,
+    # tank and carry).
+    [490, 28, 359, 29, 45, 4, 40, 3],
+    [469, 94, 200, 15, 55, 9, 15, 2],
+    [403, 27, 398, 33, 49, 9, 50, 3],
+    [631, 158, 230, 17, 62, 11, 15, 3],
+    [305, 126, 112, 34, 39, 23, 60, 3]
+  ]
   ScanSlots = 121
     ## moba reads at most 121 scanned targets per entity.
   ScanCapacity = 226
@@ -195,6 +233,10 @@ type
 
   Entity* = object
     pid*, heroType*, team*, lane*, waypoint*: int
+    ranged*: bool
+      ## Trait 3 ranged creeps.
+    reach*: float32
+      ## Trait 2: basic-attack reach in cells (0 is moba's).
     kind*: EntityKind
     gridId*: uint8
     health*, maxHealth*, mana*, maxMana*: float32
@@ -240,6 +282,8 @@ type
     deaths: array[NumPlayers, int]
     towerLanes: array[NumTowers, int]
       ## Each tower's lane (0 to 2 on its team's side), for the gates.
+    creepSlots: int
+      ## Creep slots in use: moba's 100, or all for trait 3.
 
 var pathCache: seq[seq[uint8]]
   ## Per destination cell, the BFS action toward it from every cell (255
@@ -436,6 +480,34 @@ proc calcLevel(xp: int): int =
       return i + 1
   30
 
+proc gotaLevel(xp: int): int =
+  ## Trait 2: GotA's level for total XP (100 to level 2, then 75 more per
+  ## level), at most 20.
+  result = 1
+  var need = 100
+  var total = 0
+  while result < GotaMaxLevel and xp >= total + need:
+    total += need
+    need += 75
+    inc result
+
+proc levelFor(game: Moba, xp: int): int =
+  ## The level for total XP under the current traits.
+  if game.trait(2): gotaLevel(xp) else: calcLevel(xp)
+
+proc gainXp(game: Moba, index, xp: int) =
+  ## Adds XP to a hero, pays its XP reward and refreshes its stats.
+  game.entities[index].xp += xp
+  game.rewards[index].xp += float32(xp) * game.rewardXp
+  game.entities[index].level = game.levelFor(game.entities[index].xp)
+  let level = game.entities[index].level
+  game.entities[index].maxHealth = game.entities[index].baseHealth +
+    float32(level * game.entities[index].hpGainPerLevel)
+  game.entities[index].maxMana = game.entities[index].baseMana +
+    float32(level * game.entities[index].manaGainPerLevel)
+  game.entities[index].damage = game.entities[index].baseDamage +
+    float32(level * game.entities[index].damageGainPerLevel)
+
 proc towerAlive(game: Moba, slot: int): bool =
   ## Whether a tower stands.
   let tower = game.entities[TowerOffset + slot]
@@ -524,7 +596,8 @@ proc attack(game: Moba, attacker, target: int, damage: float32): int =
     return 0
   var xp =
     if kind == PlayerEntity:
-      100 + int(float32(game.entities[target].xp) / 7.69'f32)
+      if game.trait(2): GotaHeroKillXp
+      else: 100 + int(float32(game.entities[target].xp) / 7.69'f32)
     else:
       game.entities[target].xpOnKill
   let first = if game.entities[attacker].team == 0: 0 else: 5
@@ -547,16 +620,24 @@ proc attack(game: Moba, attacker, target: int, damage: float32): int =
     let index = first + i
     if game.entities[index].xp > 10_000_000:
       continue
-    game.entities[index].xp += xp
-    game.rewards[index].xp = float32(xp) * game.rewardXp
-    game.entities[index].level = calcLevel(game.entities[index].xp)
-    let level = game.entities[index].level
-    game.entities[index].maxHealth = game.entities[index].baseHealth +
-      float32(level * game.entities[index].hpGainPerLevel)
-    game.entities[index].maxMana = game.entities[index].baseMana +
-      float32(level * game.entities[index].manaGainPerLevel)
-    game.entities[index].damage = game.entities[index].baseDamage +
-      float32(level * game.entities[index].damageGainPerLevel)
+    if game.trait(2):
+      game.gainXp(index, xp)
+    else:
+      game.entities[index].xp += xp
+      game.rewards[index].xp = float32(xp) * game.rewardXp
+      game.entities[index].level = calcLevel(game.entities[index].xp)
+      let level = game.entities[index].level
+      game.entities[index].maxHealth = game.entities[index].baseHealth +
+        float32(level * game.entities[index].hpGainPerLevel)
+      game.entities[index].maxMana = game.entities[index].baseMana +
+        float32(level * game.entities[index].manaGainPerLevel)
+      game.entities[index].damage = game.entities[index].baseDamage +
+        float32(level * game.entities[index].damageGainPerLevel)
+  if game.trait(2) and kind == TowerEntity and
+    (target == RadiantAncient or target == DireAncient):
+      # GotA pays every hero of the winning team for the god.
+      for i in 0 ..< 5:
+        game.gainXp(first + i, GotaGodXp)
   if kind == TowerEntity:
     game.rewards[game.entities[attacker].pid].tower = game.rewardTower
   0
@@ -565,6 +646,14 @@ proc basicAttack(game: Moba, attacker, target: int): int =
   ## moba's basic_attack: starts the cooldown even when the hit fails.
   if game.entities[attacker].basicAttackTimer > 0:
     return 1
+  let reach = game.entities[attacker].reach
+  if reach > 0:
+    # Traits 2 and 3: basic attacks only within the attacker's reach.
+    let
+      dy = game.entities[attacker].y - game.entities[target].y
+      dx = game.entities[attacker].x - game.entities[target].x
+    if dy * dy + dx * dx > reach * reach:
+      return 1
   game.entities[attacker].basicAttackTimer =
     game.entities[attacker].basicAttackCd
   game.attack(attacker, target, game.entities[attacker].damage)
@@ -603,6 +692,13 @@ proc spawnCreep(game: Moba, slot, lane: int) =
   creep.xpOnKill = 60
   creep.damage = 22
   creep.basicAttackCd = 5
+  creep.ranged = false
+  creep.reach = 0
+  if game.trait(3):
+    creep.maxHealth = GotaCreepHealth
+    creep.damage = GotaCreepDamage
+  if game.trait(2):
+    creep.xpOnKill = GotaCreepXp
   let
     spawnY = int(Waypoints[lane][0][0])
     spawnX = int(Waypoints[lane][0][1])
@@ -770,8 +866,10 @@ proc creepAi(game: Moba, index: int) =
     let
       destY = game.entities[target].y
       destX = game.entities[target].x
-    if l1(game.entities[index].y, game.entities[index].x, destY, destX) < 2:
-      discard game.basicAttack(index, target)
+    let reach = if game.entities[index].ranged: GotaCreepRange else: 2
+    if l1(game.entities[index].y, game.entities[index].x, destY, destX) <
+      reach:
+        discard game.basicAttack(index, target)
     discard game.moveTowards(game.entities[index], int(destY), int(destX),
       game.agentSpeed)
   else:
@@ -966,14 +1064,18 @@ proc useSkill(game: Moba, skill: Skill, caster, target: int): int =
 
 proc stepCreeps(game: Moba) =
   ## moba's step_creeps: a wave of 5 per lane every 150 ticks.
-  if game.tick mod 150 == 0:
+  let
+    period = if game.trait(3): GotaWaveSteps else: 150
+    perLane = if game.trait(3): GotaMeleePerLane + GotaRangedPerLane else: 5
+  if game.tick mod period == 0:
     for lane in 0 ..< 6:
-      for i in 0 ..< 5:
+      for i in 0 ..< perLane:
         let pid = CreepOffset + game.creepIdx
         game.killEntity(game.entities[pid])
         game.spawnCreep(game.creepIdx, lane)
-        game.creepIdx = (game.creepIdx + 1) mod NumCreeps
-  for slot in 0 ..< NumCreeps:
+        game.entities[pid].ranged = game.trait(3) and i >= GotaMeleePerLane
+        game.creepIdx = (game.creepIdx + 1) mod game.creepSlots
+  for slot in 0 ..< game.creepSlots:
     let index = CreepOffset + slot
     if game.entities[index].pid == -1:
       continue
@@ -1009,7 +1111,10 @@ proc stepTowers(game: Moba) =
     if game.entities[index].basicAttackTimer > 0:
       continue
     if game.tick mod 3 == 0:
-      discard game.scanAoe(index, TowerVision, true, false, false, true, true)
+      let vision =
+        if game.trait(4): GotaTowerReach[TowerTier[slot] - 1]
+        else: TowerVision
+      discard game.scanAoe(index, vision, true, false, false, true, true)
     let target = game.nearestScanned(index)
     if target != -1:
       discard game.basicAttack(index, target)
@@ -1229,6 +1334,8 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
   ## opponents and its reward weights, plus the cut-ladder GotA traits.
   result = Moba(
     traits: traits,
+    creepSlots: if (traits and (1'u16 shl 3)) != 0: NumCreeps
+      else: MobaCreepSlots,
     visionRange: 5,
     agentSpeed: 1,
     rewardDeath: -0.163764,
@@ -1290,6 +1397,17 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
         lane: Stats[role][7] + 3 * team,
         targetPid: -1
       )
+      if result.trait(2):
+        # GotA's level-1 values; moba's formula adds one level's gain.
+        let hero = GotaHeroes[role]
+        player.hpGainPerLevel = hero[1]
+        player.baseHealth = float32(hero[0] - hero[1])
+        player.manaGainPerLevel = hero[3]
+        player.baseMana = float32(hero[2] - hero[3])
+        player.damageGainPerLevel = hero[5]
+        player.baseDamage = float32(hero[4] - hero[5])
+        player.reach = float32(hero[6]) / 10
+        player.basicAttackCd = hero[7]
       result.entities[pid] = player
       result.skills[pid] = Kits[role]
   for slot in 0 ..< NumTowers:
@@ -1302,8 +1420,13 @@ proc newMoba*(seed: uint32, traits = 0'u16): Moba =
       team: TowerTeam[slot],
       spawnY: TowerY[slot],
       spawnX: TowerX[slot],
-      maxHealth: TowerHealth[slot],
-      damage: TowerDamage[slot],
+      maxHealth:
+        if result.trait(4): GotaTowerHealth[TowerTier[slot] - 1]
+        else: TowerHealth[slot],
+      damage:
+        if result.trait(4): GotaTowerDamage[TowerTier[slot] - 1]
+        else: TowerDamage[slot],
+      xpOnKill: if result.trait(2): GotaTowerXp else: 0,
       tier: TowerTier[slot],
       targetPid: -1
     )
