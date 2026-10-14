@@ -438,6 +438,9 @@ proc summarize*(run: JsonNode, records: seq[JsonNode],
             "run": stable[ladder]["run"]}
     included += completed
     for ladder in 0 ..< 3:
+      if run{"settings", "ladders"} != nil and
+        %Ladders[ladder] notin run["settings"]["ladders"].elems:
+          continue
       let
         rows = rankedRows(run, totals, counts, ladder)
         history = histories[ladder]

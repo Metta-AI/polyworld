@@ -23,4 +23,11 @@ compile(@["c", "-o:" & Destination / "tournament", Sources / "tournament.nim"])
 compile(@["check", Sources / "inspect_players.nim"])
 compile(@["c", "-d:release", "-o:" & Destination / "inspect_players",
   Sources / "inspect_players.nim"])
+compile(@["check", Sources / "fast_tournament.nim"])
+compile(@["c", "-o:" & Destination / "fast_tournament",
+  Sources / "fast_tournament.nim"])
+compile(@["check", Sources / "inspect_fast.nim"])
+compile(@["c", "-d:release", "-o:" & Destination / "inspect_fast",
+  Sources / "inspect_fast.nim"])
 echo "Runner: ", Destination / "tournament"
+echo "Fast XP runner: ", Destination / "fast_tournament"

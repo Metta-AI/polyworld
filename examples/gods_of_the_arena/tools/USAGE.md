@@ -400,3 +400,80 @@ Softmax. Test output is under `tmp/gota/tournament-tests/`.
 For a handoff, share this guide, the source revision, the saved run name, and
 the whole run directory if someone needs to continue or audit it. For readers
 who only need the results, share `report.html` and the CSV exports.
+
+## Fast XP Glory tournaments
+
+`fast_tournament` uses the [Fast XP staging API](https://fast-xp-k8s-staging.tail0f4a29.ts.net/docs/llms.txt)
+over Tailscale. It produces only two leaderboards: mixed Glory first, then mono
+Glory. Winners receive the game's Glory score; losers, draws, and timeouts
+receive zero. For the current GotA release, the score is whole XP per minute.
+Mono appearances average the policy's five heroes before averaging games.
+These tournaments use the `competition` Open Draft preset independently of
+the main ladder's Team Draft preset.
+
+Build with the same build command above. The additional `inspect_fast` executable
+must be built from the game source corresponding to the selected hosted release.
+The source revision and replay version for published releases are recorded under
+`coworld/releases/`. Preserve that inspector and supply `--stats-worker PATH`
+when the runner and inspector were built from different game revisions.
+
+From the repository root, prepare 1,000 games per format without submitting any:
+
+```sh
+GOTA_RUN="gota-glory-fast-2000-$(date +%Y%m%d-%H%M%S)"
+tmp/gota/tools/fast_tournament \
+  --run "$GOTA_RUN" --games 2000 --top 10 --format both \
+  --seed "$(date +%s)" --concurrency 4 --no-site --prepare-only
+```
+
+Review the frozen roster printed by this command. Then run the first two games
+as an acceptance check and resume the remainder using the same saved name:
+
+```sh
+tmp/gota/tools/fast_tournament \
+  --run "$GOTA_RUN" --concurrency 2 --no-site --stop-after 2
+tmp/gota/tools/fast_tournament \
+  --run "$GOTA_RUN" --concurrency 4 --no-site
+```
+
+Fast XP accepts policy-version UUIDs without a Softmax token. The runner uses
+Softmax authentication only to discover the ranked roster and league release.
+It requires Fast XP's deployed version to match that release, pins the version,
+records each response's service revision, and assigns every game's ten seats
+explicitly. A service redeployment may change its revision while keeping the
+game version; the original release's replay verifier must still validate every
+simulation hash before any result counts. It submits
+one game per request so each game uses its own shuffled schedule. Concurrency
+defaults to four and is capped at sixteen requests. Use `--concurrency 16`
+to run up to sixteen games at once, including when resuming a saved run.
+
+Every response ZIP is saved in `responses/` before replay processing.
+Up to four replay inspectors verify every simulation hash and derive scores
+and player statistics while new HTTP requests proceed. The combined HTTP and
+verification backlog is bounded at twice the requested concurrency. Saved
+responses are recovered without resubmission if verification is interrupted.
+The HTML, JSON, CSV, and optional local site output use the normal
+report pipeline. `--report-only` rebuilds the report without API requests.
+
+Ctrl+C stops scheduling and waits for admitted requests to return before exiting.
+Unlike the ordinary Softmax experience-request API, Fast XP has no later result
+download. A lost connection or abrupt termination with requests in flight leaves
+those submissions uncertain; the runner pauses instead of automatically replaying
+them. Saved ZIPs can be processed again on restart without resubmission. A known
+failed request can be replaced with `--retry-failed`; uncertain requests require
+manual reconciliation.
+
+HTTP 429 means no game was admitted. An explicit HTTP 503 response saying
+`Server shutting down` is also retryable. The runner retries the unchanged
+request, honors numeric or HTTP-date `Retry-After`, adds exponential jitter,
+and reduces concurrency. It pauses all new admissions during that delay.
+Saved shutdown failures from an older runner can be resumed with `--retry-failed`.
+Each request has a one-hour timeout and a bounded rejection retry budget. It
+does not automatically retry a timeout, lost connection, or other server error.
+
+Run the Fast XP checks without submitting hosted games:
+
+```sh
+nim check examples/gods_of_the_arena/tools/test_fast.nim
+nim r -o:tmp/gota/tools/test_fast examples/gods_of_the_arena/tools/test_fast.nim
+```

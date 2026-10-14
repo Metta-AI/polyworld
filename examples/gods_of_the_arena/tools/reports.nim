@@ -39,7 +39,9 @@ proc standings(panel, rows: JsonNode): string =
   ## Renders one escaped table of policy averages and displayed ranks.
   result = "<div class=scroll><table><thead><tr><th>Rank</th>" &
     "<th>Policy</th><th>Games</th><th>" &
-    (if panel["ladder"].getStr == "wins": "Win %" else: "Avg XP") &
+    (if panel["ladder"].getStr == "wins": "Win %"
+      elif panel["ladder"].getStr == "glory": "Avg Glory"
+      else: "Avg XP / min") &
     "</th><th>Move</th></tr></thead><tbody>"
   for row in rows:
     let
@@ -243,7 +245,9 @@ proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
   body.add "</section><div class=facts>"
   for (icon, value, label) in [
     ("champion", $summary["roster"].len, "Frozen policy versions"),
-    ("stats", "6 leaderboards", "Three ladders per team format"),
+    ("stats", $summary["panels"].len & " leaderboards",
+      if summary["panels"].len == 2: "Glory · Winners score, losers get zero"
+      else: "Three ladders per team format"),
     ("day", $interval, "Games per stability checkpoint, per format")
   ]:
     body.add "<div class=\"panel fact\"><img src=\"@@" & icon &
@@ -259,7 +263,9 @@ proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
       capitalizeAscii(kind) & " teams · 5 v 5</h2><p>" &
       (if kind == "mixed": "Ten distinct policies with balanced sampling."
         else: "Five heroes per policy. XP is averaged across the team.") &
-      "</p></div><div class=ladders>"
+      "</p></div><div class=ladders" &
+      (if summary["panels"].len == 2:
+        " style=\"grid-template-columns:minmax(0,1fr)\"" else: "") & ">"
     for panel in summary["panels"]:
       if panel["format"].getStr == kind:
         body.add panelHtml(panel, interval)
