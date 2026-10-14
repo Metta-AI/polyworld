@@ -73,8 +73,10 @@ kill range and cooldown, vent groups, reports, emergency meetings, votes,
 ejections, and rewards come from Crewrift's original rule implementation.
 
 The default ship renders `polyworld_art/crewrift/crewRift-map1-textured.glb`.
-Its skin retains the model's baked lighting and textures. The hidden navigation
-floor starts from `Plane002` in `crewRift-map1.blend`. Every candidate tile is
+Its skin retains the model's baked lighting and textures. Static batching
+uses the authored GLB matrices directly, including mirrored console placements,
+and reverses reflected triangle winding so facing and normals agree.
+The hidden navigation floor starts from `Plane002` in `crewRift-map1.blend`. Every candidate tile is
 then audited against the actual textured GLB mesh, leaving 2,301 connected,
 flat Polyworld tiles. The audit rejects 945 overlapping tiles and 8 isolated
 clear tiles. There are no wall tiles or geometry outside the walkable floor.
