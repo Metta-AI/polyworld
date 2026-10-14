@@ -3,8 +3,9 @@
 **New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.
 
 Two teams of five BASIC heroes battle to slay the enemy god. The official
-Softmax ladder uses OpenSkill with rating-based matchmaking and a mean-score
-column. Open Draft allows duplicate hero picks. Game results report
+Softmax ladder uses OpenSkill based only on team wins, losses, and draws,
+with rating-based matchmaking. Team Draft allows one of each hero per team;
+opposing teams may pick the same hero. Game results separately report
 **Emmett's Glory**: each winning hero's lifetime XP divided by
 elapsed simulated minutes, rounded down to whole points. Fractional minutes
 and drafting time count. Losing teams, draws, and timeouts score zero.
@@ -556,11 +557,17 @@ their average game score, so extra seats do not multiply it.
 
 Standings use OpenSkill Plackett-Luce, starting with skill (`mu`) 25 and
 uncertainty (`sigma`) 25/3. The board shows conservative MMR (`mu - 3 * sigma`),
-skill, uncertainty, win rate, and mean game score. Teams are ranked by average
-game score. Rating updates use placements rather than the score margin.
+skill, uncertainty, win rate, and mean game score. MMR uses only team wins,
+losses, and draws. Keep `margin_scale: null`: XP, Glory, and the size of a win
+must not affect rating changes. The platform derives team placements from
+winner-only scores: the winning team has positive Glory and the losing team
+has zero; draws and timeouts give both teams zero. OpenSkill receives only
+those placements. The mean-score column is informational.
 Matchmaking uses estimated skill (`mu`), including initial skill for new
 entrants, while the leaderboard uses conservative MMR.
 
+The main league selects the `team-draft` variant (`draft_mode: "team"`).
+Keep the existing `competition` variant on Open Draft for the student league.
 The former GotA OpenSkill league is retired. The student league,
 NeuralHub at Diablo Valley College, has independent settings and must remain
 unchanged when publishing game updates.

@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-14",
+  "version": "2026.10.14.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "coworld_id": "cow_c23d26ca-5c20-4a4c-b788-c88b4276a47b",
+  "canonical": true,
+  "release_type": "configuration-only",
+  "previous_coworld_id": "cow_3e536e3c-3f1c-4029-b006-b3d3ef3393b3",
+  "changes": [
+    "Select the team-draft variant for the main Gods of the Arena league.",
+    "Allow each hero once per team, including matching picks on opposing teams.",
+    "Document outcome-only OpenSkill MMR with margin_scale null.",
+    "Preserve the student league and its existing Open Draft competition variant."
+  ],
+  "rating_verification": {
+    "algorithm": "openskill",
+    "margin_scale": null,
+    "binary_vs_glory_identical": true,
+    "draws_verified": true,
+    "forfeits_verified": true
+  },
+  "verification": {
+    "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+    "coworld_id": "cow_c23d26ca-5c20-4a4c-b788-c88b4276a47b",
+    "version": "2026.10.14.1",
+    "variant": "team-draft",
+    "draft_mode": "team",
+    "algorithm": "openskill",
+    "margin_scale": null,
+    "student_settings_and_open_draft_unchanged": true,
+    "main_matchmaking_and_standings_preserved": true,
+    "hosted_certification_passed": true,
+    "hosted_smoke_passed": true
+  },
+  "game_and_web_player_binaries_unchanged": true,
+  "scheduling_and_submission_locks_restored": true,
+  "hosted_certification": {
+    "coworld_id": "cow_c23d26ca-5c20-4a4c-b788-c88b4276a47b",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-12219070005c",
+    "certification_job_id": "1c2ef68a-a07e-41b8-9e28-c0207cda362f",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-10-14T20:27:34.012111Z"
+  },
+  "hosted_smoke": [
+    {
+      "id": "ereq_0535ac14-95b9-422e-b404-8896e02125da",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "ereq_2d60ed3a-3c15-483b-b6c0-4334a82d06af",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "ereq_38210fbc-ec20-43e6-8f5c-46cbb82e5ed4",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "ereq_ae986523-3dd8-4fd8-8d7b-5a2817d0fe42",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "ereq_dab23fe2-7276-48aa-afdf-2059f3600d24",
+      "status": "completed",
+      "error": null
+    }
+  ]
+}
