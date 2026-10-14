@@ -2,7 +2,7 @@
 ## is in the middle of doing, with no window and no scene.
 import std/[options, unittest]
 import vmath
-import ../src/play, ../src/core/[bots, sim], ../src/scene/table,
+import ../src/play, ../src/core/[bots, replays, sim], ../src/scene/table,
   ../src/vfx/vfxrenderer
 
 let twoWays = Card(name: "Two Ways", energyCost: 0, kind: Spell,
@@ -116,3 +116,71 @@ suite "the end of a match":
     # The duel shows the result only once the lunge is over and all is still.
     check not play.attackActive
     check play.presentationIdle(game)
+
+suite "aiming":
+  test "aiming means picking a target on the table, not a branch":
+    var game = newGame(Archer, Mage, 7)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCardNamed("Bolt"), twoWays]
+    var play = initTablePlay(1)
+    play.resetTable()
+    check not play.aiming
+    play.pendingCard = game.players[me].hand[0]
+    play.pendingCardIndex = 0
+    play.pendingTargeting = true
+    play.pendingChoices = game.availableChoices(0)
+    check play.aiming and not play.choosing
+    # The choose screen is not aiming; the branch's target, once taken, is.
+    play.pendingCard = twoWays
+    play.pendingCardIndex = 1
+    play.pendingChoices = game.availableChoices(1)
+    check play.choosing and not play.aiming
+
+suite "arrows of chosen targets":
+  test "a target the human picks leaves a fading arrow; a branch doesn't":
+    var game = newGame(Archer, Mage, 7)
+    let me = game.currentPlayer
+    game.players[me].hand = @[baseCardNamed("Bolt"), twoWays]
+    var play = initTablePlay(1)
+    play.resetTable()
+    play.pendingCard = twoWays
+    play.pendingCardIndex = 1
+    play.pendingTargeting = true
+    play.pendingChoices = game.availableChoices(1)
+    play.takePick(game, flatTable(), optionChoice(0))
+    check play.fadingArrows.len == 0
+    play.takePick(game, flatTable(), heroChoice(1 - me))
+    check play.fadingArrows.len == 1
+    check play.fadingArrows[0].bornAt < 0
+
+  test "a bot's spell and trigger leave one arrow per target":
+    var game = newGame(Archer, Warrior, 9)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].heroClass = Archer
+    game.players[me].hand = @[baseCardNamed("Bolt")]
+    game.players[me].energy = 1
+    var play = initTablePlay(1)
+    play.resetTable()
+    let before = game.copyGameState()
+    let action = ReplayAction(playerId: me.int32, kind: ActionPlayCard,
+      handIndex: 0, choices: @[heroChoice(enemy)].toReplay)
+    check game.applyAction(action)
+    play.addActionArrows(flatTable(), before, game, action)
+    check play.fadingArrows.len == 1
+    # A trigger's arrows start from the trigger's card.
+    let snare = Card(name: "Snare", kind: Trinket, class: some(Warrior),
+      rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
+    var waiting = newGame(Archer, Warrior, 9)
+    waiting.players[me].board = @[MinionState(id: 1, owner: me, card: snare)]
+    waiting.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: baseCardNamed("Bear"), currentToughness: 2)]
+    waiting.nextMinionId = 3
+    waiting.pendingTriggers = @[PendingTrigger(owner: me, sourceId: 1)]
+    let resolve = ReplayAction(playerId: me.int32, kind: ActionResolveTrigger,
+      choices: @[creatureChoice(enemy, 2)].toReplay)
+    let held = waiting.copyGameState()
+    check waiting.applyAction(resolve)
+    play.addActionArrows(flatTable(), held, waiting, resolve)
+    check play.fadingArrows.len == 2

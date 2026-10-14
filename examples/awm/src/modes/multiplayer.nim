@@ -616,6 +616,8 @@ when not defined(headless):
           vfx.drawCharacterFlash(seat + 1,
             play.activeVfx.flashStrength(heroChoice(seat)))
         vfx.addAttackRing(play, stageEye)
+        vfx.addTargetingArrow(play, match.game, table, window, stageVp,
+          hoveredTarget, stageEye, hudTime)
         vfx.addEffects(play.activeVfx, stageEye)
         vfx.draw(stageVp)
         if not inspected.found:

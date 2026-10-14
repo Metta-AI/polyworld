@@ -2699,11 +2699,12 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     let chamber = baseCardNamed("Morphosis Chamber")
     check chamber.kind == Trinket and chamber.class == some(Mage)
     check chamber.ruleText() == "At the start of each of your turns, " &
-      "choose:\n- A minion gains Ranged.\n- A minion gains Hidden 1.\n" &
-      "- Give a minion +1/-1.\n- Give a minion -1/+1."
+      "choose:\n- A friendly minion gains Ranged.\n" &
+      "- A minion gains Hidden 1.\n" &
+      "- Give a friendly minion +1/-1.\n- Give a friendly minion -1/+1."
     check baseCardNamed("Overwork").ruleText() ==
-      "At the start of each of your turns, draw 1 card, return a minion to " &
-      "its owner's hand and deal 3 damage to yourself."
+      "At the start of each of your turns, draw 1 card and deal 3 damage " &
+      "to yourself."
     check Card(kind: Spell, rules: rules(gain(on(eachTurn(You), draw(1)),
       target({kind: {Minion}})))).ruleText() ==
       "A minion gains \"At the start of each of your turns, draw 1 card.\"."
@@ -2717,13 +2718,19 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     # Like any trigger's pick, the branch may also be declined.
     check game.triggerChoices() == @[optionChoice(0), optionChoice(1),
       optionChoice(2), optionChoice(3), NoTarget]
-    check game.resolvePendingTrigger(@[optionChoice(0), creatureChoice(enemy, 3)])
-    let bear = game.players[enemy].board[0]
+    # Ranged only goes on a friendly minion.
+    check game.triggerChoices(@[optionChoice(0)]) ==
+      @[creatureChoice(me, 2), NoTarget]
+    check not game.resolvePendingTrigger(
+      @[optionChoice(0), creatureChoice(enemy, 3)])
+    check game.resolvePendingTrigger(@[optionChoice(0), creatureChoice(me, 2)])
+    let bear = game.players[me].board[1]
     check bear.hasKeyword(Ranged)
     check bear.addedKeywords == {Ranged}
     check bear.lostKeywords == {}
     check bear.card == baseCardNamed("Bear")
-    check game.choiceLabel(creatureChoice(enemy, 3)).endsWith("(3/2, Ranged)")
+    check game.choiceLabel(creatureChoice(me, 2)).endsWith("(3/2, Ranged)")
+    check game.players[enemy].board[0].addedKeywords == {}
 
   test "a gained Ranged takes no damage back from a minion without it":
     var (game, me, enemy) = chamberGame(3103)
@@ -2748,16 +2755,23 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(me, 4)])
     check game.players[me].board[2].hiddenTurns == Always
 
-  test "+1/-1 can kill, -1/+1 never lowers power below 0":
+  test "the stat swaps reshape a friendly minion, and +1/-1 can kill it":
     var (game, me, enemy) = chamberGame(3107)
-    game.players[enemy].board.add readyMinion(enemy, 4, baseCardNamed("Sniper"))
+    game.players[me].board.add readyMinion(me, 4, baseCardNamed("Sniper"))
     game.nextMinionId = 5
-    check game.resolvePendingTrigger(@[optionChoice(2), creatureChoice(enemy, 4)])
+    # Not an enemy's: these are no longer removal.
+    check not game.resolvePendingTrigger(
+      @[optionChoice(2), creatureChoice(enemy, 3)])
+    check game.resolvePendingTrigger(@[optionChoice(2), creatureChoice(me, 4)])
     check not game.minionLocation(4).found
     game.ownerTurn(me)
-    check game.resolvePendingTrigger(@[optionChoice(3), creatureChoice(enemy, 3)])
-    check game.players[enemy].board[0].power == 2
-    check game.players[enemy].board[0].currentToughness == 3
+    check game.resolvePendingTrigger(@[optionChoice(3), creatureChoice(me, 2)])
+    check game.players[me].board[1].power == 2
+    check game.players[me].board[1].currentToughness == 3
+    # Hidden 1 may still go on any minion.
+    game.ownerTurn(me)
+    check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(enemy, 3)])
+    check game.players[enemy].board[0].hiddenTurns == 1
 
   test "a trigger's choice may be declined, and the rest still resolves":
     var (game, me, enemy) = chamberGame(3108)
@@ -2867,28 +2881,19 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check game.playCard(0, @[creatureChoice(enemy, 2)])
     check game.levels(enemy, Archer) == 0
 
-  test "Overwork draws, bounces and burns its owner each turn":
+  test "Overwork draws and burns its owner each turn":
     var game = newGame(Mage, Warrior, 3117)
-    let
-      me = game.leads(Mage)
-      enemy = 1 - me
+    let me = game.leads(Mage)
     game.players[me].board = @[MinionState(id: 1, owner: me,
       card: baseCardNamed("Overwork"), enteredTurn: game.turnNumber)]
-    game.players[enemy].board = @[readyMinion(enemy, 2, baseCardNamed("Bear"))]
-    game.nextMinionId = 3
-    let
-      hand = game.players[me].hand.len
-      enemyHand = game.players[enemy].hand.len
-    game.ownerTurn(me)
-    check game.waitingTrigger
-    check game.resolvePendingTrigger(@[creatureChoice(enemy, 2)])
-    check game.players[enemy].board.len == 0
-    check game.players[enemy].hand.len == enemyHand + 2  # Its draw and the Bear.
-    check game.players[me].hand.len == hand + 2
-    check game.players[me].life == StartingLife - 3
-    # With no minion to return, the rest still happens on its own.
+    game.nextMinionId = 2
+    let hand = game.players[me].hand.len
+    # It asks nothing: its turn draw and its own, then the burn.
     game.ownerTurn(me)
     check not game.waitingTrigger
+    check game.players[me].hand.len == hand + 2
+    check game.players[me].life == StartingLife - 3
+    game.ownerTurn(me)
     check game.players[me].hand.len == hand + 4
     check game.players[me].life == StartingLife - 6
 

@@ -357,6 +357,6 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |
 | Mage | Bubble Shield | 4 | 2 | Spell | — | Summon 2 Bubbles |
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
-| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a minion gains Ranged; a minion gains Hidden 1; give a minion +1/-1; or give a minion -1/+1 |
+| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
 | Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
-| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card, return a minion to its owner's hand and deal 3 damage to yourself |
+| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card and deal 3 damage to yourself |
