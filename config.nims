@@ -19,6 +19,7 @@ else:
   --path:"../gltf/src"
   --path:"../vmath/src"
   --path:"../spacy/src"
+  switch("path", getEnv("PATHY_PATH", "../pathy/src"))
   --path:"../mummy/src"
 
 --define:nimTypeNames

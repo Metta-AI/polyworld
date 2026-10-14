@@ -2497,41 +2497,20 @@ proc nearestNavTile(
           result = true
 
 proc fillMovementPath(tiles: seq[PathTile], start: WorldPoint,
-    team: Team, path: var seq[PathTile]) {.measure.} =
+    path: var seq[PathTile]) {.measure.} =
   ## Fills farthest clear shortcuts, retaining the destination buffer.
-  path.setLen(0)
-  if tiles.len == 0:
-    return
-  path.add tiles[0]
-  var
-    anchor = 0
-    position = start
-  while anchor < tiles.high:
-    var
-      last = anchor
-      reach = -1
-      destination: WorldPoint
-    while last < tiles.high and tiles[last + 1].layer == tiles[anchor].layer:
-      inc last
-    last = max(last, anchor + 1)
-    for i in countdown(last, anchor + 1):
-      let point = worldPoint(pathPoint(
-        int(tiles[i].layer), int(tiles[i].x), int(tiles[i].z)))
-      if navigationLineClear(position, point,
-        tiles[anchor].layer, tiles[i].layer, team):
-        reach = i
-        destination = point
-        break
-    if reach < 0:
-      path.setLen(0)
-      return
-    path.add tiles[reach]
-    position = destination
-    anchor = reach
+  const Origin = int64(GridTiles div 2) * WorldScale
+  fillSmoothPath(
+    tiles,
+    (int64(start.x) + Origin, int64(start.z) + Origin),
+    WorldScale,
+    path,
+    navigationOpen
+  )
 
 proc navigationPath(world: World, query: PathQuery,
     tiles: var seq[PathTile]) {.measure.} =
-  ## Runs A* over navigationOpen, reusing results until occupancy changes.
+  ## Searches Pathy terrain, reusing routes until occupancy changes.
   const MaxCachedPaths = 4096
   if world.pathCacheRevision != world.navigationRevision or
       world.pathCache.len >= MaxCachedPaths:
@@ -2545,7 +2524,9 @@ proc navigationPath(world: World, query: PathQuery,
     world.pathCache.withValue(key, cached):
       tiles = cached[]
       return
-  discard fillTilePath(query, tiles)
+  var terrainQuery = query
+  terrainQuery.acceleration = LandmarkSearch
+  discard fillTilePath(terrainQuery, tiles)
   world.pathCache[key] = tiles
 
 proc followCreepPath(world: World, footman: var Footman,
@@ -2581,7 +2562,6 @@ proc followCreepPath(world: World, footman: var Footman,
       fillMovementPath(
         navigationTiles,
         footman.position,
-        footman.team,
         footman.movePath
       )
       # The first tile is the search origin, not a movement destination.
@@ -2655,7 +2635,6 @@ proc setHeroDestination(
   fillMovementPath(
     navigationTiles,
     hero.position,
-    hero.team,
     movementTiles
   )
   if movementTiles.len == 0:
