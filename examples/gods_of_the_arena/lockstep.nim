@@ -99,6 +99,8 @@ type
     played*, level*: int32
       ## The match's curriculum level (or its opponent's index in a static
       ## mix) and the current level (-1 for a static mix).
+    help*: int32
+      ## The training help the match was played with, in percent.
     potential*: int64
       ## Leaderboard score numerator at the end; points = potential / 7200.
 
@@ -118,6 +120,8 @@ type
       ## (1), and before a lane falls focus the weakest enemy lane (2).
     retreat: int
       ## Percent of health below which heroes walk home to heal.
+    help: int
+      ## The training help this match started with (`setHelp`).
     lastGame: Game
       ## The lane's previous match, kept after a restart for its replay.
     labels, lastLabels: seq[string]
@@ -166,6 +170,8 @@ type
       ## Percent of curriculum matches played at an easier level.
     retreat: int
       ## Percent of health below which heroes walk home to heal (0 off).
+    help: int
+      ## Training help in percent for the policy team (`setHelp`).
     winBonus: float32
       ## MobaWinReward's bonus to each winning hero (`setWinBonus`).
     structureWeight: float32
@@ -427,6 +433,11 @@ proc setRetreat*(batch: StepBatch, percent: int) =
   for lane in batch.lanes.mitems:
     lane.retreat = percent
 
+proc setHelp*(batch: StepBatch, percent: int) =
+  ## Sets the training help in percent for matches that start from now on.
+  doAssert percent in 0 .. 100
+  batch.help = percent
+
 proc setEasier*(batch: StepBatch, percent: int) =
   ## Sets the percent of curriculum matches played at an easier level.
   batch.easier = percent
@@ -500,6 +511,12 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
     game.world.fixRoster()
   if batch.cut(11):
     game.world.weakenTowers()
+  if batch.help > 0:
+    # Help for the first policy team: XP x 4, the enemy's towers about 3
+    # times weaker at 100, and auto-bought potions in harness.nim.
+    game.world.xpBonus[team] = int32(3 * batch.help)
+    game.world.towerPenalty[Team(1 - team.ord)] = int32(2 * batch.help div 3)
+    game.world.thinTowers()
   if batch.cut(4):
     # Training lanes start without a draft, so the kit is fixed here.
     for hero in game.world.heroes:
@@ -520,6 +537,7 @@ proc startLane(batch: StepBatch, lane: ptr StepLane, seed: int) =
   lane.build = batch.build
   lane.finish = batch.finish
   lane.retreat = batch.retreat
+  lane.help = batch.help
   if batch.recording:
     game.recorder = initReplayRecorder(
       currentSetup(game, uint32(batch.maxTicks))
@@ -623,6 +641,9 @@ proc thinkHero(lane: ptr StepLane, index: int) =
     lane.harnesses[agent].walkReach = int32(lane.walkReach)
     lane.harnesses[agent].build = lane.build
     lane.harnesses[agent].retreatPercent = int32(lane.retreat)
+    lane.harnesses[agent].help =
+      if lane.game.world.heroes[index].team == lane.team: int32(lane.help)
+      else: 0
     lane.harnesses[agent].think(
       lane.game,
       index,
@@ -736,6 +757,7 @@ proc step*(
         selfPlay: int32(batch.selfPlay),
         played: int32(lane.played),
         level: int32(batch.level),
+        help: int32(lane.help),
         potential:
           if outcome(world, lane.team, true) == 1:
             teamPotential(world, lane.team)
@@ -858,6 +880,9 @@ proc gota_set_retreat(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.}
 
 proc gota_set_easier(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
   cast[StepBatch](handle).setEasier(int(percent))
+
+proc gota_set_help(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
+  cast[StepBatch](handle).setHelp(int(percent))
 
 proc gota_set_build(handle: pointer, build: cint) {.cdecl, exportc, dynlib.} =
   cast[StepBatch](handle).setBuild(build != 0)

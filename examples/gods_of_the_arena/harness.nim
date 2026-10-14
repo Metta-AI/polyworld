@@ -169,6 +169,10 @@ type
       ## Below this share of its health the hero walks home and heals to
       ## 90% before the policy moves it again, as base.bas does below a
       ## quarter; 0 is off (harness.bas: 0).
+    help*: int32
+      ## Training help in percent: in its shop the hero tops up to
+      ## ceil(3 * help / 100) health and mana potions by itself
+      ## (harness.bas: 0).
     retreating*: bool
     shopCursor*, inventoryCursor*: int32
     focus*: int32
@@ -625,6 +629,24 @@ proc buildItem(turn: Turn): int32 =
       return item
   0
 
+proc autoBuy(harness: Harness, turn: Turn) =
+  ## Training help: tops the hero up to its share of health and mana
+  ## potions while it stands in its shop, health first.
+  let
+    hero = turn.hero
+    stack = (harness.help * 3 + 99) div 100
+  if stack <= 0 or turn.world.phase == Drafting or not hero.canShop:
+    return
+  for item in [HealthPotion, ManaPotion]:
+    var owned = 0'i32
+    for slot in 0 ..< InventorySlots:
+      if hero.inventory[slot] == item:
+        owned += hero.itemCounts[slot]
+    while owned < stack and hero.gold >= ItemSpecs[item].cost:
+      if not turn.buyItem(int32(item.ord)):
+        break
+      inc owned
+
 proc menu(harness: var Harness, turn: Turn, code: int32) =
   ## Applies a menu key: 1 and 2 move the shop cursor forward and back, 3
   ## buys the item under it, 4 moves the inventory cursor, 5 uses the item
@@ -950,6 +972,7 @@ proc thinkMoba(
   if not harness.initialized:
     harness.initialize(turn)
   turn.learnAbilities()
+  harness.autoBuy(turn)
   if harness.walking:
     harness.walkLane(turn)
     if harness.walking:
@@ -1028,6 +1051,7 @@ proc think*(
   if not harness.initialized:
     harness.initialize(turn)
   turn.learnAbilities()
+  harness.autoBuy(turn)
   if key in [18'i32, 20]:
     harness.menu(turn, key - 15)
   if harness.retreatPercent > 0 and data.maxHp > 0:

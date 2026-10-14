@@ -315,6 +315,12 @@ type
       ## 10 ticks, moba's rate at the ladder's time scale), 11 weak towers
       ## (every tower WeakTowerHp, moba's toughness in GotA units), 12
       ## hero XP x 4 (moba's creep XP relative to GotA's).
+    xpBonus*: array[Team, int32]
+      ## Training help: percent of extra XP each team's heroes earn (0 is
+      ## the real game, 300 is x 4).
+    towerPenalty*: array[Team, int32]
+      ## Training help: percent taken off each team's tower health and
+      ## damage (0 is the real game, 67 is about 3 times weaker).
     drafting*: bool
       ## Preserves the initial setup when capturing a replay after drafting.
     draftOrder*: seq[int]
@@ -1376,7 +1382,8 @@ proc gainRewards(
     cause = KillReward
 ) =
   ## Grants rewards and links them to their lethal event.
-  let xp = if world.cut(12): xp * 4 else: xp
+  var xp = if world.cut(12): xp * 4 else: xp
+  xp = xp * (100 + int(world.xpBonus[hero.team])) div 100
   when defined(replayEvents):
     let related = world.deathEvent(victim)
     world.valueEvent(XpGained, victim, hero.id, cause, 0,
@@ -3293,7 +3300,9 @@ proc updateTower*(world: World, tower: var Building,
   origin.y += 2 * WorldScale
   world.towerShots.add TowerShot(
     sourceId: tower.id, targetId: targetId, team: tower.team,
-    damage: TowerDamages[tower.tier], previous: origin, position: origin,
+    damage: TowerDamages[tower.tier] *
+      (100 - world.towerPenalty[tower.team]) div 100,
+    previous: origin, position: origin,
     started: world.tick
   )
 
@@ -4083,6 +4092,14 @@ proc weakenTowers*(world: World) =
     if building.kind == TowerBuilding:
       building.hp = WeakTowerHp
       building.maxHp = WeakTowerHp
+
+proc thinTowers*(world: World) =
+  ## Takes each team's towerPenalty percent off its towers' health.
+  for building in world.buildings.mitems:
+    if building.kind == TowerBuilding:
+      let keep = 100 - world.towerPenalty[building.team]
+      building.maxHp = max(1'i32, building.maxHp * keep div 100)
+      building.hp = min(building.hp, building.maxHp)
 
 proc fixRoster*(world: World) =
   ## Simplify 5: skips the draft and gives each team SimpleRoster.

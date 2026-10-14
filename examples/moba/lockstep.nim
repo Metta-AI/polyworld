@@ -15,7 +15,7 @@ type
   LaneStats {.bycopy.} = object
     ## Mirrors GotaLaneStats in gota.h.
     finished, outcome, tick, selfPlay: int32
-    played, level: int32
+    played, level, help: int32
     potential: int64
 
   StepBatch = ref object
@@ -156,6 +156,9 @@ proc gota_set_cuts(handle: pointer, cuts: cint) {.cdecl, exportc, dynlib.} =
   batch.traits = uint16(cuts)
   for i in 0 ..< batch.lanes.len:
     batch.lanes[i] = newMoba(seedFor(0, i), batch.traits)
+
+proc gota_set_help(handle: pointer, percent: cint) {.cdecl, exportc, dynlib.} =
+  discard
 
 proc gota_set_simplify(
   handle: pointer,

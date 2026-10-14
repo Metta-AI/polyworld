@@ -90,4 +90,33 @@ block:
   batch.stepTicks(20)
   doAssert hero.hp > before, "cut 10 regenerates"
 
+echo "Testing help: XP x 4, weaker enemy towers, auto-bought potions"
+block:
+  let
+    plain = newBatch(0)
+    helped = newBatch(0)
+  helped.setHelp(100)
+  helped.reset(0)
+  plain.reset(0)
+  let
+    team = helped.lanes[0].team
+    world = helped.currentMatch(0).world
+    real = plain.currentMatch(0).world
+  doAssert world.xpBonus[team] == 300 and world.xpBonus[Team(1 - team.ord)] == 0
+  for b, building in world.buildings:
+    if building.kind == TowerBuilding:
+      let full = real.buildings[b].maxHp
+      if building.team == team:
+        doAssert building.maxHp == full
+      else:
+        doAssert building.maxHp == full * 34 div 100
+  helped.stepTicks(5)
+  for hero in world.heroes:
+    var potions = 0
+    for slot in 0 ..< InventorySlots:
+      if hero.inventory[slot] in {HealthPotion, ManaPotion}:
+        potions += hero.itemCounts[slot]
+    if hero.team == team:
+      doAssert potions > 0, "policy heroes buy potions in spawn"
+
 echo "Simplify cuts take effect"
