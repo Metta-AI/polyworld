@@ -270,10 +270,10 @@ let mage = [
     rules: rules(
       on(eachTurn(You),
         choose(
-          gain(ranged(), target({kind: {Minion}}), vfx = OozeSplatVfx),
+          gain(ranged(), target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
           gain(hidden(1), target({kind: {Minion}}), vfx = OozeSplatVfx),
-          addPowerToughness(1, -1, target({kind: {Minion}}), vfx = OozeSplatVfx),
-          addPowerToughness(-1, 1, target({kind: {Minion}}), vfx = OozeSplatVfx)
+          addPowerToughness(1, -1, target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
+          addPowerToughness(-1, 1, target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx)
         )
       )
     )
