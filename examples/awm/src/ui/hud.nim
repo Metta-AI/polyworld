@@ -109,7 +109,7 @@ proc cardReadingRect*(window: Window): UiRect =
     size: vec2(height * CardFaceWidth.float32 / CardFaceHeight.float32, height))
 
 proc drawCardReading*(sk: Silky, rect: UiRect, card: Card, power = -1,
-    toughness = -1, lost: set[Keyword] = {}, extraCost = 0): bool =
+    toughness = -1, keywords = KeywordLine(), extraCost = 0): bool =
   ## The large preview of the inspected card, in `rect`. A minion in play
   ## passes its live stats (toughness >= 0). True when the preview is shown.
   when defined(takeScreenshot):
@@ -117,14 +117,14 @@ proc drawCardReading*(sk: Silky, rect: UiRect, card: Card, power = -1,
       return false
   sk.drawCardImage(sk.bakedCardImage(card), rect.origin, rect.size)
   if toughness >= 0 or extraCost > 0:
-    sk.drawMinionOverlays(card, power, toughness, lost, rect.origin,
+    sk.drawMinionOverlays(card, power, toughness, keywords, rect.origin,
       rect.size, extraCost)
   true
 
 proc drawCardReading*(sk: Silky, window: Window, card: Card, power = -1,
-    toughness = -1, lost: set[Keyword] = {}, extraCost = 0): bool =
+    toughness = -1, keywords = KeywordLine(), extraCost = 0): bool =
   ## The duel's preview, on the left of the screen.
-  sk.drawCardReading(cardReadingRect(window), card, power, toughness, lost,
+  sk.drawCardReading(cardReadingRect(window), card, power, toughness, keywords,
     extraCost)
 
 const

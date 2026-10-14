@@ -42,8 +42,10 @@ type
     atLunge*: bool  ## Slain while attacking: held at `lungePoint`.
     held*: bool  ## Its death's beat hasn't played yet: it stays put.
     bouncing*: bool
-      ## Not slain: a bounced card holding its slot until its beat, when it
-      ## flies to hand instead of the discard pile.
+      ## Not slain: a bounced or stolen card holding its slot until its
+      ## beat, when it flies to a hand or another board instead of the
+      ## discard pile.
+    home*: int  ## Whose discard pile a slain card goes to.
     lungePoint*: Vec3
 
   LevelUpBadge* = object
@@ -109,6 +111,10 @@ type
     visualRng*: Rand
       ## Visual seeds never advance the game's RNG.
 
+proc keywordLine*(minion: MinionState): KeywordLine =
+  ## Its gained and lost keywords, for the type line on its face.
+  KeywordLine(added: minion.addedKeywords, lost: minion.lostKeywords)
+
 proc drawFaceUp*(layout: TableLayout, player: int): bool =
   if layout.drawVisible.isNil: layout.handVisible(player)
   else: layout.drawVisible(player)
@@ -155,9 +161,11 @@ proc queuedTosses*(play: TablePlay, owner: int): int =
       inc result
 
 proc queuedSummon*(queued: openArray[VisualEvent], minionId: int): bool =
-  ## A summoned minion whose beat hasn't played yet stays off the board.
+  ## A summoned or stolen minion whose beat hasn't played yet stays off its
+  ## new board.
   for event in queued:
-    if event.kind == SummonVfx and event.target.kind == CreatureChoice and
+    if event.kind in {SummonVfx, StealVfx} and
+        event.target.kind == CreatureChoice and
         event.target.creatureId == minionId:
       return true
 
@@ -485,7 +493,8 @@ proc presentedCardPose*(play: TablePlay, game: GameState, layout: TableLayout,
 proc countHiddenSummons*(play: var TablePlay, playerCount: int) =
   play.hiddenSummons = newSeq[int](playerCount)
   for event in play.queuedEvents:
-    if event.kind == SummonVfx:
+    # A stolen minion joins the end of its new board, as a summon does.
+    if event.kind in {SummonVfx, StealVfx}:
       inc play.hiddenSummons[event.target.owner]
 
 proc presentationIdle*(play: TablePlay, game: GameState): bool =
@@ -508,7 +517,7 @@ proc spellSettled*(play: TablePlay, game: GameState): bool =
 proc dyingDiscards*(play: TablePlay, owner: int): int =
   ## Slain cards already in the discard pile but still shown on the board.
   for dying in play.dyingMinions:
-    if dying.target.owner == owner and not dying.bouncing:
+    if dying.home == owner and not dying.bouncing:
       inc result
 
 proc resetTable*(play: var TablePlay) =
@@ -529,7 +538,7 @@ proc inspectedCard*(
     hoverIndex: int,
     handOwner = -1
 ): tuple[found: bool, card: Card, power, toughness: int,
-    lost: set[Keyword]] =
+    keywords: KeywordLine] =
   ## The card to show large: the hovered hand card, else the closest board
   ## card under the mouse with its live stats, else the visible top of a
   ## discard pile. `handOwner` is whose hand `hoverIndex` is in (default:
@@ -563,11 +572,11 @@ proc inspectedCard*(
       if result.card.kind == Minion:
         result.power = minion.power
         result.toughness = minion.currentToughness
-        result.lost = minion.lostKeywords
+        result.keywords = minion.keywordLine
       else:
         result.power = -1
         result.toughness = -1
-        result.lost = {}
+        result.keywords = KeywordLine()
   if result.found:
     return
   # The visible top of a discard pile, matching how the pile is drawn:
@@ -822,13 +831,20 @@ proc updateChoosing*(
     time: float32
 ) =
   ## The choose screen: click one of the offered cards to take that branch,
-  ## or cancel the card. Picking plays the chosen card away first.
+  ## or cancel the card. A trigger can't be canceled, so canceling its
+  ## choice declines it: no branch runs, and the rest of the trigger does.
+  ## Picking plays the chosen card away first.
   if play.choosePicked.isSome:
     # The pick's animation is playing; take it once it finishes.
     if time - play.choosePickedAt >= ChoosePickSeconds:
       let option = play.choosePicked.get
       play.choosePicked = none(int)
       play.takePick(game, layout, optionChoice(option))
+    return
+  if cancel and play.pendingTrigger:
+    let name = play.pendingCard.name
+    play.takePick(game, layout, NoTarget)
+    play.statusMessage = &"{name}: nothing chosen."
     return
   if cancel:
     play.statusMessage = &"{play.pendingCard.name} canceled."
@@ -1049,7 +1065,8 @@ proc presentVisualEvents*(
       var dying = DyingMinion(target: event.target, card: event.card,
         power: event.power,
         heroClass: game.players[event.target.owner].heroClass,
-        boardIndex: event.boardIndex, held: true)
+        boardIndex: event.boardIndex, held: true,
+        home: event.home.get(event.target.owner))
       if play.lungingMinion() == event.target.creatureId:
         # A slain attacker stays where its lunge landed.
         dying.atLunge = true
@@ -1061,6 +1078,12 @@ proc presentVisualEvents*(
       # Keep the card in its slot until its beat sends it home.
       play.dyingMinions.add DyingMinion(target: event.target, card: event.card,
         heroClass: game.players[event.target.owner].heroClass,
+        boardIndex: event.boardIndex, held: true, bouncing: true)
+    elif event.kind == StealVfx:
+      # Keep the card in its old slot until its beat moves it across.
+      let left = creatureChoice(event.fromPlayer, event.target.creatureId)
+      play.dyingMinions.add DyingMinion(target: left, card: event.card,
+        heroClass: game.players[event.fromPlayer].heroClass,
         boardIndex: event.boardIndex, held: true, bouncing: true)
     play.queuedEvents.add event
   # Before any beat plays: VFX positions are fixed when they start, so
@@ -1141,9 +1164,31 @@ proc presentVisualEvents*(
           suppressDiscardOwner = owner,
           duration =
             if dying: play.deathDiscard[owner] else: CardMoveDuration)
+      of StealVfx:
+        let
+          left = creatureChoice(event.fromPlayer, event.target.creatureId)
+          thief = event.target.owner
+          board = game.players[thief].board
+        var source = CardPose()
+        for i in 0 ..< play.dyingMinions.len:
+          if play.dyingMinions[i].bouncing and
+              play.dyingMinions[i].target == left:
+            source = play.dyingPose(layout, i,
+              game.players[event.fromPlayer].board.len)
+            play.dyingMinions.delete(i)
+            break
+        var slot = board.high
+        for i, minion in board:
+          if minion.id == event.target.creatureId:
+            slot = i
+        play.animations.add newCardAnimation(event.card,
+          game.players[thief].heroClass, source,
+          play.liveBoardPose(layout, thief, slot, board.len),
+          arcHeight = 1.0'f32, suppressBoardId = event.target.creatureId,
+          duration = 0.7'f32, trackingTarget = event.target)
       of BounceVfx:
         let
-          owner = event.target.owner
+          owner = event.home.get(event.target.owner)
           source = play.presentedCardPose(game, layout, event.target,
             event.boardIndex, event.boardCount)
         for i in 0 ..< play.dyingMinions.len:
@@ -1191,9 +1236,10 @@ proc presentVisualEvents*(
       if effect.target == dying.target:
         effectsPending = true
     if not effectsPending and not dying.held:
-      let owner = dying.target.owner
+      let owner = dying.home
       play.discardFlights.add newCardAnimation(dying.card, dying.heroClass,
-        play.dyingPose(layout, i, game.players[owner].board.len),
+        play.dyingPose(layout, i,
+          game.players[dying.target.owner].board.len),
         stackTopPose(layout.discardPose(owner),
           game.players[owner].discardPile.len),
         suppressDiscardOwner = owner)
@@ -1313,7 +1359,7 @@ proc addTableCards*(
         currentPower = minion.power,
         currentToughness = minion.currentToughness,
         damageFlash = play.activeVfx.flashStrength(minionChoice),
-        lostKeywords = minion.lostKeywords,
+        keywordLine = minion.keywordLine,
         # Hidden from everyone but its owner, who sees it as it is.
         veiled = minion.hiddenTurns != 0 and playerIndex != viewer
       )
@@ -1533,7 +1579,7 @@ proc addAttackCard*(
     card = atkMinion.card,
     currentPower = atkMinion.power,
     currentToughness = atkMinion.currentToughness,
-    lostKeywords = atkMinion.lostKeywords
+    keywordLine = atkMinion.keywordLine
   )
   vfx.addCardGlow(atkPose, true, true, true, time)
 
@@ -1573,6 +1619,9 @@ proc updateBots*(
   ## Humans choose their own discards and trigger targets. Attacks never
   ## end a turn. A failed script stops acting without selecting a fallback.
   if game.gameOver:
+    # The attack that ended the match still finishes its lunge, so the
+    # result can show once the table settles.
+    discard play.advanceAttack(game, dt)
     return false
   if play.presentationIdle(game) and not play.attackActive:
     if humanActs():

@@ -447,7 +447,7 @@ proc addCard*(
     currentPower = -1,
     currentToughness = -1,
     damageFlash = 0.0'f32,
-    lostKeywords: set[Keyword] = {},
+    keywordLine = KeywordLine(),
     veiled = false,
     extraCost = 0
 ) =
@@ -508,7 +508,7 @@ proc addCard*(
       elif card.kind == Minion: card.power
       else: 0
     faces.addMinionOverlays(sk, corners, card, printedPower,
-      currentToughness, lostKeywords, brightness, damageFlash, extraCost)
+      currentToughness, keywordLine, brightness, damageFlash, extraCost)
 
 
 proc addCardStack*(

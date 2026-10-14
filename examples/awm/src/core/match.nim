@@ -21,14 +21,23 @@ type
       ## Called when a seat fails to supply a legal action.
     failed*: bool  ## No valid explicit action was supplied.
 
-proc initBotMatch*(classes: openArray[HeroClass], seed: int64,
+proc initBotMatch*(seats: openArray[Seat], seed: int64,
     bots: seq[BotVm], maxTicks: uint32,
     recorder: ReplayRecorder = nil): BotMatch =
   ## Starts a deterministic match with explicit seat-owned policies.
-  result = BotMatch(game: newGame(classes, seed), bots: bots, maxTicks: maxTicks,
+  result = BotMatch(game: newGame(seats, seed), bots: bots, maxTicks: maxTicks,
     recorder: recorder)
   for bot in result.bots:
     bot.ensureSeed(seed)
+
+proc initBotMatch*(classes: openArray[HeroClass], seed: int64,
+    bots: seq[BotVm], maxTicks: uint32,
+    recorder: ReplayRecorder = nil): BotMatch =
+  ## Every seat with its class's precon.
+  var seats: seq[Seat]
+  for heroClass in classes:
+    seats.add precon(heroClass)
+  initBotMatch(seats, seed, bots, maxTicks, recorder)
 
 proc outcome*(match: BotMatch): MatchOutcome =
   if match.failed:

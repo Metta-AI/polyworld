@@ -265,6 +265,38 @@ let mage = [
     rules: rules(summon(2, "Bubble"))
   ),
   Card(
+    name: "Morphosis Chamber", energyCost: 3,
+    class: some(Mage), kind: Trinket,
+    rules: rules(
+      on(eachTurn(You),
+        choose(
+          gain(ranged(), target({kind: {Minion}}), vfx = OozeSplatVfx),
+          gain(hidden(1), target({kind: {Minion}}), vfx = OozeSplatVfx),
+          addPowerToughness(1, -1, target({kind: {Minion}}), vfx = OozeSplatVfx),
+          addPowerToughness(-1, 1, target({kind: {Minion}}), vfx = OozeSplatVfx)
+        )
+      )
+    )
+  ),
+  Card(
+    name: "Overwork", energyCost: 4,
+    class: some(Mage), kind: Trinket,
+    rules: rules(
+      on(eachTurn(You),
+        draw(1),
+        bounce(target({kind: {Minion}}), vfx = BubbleVfx),
+        damage(3, You, vfx = ExplosionVfx)
+      )
+    )
+  ),
+  Card(
+    name: "Control", energyCost: 5,
+    class: some(Mage), kind: Spell,
+    rules: rules(
+      steal(target({kind: {Minion}, owner: AllOpponents}), vfx = BubbleVfx)
+    )
+  ),
+  Card(
     name: "Oozification", energyCost: 4,
     class: some(Mage), kind: Spell,
     rules: rules(
@@ -280,13 +312,14 @@ const
   DeckSize* = 40
 
   baseDeckLists*: array[HeroClass, seq[(string, int)]] = [
-    Archer: @[("Bolt", 7), ("Sniper", 7), ("Sharpshooter", 5),
-      ("Hail of Arrows", 4), ("Overcharge", 4), ("Explode", 3),
-      ("Ambusher", 2), ("Assassin", 2), ("Reload", 4), ("Wildfire", 2)],
-    Warrior: @[("Bear", 7), ("Swords", 4), ("Shields", 4), ("Duel", 4),
-      ("Tactician", 4), ("Footsoldier", 5), ("Commander", 4), ("Rally", 2),
-      ("Banner", 3), ("Pillage", 3)],
-    # Ooze isn't dealt: only Oozification summons it.
-    Mage: @[("Bouncer", 12), ("Oozification", 4), ("Plan", 7), ("Study", 7),
-      ("Summon Primordial", 2), ("Bubble Shield", 4), ("Spirit", 4)]
+    Archer: @[("Bolt", 4), ("Sniper", 4), ("Sharpshooter", 4),
+      ("Hail of Arrows", 4), ("Overcharge", 4), ("Explode", 4),
+      ("Ambusher", 4), ("Assassin", 4), ("Reload", 4), ("Wildfire", 4)],
+    Warrior: @[("Bear", 4), ("Swords", 4), ("Shields", 4), ("Duel", 4),
+      ("Tactician", 4), ("Footsoldier", 4), ("Commander", 4), ("Rally", 4),
+      ("Banner", 4), ("Pillage", 4)],
+    # Ooze, Primordial and Bubble aren't dealt: only other cards summon them.
+    Mage: @[("Bouncer", 4), ("Spirit", 4), ("Plan", 4), ("Study", 4),
+      ("Summon Primordial", 4), ("Bubble Shield", 4), ("Oozification", 4),
+      ("Morphosis Chamber", 4), ("Overwork", 4), ("Control", 4)]
   ]

@@ -12,7 +12,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 players="${1:-4}"
 output="${2:-$root/tmp/coworld/awm-episode}"
-bot="${3:-$root/coworld/awm/players/base.bas}"
+bot="${3:-$root/coworld/awm/players/archer.bas}"
 image="polyworld-awm-coworld:latest"
 if (( players < 2 || players > 7 )); then
   echo "AWM plays 2 to 7 players" >&2

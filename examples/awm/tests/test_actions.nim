@@ -274,7 +274,7 @@ endTurn()
 
 echo "Explicit action parity passed"
 
-echo "Scripts choose classes before dealing and can query every seat"
+echo "Scripts choose classes and decks before dealing and can query every seat"
 block:
   let sources = newSeqWith(4, """
 if selectingClass then
@@ -282,6 +282,7 @@ if selectingClass then
   if handSize <> 0 or boardCount(selfPlayer) <> 0 then stop
   if pickClass(selfPlayer MOD 3) <> 1 then stop
   if pickClass(2) <> 0 or endTurn() <> 0 then stop
+  if deckCard("Warrior", 40) <> 1 then stop
   end
 end if
 if selfClass <> playerClass(selfPlayer) then stop
@@ -290,17 +291,15 @@ if playerClass(3) <> 0 then stop
 endTurn()
 """)
   let bots = loadBots(sources)
-  let classes = bots.chooseBotClasses()
-  doAssert classes == @[Archer, Warrior, Mage, Archer]
-  var setup = Setup(seed: 19, maximumTicks: 4)
-  for heroClass in classes:
-    setup.classes.add heroClass.ord.uint8
-  let recorder = initReplayRecorder(setup,
+  let seats = bots.setupBotSeats()
+  doAssert seats.mapIt(it.heroClass) == @[Archer, Warrior, Mage, Archer]
+  doAssert seats.allIt(it.deck == @[("Warrior", 40)])
+  let recorder = initReplayRecorder(matchSetup(seats, 19, 4),
     GameConfig(seed: 19, maxTicks: 4, players: unnamedPlayers(4)))
-  var played = initBotMatch(classes, 19, bots, 4, recorder)
+  var played = initBotMatch(seats, 19, bots, 4, recorder)
   played.run()
   doAssert played.outcome == MatchTimedOut
-  var replayed = newGame(recorder.data.header.setup.heroClasses, 19)
+  var replayed = newGame(recorder.data.header.setup)
   for action in recorder.data.actions:
     doAssert replayed.applyAction(action)
     discard replayed.takeVisualEvents()
@@ -309,10 +308,37 @@ endTurn()
   let missing = loadBot("endTurn()", 0)
   var rejected = false
   try:
-    discard missing.chooseClass(2)
+    discard missing.setupSeat(2)
   except BasicError:
     rejected = true
   doAssert rejected
+
+echo "An illegal deck is out before the first turn"
+block:
+  const
+    Legal = "if selectingClass then\npickClass(1)\n" &
+      "deckCard(\"Bear\", 4)\ndeckCard(\"Warrior\", 36)\nend\nend if\nendTurn()"
+    Short = "if selectingClass then\npickClass(0)\n" &
+      "deckCard(\"Bolt\", 4)\ndeckCard(\"Bolt\", 1)\n" &
+      "deckCard(\"Nothing\", 2)\nend\nend if\nendTurn()"
+    Unlisted = "if selectingClass then\npickClass(2)\nend\nend if\nendTurn()"
+  let bots = loadBots([Legal, Short, Unlisted])
+  let seats = bots.setupBotSeats(5)
+  doAssert seats[0].deck == @[("Bear", 4), ("Warrior", 36)]
+  doAssert bots[0].deckProblems.len == 0
+  # Seated with their class and no deck.
+  doAssert seats[1].heroClass == Archer and seats[1].deck.len == 0
+  doAssert bots[1].deckProblems == @["5 copies of Bolt; at most 4",
+    "No card named 'Nothing'", "7 cards; a deck holds exactly 40"]
+  doAssert seats[2].deck.len == 0
+  doAssert bots[2].deckProblems == @["0 cards; a deck holds exactly 40"]
+  var played = initBotMatch(seats, 5, bots, 100)
+  doAssert played.game.gameOver
+  doAssert played.game.winner == 0
+  doAssert played.game.dead(1) and played.game.dead(2)
+  doAssert played.game.players[1].hand.len == 0
+  doAssert played.outcome == MatchWon
+  doAssert not played.step()
 
 echo "Printed identity and live stats cover hand and every player's board"
 block:
@@ -339,7 +365,7 @@ endTurn()
   played.game.players[player].hand = @[baseCardNamed("Bouncer")]
   var sniper = ready(3, 1, baseCardNamed("Sniper"))
   sniper.bonusPower = 3
-  sniper.lostKeywords = {Ranged}
+  sniper.lostRules = @[baseCardNamed("Sniper").rules[0]]
   sniper.hasAttacked = true
   played.game.players[3].board = @[
     sniper, ready(3, 2, baseCardNamed("Bubble"))]

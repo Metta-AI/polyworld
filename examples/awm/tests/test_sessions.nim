@@ -27,6 +27,14 @@ suite "session options":
     check parseSessionOptions(["--human", "false"]).human == false
     check parseSessionOptions(["--human", "--seed", "1"]).human == true
 
+  test "a human may bring a bot script's deck":
+    for args in [@["--human", "players/archer.bas"],
+        @["--human=players/archer.bas"]]:
+      let options = parseSessionOptions(args)
+      check options.human
+      check options.humanDeckPath == "players/archer.bas"
+    check parseSessionOptions(["--human"]).humanDeckPath == ""
+
   test "player count selects a scene without changing duel options":
     check parseSessionOptions(["--players=2"]).playerCount == 2
     check parseSessionOptions(["--players=3"]).playerCount == 3
@@ -124,7 +132,8 @@ suite "global snapshots":
     game.players[0].discardPile = @[Archer.classCard()]
     game.players[1].board = @[MinionState(id: 8, owner: 1,
       card: Warrior.classCard(), currentToughness: 1, bonusPower: 2,
-      lostKeywords: {Ranged})]
+      gainedRules: @[baseCardNamed("Sniper").rules[0]],
+      lostRules: @[baseCardNamed("Spirit").rules[0]])]
     game.nextMinionId = 9
     game.visualEvents = @[
       VisualEvent(kind: LightningVfx, target: heroChoice(1)),
@@ -151,11 +160,15 @@ suite "global snapshots":
       check card.needsChoice() == heroClass.classCard().needsChoice()
     check decoded.game.players[1].board[0].currentToughness == 1
     check decoded.game.players[1].board[0].power == 5
-    check decoded.game.players[1].board[0].lostKeywords == {Ranged}
-    var unknownKeyword = encoded["game"].copy()
-    unknownKeyword["players"][1]["board"][0]["lostKeywords"] = %*["Flying"]
-    expect ValueError:
-      discard gameFromJson(unknownKeyword)
+    check decoded.game.players[1].board[0].addedKeywords == {Ranged}
+    check decoded.game.players[1].board[0].gainedRules[0] ==
+      baseCardNamed("Sniper").rules[0]
+    check decoded.game.players[1].board[0].lostRules[0] of HiddenRule
+    for unknown in ["flying-1#0", "sniper-2#9", "sniper-2"]:
+      var unknownRule = encoded["game"].copy()
+      unknownRule["players"][1]["board"][0]["gainedRules"] = %*[unknown]
+      expect ValueError:
+        discard gameFromJson(unknownRule)
     check decoded.game.visualEvents == game.visualEvents
     check decoded.game.visualBeat == 9
 
@@ -350,7 +363,7 @@ suite "bots and two-target cards":
   test "the reference BASIC bot plays Duel with both targets":
     var (game, me) = duelGame()
     let vm = loadBot(readFile(currentSourcePath().parentDir.parentDir /
-      "players" / "base.bas"), me.int32)
+      "players" / "archer.bas"), me.int32)
     check vm.runDecision(game) == BotPlayedCard
     check game.players[me].hand.len == 0
     check not game.minionLocation(2).found
@@ -474,15 +487,44 @@ suite "waiting discards":
           summonedOwner: enemy, summonedCard: baseCard("ooze-0")),
         Effect(kind: TargetVfxEffect, beat: 3, targetVfx: OozeSplatVfx,
           visualTarget: creatureChoice(enemy, 2)),
-        Effect(kind: LoseKeywordEffect, beat: 4, keywordLoserId: 2,
-          lostKeyword: Ranged)])
+        Effect(kind: LoseRuleEffect, beat: 4, loserId: 2,
+          lostRule: baseCardNamed("Sniper").rules[0]),
+        Effect(kind: GainRuleEffect, beat: 5, gainerId: 2,
+          gainedRule: baseCardNamed("Ambusher").rules[0]),
+        Effect(kind: StealEffect, beat: 6, stolenId: 2, thief: me)])
     let encoded = gameToJson(game)
     let decoded = gameFromJson(encoded)
     check decoded.waitingToss
     check decoded.pendingToss.count == 1
-    check decoded.pendingToss.remaining.len == 5
+    check decoded.pendingToss.remaining.len == 7
+    check decoded.pendingToss.remaining[6].thief == me
     check gameToJson(decoded) == encoded
     var invalid = encoded.copy()
     invalid["pendingToss"]["remaining"][0]["kind"] = %"NoSuchEffect"
     expect ValueError:
       discard gameFromJson(invalid)
+
+suite "stolen minions":
+  test "a stolen minion and its steal round trip":
+    var game = newGame(Mage, Warrior, 1401)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[me].hand = @[baseCardNamed("Control")]
+    game.players[me].energy = 10
+    game.players[me].totalEnergy = 10
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: baseCardNamed("Bear"), currentToughness: 2)]
+    game.nextMinionId = 3
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check gameToJson(decoded) == encoded
+    check decoded.players[me].board[0].stolenFrom == some(enemy)
+    var steals = 0
+    for event in decoded.visualEvents:
+      if event.kind == StealVfx:
+        inc steals
+        check event.fromPlayer == enemy
+        check event.card == baseCardNamed("Bear")
+    check steals == 1

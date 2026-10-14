@@ -171,7 +171,7 @@ proc drawCardReadingView(
   if not inspected.found:
     return
   sk.drawCardReading(window, inspected.card, inspected.power,
-    inspected.toughness, inspected.lost,
+    inspected.toughness, inspected.keywords,
     game.extraCost(if handOwner >= 0: handOwner else: game.currentPlayer,
       inspected.card))
 
@@ -257,16 +257,40 @@ proc runDuel*(app: App) =
         for i in 0 ..< min(sessionOptions.botPaths.len, PlayerCount):
           sources[i] = readFile(sessionOptions.botPaths[i])
     else:
-      let defaultBot = appDir / "players" / "base.bas"
-      if fileExists(defaultBot):
-        let src = readFile(defaultBot)
+      # The reference bots: two of them face off, or one at random faces
+      # the human.
+      let defaults = defaultBotSources(appDir)
+      if defaults.len > 0:
         if not sessionOptions.human:
-          sources = [src, src]
+          sources = [defaults[0], defaults[1 mod defaults.len]]
         else:
-          sources[1] = src
+          sources[1] = defaults[seedRng.rand(defaults.high)]
     botVms = loadBots(sources)
 
-  if sessionOptions.human:
+  proc botSeat(player: int, seed: int64): Seat =
+    ## A bot's own class and deck; an illegal deck is reported and seats
+    ## it with none.
+    result = botVms[player].setupSeat(PlayerCount, seed)
+    for problem in botVms[player].deckProblems:
+      stderr.writeLine "Player ", player + 1, " has an illegal deck: ", problem
+
+  proc startDuel(seats: openArray[Seat], seed: int64) =
+    game = newGame(seats, seed)
+    play.resetTable()
+    phase = PlayGame
+    play.addOpeningHands(game, duelLayout)
+    botClock.wait = 1.2'f32
+
+  proc humanStatus(): string =
+    if game.currentPlayer == 0: "Your turn. Select a card to play."
+    else: "Your opponent is thinking..."
+
+  if app.humanSeat.isSome:
+    # The human brought a deck: no class to choose.
+    let seed = gameSeed()
+    startDuel([app.humanSeat.get, botSeat(1, seed)], seed)
+    play.statusMessage = humanStatus()
+  elif sessionOptions.human:
     phase = ChooseClasses
     play.statusMessage = "Choose your class."
   else:
@@ -449,6 +473,18 @@ proc runDuel*(app: App) =
         let targetId = game.players[1].board[targetIndex].id
         if game.playCard(0, creatureChoice(1, targetId)):
           play.statusMessage = "Demo: Oozification."
+      if getEnv("AWM_DEMO_CONTROL") == "1":
+        # Control takes the enemy card AWM_DEMO_OOZE_TARGET picks: it flies
+        # from its slot to the end of the player's board.
+        play.animations.setLen(0)
+        let targetIndex = parseInt(getEnv("AWM_DEMO_OOZE_TARGET", "0"))
+        game.players[0].heroClass = Mage
+        game.players[0].hand = @[baseCardNamed("Control")]
+        game.players[0].energy = 5
+        game.players[0].totalEnergy = 5
+        let targetId = game.players[1].board[targetIndex].id
+        if game.playCard(0, @[creatureChoice(1, targetId)]):
+          play.statusMessage = "Demo: Control."
       if getEnv("AWM_DEMO_PLAN") == "1":
         # Plan enters the board as a trinket and draws a card.
         play.animations.setLen(0)
@@ -657,15 +693,8 @@ proc runDuel*(app: App) =
     if phase == ChooseClasses and not sessionOptions.human:
       botClassWait -= dt
       if botClassWait <= 0:
-        let
-          seed = gameSeed()
-          playerClass = botVms[0].chooseClass(PlayerCount, seed)
-          opponentClass = botVms[1].chooseClass(PlayerCount, seed)
-        game = newGame(playerClass, opponentClass, seed)
-        play.resetTable()
-        phase = PlayGame
-        play.addOpeningHands(game, duelLayout)
-        botClock.wait = 1.2'f32
+        let seed = gameSeed()
+        startDuel([botSeat(0, seed), botSeat(1, seed)], seed)
         play.statusMessage = "Watching bot match..."
 
     sk.uiScale = if phase == ChooseClasses: classSelectionScale()
@@ -711,12 +740,15 @@ proc runDuel*(app: App) =
       hoveredTarget = Canceled
       hoveredBoard = Canceled
     if phase == PlayGame:
-      if play.tossPicking:
+      # The choose screen covers the table: nothing under it is hovered.
+      if play.choosing:
+        discard
+      elif play.tossPicking:
         hoverIndex = hoveredCard(window, viewProjection, game, duelLayout,
           handOwner = game.pendingToss.player)
       elif humanTurn() or (botVms[0] != nil and botVms[1] != nil):
         hoverIndex = hoveredCard(window, viewProjection, game, duelLayout)
-      if hoverIndex < 0:
+      if hoverIndex < 0 and not play.choosing:
         var boardChoices: seq[Choice]
         for owner in 0 ..< PlayerCount:
           for minion in game.players[owner].board:
@@ -747,7 +779,8 @@ proc runDuel*(app: App) =
       elif humanActs() and play.choosing and play.presentationIdle(game) and
           not game.gameOver:
         hoverIndex = -1
-        chooseHover = hoveredChooseOption(sk, window, play.pendingChoices.len)
+        chooseHover = hoveredChooseOption(sk, window,
+          play.chooseOptions(game).len)
         if play.chooseStart <= 0:
           play.chooseStart = animationTime
         let clicked = gamePressed(MouseLeft)
@@ -914,22 +947,9 @@ proc runDuel*(app: App) =
     if phase == ChooseClasses:
       let picked = classSelection(viewProjection, sessionOptions.human, not uiCapturesMouse)
       if picked.isSome:
-        let
-          heroClass = picked.get
-          seed = gameSeed()
-        game = newGame(
-          heroClass,
-          botVms[1].chooseClass(PlayerCount, seed),
-          seed
-        )
-        play.resetTable()
-        phase = PlayGame
-        play.addOpeningHands(game, duelLayout)
-        botClock.wait = 1.2'f32
-        if game.currentPlayer == 0:
-          play.statusMessage = "Your turn. Select a card to play."
-        else:
-          play.statusMessage = "Your opponent is thinking..."
+        let seed = gameSeed()
+        startDuel([precon(picked.get), botSeat(1, seed)], seed)
+        play.statusMessage = humanStatus()
     else:
       drawPlayerPanel(sk, window, game, 0, sessionOptions.human,
         hudTime, names)
@@ -945,7 +965,7 @@ proc runDuel*(app: App) =
         play,
         duelLayout,
         hoverIndex,
-        false,
+        play.choosing,
         handOwner = if play.tossPicking: game.pendingToss.player else: -1
       )
       sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,

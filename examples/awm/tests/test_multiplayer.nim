@@ -1,5 +1,5 @@
 ## The multiplayer preview is a scene harness: these checks need no window.
-import std/[math, random, unittest]
+import std/[math, random, sequtils, unittest]
 import vmath
 import ../src/scene/courtyard, ../src/modes/multiplayer, ../src/core/sim,
   ../src/core/sessions, ../src/core/bots
@@ -691,7 +691,7 @@ suite "Attacks in a multiplayer match":
 
 
 suite "Bots in a multiplayer match":
-  const ReferenceBot = staticRead("../players/base.bas")
+  const ReferenceBot = staticRead("../players/archer.bas")
 
   proc botTurn(match: var MultiplayerMatch): tuple[plays, attacks: int] =
     ## Runs the same explicitly selected actions as the table and server.
@@ -908,7 +908,7 @@ suite "An opponent, each opponent, and turn triggers":
 
 suite "Failing bot scripts":
   const
-    ReferenceBot = staticRead("../players/base.bas")
+    ReferenceBot = staticRead("../players/archer.bas")
     BrokenBot = "this is not a BASIC program ((("
     RunawayBot = "i = 0\nWHILE i < 1\n  j = j + 1\nWEND\n"
 
@@ -935,12 +935,18 @@ suite "Failing bot scripts":
     check match.seats[match.current].hand.len == hand  # Nothing was played.
     check match.bots[match.current].runDecision(match.game) == BotFailed
 
-echo "Multiplayer bots choose their class while preserving the human's choice"
+echo "Multiplayer bots choose their class and deck while preserving the human's"
 block:
-  let match = newMultiplayerMatch(@[Mage, Archer, Warrior], 0, 23,
-    @["if selectingClass then\npickClass(1)\nend\nend if\nendTurn()"],
-    pickClasses = true)
+  let match = newMultiplayerMatch(
+    @[Seat(heroClass: Mage, deck: @[("Archer", 40)]), precon(Archer),
+      precon(Archer)], 0, 23,
+    @["if selectingClass then\npickClass(1)\ndeckCard(\"Bear\", 4)\n" &
+      "deckCard(\"Mage\", 36)\nend\nend if\nendTurn()"],
+    botsChoose = true)
   doAssert match.game.players[0].heroClass == Mage
-  doAssert match.game.players[1].heroClass == Warrior
-  doAssert match.game.players[2].heroClass == Warrior
+  doAssert match.game.players[0].hand.allIt(it.name == "Archer")
+  for seat in 1 .. 2:
+    doAssert match.game.players[seat].heroClass == Warrior
+    doAssert (match.game.players[seat].hand & match.game.players[seat].deck).
+      countIt(it.name == "Bear") == 4
   doAssert match.bots[0] == nil

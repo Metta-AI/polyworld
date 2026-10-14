@@ -28,29 +28,41 @@ proc current*(match: MultiplayerMatch): int =
 proc turnNumber*(match: MultiplayerMatch): int =
   match.game.turnNumber
 
-proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
+proc newMultiplayerMatch*(seats: openArray[Seat], humanSeat: int,
     seed: int64, botSources: openArray[string] = [],
-    pickClasses = false): MultiplayerMatch =
-  ## One seat per class, dealt by the core. The last seat standing wins.
-  ## Every seat but the human's runs a bot script, taken from `botSources`
-  ## in turn (repeating); with none, those seats don't act.
+    botsChoose = false): MultiplayerMatch =
+  ## The seats dealt by the core. The last seat standing wins. Every seat
+  ## but the human's runs a bot script, taken from `botSources` in turn
+  ## (repeating); with none, those seats don't act. With `botsChoose`, each
+  ## bot's own setup picks its class and deck instead of its seat's.
   result.humanSeat = humanSeat
-  var sources = newSeq[string](classes.len)
+  var sources = newSeq[string](seats.len)
   if botSources.len > 0:
     var next = 0
-    for seat in 0 ..< classes.len:
+    for seat in 0 ..< seats.len:
       if seat != humanSeat:
         sources[seat] = botSources[next mod botSources.len]
         inc next
   result.bots = loadBots(sources)
-  var selected = @classes
-  if pickClasses:
+  var selected = @seats
+  if botsChoose:
     for seat in 0 ..< selected.len:
-      if seat != humanSeat:
-        selected[seat] = result.bots[seat].chooseClass(selected.len, seed)
+      if seat != humanSeat and result.bots[seat] != nil:
+        selected[seat] = result.bots[seat].setupSeat(selected.len, seed)
+        for problem in result.bots[seat].deckProblems:
+          stderr.writeLine "Player ", seat + 1, " has an illegal deck: ",
+            problem
   for bot in result.bots:
     bot.ensureSeed(seed)
   result.game = newGame(selected, seed)
+
+proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
+    seed: int64, botSources: openArray[string] = []): MultiplayerMatch =
+  ## Every seat with its class's precon.
+  var seats: seq[Seat]
+  for heroClass in classes:
+    seats.add precon(heroClass)
+  newMultiplayerMatch(seats, humanSeat, seed, botSources)
 
 proc humanTurn*(match: MultiplayerMatch): bool =
   ## The living human's turn: the dead can't act.
@@ -232,15 +244,18 @@ when not defined(headless):
     template gamePressed(button: Button): bool =
       ## A press the table should react to (not one meant for a window).
       window.buttonPressed[button] and not uiCapturesMouse
-    proc startMatch(humanClass: Option[HeroClass]) =
-      var classes = newSeq[HeroClass](layout.playerCount)
-      if humanClass.isSome:
-        classes[0] = humanClass.get
+    proc startMatch(human: Option[Seat]) =
+      ## The human's seat, if they play, and every bot's own pick.
+      var seats = newSeq[Seat](layout.playerCount)
+      for seat in seats.mitems:
+        seat = precon(Archer)
+      if human.isSome:
+        seats[0] = human.get
       choosingClasses = false
-      match = newMultiplayerMatch(classes,
-        humanSeat = if humanClass.isSome: 0 else: -1,
+      match = newMultiplayerMatch(seats,
+        humanSeat = if human.isSome: 0 else: -1,
         seed = seatRng.rand(high(int)).int64, botSources = botSources,
-        pickClasses = true)
+        botsChoose = true)
       botClock = initBotClock()
       orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
       play.resetTable()
@@ -253,11 +268,15 @@ when not defined(headless):
       play.statusMessage = match.turnStatus(names)
     for path in sessionOptions.botPaths:
       botSources.add readFile(path)
-    if botSources.len == 0 and fileExists(appDir / "players" / "base.bas"):
-      botSources.add readFile(appDir / "players" / "base.bas")
-    if getEnv("AWM_AUTOSTART") == "1":
-      startMatch(if sessionOptions.human: some(sessionOptions.playerClass)
-        else: none(HeroClass))
+    if botSources.len == 0:
+      botSources = defaultBotSources(appDir)
+    if app.humanSeat.isSome:
+      # The human brought a deck: no class to choose.
+      startMatch(app.humanSeat)
+    elif getEnv("AWM_AUTOSTART") == "1":
+      startMatch(if sessionOptions.human:
+          some(precon(sessionOptions.playerClass))
+        else: none(Seat))
     if app.replay != nil:
       # A recorded match: its classes and deal, played back on the ring.
       choosingClasses = false
@@ -303,7 +322,7 @@ when not defined(headless):
         if not sessionOptions.human:
           botClassWait -= previewDt
           if botClassWait <= 0:
-            startMatch(none(HeroClass))
+            startMatch(none(Seat))
       sk.uiScale = if choosingClasses: classSelectionScale()
         else: hudScale(window)
       sk.mousePos = window.mousePos.vec2 / max(sk.uiScale, 0.01'f32)
@@ -444,13 +463,16 @@ when not defined(headless):
         hoveredBoard = Canceled
       if not choosingClasses:
         template game: untyped = match.game
-        if play.tossPicking:
+        # The choose screen covers the table: nothing under it is hovered.
+        if play.choosing:
+          discard
+        elif play.tossPicking:
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = game.pendingToss.player)
         elif match.current == match.viewedSeat:
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = match.viewedSeat)
-        if hoverIndex < 0:
+        if hoverIndex < 0 and not play.choosing:
           var boardChoices: seq[Choice]
           for owner in 0 ..< game.playerCount:
             for minion in game.players[owner].board:
@@ -482,7 +504,7 @@ when not defined(headless):
             play.presentationIdle(game) and not game.gameOver:
           hoverIndex = -1
           chooseHover = hoveredChooseOption(sk, window,
-            play.pendingChoices.len)
+            play.chooseOptions(game).len)
           if play.chooseStart <= 0:
             play.chooseStart = previewTime
           play.updateChoosing(game, table, chooseHover,
@@ -515,8 +537,8 @@ when not defined(headless):
         attackHoverTarget = hoveredWorldTarget(window, stageVp, match.game,
           play, table, attackChoices)
       let inspected =
-        if choosingClasses: (found: false, card: Card(), power: -1,
-          toughness: -1, lost: set[Keyword]({}))
+        if choosingClasses or play.choosing: (found: false, card: Card(), power: -1,
+          toughness: -1, keywords: KeywordLine())
         else: inspectedCard(window, stageVp, match.game, play, table,
           hoverIndex,
           if play.tossPicking: match.game.pendingToss.player
@@ -618,13 +640,13 @@ when not defined(headless):
       if choosingClasses:
         let picked = classSelection(vp, sessionOptions.human, not uiCapturesMouse)
         if picked.isSome:
-          startMatch(picked)
+          startMatch(some(precon(picked.get)))
       else:
         # The inspector takes the panels' place while it is open.
         if inspected.found:
           discard sk.drawCardReading(
             cardReadingColumnRect(window, panelsBottom), inspected.card,
-            inspected.power, inspected.toughness, inspected.lost,
+            inspected.power, inspected.toughness, inspected.keywords,
             match.game.extraCost(match.viewedSeat, inspected.card))
         else:
           sk.drawPlayerPanelColumn(window, match.seats, match.current,

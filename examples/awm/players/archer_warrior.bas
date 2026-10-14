@@ -1,4 +1,5 @@
-' AWM reference bot.
+' AWM reference bot: an Archer splashing Warrior cards. Its Warrior class
+' cards bring the Warrior cards' extra cost down.
 '
 ' Each decision selects one explicit action, then runs again for the next.
 ' The engine never attacks, chooses targets, discards, or ends turns for you.
@@ -12,7 +13,12 @@
 '   handSize selfBoardSize enemyBoardSize selfDeckSize enemyDeckSize
 '   playerCount currentPlayer tossCount triggerTargets
 '   selectingClass selfClass enemyClass
-'   Setup: call pickClass(0=Archer, 1=Warrior, 2=Mage), then END.
+'   Setup: call pickClass(0=Archer, 1=Warrior, 2=Mage), list a deck with
+'   deckCard(name$, copies), then END. A deck holds exactly 40 cards, 1 to 4
+'   copies of each but the class cards (Archer, Warrior, Mage), which take
+'   any number. Cards of another class cost 3 more energy, 1 less for each
+'   class card of that class in play. An illegal deck is out before the
+'   first turn. deckCard returns 0 for a name that is no card.
 '   playerClass(p) returns any seat's class.
 '
 ' HAND QUERIES (index 0 to handSize - 1)
@@ -37,7 +43,8 @@
 '   targetIntent(handIndex, step)  what the card does to that target:
 '                                  0 = nothing to judge, 1 = damage,
 '                                  2 = buff, 3 = weaken, 4 = bounce,
-'                                  5 = destroy, 6 = loses a keyword
+'                                  5 = destroy, 6 = loses a keyword,
+'                                  7 = steal
 '   targetAmount(handIndex, step)  how much: damage dealt, stats changed
 '   choiceCount(handIndex)              number of valid targets
 '   choiceKind(handIndex, choiceIndex)  0=canceled 1=noTarget 2=hero 3=creature
@@ -90,7 +97,19 @@
 ' an action. A decision with no action stops the match with a player error.
 
 IF selectingClass THEN
-  pickClass(random(3))
+  pickClass(0)          ' Archer
+  deckCard("Warrior", 4)
+  deckCard("Bolt", 4)
+  deckCard("Sniper", 4)
+  deckCard("Sharpshooter", 4)
+  deckCard("Hail of Arrows", 4)
+  deckCard("Overcharge", 4)
+  deckCard("Reload", 2)
+  deckCard("Explode", 2)
+  deckCard("Bear", 4)
+  deckCard("Shields", 4)
+  deckCard("Swords", 2)
+  deckCard("Banner", 2)
   END
 END IF
 

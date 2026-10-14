@@ -99,6 +99,9 @@ type
     # Presentation cue, not a card VFX: a hero died. The UI plays its death
     # animation while its hand is discarded, one card at a time.
     HeroDeathVfx
+    # Presentation cue, not a card VFX: a minion changed sides. The UI flies
+    # it from its old slot to the end of its new controller's board.
+    StealVfx
 
   Keyword* = enum
     ## Printed minion keywords. Each prints as its own line of rules text.
@@ -203,13 +206,15 @@ type
     DamageCreatureEffect
     BounceCreatureEffect
     ModifyStatsEffect
-    LoseKeywordEffect
+    LoseRuleEffect
     FightEffect
     SummonEffect
     DestroyEffect
     DrawEffect
     TossEffect
     TargetVfxEffect
+    GainRuleEffect
+    StealEffect
 
   Effect* = object
     ## Rules emit effects; the authoritative game applies them.
@@ -231,10 +236,21 @@ type
       modifiedCreatureId*: int
       powerChange*: int
       toughnessChange*: int
-    of LoseKeywordEffect:
-      ## Permanent while the minion stays on the board, like stat changes.
-      keywordLoserId*: int
-      lostKeyword*: Keyword
+    of LoseRuleEffect:
+      ## The card in play loses every rule that prints as `lostRule` does,
+      ## for as long as it stays in play, like stat changes.
+      loserId*: int
+      lostRule*: Rule
+    of GainRuleEffect:
+      ## The card in play gains `gainedRule` for as long as it stays in
+      ## play; it undoes a loss of the same rule.
+      gainerId*: int
+      gainedRule*: Rule
+    of StealEffect:
+      ## `thief` takes control of the card in play for good. It still
+      ## belongs to its owner, whose hand or discard pile it goes to.
+      stolenId*: int
+      thief*: int
     of FightEffect:
       ## Both minions deal their power to each other at once, as in combat.
       ## Resolved when applied, so earlier effects on the card count.
@@ -339,6 +355,7 @@ type
     BounceIntent
     DestroyIntent
     KeywordIntent
+    StealIntent
 
   DamageRule* = ref object of Rule
     amount*: RuleValue[int]
@@ -403,8 +420,22 @@ type
     card*: RuleValue[Card]
     owner*: RuleValue[Owner]
 
-  LoseKeywordRule* = ref object of Rule
-    keyword*: Keyword
+  GainRule* = ref object of Rule
+    ## "A minion gains Ranged.": the cards picked gain a rule while they
+    ## stay in play, as if it were printed on them.
+    rule*: Rule
+    what*: Selection
+    vfx*: VfxKind
+
+  StealRule* = ref object of Rule
+    ## "Gain control of an enemy minion."
+    what*: Selection
+    vfx*: VfxKind
+
+  LoseRule* = ref object of Rule
+    ## "A minion loses Ranged.": the cards picked lose every rule that
+    ## prints the same, while they stay in play.
+    rule*: Rule
     what*: Selection
     vfx*: VfxKind
 
@@ -1366,30 +1397,94 @@ method run*(rule: DestroyRule, card: Card, context: var RuleContext): bool =
         destroyedId: choice.creatureId)
   true
 
-method text*(rule: LoseKeywordRule, card: Card): string =
-  ## "A minion loses Ranged.", "All enemy minions lose Ranged."
-  rule.what.text(card).capitalizeAscii() &
-    (if rule.what.plural: " lose " else: " loses ") & $rule.keyword & "."
+proc grantText(rule: Rule, card: Card): string =
+  ## How a gained or lost rule reads after "gains"/"loses": a keyword as
+  ## it prints ("Ranged", "Hidden 1"), any other rule in quotes.
+  let text = rule.text(card)
+  if rule of KeywordRule or rule of HiddenRule:
+    text.strip(leading = false, chars = {'.'})
+  else:
+    "\"" & text & "\""
 
-method choices*(rule: LoseKeywordRule, card: Card,
+method text*(rule: GainRule, card: Card): string =
+  ## "A minion gains Ranged.", "All friendly minions gain Hidden 1."
+  rule.what.text(card).capitalizeAscii() &
+    (if rule.what.plural: " gain " else: " gains ") &
+    rule.rule.grantText(card) & "."
+
+method choices*(rule: GainRule, card: Card,
     context: RuleContext): seq[Choice] =
   discard card
   rule.what.candidates(context)
 
-method targets*(rule: LoseKeywordRule): seq[Target] =
+method targets*(rule: GainRule): seq[Target] =
   rule.what.picks()
 
-method intent*(rule: LoseKeywordRule): TargetIntent = KeywordIntent
+method helpsTarget*(rule: GainRule): bool = true
 
-method run*(rule: LoseKeywordRule, card: Card, context: var RuleContext): bool =
+method intent*(rule: GainRule): TargetIntent = BuffIntent
+
+method run*(rule: GainRule, card: Card, context: var RuleContext): bool =
   discard card
   let selection = rule.what.resolve(context, rule.vfx)
   if not selection.ok:
     return false
   for choice in selection.chosen:
     if choice.kind == CreatureChoice:
-      context.effects.add Effect(kind: LoseKeywordEffect,
-        keywordLoserId: choice.creatureId, lostKeyword: rule.keyword)
+      context.effects.add Effect(kind: GainRuleEffect,
+        gainerId: choice.creatureId, gainedRule: rule.rule)
+  true
+
+method text*(rule: LoseRule, card: Card): string =
+  ## "A minion loses Ranged.", "All enemy minions lose Ranged."
+  rule.what.text(card).capitalizeAscii() &
+    (if rule.what.plural: " lose " else: " loses ") &
+    rule.rule.grantText(card) & "."
+
+method choices*(rule: LoseRule, card: Card,
+    context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: LoseRule): seq[Target] =
+  rule.what.picks()
+
+method intent*(rule: LoseRule): TargetIntent = KeywordIntent
+
+method run*(rule: LoseRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  for choice in selection.chosen:
+    if choice.kind == CreatureChoice:
+      context.effects.add Effect(kind: LoseRuleEffect,
+        loserId: choice.creatureId, lostRule: rule.rule)
+  true
+
+method text*(rule: StealRule, card: Card): string =
+  ## "Gain control of an enemy minion."
+  "Gain control of " & rule.what.text(card) & "."
+
+method choices*(rule: StealRule, card: Card,
+    context: RuleContext): seq[Choice] =
+  discard card
+  rule.what.candidates(context)
+
+method targets*(rule: StealRule): seq[Target] =
+  rule.what.picks()
+
+method intent*(rule: StealRule): TargetIntent = StealIntent
+
+method run*(rule: StealRule, card: Card, context: var RuleContext): bool =
+  discard card
+  let selection = rule.what.resolve(context, rule.vfx)
+  if not selection.ok:
+    return false
+  for choice in selection.chosen:
+    if choice.kind == CreatureChoice:
+      context.effects.add Effect(kind: StealEffect,
+        stolenId: choice.creatureId, thief: context.sourcePlayer)
   true
 
 method text*(rule: DamagePlayerRule, card: Card): string =
@@ -1492,6 +1587,10 @@ method targets*(rule: ChooseRule): seq[Target] =
 
 method run*(rule: ChooseRule, card: Card, context: var RuleContext): bool =
   let option = OptionTarget(count: rule.options.len).choose(context)
+  if option.isNoTarget and context.allowNoTarget:
+    # A trigger's choice may be declined, as its targets may: no branch
+    # runs, and the rest of its rules still do.
+    return true
   if option.kind != OptionChoice or option.option notin 0 ..< rule.options.len:
     return false
   card.runRules(rule.options[option.option], context)
@@ -1537,6 +1636,13 @@ proc choose*(options: varargs[Rules]): Rule =
   doAssert options.len > 1, "choose: offer at least two options"
   ChooseRule(options: @options)
 
+proc choose*(options: varargs[Rule]): Rule =
+  ## `choose(draw(1), damage(1, target(...)))`: branches of one rule each.
+  var branches: seq[Rules]
+  for option in options:
+    branches.add @[option]
+  choose(branches)
+
 proc addPowerToughness*(
     power, toughness: RuleValue[int],
     what: Selection,
@@ -1563,9 +1669,25 @@ proc destroy*(what: Selection, vfx = NoVfx): Rule =
   ## `destroy(target({Minion}))`: straight to the discard pile.
   DestroyRule(what: what, vfx: vfx)
 
-proc lose*(keyword: KeywordRule, what: Selection, vfx = NoVfx): Rule =
-  ## `lose(ranged(), target({Minion}))`: permanent while on the board.
-  LoseKeywordRule(keyword: keyword.keyword, what: what, vfx: vfx)
+proc gain*(rule: Rule, what: Selection, vfx = NoVfx): Rule =
+  ## `gain(ranged(), target({Minion}))`, `gain(hidden(1), ...)`,
+  ## `gain(on(eachTurn(You), draw(1)), ...)`: the card gains the rule while
+  ## it stays in play. It takes hold at once: `hidden(1)` hides it until the
+  ## start of its owner's next turn, and a trigger fires from then on. A
+  ## rule that only runs on play (`damage(...)`) never gets to.
+  GainRule(rule: rule, what: what, vfx: vfx)
+
+proc steal*(what: Selection, vfx = NoVfx): Rule =
+  ## `steal(target({kind: {Minion}, owner: AllOpponents}))`: you control it
+  ## from now on, at the end of your board, and it can't attack until your
+  ## next turn. Bounced or slain, it goes to its owner's hand or pile.
+  StealRule(what: what, vfx: vfx)
+
+proc lose*(rule: Rule, what: Selection, vfx = NoVfx): Rule =
+  ## `lose(ranged(), target({Minion}))`: the card loses every rule that
+  ## prints the same while it stays in play; `lose(hidden(), ...)` ends any
+  ## hiding, however long.
+  LoseRule(rule: rule, what: what, vfx: vfx)
 
 method text*(rule: DestroyCardRule, card: Card): string =
   "Destroy " & rule.card.text(card) & "."
@@ -1782,10 +1904,13 @@ proc on*(trigger: Trigger, rules: varargs[Rule]): Rule =
   ## the rules resolve when the trigger fires, for the card's owner.
   OnRule(trigger: trigger, rules: @rules)
 
-proc triggers*(card: Card): seq[OnRule] =
-  for rule in card.rules:
+proc triggers*(rules: Rules): seq[OnRule] =
+  for rule in rules:
     if rule of OnRule:
       result.add OnRule(rule)
+
+proc triggers*(card: Card): seq[OnRule] =
+  card.rules.triggers()
 
 method text*(rule: SummonRule, card: Card): string =
   ## "Summon 2 Footsoldiers.", "Summon a Footsoldier for your opponent.",
@@ -1955,11 +2080,14 @@ const OffClassCost* = 3
   ## What a card of another class costs on top of its printed cost, before
   ## the hero's levels in that class bring it down.
 
-proc levels*(card: Card, heroClass: HeroClass): int =
-  ## How far this card raises a hero in `heroClass`: 0 for most cards.
-  for rule in card.rules:
+proc levels*(rules: Rules, heroClass: HeroClass): int =
+  ## How far these rules raise a hero in `heroClass`: 0 for most cards.
+  for rule in rules:
     if rule of LevelUpRule and LevelUpRule(rule).heroClass == heroClass:
       result += LevelUpRule(rule).levels
+
+proc levels*(card: Card, heroClass: HeroClass): int =
+  card.rules.levels(heroClass)
 
 proc levelUpClass*(card: Card): Option[HeroClass] =
   ## The class a class card teaches, for its visual.
@@ -1975,17 +2103,52 @@ proc extraCost*(card: Card, heroClass: HeroClass, levels: int): int =
     return 0
   max(0, OffClassCost - levels)
 
-proc hiddenTurns*(card: Card): int =
-  ## How long the card is hidden once in play: 0 when it never is,
-  ## `Always` when it always is, else that many of its owner's turns.
-  for rule in card.rules:
+proc hiddenTurns*(rules: Rules): int =
+  ## How long a card with these rules is hidden once in play: 0 when it
+  ## never is, `Always` when it always is, else that many of its owner's
+  ## turns.
+  for rule in rules:
     if rule of HiddenRule:
       return HiddenRule(rule).turns
 
-proc keywords*(card: Card): set[Keyword] =
-  for rule in card.rules:
+proc hiddenTurns*(card: Card): int =
+  card.rules.hiddenTurns()
+
+proc keywords*(rules: Rules): set[Keyword] =
+  for rule in rules:
     if rule of KeywordRule:
       result.incl KeywordRule(rule).keyword
+
+proc keywords*(card: Card): set[Keyword] =
+  card.rules.keywords()
+
+method subrules*(rule: Rule): Rules {.base, gcsafe.} =
+  ## The rules written inside this one, for walking a card's rule tree.
+  discard
+
+method subrules*(rule: OnRule): Rules = rule.rules
+
+method subrules*(rule: ChooseRule): Rules =
+  for option in rule.options:
+    result.add option
+
+method subrules*(rule: GainRule): Rules = @[rule.rule]
+
+method subrules*(rule: LoseRule): Rules = @[rule.rule]
+
+proc ruleTree*(rules: Rules): Rules =
+  ## Every rule written in these, each before the ones inside it.
+  for rule in rules:
+    result.add rule
+    result.add rule.subrules().ruleTree()
+
+method sameAs*(rule, other: Rule): bool {.base, gcsafe.} =
+  ## Whether `lose(other)` takes this rule away: the two print the same.
+  rule.text(Card()) == other.text(Card())
+
+method sameAs*(rule: HiddenRule, other: Rule): bool =
+  ## Losing Hidden ends it whatever its count.
+  other of HiddenRule
 
 proc picks(rule: Rule): seq[Target] =
   ## The rule's targets that make a new choice: `getTarget` reuses one.

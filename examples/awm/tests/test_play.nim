@@ -2,7 +2,8 @@
 ## is in the middle of doing, with no window and no scene.
 import std/[options, unittest]
 import vmath
-import ../src/play, ../src/core/sim, ../src/scene/table
+import ../src/play, ../src/core/[bots, sim], ../src/scene/table,
+  ../src/vfx/vfxrenderer
 
 let twoWays = Card(name: "Two Ways", energyCost: 0, kind: Spell,
   rules: rules(choose(
@@ -84,3 +85,34 @@ suite "offering a card's options":
     check play.pendingPicks.len == 0
     check game.players[player].hand.len == 1
     check game.players[player].energy == game.players[player].totalEnergy
+
+suite "the end of a match":
+  test "a lethal attack finishes its lunge and the table settles":
+    var game = newGame(Warrior, Mage, 11)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[enemy].life = 3
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCardNamed("Bear"), currentToughness: 2, canAttack: true)]
+    game.nextMinionId = 2
+    var
+      play = initTablePlay(1)
+      clock = initBotClock()
+      time = 0'f32
+    play.resetTable()
+    play.startAttack(game, flatTable(), @[1], heroChoice(enemy))
+    for _ in 0 ..< 600:
+      let dt = 1'f32 / 60
+      time += dt
+      play.animations.advanceAnimations(dt)
+      play.discardFlights.advanceAnimations(dt)
+      play.activeVfx.advance(dt)
+      discard play.updateBots(game, flatTable(), [nil.BotVm, nil.BotVm],
+        clock, proc(): bool = true, dt)
+      play.presentVisualEvents(game, flatTable(), time)
+    check game.gameOver
+    check game.winner == me
+    # The duel shows the result only once the lunge is over and all is still.
+    check not play.attackActive
+    check play.presentationIdle(game)

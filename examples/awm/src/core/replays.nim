@@ -1,6 +1,6 @@
 ## AWM's action-only replay format, on Polyworld's shared tape.
 ##
-## A replay holds the match setup (seed and classes), the public match
+## A replay holds the match setup (seed, classes and decks), the public match
 ## config, every accepted game action, and one canonical state hash per
 ## tick. A tick is one action: a card played, an attack, a discard or
 ## trigger answered, or a turn ended. It never stores bot source or the
@@ -17,7 +17,7 @@ const
   ReplayFormatVersion* = 1'u16
   ## This client supports only this gameplay version. Bump it when rules
   ## change. Older replays use their archived client.
-  ReplayGameVersion* = 2'u16
+  ReplayGameVersion* = 3'u16
 
   MaxReplayActions* = 1_000_000
   MaxReplayHashes* = 1_000_000
@@ -37,9 +37,15 @@ type
     owner*, creatureId*: int32
     option*: int32  ## Which branch of a `choose` rule the player picked.
 
+  ReplayDeckCard* = object
+    name*: string
+    copies*: int32
+
   Setup* = object
     seed*: int32
     classes*: seq[uint8]  ## One HeroClass ordinal per seat, in seat order.
+    decks*: seq[seq[ReplayDeckCard]]
+      ## One per seat, in seat order; empty when the seat had no legal deck.
     maximumTicks*: uint32
 
   ReplayAction* = object
@@ -114,6 +120,38 @@ proc heroClasses*(setup: Setup): seq[HeroClass] =
       fail("replay setup names an unknown class")
     result.add HeroClass(value)
 
+proc matchSetup*(seats: openArray[Seat], seed: int32,
+    maxTicks: uint32): Setup =
+  ## The setup that deals these seats again.
+  result = Setup(seed: seed, maximumTicks: maxTicks)
+  for seat in seats:
+    result.classes.add seat.heroClass.ord.uint8
+    var deck: seq[ReplayDeckCard]
+    for (name, copies) in seat.deck:
+      deck.add ReplayDeckCard(name: name, copies: copies.int32)
+    result.decks.add deck
+
+proc seats*(setup: Setup): seq[Seat] =
+  ## The recorded seats, for `newGame`.
+  let classes = setup.heroClasses()
+  if setup.decks.len != classes.len:
+    fail("replay setup needs one deck per player")
+  for player, heroClass in classes:
+    var seat = Seat(heroClass: heroClass)
+    for card in setup.decks[player]:
+      try:
+        discard baseCardNamed(card.name)
+      except ValueError:
+        fail("replay deck names an unknown card")
+      if card.copies < 1:
+        fail("replay deck lists a card without copies")
+      seat.deck.add (card.name, card.copies.int)
+    result.add seat
+
+proc newGame*(setup: Setup): GameState =
+  ## The recorded match before its first action.
+  newGame(setup.seats, setup.seed.int64)
+
 proc initReplayRecorder*(setup: Setup, config: GameConfig): ReplayRecorder =
   ## An in-memory recorder for one match; `config` is its public record.
   result = initTapeRecorder[Setup, ReplayAction](setup,
@@ -140,7 +178,7 @@ proc validate*(data: ReplayData) =
   let setup = data.header.setup
   if setup.classes.len notin 2 .. MaxPlayers:
     fail("replay setup has an unsupported player count")
-  discard setup.heroClasses()
+  discard setup.seats()
   data.config.validateConfig(setup.classes.len)
   if data.hashes.len > MaxReplayHashes or data.actions.len > MaxReplayActions:
     fail("replay is too long")

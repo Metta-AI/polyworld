@@ -2,7 +2,7 @@
 import std/[os, random, sequtils, unittest]
 import ../src/core/[sim, bots, match, replays]
 
-const BaseBot = staticRead("../players/base.bas")
+const ArcherBot = staticRead("../players/archer.bas")
 
 proc classesFor(seats: int, seed: int64): seq[HeroClass] =
   var rng = initRand(seed)
@@ -11,22 +11,19 @@ proc classesFor(seats: int, seed: int64): seq[HeroClass] =
 
 proc recordMatch(seats: int, seed: int32, sources: seq[string],
     maxTicks = 28_800'u32): (BotMatch, ReplayData) =
-  let classes = classesFor(seats, seed)
-  var setup = Setup(seed: seed, maximumTicks: maxTicks)
-  for heroClass in classes:
-    setup.classes.add heroClass.ord.uint8
-  let recorder = initReplayRecorder(setup,
-    GameConfig(seed: seed, maxTicks: maxTicks.int32,
-      players: unnamedPlayers(seats)))
-  var match = initBotMatch(classes, seed, loadBots(sources), maxTicks,
+  let
+    seated = classesFor(seats, seed).mapIt(precon(it))
+    recorder = initReplayRecorder(matchSetup(seated, seed, maxTicks),
+      GameConfig(seed: seed, maxTicks: maxTicks.int32,
+        players: unnamedPlayers(seats)))
+  var match = initBotMatch(seated, seed, loadBots(sources), maxTicks,
     recorder)
   match.run()
   (match, recorder.data)
 
 proc replayHashes(data: ReplayData): GameState =
   ## Plays a replay back, checking every tick's hash.
-  result = newGame(data.header.setup.heroClasses,
-    data.header.setup.seed.int64)
+  result = newGame(data.header.setup)
   for action in data.actions:
     check result.applyAction(action)
     discard result.takeVisualEvents()
@@ -36,7 +33,7 @@ suite "bot matches":
   test "every roster size finishes with one winner and replays exactly":
     for seats in 2 .. MaxPlayers:
       let (played, data) = recordMatch(seats, int32(40 + seats),
-        newSeq[string](seats).mapIt(BaseBot))
+        newSeq[string](seats).mapIt(ArcherBot))
       check played.outcome == MatchWon
       check played.scores.len == seats
       check played.scores[played.game.winner] == 1
@@ -46,7 +43,7 @@ suite "bot matches":
       check replayed.winner == played.game.winner
 
   test "a replay survives the file round trip":
-    let (_, data) = recordMatch(3, 7, @[BaseBot, BaseBot, BaseBot])
+    let (_, data) = recordMatch(3, 7, @[ArcherBot, ArcherBot, ArcherBot])
     let path = getTempDir() / "awm-test.replay"
     saveReplay(path, data)
     let loaded = loadReplay(path)
@@ -62,7 +59,7 @@ suite "bot matches":
     discard data.replayHashes()
 
   test "the tick limit ends a match as a timeout":
-    let (played, data) = recordMatch(4, 5, newSeq[string](4).mapIt(BaseBot),
+    let (played, data) = recordMatch(4, 5, newSeq[string](4).mapIt(ArcherBot),
       maxTicks = 12)
     check played.outcome == MatchTimedOut
     check played.scores == @[0, 0, 0, 0]

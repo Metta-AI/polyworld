@@ -22,6 +22,9 @@ when PostLayerControls:
 type
   App* = ref object
     options*: SessionOptions
+    humanSeat*: Option[Seat]
+      ## The class and deck the human brought with `--human PATH.bas`;
+      ## without one they choose a class and play its precon.
     appDir*: string  ## The project folder: players/, the atlas, screenshots.
     window*: Window
     sk*: Silky
@@ -36,6 +39,17 @@ type
     idleClips*: array[HeroSeats, array[HeroClass, int]]
     deathClips*: array[HeroSeats, array[HeroClass, int]]
     replay*: Replayer  ## Set when watching a recorded match.
+
+const DefaultBots* = ["archer.bas", "warrior.bas", "mage.bas",
+    "archer_warrior.bas"]
+  ## The reference bots in players/, one per precon, for seats no --bot
+  ## fills.
+
+proc defaultBotSources*(appDir: string): seq[string] =
+  for name in DefaultBots:
+    let path = appDir / "players" / name
+    if fileExists(path):
+      result.add readFile(path)
 
 proc polyworldRoot(): string =
   var candidates: seq[string]
@@ -99,7 +113,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
   let
     cardAssets = artworkRoot() / "cards"
     atlasPath = appDir / "awm.atlas.png"
-    atlasBuilder = newHudAtlas(5120)
+    atlasBuilder = newHudAtlas(5632)
   initCardAssets(cardAssets)
   atlasBuilder.addBaseCardImages()
   atlasBuilder.addAwmHudAssets(cardAssets)

@@ -39,6 +39,8 @@ type
     rngInitialized: bool
     selectingClass: bool
     selectedClass: int
+    deck: DeckList  ## The `deckCard` calls of the last setup, in order.
+    deckProblems*: seq[string]  ## Why the last setup's deck is illegal.
     action*: ReplayAction  ## The action explicitly selected this decision.
     playedHand*: int  ## The hand card the last decision played, or -1.
     playedChoices*: seq[Choice]  ## Its targets, one per step, in order.
@@ -259,6 +261,21 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
         activeVm.selectedClass = args[0].int
         result = 1
   discard result.addFunction("pickClass", 1, pickClassProc, 3)
+
+  let deckCardProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Adds copies of a base-set card to the deck before the match is
+    ## dealt. Returns 1 when the name is a card; the deck is checked whole
+    ## once setup ends.
+    result = 0'i32
+    if activeVm.selectingClass:
+      let name = activeVm.runtime.getString(args[0])
+      activeVm.deck.add (name, args[1].asInt.int)
+      try:
+        discard baseCardNamed(name)
+        result = 1'i32
+      except ValueError:
+        discard
+  discard result.addFunction("deckCard", 2, deckCardProc, 8)
 
   let playerClassProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns a public player value for any seat.
@@ -1110,8 +1127,11 @@ proc runDecision*(vm: BotVm, game: var GameState,
   of ActionEndTurn: BotEndedTurn
   else: BotFailed
 
-proc chooseClass*(vm: BotVm, seats: int, seed = 0'i64): HeroClass =
-  ## Runs the script's pre-match phase before cards are dealt.
+proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64): Seat =
+  ## Runs the script's pre-match phase before cards are dealt: it picks a
+  ## class and lists a deck. An illegal deck still seats the bot, with no
+  ## deck, so it is out before the first turn; `deckProblems` and the
+  ## script's output say why.
   if vm == nil or vm.failed:
     raise newException(BasicError,
       if vm == nil: "Cannot select class for a missing bot"
@@ -1122,6 +1142,8 @@ proc chooseClass*(vm: BotVm, seats: int, seed = 0'i64): HeroClass =
   vm.seedBot(seed)
   vm.selectingClass = true
   vm.selectedClass = -1
+  vm.deck.setLen(0)
+  vm.deckProblems.setLen(0)
   vm.action = ReplayAction()
   activeGame = addr setup
   activePlayer = vm.player.int32
@@ -1142,7 +1164,14 @@ proc chooseClass*(vm: BotVm, seats: int, seed = 0'i64): HeroClass =
     if vm.selectedClass == -1:
       raise newException(BasicError,
         "BASIC setup selected no class; call pickClass(0, 1 or 2)")
-    result = HeroClass(vm.selectedClass)
+    result = Seat(heroClass: HeroClass(vm.selectedClass))
+    vm.deckProblems = vm.deck.deckProblems()
+    if vm.deckProblems.len == 0:
+      result.deck = vm.deck
+    elif vm.output != nil:
+      for problem in vm.deckProblems:
+        vm.output(PrintEvent(kind: TextPrint,
+          text: "Illegal deck: " & problem & "\n"))
   except BasicError as error:
     vm.lastError = error.msg
     raise
@@ -1151,8 +1180,7 @@ proc chooseClass*(vm: BotVm, seats: int, seed = 0'i64): HeroClass =
     activeGame = nil
     activeVm = nil
 
-proc chooseBotClasses*(bots: openArray[BotVm],
-    seed = 0'i64): seq[HeroClass] =
-  ## Collects each script's explicit class before starting a bot match.
+proc setupBotSeats*(bots: openArray[BotVm], seed = 0'i64): seq[Seat] =
+  ## Each script's class and deck, before starting a bot match.
   for bot in bots:
-    result.add bot.chooseClass(bots.len, seed)
+    result.add bot.setupSeat(bots.len, seed)

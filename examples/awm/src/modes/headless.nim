@@ -9,25 +9,19 @@ when defined(coworld):
   import jsony
   import polyworld/coworld
 
-proc seatClasses*(names: openArray[string], seats: int): seq[HeroClass] =
-  ## Parses an explicit class override with one entry per seat.
+proc seatClasses*(names: openArray[string], seats: int): seq[Seat] =
+  ## Parses an explicit class override with one entry per seat. Each seat
+  ## plays its class's precon, whatever deck its script lists.
   if names.len != seats:
     raise newException(ValueError, "classes must name one class per player")
   for name in names:
-    result.add parseHeroClass(name)
-
-proc matchSetup*(classes: openArray[HeroClass], seed: int32,
-    maxTicks: int32): Setup =
-  result = Setup(seed: seed, maximumTicks: maxTicks.uint32)
-  for heroClass in classes:
-    result.classes.add heroClass.ord.uint8
+    result.add precon(parseHeroClass(name))
 
 proc checkReplay*(path: string) =
   ## Plays a replay back with no window and requires every hash to match.
   let data = loadReplay(path)
   var
-    game = newGame(data.header.setup.heroClasses,
-      data.header.setup.seed.int64)
+    game = newGame(data.header.setup)
     check: ReplayHashCheck
     tick = 0'u32
   for action in data.actions:
@@ -78,14 +72,17 @@ proc runHeadless*() =
       players.add PlayerConfig(name: group.path.extractFilename)
   let
     bots = loadBots(sources)
-    classes =
+    seated =
       if classNames.len > 0: seatClasses(classNames, seats)
-      else: chooseBotClasses(bots, options.seed.int64)
+      else: setupBotSeats(bots, options.seed.int64)
     recorder = initReplayRecorder(
-      matchSetup(classes, options.seed, options.maximumTicks),
+      matchSetup(seated, options.seed, options.maximumTicks.uint32),
       GameConfig(players: players, seed: options.seed,
         maxTicks: options.maximumTicks))
-  var played = initBotMatch(classes, options.seed.int64, bots,
+  for player, bot in bots:
+    for problem in bot.deckProblems:
+      echo "player ", player, " illegal deck: ", problem
+  var played = initBotMatch(seated, options.seed.int64, bots,
     options.maximumTicks.uint32, recorder)
   played.scriptError = proc(player: int, message: string) =
     echo "player ", player, " BASIC error: ", message
@@ -121,22 +118,24 @@ when defined(coworld):
         policy = loadPlayerPolicy(readPlayerSource(group.path), slot)
         program = compilePlayer(policy.source, botSchema(), botLimits(), slot)
       vms.add newBotVm(program, slot.int32, playerPrinter(slot))
-    let classes =
+    let seated =
       if names.len > 0:
         try: seatClasses(names, seats)
         except ValueError as error:
           raise newException(CoworldError, error.msg)
       else:
-        var selected: seq[HeroClass]
+        # A script's illegal deck is in its own log; the seat starts out.
+        var selected: seq[Seat]
         for slot, vm in vms:
           try:
-            selected.add vm.chooseClass(seats, options.seed.int64)
+            selected.add vm.setupSeat(seats, options.seed.int64)
           except BasicError as error:
             rejectPlayer(slot, error.msg)
         selected
     let recorder = initReplayRecorder(
-      matchSetup(classes, options.seed, options.maximumTicks), coworld.config)
-    var played = initBotMatch(classes, options.seed.int64, vms,
+      matchSetup(seated, options.seed, options.maximumTicks.uint32),
+      coworld.config)
+    var played = initBotMatch(seated, options.seed.int64, vms,
       options.maximumTicks.uint32, recorder)
     played.scriptError = proc(player: int, message: string) =
       # A failed decision stops the match without substituting an action.

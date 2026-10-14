@@ -1,13 +1,18 @@
 import
-  std/[options, sequtils],
+  std/[options, sequtils, strutils],
   ../src/core/[bots, match, replays, sim]
 
-const BaseBot = staticRead("../players/base.bas")
+const
+  ArcherBot = staticRead("../players/archer.bas")
+  WarriorBot = staticRead("../players/warrior.bas")
+  MageBot = staticRead("../players/mage.bas")
+  ArcherWarriorBot = staticRead("../players/archer_warrior.bas")
+  ReferenceBots = [ArcherBot, WarriorBot, MageBot, ArcherWarriorBot]
 
 proc fixture(seed: int64): BotMatch =
   ## Gives the reference script a deterministic four-seat test match.
   result = initBotMatch(@[Mage, Mage, Mage, Mage], seed,
-    loadBots(newSeqWith(4, BaseBot)), 28_800)
+    loadBots(newSeqWith(4, ArcherBot)), 28_800)
   result.game.currentPlayer = 0
   result.game.players[0].hand.setLen(0)
   result.game.players[0].energy = 9
@@ -20,17 +25,29 @@ proc ready(owner, id: int, name: string): MinionState =
     currentToughness: (if card.kind == Minion: card.toughness else: 0),
     canAttack: true)
 
-echo "The reference script randomly selects all three classes reproducibly"
+echo "The reference players list legal decks: the precons and a multiclass one"
 block:
-  var selected: set[HeroClass]
-  for seed in 0 ..< 32:
+  let seats = loadBots(ReferenceBots).setupBotSeats()
+  doAssert seats[0] == precon(Archer)
+  doAssert seats[1] == precon(Warrior)
+  doAssert seats[2] == precon(Mage)
+  doAssert seats[3].heroClass == Archer
+  for seat in seats:
+    doAssert seat.deck.deckProblems.len == 0
+  let splash = seats[3].deck.buildDeck()
+  doAssert splash.anyIt(it.class == some(Warrior))
+  doAssert splash.anyIt(it.levelUpClass == some(Warrior))
+
+echo "The reference players play alike and differ only in their setup"
+block:
+  proc play(source: string): string =
+    ## The script without its title and its setup.
     let
-      first = loadBots(newSeqWith(4, BaseBot)).chooseBotClasses(seed)
-      second = loadBots(newSeqWith(4, BaseBot)).chooseBotClasses(seed)
-    doAssert first == second
-    for heroClass in first:
-      selected.incl heroClass
-  doAssert selected == {Archer, Warrior, Mage}
+      start = source.find("IF selectingClass THEN")
+      finish = source.find("END IF\n", start) + "END IF\n".len
+    source[source.find("'\n") ..< start] & source[finish .. ^1]
+  for bot in ReferenceBots:
+    doAssert bot.play == ArcherBot.play
 
 echo "The reference script takes the swing worth the most"
 block:
@@ -198,6 +215,18 @@ block:
   let action = played.bots[0].action
   doAssert action.kind == ActionPlayCard
   doAssert action.choices[0].toChoice == optionChoice(1)
+
+echo "The reference script steals the biggest threat"
+block:
+  var played = fixture(16)
+  played.game.players[0].hand = @[baseCardNamed("Control")]
+  played.game.players[1].board = @[ready(1, 1, "Footsoldier"), ready(1, 2, "Bear")]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == creatureChoice(1, 2)
+  doAssert played.game.players[0].board[^1].id == 2
 
 echo "The reference script discards what it can use least"
 block:

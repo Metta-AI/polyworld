@@ -19,7 +19,8 @@ const
   PowerBox* = Rect(x: 85, y: 757, w: 54, h: 61)
   ToughnessBox* = Rect(x: 503, y: 757, w: 54, h: 61)
   StatMargin* = 10'f32  ## Room around a stat box for glyph overhang.
-  # The type line ("MINION"), restated over a live minion that lost keywords.
+  # The type line ("MINION"), restated over a live minion whose keywords
+  # changed.
   TypeLine* = Rect(x: 109, y: 532, w: 382, h: 32)
   # The cost crystal, top right. A card of another class shows its
   # surcharge outside it, which moves the cost one slot to the left; both
@@ -163,17 +164,34 @@ proc renderStat*(value: int, ink: StatInk, slot: StatSlot): Image =
   result.drawStat(value, ink,
     Rect(x: StatMargin, y: StatMargin, w: box.w, h: box.h))
 
-proc renderLostKeywords*(lost: set[Keyword]): Image =
-  ## The minion type line with the keywords it lost ("MINION · LOST
-  ## RANGED"), cut from the frame so it covers the printed line exactly.
+type
+  KeywordLine* = object
+    ## How a live minion's keywords differ from its printed ones.
+    added*, lost*: set[Keyword]
+
+proc changed*(line: KeywordLine): bool =
+  line.added.len > 0 or line.lost.len > 0
+
+proc renderKeywordLine*(line: KeywordLine): Image =
+  ## The minion type line with the keywords it gained and lost ("MINION ·
+  ## RANGED", "MINION · LOST RANGED"), cut from the frame so it covers the
+  ## printed line exactly. Green for gains, red once anything is lost.
   ensureAssets()
   result = assetImage("frames/creature.svg").subImage(int(TypeLine.x),
     int(TypeLine.y), int(TypeLine.w), int(TypeLine.h))
-  var names: seq[string]
-  for keyword in lost:
-    names.add ($keyword).toUpperAscii()
-  result.drawText("MINION · LOST " & names.join(", "), 0, 0, TypeLine.w,
-    TypeLine.h, 31, LoweredStat.color, true, minimumSize = 18)
+  proc names(keywords: set[Keyword]): string =
+    var parts: seq[string]
+    for keyword in keywords:
+      parts.add ($keyword).toUpperAscii()
+    parts.join(", ")
+  var text = "MINION"
+  if line.added.len > 0:
+    text.add " · " & line.added.names
+  if line.lost.len > 0:
+    text.add " · LOST " & line.lost.names
+  result.drawText(text, 0, 0, TypeLine.w, TypeLine.h, 31,
+    (if line.lost.len > 0: LoweredStat else: RaisedStat).color, true,
+    minimumSize = 18)
 
 proc renderSurcharge(extra: int): Image =
   ## The off-class surcharge: a purple crystal reading "+2".

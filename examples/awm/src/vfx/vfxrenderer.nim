@@ -297,7 +297,7 @@ proc newVfx*(kind: VfxKind, target: Choice, position: Vec3, seed: int): ActiveVf
       of StabVfx: 0.6'f32
       # Presentation cues the table draws itself, not particle effects.
       of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
-          HeroDeathVfx, LevelUpVfx: 0.0'f32)
+          HeroDeathVfx, LevelUpVfx, StealVfx: 0.0'f32)
 
 proc advance*(effects: var seq[ActiveVfx], dt: float32) =
   for effect in effects.mitems:
@@ -649,7 +649,7 @@ proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
       renderer.addBillboard(effect.position, 1.2'f32 + t * 0.8'f32, eye,
         vec4(1, 0.025, 0.05, (1 - t) * 0.38'f32), 4)
     of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
-        HeroDeathVfx, LevelUpVfx: discard
+        HeroDeathVfx, LevelUpVfx, StealVfx: discard
 
 proc draw*(renderer: var VfxRenderer, viewProjection: Mat4,
     additive = true, depthTest = true) =

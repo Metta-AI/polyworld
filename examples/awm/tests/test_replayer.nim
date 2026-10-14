@@ -8,19 +8,18 @@ import
   ../src/scene/table,
   ../src/vfx/vfxrenderer
 
-const BaseBot = staticRead("../players/base.bas")
+const ArcherBot = staticRead("../players/archer.bas")
 
 proc recordedGame(): ReplayData =
   ## Records a deterministic five seat match with real bot actions.
   let
     classes = @[Warrior, Mage, Archer, Mage, Warrior]
-    setup = Setup(seed: 44, maximumTicks: 28_800,
-      classes: classes.mapIt(it.ord.uint8))
+    setup = matchSetup(classes.mapIt(precon(it)), 44, 28_800)
     recorder = initReplayRecorder(setup,
       GameConfig(seed: setup.seed, maxTicks: setup.maximumTicks.int32,
         players: unnamedPlayers(classes.len)))
   var match = initBotMatch(classes, setup.seed,
-    loadBots(newSeqWith(classes.len, BaseBot)), setup.maximumTicks, recorder)
+    loadBots(newSeqWith(classes.len, ArcherBot)), setup.maximumTicks, recorder)
   match.run()
   doAssert match.outcome == MatchWon
   recorder.data

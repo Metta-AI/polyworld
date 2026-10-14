@@ -42,7 +42,7 @@ proc classes*(replayer: Replayer): seq[HeroClass] =
 
 proc newReplayGame*(replayer: Replayer): GameState =
   ## The recorded match before its first action.
-  newGame(replayer.classes, replayer.data.header.setup.seed.int64)
+  newGame(replayer.data.header.setup)
 
 proc playerName*(replayer: Replayer, player: int): string =
   ## Returns the recorded public name for this seat.

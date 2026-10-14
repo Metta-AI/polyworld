@@ -34,20 +34,52 @@ and `web/`.
 nim c src/awm.nim                            # builds ./awm
 ./awm                                        # bot vs bot, random classes
 ./awm --human --class warrior --opponent mage # play against a bot
+./awm --human players/archer_warrior.bas     # play that script's deck
 ./awm --seed 42                              # fixed deal
 ./awm --players=4 --human                    # multiplayer: you and 3 bots
 ```
 
 | Flag | Default |
 |---|---|
-| `--human` | off (bot vs bot) |
+| `--human [PATH.bas]` | off (bot vs bot) |
 | `--class CLASS` | `archer` |
 | `--opponent CLASS` | `mage` |
 | `--seed INTEGER` | `20260910` |
 | `--players INTEGER` | `2` |
-| `--bot PATH` | `players/base.bas` |
+| `--bot PATH` | the reference players in `players/` |
 
-Bot vs bot ignores `--class`/`--opponent` and picks randomly.
+Bot vs bot ignores `--class`/`--opponent`: each script picks its own class
+and deck. `--human` alone puts up the class selection screen, and you play
+the chosen class's precon; `--human PATH.bas` skips it and plays the class
+and deck that script's setup lists (only its setup runs).
+
+`players/` holds four reference players that play alike and differ only in
+their setup: `archer.bas`, `warrior.bas` and `mage.bas` play the precons, and
+`archer_warrior.bas` an Archer deck with Warrior cards and Warrior class
+cards. Without `--bot`, a duel's bots are drawn from them and a multiplayer
+match seats them in turn.
+
+### Decks
+
+A bot script lists its deck in its setup, after picking a class:
+
+```basic
+IF selectingClass THEN
+  pickClass(0)            ' Archer
+  deckCard("Bolt", 4)
+  deckCard("Sniper", 4)
+  ' ... 40 cards in all
+  END
+END IF
+```
+
+A deck is exactly 40 base-set cards, by printed name, with 1 to 4 copies of
+each; the class cards (Archer, Warrior, Mage) take any number. A card listed
+twice counts its copies together. A seat whose deck breaks these rules sits
+down with its class and no deck, and is out before the first turn; the
+problems are printed (in Coworld, to the player's private log). The precons
+in `baseDeckLists` follow the same rules, checked at startup.
+Replays record every seat's deck.
 
 Hero Select presents the animated Polyworld characters on stone podiums,
 with class banners, lanterns and the battlefield's starry sky and materials.
@@ -59,7 +91,7 @@ selection screen is used for duels and multiplayer; bot selection stays automati
 a small circular center surrounded by one modular balcony per player. Each
 balcony has its own hero, deck, cards in play, discard pile and hand. The
 camera fits all balconies in the view. With `--human` you pick your class on
-screen and play seat 1; bots with random classes play the others, and the last
+screen (or bring a deck) and play seat 1; bots play the others, and the last
 player alive wins. Without it, bots play every seat. Omitting `--players`, or
 using `--players=2`, keeps the existing two-player game. Counts below two and
 invalid counts are rejected. F8 toggles the same screen effects as the game.
@@ -189,20 +221,22 @@ coworld build --project ../../coworld/awm --version VERSION
 ```
 
 The config takes `players` and `tokens` (2 to 7 each), `seed`, `max_ticks`,
-and an optional `classes` array (one of `archer`, `warrior`, `mage` per seat;
-otherwise drawn from the seed). One tick is one game action. The winner
+and an optional `classes` array (one of `archer`, `warrior`, `mage` per seat,
+each playing its precon; otherwise every script picks its class and deck). One tick is one game action. The winner
 scores 1, everyone else 0; a draw or a timeout scores 0 for all.
 
 ### Headless matches and replays
 
 ```sh
 nim c -d:headless -o:build/awm-headless src/awm.nim
-./build/awm-headless --bot players/base.bas:5 --seed 9 --record build/m.replay
+./build/awm-headless --bot players/archer.bas:3 --bot players/warrior.bas:2 \
+  --seed 9 --record build/m.replay
 ./build/awm-headless --replay build/m.replay  # checks every tick's hash
 ./awm --replay build/m.replay                 # watch it on the table
 ```
 
-`--classes archer,mage,...` fixes the classes and `--ticks N` limits the
+`--classes archer,mage,...` fixes the classes (each seat then plays its
+class's precon) and `--ticks N` limits the
 match. The replay viewer has the shared Polyworld transport: play/pause
 (Space), step, seek, loop and 1x-16x speed. Its browser build is
 `AWM_WEB_DIR=build/replay ./tools/build_web.sh -d:replayViewer`; open
@@ -219,8 +253,8 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 
 ## Rules
 
-- Choose Archer, Warrior, or Mage.
-- 20 life, 40-card class deck, 5-card opening hand.
+- Choose Archer, Warrior, or Mage, and a 40-card deck (see Decks).
+- 20 life, 5-card opening hand.
 - Random first player; first player skips their turn draw.
 - Each turn: +1 max energy, full replenish, draw one card.
 - Minions attack once per turn, starting the turn after they're played:
@@ -231,8 +265,16 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   attacking or defending. Spells and on-play effects still damage them.
 - Power/toughness buffs are permanent while the minion stays on the board;
   a bounced minion returns to hand with its printed stats. Changed stats
-  show green (raised) or red (lowered) on the card. Lost keywords are
-  permanent the same way, and show on the card's type line.
+  show green (raised) or red (lowered) on the card.
+- `gain(rule, ...)` gives a card in play any rule, and `lose(rule, ...)`
+  takes away every rule of its own that prints the same; both last while it
+  stays in play. A gained rule takes hold at once: `hidden(1)` hides the
+  minion until the start of its owner's next turn (a longer hiding stands),
+  and a gained trigger fires from then on. A gained on-play rule never runs.
+  Losing `hidden()` ends any hiding. Gaining a rule back undoes its loss.
+  Gained and lost keywords show on the card's type line (green "MINION ·
+  RANGED", red "MINION · LOST RANGED"); other gained rules don't show on
+  the face yet.
 - Summoned minions enter at the right of their owner's board. Like played
   minions they attack from their owner's next turn, and their own on-play
   rules don't run. A card's later rules reach them (Rally buffs its own
@@ -252,13 +294,18 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   Warrior, Mage) belong to no class, cost nothing, and stay in play as
   trinkets: each one you control takes 1 off the surcharge on cards of the
   class it names, and announces itself with that class's icon beside your
-  hero. No deck carries them yet.
+  hero. The `archer_warrior.bas` deck carries Warrior class cards.
 - A hidden minion (Ambusher, Spirit) can't be attacked. `hidden(2)` lasts
   until the start of its owner's second turn from now, counting down as
   their turns begin; `hidden()` lasts as long as the minion is in play.
   Spells and other card effects still reach it, it attacks as usual, and
   attacking doesn't reveal it. Its owner sees it normally; everyone else
   sees it in shadow.
+- `steal` (Control) takes a minion for good: it moves to the end of your
+  board with its damage, buffs and gained or lost rules, and attacks from
+  your next turn, like a minion just played. Its triggers fire for you. It
+  is still its owner's card: bounced, it goes to their hand, and slain, to
+  their discard pile. Stolen back by its owner, it is simply theirs again.
 - `repeat` (Reload) runs another card in play's printed rules again. Its
   targets are picked afresh, and anything the rules aim at their own card
   (`self()`) finds nothing and does nothing. Picking no card cancels.
@@ -268,43 +315,48 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 - A card that offers a choice (Overcharge) asks for it first: the table
   dims and shows one card per branch, each printing that branch alone.
   Click one to take it, or cancel with the button, a click off the cards,
-  or a right-click. The branch's own targets are aimed afterwards, as
+  or a right-click. A trigger's choice (Morphosis Chamber) can't be
+  canceled: canceling declines it, so no branch runs and the rest of the
+  trigger still does. The branch's own targets are aimed afterwards, as
   usual. Bots weigh a branch by what it deals against what it costs their
   own hero, and never take one that would finish them off.
 - No victory condition yet.
 
-| Class | Card | Copies | Cost | Type | Stats | Effect |
+| Class | Card | In precon | Cost | Type | Stats | Effect |
 |---|---|---|---|---|---|---|
-| — | Archer | — | 0 | Trinket | — | Off-class Archer cards cost 1 less (in no deck yet) |
-| — | Warrior | — | 0 | Trinket | — | Off-class Warrior cards cost 1 less (in no deck yet) |
-| — | Mage | — | 0 | Trinket | — | Off-class Mage cards cost 1 less (in no deck yet) |
-| Archer | Bolt | 7 | 1 | Spell | — | 2 damage to either hero |
-| Archer | Sniper | 7 | 2 | Minion | 2/1 | Ranged |
-| Archer | Sharpshooter | 5 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
+| — | Archer | — | 0 | Trinket | — | Off-class Archer cards cost 1 less |
+| — | Warrior | — | 0 | Trinket | — | Off-class Warrior cards cost 1 less |
+| — | Mage | — | 0 | Trinket | — | Off-class Mage cards cost 1 less |
+| Archer | Bolt | 4 | 1 | Spell | — | 2 damage to either hero |
+| Archer | Sniper | 4 | 2 | Minion | 2/1 | Ranged |
+| Archer | Sharpshooter | 4 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
 | Archer | Hail of Arrows | 4 | 3 | Spell | — | 1 damage to all enemy minions |
 | Archer | Overcharge | 4 | 3 | Spell | — | Choose: 1 damage to a minion and its owner; or 3 damage to a minion, its owner and yourself |
-| Archer | Explode | 3 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
-| Archer | Ambusher | 2 | 3 | Minion | 2/2 | Hidden 1 |
-| Archer | Assassin | 2 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
+| Archer | Explode | 4 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
+| Archer | Ambusher | 4 | 3 | Minion | 2/2 | Hidden 1 |
+| Archer | Assassin | 4 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
 | Archer | Reload | 4 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
-| Archer | Wildfire | 2 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
-| Warrior | Bear | 7 | 2 | Minion | 3/2 | — |
+| Archer | Wildfire | 4 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
+| Warrior | Bear | 4 | 2 | Minion | 3/2 | — |
 | Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
 | Warrior | Shields | 4 | 1 | Spell | — | Friendly minions get +0/+1 permanently |
 | Warrior | Duel | 4 | 2 | Spell | — | A minion gets +1/+1, a minion loses Ranged, then they fight |
 | Warrior | Tactician | 4 | 2 | Minion | 1/2 | A minion gets -1/-0 permanently |
-| Warrior | Footsoldier | 5 | 1 | Minion | 1/2 | — |
+| Warrior | Footsoldier | 4 | 1 | Minion | 1/2 | — |
 | Warrior | Commander | 4 | 5 | Minion | 2/3 | Summons 2 Footsoldiers |
-| Warrior | Rally | 2 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
-| Warrior | Banner | 3 | 3 | Trinket | — | At the start of each of your turns, summon a Footsoldier |
-| Warrior | Pillage | 3 | 4 | Spell | — | Destroy a trinket, then choose: friendly minions get +1/+0, or +0/+1 |
-| Mage | Bouncer | 12 | 1 | Minion | 1/1 | Return a minion to owner's hand |
+| Warrior | Rally | 4 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
+| Warrior | Banner | 4 | 3 | Trinket | — | At the start of each of your turns, summon a Footsoldier |
+| Warrior | Pillage | 4 | 4 | Spell | — | Destroy a trinket, then choose: friendly minions get +1/+0, or +0/+1 |
+| Mage | Bouncer | 4 | 1 | Minion | 1/1 | Return a minion to owner's hand |
 | Mage | Spirit | 4 | 3 | Minion | 1/3 | Hidden; Ranged |
-| Mage | Summon Primordial | 2 | 8 | Spell | — | Return all cards a hero controls to their owner's hand, then summon a Primordial |
+| Mage | Summon Primordial | 4 | 8 | Spell | — | Return all cards a hero controls to their owner's hand, then summon a Primordial |
 | Mage | Primordial | — | 8 | Minion | 10/10 | — (only summoned, by Summon Primordial) |
-| Mage | Study | 7 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
-| Mage | Plan | 7 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
+| Mage | Study | 4 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
+| Mage | Plan | 4 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
 | Mage | Oozification | 4 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
 | Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |
 | Mage | Bubble Shield | 4 | 2 | Spell | — | Summon 2 Bubbles |
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
+| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a minion gains Ranged; a minion gains Hidden 1; give a minion +1/-1; or give a minion -1/+1 |
+| Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
+| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card, return a minion to its owner's hand and deal 3 damage to yourself |

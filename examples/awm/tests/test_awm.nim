@@ -13,26 +13,21 @@ proc leads(game: var GameState, heroClass: HeroClass): int =
   game.currentPlayer
 
 suite "AWM base set":
-  test "the Mage deck is Bouncers and Oozifications, without Oozes":
+  test "the Mage deck is four of every Mage card, without the summoned ones":
     check DeckSize == 40
     let deck = Mage.baseDeck()
     check deck.len == DeckSize
-    var bouncers, oozifications, plans, studies, summons, shields, spirits: int
+    for name in ["Bouncer", "Spirit", "Plan", "Study", "Summon Primordial",
+        "Bubble Shield", "Oozification", "Morphosis Chamber", "Overwork",
+        "Control"]:
+      var count = 0
+      for card in deck:
+        if card.name == name: inc count
+      check count == 4
     for card in deck:
-      check card.class == some(Mage)
-      if card == baseCard("bouncer-1"): inc bouncers
-      elif card == baseCard("oozification-4"): inc oozifications
-      elif card == baseCard("plan-3"): inc plans
-      elif card == baseCard("study-2"): inc studies
-      elif card == baseCard("summon-primordial-8"): inc summons
-      elif card == baseCard("bubble-shield-2"): inc shields
-      elif card == baseCard("spirit-3"): inc spirits
+      check card.class == some(Mage) or card.isClassCard
       # Summoned-only cards never sit in the deck.
-      check card != baseCard("bubble-0")
-      check card != baseCard("primordial-8")
-      check card != baseCard("ooze-0")
-    check (bouncers, oozifications, plans, studies, summons, shields,
-      spirits) == (12, 4, 7, 7, 2, 4, 4)
+      check card.name notin ["Bubble", "Primordial", "Ooze"]
 
   test "the Warrior deck is forty cards of every Warrior card":
     let deck = Warrior.baseDeck()
@@ -46,7 +41,7 @@ suite "AWM base set":
       counts.add count
     for card in deck:
       check card.class == some(Warrior)
-    check counts == @[7, 4, 4, 4, 4, 5, 4, 2, 3, 3]
+    check counts == @[4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
 
   test "the Archer deck is forty cards of every Archer card":
     let deck = Archer.baseDeck()
@@ -60,7 +55,7 @@ suite "AWM base set":
       for index, id in ids:
         if card == baseCard(id):
           inc counts[index]
-    check counts == [7, 7, 5, 4, 4, 3, 2, 2, 4, 2]
+    check counts == [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
 
   test "Bolt is a targeted two-damage spell":
     let bolt = Archer.classCard()
@@ -1943,12 +1938,15 @@ suite "AWM class cards and off-class costs":
     check announced == 1
 
   test "a deck list may name cards of another class":
-    # Decks are unchanged, but the builder no longer insists on one class.
+    let splash = @[("Bolt", 4), ("Bear", 4), ("Warrior", 32)]
+    check splash.deckProblems().len == 0
+    check splash.buildDeck().len == DeckSize
+    # The precons keep to their class, plus class cards of no class.
     for heroClass in HeroClass:
       let deck = heroClass.baseDeck()
       check deck.len == DeckSize
       for card in deck:
-        check card.class == some(heroClass)
+        check card.class == some(heroClass) or card.isClassCard
 
 suite "AWM option faces":
   test "every branch a card offers has a face of its own":
@@ -2674,3 +2672,328 @@ suite "AWM attack triggers and Bubble Shield":
     check not game.minionLocation(50).found
     # The attacker is gone, so the whole trigger fizzles: no draw either.
     check game.players[me].hand.len == hand
+
+suite "AWM gain and lose, Morphosis Chamber and Overwork":
+  proc ownerTurn(game: var GameState, me: int) =
+    ## Passes turns until `me` begins one, firing its turn-start triggers.
+    game.finishTurn()
+    while game.currentPlayer != me:
+      game.finishTurn()
+
+  proc chamberGame(seed: int64): (GameState, int, int) =
+    ## A Mage with Morphosis Chamber in play, a Bear each, at its next turn.
+    var game = newGame(Mage, Warrior, seed)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].board = @[
+      MinionState(id: 1, owner: me, card: baseCardNamed("Morphosis Chamber"),
+        enteredTurn: game.turnNumber),
+      readyMinion(me, 2, baseCardNamed("Bear"))]
+    game.players[enemy].board = @[readyMinion(enemy, 3, baseCardNamed("Bear"))]
+    game.nextMinionId = 4
+    game.ownerTurn(me)
+    (game, me, enemy)
+
+  test "the new cards read as rules text":
+    let chamber = baseCardNamed("Morphosis Chamber")
+    check chamber.kind == Trinket and chamber.class == some(Mage)
+    check chamber.ruleText() == "At the start of each of your turns, " &
+      "choose:\n- A minion gains Ranged.\n- A minion gains Hidden 1.\n" &
+      "- Give a minion +1/-1.\n- Give a minion -1/+1."
+    check baseCardNamed("Overwork").ruleText() ==
+      "At the start of each of your turns, draw 1 card, return a minion to " &
+      "its owner's hand and deal 3 damage to yourself."
+    check Card(kind: Spell, rules: rules(gain(on(eachTurn(You), draw(1)),
+      target({kind: {Minion}})))).ruleText() ==
+      "A minion gains \"At the start of each of your turns, draw 1 card.\"."
+    check Card(kind: Spell, rules: rules(lose(hidden(),
+      target({kind: {Minion}})))).ruleText() == "A minion loses Hidden."
+
+  test "Morphosis Chamber asks for a branch, then its target":
+    var (game, me, enemy) = chamberGame(3101)
+    check game.waitingTrigger
+    check game.actingPlayer() == me
+    # Like any trigger's pick, the branch may also be declined.
+    check game.triggerChoices() == @[optionChoice(0), optionChoice(1),
+      optionChoice(2), optionChoice(3), NoTarget]
+    check game.resolvePendingTrigger(@[optionChoice(0), creatureChoice(enemy, 3)])
+    let bear = game.players[enemy].board[0]
+    check bear.hasKeyword(Ranged)
+    check bear.addedKeywords == {Ranged}
+    check bear.lostKeywords == {}
+    check bear.card == baseCardNamed("Bear")
+    check game.choiceLabel(creatureChoice(enemy, 3)).endsWith("(3/2, Ranged)")
+
+  test "a gained Ranged takes no damage back from a minion without it":
+    var (game, me, enemy) = chamberGame(3103)
+    check game.resolvePendingTrigger(@[optionChoice(0), creatureChoice(me, 2)])
+    check game.attack(2, creatureChoice(enemy, 3))
+    check not game.minionLocation(3).found
+    check game.players[me].board[1].currentToughness == 2
+
+  test "a gained Hidden 1 lasts until the start of its owner's next turn":
+    var (game, me, enemy) = chamberGame(3105)
+    check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(me, 2)])
+    check game.players[me].board[1].hiddenTurns == 1
+    game.finishTurn()
+    check game.currentPlayer == enemy
+    check creatureChoice(me, 2) notin game.attackTargets(3)
+    game.finishTurn()
+    check game.players[me].board[1].hiddenTurns == 0
+    # A longer hiding stands: Spirit stays hidden for good.
+    game.players[me].board.add readyMinion(me, 4, baseCardNamed("Spirit"))
+    game.players[me].board[2].hiddenTurns = Always
+    game.nextMinionId = 5
+    check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(me, 4)])
+    check game.players[me].board[2].hiddenTurns == Always
+
+  test "+1/-1 can kill, -1/+1 never lowers power below 0":
+    var (game, me, enemy) = chamberGame(3107)
+    game.players[enemy].board.add readyMinion(enemy, 4, baseCardNamed("Sniper"))
+    game.nextMinionId = 5
+    check game.resolvePendingTrigger(@[optionChoice(2), creatureChoice(enemy, 4)])
+    check not game.minionLocation(4).found
+    game.ownerTurn(me)
+    check game.resolvePendingTrigger(@[optionChoice(3), creatureChoice(enemy, 3)])
+    check game.players[enemy].board[0].power == 2
+    check game.players[enemy].board[0].currentToughness == 3
+
+  test "a trigger's choice may be declined, and the rest still resolves":
+    var (game, me, enemy) = chamberGame(3108)
+    check game.resolvePendingTrigger(@[NoTarget])
+    check not game.waitingTrigger
+    check game.players[enemy].board[0].addedKeywords == {}
+    # Declining skips only the choice: the trigger's other rules run.
+    let fickle = Card(name: "Fickle", energyCost: 0, kind: Trinket,
+      class: some(Mage), rules: rules(on(eachTurn(You), draw(1),
+        choose(draw(1), damage(1, target({kind: {Minion}}))))))
+    game.players[me].board.add MinionState(id: 4, owner: me, card: fickle,
+      enteredTurn: game.turnNumber)
+    game.nextMinionId = 5
+    game.ownerTurn(me)
+    check game.resolvePendingTrigger(@[NoTarget])  # Morphosis Chamber's.
+    let hand = game.players[me].hand.len
+    check game.resolvePendingTrigger(@[NoTarget])  # Fickle's.
+    check game.players[me].hand.len == hand + 1
+    # A spell's choice is still all or nothing: declining it plays nothing.
+    game.players[me].hand = @[baseCardNamed("Overcharge")]
+    game.players[me].energy = 10
+    check not game.playCard(0, @[NoTarget])
+    check game.players[me].hand.len == 1
+
+  test "a minion with nothing to aim at still takes the branch":
+    var (game, me, enemy) = chamberGame(3109)
+    game.players[me].board.setLen(1)
+    game.players[enemy].board.setLen(0)
+    check game.resolvePendingTrigger(@[optionChoice(0), NoTarget])
+    check not game.waitingTrigger
+
+  test "gaining a keyword back undoes its loss, and losing undoes a gain":
+    let
+      strip = Card(name: "Strip", energyCost: 0, kind: Spell, class: some(Mage),
+        rules: rules(lose(ranged(), target({kind: {Minion}}))))
+      grant = Card(name: "Grant", energyCost: 0, kind: Spell, class: some(Mage),
+        rules: rules(gain(ranged(), target({kind: {Minion}}))))
+    var game = newGame(Mage, Warrior, 3111)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[enemy].board = @[readyMinion(enemy, 1, baseCardNamed("Sniper")),
+      readyMinion(enemy, 2, baseCardNamed("Bear"))]
+    game.nextMinionId = 3
+    game.players[me].hand = @[strip, grant, strip, grant]
+    check game.playCard(0, @[creatureChoice(enemy, 1)])
+    check game.players[enemy].board[0].lostKeywords == {Ranged}
+    check game.playCard(0, @[creatureChoice(enemy, 1)])
+    check game.players[enemy].board[0].hasKeyword(Ranged)
+    check game.players[enemy].board[0].lostRules.len == 0
+    # Ranged was printed, so gaining it adds no second copy.
+    check game.players[enemy].board[0].gainedRules.len == 0
+    check game.playCard(1, @[creatureChoice(enemy, 2)])
+    check game.players[enemy].board[1].addedKeywords == {Ranged}
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    check not game.players[enemy].board[1].hasKeyword(Ranged)
+    check game.players[enemy].board[1].addedKeywords == {}
+    check game.players[enemy].board[1].lostKeywords == {}
+
+  test "any rule can be gained and lost: a trigger fires while held":
+    let
+      blessing = on(eachTurn(You), draw(1))
+      bless = Card(name: "Bless", energyCost: 0, kind: Spell, class: some(Mage),
+        rules: rules(gain(blessing, target({kind: {Minion}}))))
+      curse = Card(name: "Curse", energyCost: 0, kind: Spell, class: some(Mage),
+        rules: rules(lose(on(eachTurn(You), draw(1)),
+          target({kind: {Minion}}))))
+    var game = newGame(Mage, Warrior, 3113)
+    let me = game.leads(Mage)
+    game.players[me].board = @[readyMinion(me, 1, baseCardNamed("Bear"))]
+    game.nextMinionId = 2
+    game.players[me].hand = @[bless, curse]
+    check game.playCard(0, @[creatureChoice(me, 1)])
+    check game.players[me].board[0].liveRules == @[blessing]
+    var hand = game.players[me].hand.len
+    game.ownerTurn(me)
+    check game.players[me].hand.len == hand + 2  # Its draw and the Bear's.
+    # Losing a rule that prints the same takes it away.
+    check game.playCard(0, @[creatureChoice(me, 1)])
+    check game.players[me].board[0].liveRules.len == 0
+    hand = game.players[me].hand.len
+    game.ownerTurn(me)
+    check game.players[me].hand.len == hand + 1
+
+  test "losing Hidden ends any hiding, and a class card can lose its level":
+    let
+      reveal = Card(name: "Reveal", energyCost: 0, kind: Spell,
+        class: some(Warrior), rules: rules(lose(hidden(),
+          target({kind: {Minion, Trinket}}))))
+      unlearn = Card(name: "Unlearn", energyCost: 0, kind: Spell,
+        class: some(Warrior), rules: rules(lose(levelUp(1, Archer),
+          target({kind: {Minion, Trinket}}))))
+    var game = newGame(Warrior, Mage, 3115)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    game.players[enemy].board = @[readyMinion(enemy, 1, baseCardNamed("Spirit")),
+      MinionState(id: 2, owner: enemy, card: baseCardNamed("Archer"))]
+    game.players[enemy].board[0].hiddenTurns = Always
+    game.players[me].board = @[readyMinion(me, 3, baseCardNamed("Bear"))]
+    game.nextMinionId = 4
+    check game.levels(enemy, Archer) == 1
+    game.players[me].hand = @[reveal, unlearn]
+    check game.playCard(0, @[creatureChoice(enemy, 1)])
+    check game.players[enemy].board[0].hiddenTurns == 0
+    check creatureChoice(enemy, 1) in game.attackTargets(3)
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    check game.levels(enemy, Archer) == 0
+
+  test "Overwork draws, bounces and burns its owner each turn":
+    var game = newGame(Mage, Warrior, 3117)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCardNamed("Overwork"), enteredTurn: game.turnNumber)]
+    game.players[enemy].board = @[readyMinion(enemy, 2, baseCardNamed("Bear"))]
+    game.nextMinionId = 3
+    let
+      hand = game.players[me].hand.len
+      enemyHand = game.players[enemy].hand.len
+    game.ownerTurn(me)
+    check game.waitingTrigger
+    check game.resolvePendingTrigger(@[creatureChoice(enemy, 2)])
+    check game.players[enemy].board.len == 0
+    check game.players[enemy].hand.len == enemyHand + 2  # Its draw and the Bear.
+    check game.players[me].hand.len == hand + 2
+    check game.players[me].life == StartingLife - 3
+    # With no minion to return, the rest still happens on its own.
+    game.ownerTurn(me)
+    check not game.waitingTrigger
+    check game.players[me].hand.len == hand + 4
+    check game.players[me].life == StartingLife - 6
+
+suite "AWM steal and Control":
+  proc controlGame(seed: int64): (GameState, int, int) =
+    ## A Mage with Control in hand, and a wounded, buffed enemy Bear.
+    var game = newGame(Mage, Warrior, seed)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].hand = @[baseCardNamed("Control")]
+    game.players[me].energy = 5
+    game.players[me].board = @[readyMinion(me, 1, baseCardNamed("Footsoldier"))]
+    game.players[enemy].board = @[readyMinion(enemy, 2, baseCardNamed("Bear")),
+      readyMinion(enemy, 3, baseCardNamed("Sniper"))]
+    game.players[enemy].board[0].currentToughness = 1
+    game.players[enemy].board[0].bonusPower = 1
+    game.nextMinionId = 4
+    (game, me, enemy)
+
+  test "Control reads as rules text and aims at enemy minions only":
+    let control = baseCardNamed("Control")
+    check control.kind == Spell and control.energyCost == 5
+    check control.ruleText() == "Gain control of an enemy minion."
+    check control.intent(0) == StealIntent
+    var (game, me, enemy) = controlGame(4001)
+    check game.availableChoices(0) ==
+      @[creatureChoice(enemy, 2), creatureChoice(enemy, 3)]
+    # With nothing to take, it can't be cast and costs nothing.
+    game.players[enemy].board.setLen(0)
+    check game.availableChoices(0).len == 0
+    check not game.playCard(0, @[NoTarget])
+    check game.players[me].energy == 5
+
+  test "a stolen minion joins your board as it was, and waits a turn":
+    var (game, me, enemy) = controlGame(4003)
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    check game.players[enemy].board.len == 1
+    check game.players[me].board.len == 2
+    let bear = game.players[me].board[1]
+    check bear.id == 2 and bear.owner == me
+    check bear.stolenFrom == some(enemy)
+    check bear.home == enemy
+    check bear.currentToughness == 1 and bear.power == 4
+    check game.attackTargets(2).len == 0
+    var stolen = false
+    for event in game.visualEvents:
+      if event.kind == StealVfx:
+        stolen = true
+        check event.target == creatureChoice(me, 2)
+        check event.fromPlayer == enemy
+        check event.boardIndex == 0
+    check stolen
+    game.finishTurn()
+    game.finishTurn()
+    check creatureChoice(enemy, 3) in game.attackTargets(2)
+
+  test "bounced or slain, a stolen minion goes back to its owner":
+    var (game, me, enemy) = controlGame(4005)
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    let enemyHand = game.players[enemy].hand.len
+    game.players[me].hand = @[baseCardNamed("Bouncer")]
+    game.players[me].energy = 1
+    check game.playCard(0, @[creatureChoice(me, 2)])
+    check game.players[enemy].hand.len == enemyHand + 1
+    check game.players[enemy].hand[^1] == baseCardNamed("Bear")
+    for event in game.visualEvents:
+      if event.kind == BounceVfx:
+        check event.home == some(enemy)
+    # A slain one goes to its owner's discard pile.
+    var (other, mine, theirs) = controlGame(4007)
+    check other.playCard(0, @[creatureChoice(theirs, 2)])
+    let pile = other.players[theirs].discardPile.len
+    other.players[mine].hand = @[baseCardNamed("Bolt")]
+    other.players[mine].hand = @[Card(name: "Zap", energyCost: 0, kind: Spell,
+      class: some(Mage), rules: rules(damage(1, target({kind: {Minion}}))))]
+    check other.playCard(0, @[creatureChoice(mine, 2)])
+    check other.players[theirs].discardPile.len == pile + 1
+    check other.players[theirs].discardPile[^1] == baseCardNamed("Bear")
+
+  test "stolen back by its owner, it is simply theirs again":
+    var (game, me, enemy) = controlGame(4009)
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    let grab = Card(name: "Grab", energyCost: 0, kind: Spell,
+      class: some(Warrior),
+      rules: rules(steal(target({kind: {Minion}, owner: AllOpponents}))))
+    game.finishTurn()
+    check game.currentPlayer == enemy
+    game.players[enemy].hand = @[grab]
+    check game.playCard(0, @[creatureChoice(me, 2)])
+    let bear = game.players[enemy].board[^1]
+    check bear.id == 2 and bear.owner == enemy
+    check bear.stolenFrom == none(int)
+
+  test "a stolen minion's triggers fire for its new controller":
+    let drummer = Card(name: "Drummer", energyCost: 0, kind: Minion,
+      class: some(Warrior), rules: rules(on(eachTurn(You), draw(1))),
+      power: 1, toughness: 1)
+    var (game, me, enemy) = controlGame(4011)
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: drummer, currentToughness: 1, enteredTurn: 0)]
+    check game.playCard(0, @[creatureChoice(enemy, 2)])
+    let enemyHand = game.players[enemy].hand.len
+    game.finishTurn()
+    check game.players[enemy].hand.len == enemyHand + 1  # Its own draw only.
+    let hand = game.players[me].hand.len
+    game.finishTurn()
+    check game.players[me].hand.len == hand + 2

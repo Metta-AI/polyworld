@@ -138,11 +138,16 @@ proc episode(
   for slot, fixture in scripts:
     let source =
       if game == "awm" and selectClass:
-        "IF selectingClass THEN\npickClass(selfPlayer MOD 3)\nEND\n" &
-          "END IF\n" &
+        # A reference player's setup picks the class and deck, then the
+        # fixture, then the reference player's play.
+        let
+          reference = readFile(Root / "examples/awm/players" /
+            (if slot mod 2 == 0: "archer.bas" else: "warrior.bas"))
+          setupStart = reference.find("IF selectingClass THEN")
+          setupEnd = reference.find("END IF\n", setupStart) + "END IF\n".len
+        reference[setupStart ..< setupEnd] &
           fixture.splitLines().filterIt(it.strip() != "END").join("\n") &
-          "\n" &
-          readFile(Root / "examples/awm/players/base.bas")
+          "\n" & reference
       else:
         fixture
     let path = directory / ("player-" & $slot)
