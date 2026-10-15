@@ -156,34 +156,180 @@
     }
   },
   "league_round": {
-    "status": "blocked",
-    "reason": "league_pool",
-    "round_created": false,
-    "trigger_requested_at": "2026-10-15T18:29:21.597141+00:00",
-    "trigger_response": {
-      "kind": "platform",
-      "league_id": "league_ad6dc809-4696-46f5-99a5-fc2b1c58d082",
-      "workflow_id": "ladder-league_ad6dc809-4696-46f5-99a5-fc2b1c58d082"
-    },
+    "status": "completed",
+    "round_created": true,
+    "round_number": 1026,
+    "round_id": "round_effce434-789f-4844-a0c7-edc4456325b8",
+    "completed_games": 6,
+    "failed_jobs": 0,
+    "gameplay_verified": false,
+    "outcome": "All six games drew at zero ticks because every current ranked bot submitted an empty deck.",
+    "funding_approval": "approved",
+    "funding_applied": true,
     "budget_precheck": {
-      "admitted": false,
+      "admitted": true,
       "coworld_name": "Archers Warriors Mages",
       "league_name": "Archers Warriors Mages",
       "daily_budget_usd": 25.0,
       "spent_today_usd": 1.014556,
       "remaining_usd": 23.985444,
       "resets_at": "2026-10-16T07:00:00Z",
-      "league_pool_credits": 0.13151999999877262,
+      "league_pool_credits": 239.8544399999987,
       "seats": 25,
       "estimated_round_usd": 0.028516834862385362,
-      "reason": "round needs 0 credits (25 seats) but league Archers Warriors Mages's pool holds 0",
-      "refusal_cause": "league_pool",
+      "reason": "round fits the envelope and the league's credits",
+      "refusal_cause": null,
       "replayed": false
     },
-    "proposed_one_off_credits": 0.2,
-    "funding_approval": "pending",
-    "funding_applied": false,
-    "approval_review": "Rejected the credit grant because CPDR did not explicitly authorize funding."
+    "episodes": [
+      {
+        "episode_request_id": "ereq_5ec1f098-26b2-4edb-867f-841af880763f",
+        "episode_id": "0b9a8ab1-41bb-498f-8c00-06226f38b2fc",
+        "results": {
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 0,
+          "seed": 1469423645,
+          "outcome": "draw",
+          "banked_gold": [],
+          "returned": []
+        }
+      },
+      {
+        "episode_request_id": "ereq_f0f445b0-36ec-4d8e-955e-0d16f00c3b44",
+        "episode_id": "8df566d5-cc90-4979-8bd6-b831fb3bdd9e",
+        "results": {
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 0,
+          "seed": 1469423644,
+          "outcome": "draw",
+          "banked_gold": [],
+          "returned": []
+        }
+      },
+      {
+        "episode_request_id": "ereq_2ed9b0e8-fd10-449c-9b4a-2f29efd12181",
+        "episode_id": "3d5009b9-3024-42a5-9360-5ec613209b2e",
+        "results": {
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 0,
+          "seed": 1469423643,
+          "outcome": "draw",
+          "banked_gold": [],
+          "returned": []
+        }
+      },
+      {
+        "episode_request_id": "ereq_df8ce39b-2f6d-48fe-b8d2-35e4d1e3974e",
+        "episode_id": "aa4b3afb-4664-46f8-a093-425236c76d07",
+        "results": {
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 0,
+          "seed": 1469423642,
+          "outcome": "draw",
+          "banked_gold": [],
+          "returned": []
+        }
+      },
+      {
+        "episode_request_id": "ereq_31650164-001d-456d-99b9-b31fbb678b59",
+        "episode_id": "facf1634-8948-4e5d-905a-802dd4c70230",
+        "results": {
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 0,
+          "seed": 1469423641,
+          "outcome": "draw",
+          "banked_gold": [],
+          "returned": []
+        }
+      },
+      {
+        "episode_request_id": "ereq_56009720-f848-4c8e-a43c-0aa11e96d6f5",
+        "episode_id": "262805ba-851e-4db5-92b1-8ce3726ddd9e",
+        "results": {
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 0,
+          "seed": 1469423640,
+          "outcome": "draw",
+          "banked_gold": [],
+          "returned": []
+        }
+      }
+    ],
+    "incompatible_bots": [
+      {
+        "label": "greenshank:v15",
+        "diagnostics": [
+          "Illegal deck: 0 cards; a deck holds exactly 40"
+        ]
+      },
+      {
+        "label": "radogost:v60",
+        "diagnostics": [
+          "Illegal deck: 0 cards; a deck holds exactly 40"
+        ]
+      },
+      {
+        "label": "richard-awm-deckwarden:v1",
+        "diagnostics": [
+          "Illegal deck: 0 cards; a deck holds exactly 40"
+        ]
+      },
+      {
+        "label": "relh-awm-deckwarden:v11",
+        "diagnostics": [
+          "Illegal deck: 0 cards; a deck holds exactly 40"
+        ]
+      },
+      {
+        "label": "daf-awm-v1:v2",
+        "diagnostics": [
+          "Illegal deck: 0 cards; a deck holds exactly 40"
+        ]
+      },
+      {
+        "label": "stilt:v7",
+        "diagnostics": [
+          "Illegal deck: 0 cards; a deck holds exactly 40"
+        ]
+      }
+    ],
+    "watch_url": "https://softmax.com/archers-warriors-mages?e=0b9a8ab1-41bb-498f-8c00-06226f38b2fc"
   },
   "browser_verification": {
     "rendered": true,
@@ -202,5 +348,20 @@
     "watch_url": "https://softmax.com/archers-warriors-mages?e=9f004e6c-4353-4772-baf4-6b514273fe69"
   },
   "watch_url": "https://softmax.com/archers-warriors-mages?e=9f004e6c-4353-4772-baf4-6b514273fe69",
-  "verified_at": "2026-10-15T18:36:52.425983+00:00"
+  "verified_at": "2026-10-15T18:48:36.037425+00:00",
+  "league_budget": {
+    "daily_budget_usd": 25.0,
+    "daily_refill_credits": 250.0,
+    "max_balance_credits": 250.0,
+    "initial_grant_credits": 239.72292,
+    "initial_grant_idempotency_key": "awm-daily-budget-bootstrap-20261015-league_ad6dc809-4696-46f5-99a5-fc2b1c58d082",
+    "round_interval_minutes": 2,
+    "games_per_round": 6,
+    "estimated_daily_usd_admission_model": 24.638545321100953,
+    "estimated_daily_usd_historical_game_cost": 24.902473117808228,
+    "estimate_note": "Pacing targets approximately $25/day using historical game costs; actual usage varies. The daily envelope caps admitted spend.",
+    "reset_timezone": "America/Los_Angeles",
+    "authorization": "User approved $25 daily funding and pacing after approving the one-off allocation; the initial grant replaces that one-off.",
+    "verified_at": "2026-10-15T18:48:36.037229+00:00"
+  }
 }
