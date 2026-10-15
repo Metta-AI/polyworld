@@ -242,16 +242,16 @@
     },
     "players": [
       {
-        "player_id": "baseline"
+        "player_id": "archer"
       },
       {
-        "player_id": "baseline"
+        "player_id": "warrior"
       },
       {
-        "player_id": "baseline"
+        "player_id": "mage"
       },
       {
-        "player_id": "baseline"
+        "player_id": "archer-warrior"
       }
     ]
   }
