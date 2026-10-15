@@ -284,7 +284,6 @@ let mage = [
     rules: rules(
       on(eachTurn(You),
         draw(1),
-        bounce(target({kind: {Minion}}), vfx = BubbleVfx),
         damage(3, You, vfx = ExplosionVfx)
       )
     )

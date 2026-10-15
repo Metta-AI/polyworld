@@ -1,6 +1,6 @@
 import
   std/[options, strutils, unittest],
-  ../src/awm
+  ../src/awm, ../src/core/explanations
 
 proc leads(game: var GameState, heroClass: HeroClass): int =
   ## Hands the turn to the seat of that class and returns it. Card tests
@@ -1666,6 +1666,98 @@ suite "AWM triggers that choose targets":
     check game.actingPlayer() == me
     check game.eligibleAttackers().len == 0
 
+suite "AWM summoned cards' on-play rules":
+  proc summoning(card: Card, owner = toRuleValue(You)): Rule =
+    ## `summon(1, ...)` of a card outside the base set.
+    summon(1, RuleValue[Card](kind: FixedValue, fixed: card), owner)
+
+  let
+    herald = Card(name: "Herald", energyCost: 0, kind: Minion,
+      rules: rules(draw(1)), power: 1, toughness: 1)
+    archerling = Card(name: "Archerling", energyCost: 0, kind: Minion,
+      rules: rules(damage(1, target({kind: {Minion}}))), power: 1,
+      toughness: 1)
+
+  test "they run for the summoned card's owner, as if it had been played":
+    var game = newGame(Mage, Warrior, 1151)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+      mayfly = Card(name: "Mayfly", energyCost: 0, kind: Minion,
+        rules: rules(destroy(self())), power: 1, toughness: 1)
+    game.players[me].hand = @[
+      Card(name: "Call", energyCost: 0, kind: Spell,
+        rules: @[summoning(herald)]),
+      Card(name: "Gift", energyCost: 0, kind: Spell,
+        rules: @[summoning(herald, toRuleValue(AllOpponents))]),
+      Card(name: "Hatch", energyCost: 0, kind: Spell,
+        rules: @[summoning(mayfly)])]
+    let
+      mine = game.players[me].hand.len
+      theirs = game.players[enemy].hand.len
+    check game.playCard(0)
+    check game.players[me].hand.len == mine  # Call went; Herald drew one.
+    check game.playCard(0)
+    check game.players[enemy].hand.len == theirs + 1
+    check game.players[enemy].board[^1].card.name == "Herald"
+    # `self()` is the summoned card.
+    check game.players[me].hand[0].name == "Hatch"
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.players[me].discardPile[^1].name == "Mayfly"
+    check not game.waitingTrigger
+
+  test "a targeted one waits for its owner, who may pick no target":
+    var game = newGame(Mage, Warrior, 1153)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[enemy].board = @[readyMinion(enemy, 90, Warrior.classCard())]
+    game.nextMinionId = 91
+    game.players[me].hand = @[
+      Card(name: "Muster", energyCost: 0, kind: Spell,
+        rules: @[summoning(archerling)]),
+      Card(name: "Muster", energyCost: 0, kind: Spell,
+        rules: @[summoning(archerling)])]
+    check game.playCard(0)
+    check game.waitingTrigger
+    check game.actingPlayer() == me
+    check game.waitingTriggerName() == "Archerling's rule"
+    check game.waitingTriggerRules().rules == archerling.rules
+    check creatureChoice(enemy, 90) in game.triggerChoices()
+    check NoTarget in game.triggerChoices()
+    check not game.canPlay(0)
+    check game.resolvePendingTrigger(@[creatureChoice(enemy, 90)])
+    check game.players[enemy].board[0].currentToughness == 1
+    check game.playCard(0)
+    check game.resolvePendingTrigger(@[NoTarget])
+    check not game.waitingTrigger
+    check game.players[enemy].board[0].currentToughness == 1
+
+  test "they resolve after the card that summoned them":
+    # Sapper hits every minion for 1; Bolster's later +0/+1 lands first, so
+    # the Sapper survives its own blast.
+    let sapper = Card(name: "Sapper", energyCost: 0, kind: Minion,
+      rules: rules(damage(1, game.board.getCards({kind: {Minion}}))),
+      power: 1, toughness: 1)
+    var game = newGame(Warrior, Warrior, 1155)
+    let me = game.leads(Warrior)
+    game.players[me].hand = @[Card(name: "Bolster", energyCost: 0,
+      kind: Spell, rules: rules(summoning(sapper), addPowerToughness(0, 1,
+        game.board.getCards({kind: {Minion}, owner: You}))))]
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].currentToughness == 1
+
+  test "a summoned card with only triggers queues nothing":
+    var game = newGame(Mage, Warrior, 1157)
+    let me = game.leads(Mage)
+    game.players[me].hand = @[baseCardNamed("Bubble Shield")]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    check game.players[me].board.len == 2
+    check game.pendingTriggers.len == 0
+
 suite "AWM presentation beats":
   test "Oozification's Oozes come a beat after its splat and destroy":
     var game = newGame(Mage, Warrior, 1201)
@@ -2699,11 +2791,12 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     let chamber = baseCardNamed("Morphosis Chamber")
     check chamber.kind == Trinket and chamber.class == some(Mage)
     check chamber.ruleText() == "At the start of each of your turns, " &
-      "choose:\n- A minion gains Ranged.\n- A minion gains Hidden 1.\n" &
-      "- Give a minion +1/-1.\n- Give a minion -1/+1."
+      "choose:\n- A friendly minion gains Ranged.\n" &
+      "- A minion gains Hidden 1.\n" &
+      "- Give a friendly minion +1/-1.\n- Give a friendly minion -1/+1."
     check baseCardNamed("Overwork").ruleText() ==
-      "At the start of each of your turns, draw 1 card, return a minion to " &
-      "its owner's hand and deal 3 damage to yourself."
+      "At the start of each of your turns, draw 1 card and deal 3 damage " &
+      "to yourself."
     check Card(kind: Spell, rules: rules(gain(on(eachTurn(You), draw(1)),
       target({kind: {Minion}})))).ruleText() ==
       "A minion gains \"At the start of each of your turns, draw 1 card.\"."
@@ -2717,13 +2810,19 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     # Like any trigger's pick, the branch may also be declined.
     check game.triggerChoices() == @[optionChoice(0), optionChoice(1),
       optionChoice(2), optionChoice(3), NoTarget]
-    check game.resolvePendingTrigger(@[optionChoice(0), creatureChoice(enemy, 3)])
-    let bear = game.players[enemy].board[0]
+    # Ranged only goes on a friendly minion.
+    check game.triggerChoices(@[optionChoice(0)]) ==
+      @[creatureChoice(me, 2), NoTarget]
+    check not game.resolvePendingTrigger(
+      @[optionChoice(0), creatureChoice(enemy, 3)])
+    check game.resolvePendingTrigger(@[optionChoice(0), creatureChoice(me, 2)])
+    let bear = game.players[me].board[1]
     check bear.hasKeyword(Ranged)
     check bear.addedKeywords == {Ranged}
     check bear.lostKeywords == {}
     check bear.card == baseCardNamed("Bear")
-    check game.choiceLabel(creatureChoice(enemy, 3)).endsWith("(3/2, Ranged)")
+    check game.choiceLabel(creatureChoice(me, 2)).endsWith("(3/2, Ranged)")
+    check game.players[enemy].board[0].addedKeywords == {}
 
   test "a gained Ranged takes no damage back from a minion without it":
     var (game, me, enemy) = chamberGame(3103)
@@ -2748,16 +2847,23 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(me, 4)])
     check game.players[me].board[2].hiddenTurns == Always
 
-  test "+1/-1 can kill, -1/+1 never lowers power below 0":
+  test "the stat swaps reshape a friendly minion, and +1/-1 can kill it":
     var (game, me, enemy) = chamberGame(3107)
-    game.players[enemy].board.add readyMinion(enemy, 4, baseCardNamed("Sniper"))
+    game.players[me].board.add readyMinion(me, 4, baseCardNamed("Sniper"))
     game.nextMinionId = 5
-    check game.resolvePendingTrigger(@[optionChoice(2), creatureChoice(enemy, 4)])
+    # Not an enemy's: these are no longer removal.
+    check not game.resolvePendingTrigger(
+      @[optionChoice(2), creatureChoice(enemy, 3)])
+    check game.resolvePendingTrigger(@[optionChoice(2), creatureChoice(me, 4)])
     check not game.minionLocation(4).found
     game.ownerTurn(me)
-    check game.resolvePendingTrigger(@[optionChoice(3), creatureChoice(enemy, 3)])
-    check game.players[enemy].board[0].power == 2
-    check game.players[enemy].board[0].currentToughness == 3
+    check game.resolvePendingTrigger(@[optionChoice(3), creatureChoice(me, 2)])
+    check game.players[me].board[1].power == 2
+    check game.players[me].board[1].currentToughness == 3
+    # Hidden 1 may still go on any minion.
+    game.ownerTurn(me)
+    check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(enemy, 3)])
+    check game.players[enemy].board[0].hiddenTurns == 1
 
   test "a trigger's choice may be declined, and the rest still resolves":
     var (game, me, enemy) = chamberGame(3108)
@@ -2867,28 +2973,19 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check game.playCard(0, @[creatureChoice(enemy, 2)])
     check game.levels(enemy, Archer) == 0
 
-  test "Overwork draws, bounces and burns its owner each turn":
+  test "Overwork draws and burns its owner each turn":
     var game = newGame(Mage, Warrior, 3117)
-    let
-      me = game.leads(Mage)
-      enemy = 1 - me
+    let me = game.leads(Mage)
     game.players[me].board = @[MinionState(id: 1, owner: me,
       card: baseCardNamed("Overwork"), enteredTurn: game.turnNumber)]
-    game.players[enemy].board = @[readyMinion(enemy, 2, baseCardNamed("Bear"))]
-    game.nextMinionId = 3
-    let
-      hand = game.players[me].hand.len
-      enemyHand = game.players[enemy].hand.len
-    game.ownerTurn(me)
-    check game.waitingTrigger
-    check game.resolvePendingTrigger(@[creatureChoice(enemy, 2)])
-    check game.players[enemy].board.len == 0
-    check game.players[enemy].hand.len == enemyHand + 2  # Its draw and the Bear.
-    check game.players[me].hand.len == hand + 2
-    check game.players[me].life == StartingLife - 3
-    # With no minion to return, the rest still happens on its own.
+    game.nextMinionId = 2
+    let hand = game.players[me].hand.len
+    # It asks nothing: its turn draw and its own, then the burn.
     game.ownerTurn(me)
     check not game.waitingTrigger
+    check game.players[me].hand.len == hand + 2
+    check game.players[me].life == StartingLife - 3
+    game.ownerTurn(me)
     check game.players[me].hand.len == hand + 4
     check game.players[me].life == StartingLife - 6
 
@@ -2997,3 +3094,37 @@ suite "AWM steal and Control":
     let hand = game.players[me].hand.len
     game.finishTurn()
     check game.players[me].hand.len == hand + 2
+
+suite "AWM rule explanations":
+  test "a card explains the mechanics its rules print, in reading order":
+    check baseCardNamed("Spirit").mechanics() ==
+      @[HiddenMechanic, RangedMechanic]
+    check baseCardNamed("Sharpshooter").mechanics() == @[RangedMechanic]
+    check baseCardNamed("Summon Primordial").mechanics() == @[SummonMechanic]
+    check baseCardNamed("Control").mechanics() == @[StealMechanic]
+    check baseCardNamed("Archer").mechanics() == @[OffClassMechanic]
+
+  test "mechanics nested in choices, triggers and gained or lost rules count":
+    check baseCardNamed("Morphosis Chamber").mechanics() ==
+      @[RangedMechanic, HiddenMechanic]
+    check baseCardNamed("Duel").mechanics() == @[RangedMechanic, FightMechanic]
+    check baseCardNamed("Banner").mechanics() == @[SummonMechanic]
+
+  test "plain verbs explain themselves":
+    for name in ["Bolt", "Overcharge", "Hail of Arrows", "Explode", "Swords",
+        "Wildfire", "Study", "Plan", "Overwork", "Bear", "Bouncer", "Bubble",
+        "Reload"]:
+      check baseCardNamed(name).mechanics().len == 0
+
+  test "a keyword gained in play is explained after the printed ones":
+    check baseCardNamed("Bear").mechanics({Ranged}) == @[RangedMechanic]
+    check baseCardNamed("Sniper").mechanics({Ranged}) == @[RangedMechanic]
+
+  test "every mechanic has an explanation and a base card that prints it":
+    var printed: set[Mechanic]
+    for card in baseCards:
+      for mechanic in card.mechanics():
+        printed.incl mechanic
+    for mechanic in Mechanic:
+      check Explanations[mechanic].len > 0
+      check mechanic in printed

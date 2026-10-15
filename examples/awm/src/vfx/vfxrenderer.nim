@@ -268,6 +268,80 @@ proc addLevelUpArrow*(renderer: var VfxRenderer, base, eye: Vec3,
   renderer.addGlowLine(tip, tip - up * 0.55'f32 + right * 0.5'f32, eye,
     size * 0.1'f32, glow)
 
+proc addTargetingArrow*(renderer: var VfxRenderer, start, finish, eye: Vec3,
+    time, strength: float32, scale = 1'f32) =
+  ## A fat, dotted red arc from a card to what it aims at, its dots flowing
+  ## toward an arrowhead. `strength` brightens it over a legal target and
+  ## fades it; `scale` sizes it for a farther camera.
+  let distance = length(finish - start)
+  if distance < 0.25'f32 or strength <= 0.01'f32:
+    return
+  const Steps = 48
+  # A long throw arches over the table; a short hop bows out sideways
+  # instead, since from the camera above a tall hump would only climb onto
+  # the card it aims at.
+  let
+    ground = vec3(finish.x - start.x, 0, finish.z - start.z)
+    across =
+      if length(ground) > 0.001'f32: normalize(cross(ground, vec3(0, 1, 0)))
+      else: vec3(0)
+    control = (start + finish) * 0.5'f32 +
+      vec3(0, 0.3'f32 + distance * 0.25'f32, 0) +
+      across * max(0'f32, 1.4'f32 - distance * 0.15'f32)
+  # The curve, sampled with how far along it each sample lies.
+  var
+    points: array[Steps + 1, Vec3]
+    along: array[Steps + 1, float32]
+  for i in 0 .. Steps:
+    let
+      t = i.float32 / Steps
+      u = 1 - t
+    points[i] = start * (u * u) + control * (2 * u * t) + finish * (t * t)
+    if i > 0:
+      along[i] = along[i - 1] + length(points[i] - points[i - 1])
+  let total = along[Steps]
+  proc pointAt(d: float32): Vec3 =
+    var i = 1
+    while i < Steps and along[i] < d:
+      inc i
+    let
+      span = max(along[i] - along[i - 1], 0.00001'f32)
+      f = clamp((d - along[i - 1]) / span, 0, 1)
+    mix(points[i - 1], points[i], f)
+  let
+    red = TargetRed.xyz
+    hot = mix(red, vec3(1, 0.7, 0.6), 0.22'f32)
+    head = min(0.7'f32 * scale, total * 0.3'f32)
+    spacing = 0.3'f32 * scale
+  # Dots, moving toward the target.
+  var d = fract(time * 1.4'f32) * spacing
+  while d < total - head * 0.8'f32:
+    let p = pointAt(d)
+    renderer.addBillboard(p, 0.36 * scale, eye,
+      vec4(red, 0.5'f32 * strength), 4)
+    renderer.addBillboard(p, 0.17 * scale, eye,
+      vec4(hot, 0.8'f32 * strength), 4)
+    d += spacing
+  # A filled arrowhead lying flat over the target, pointing the way the
+  # arc travels across the table, so the camera above reads its shape.
+  let
+    tip = finish
+    approach = tip - pointAt(total - head)
+    flat = vec3(approach.x, 0, approach.z)
+  if length(flat) < 0.00001'f32:
+    return
+  let
+    forward = normalize(flat) * head
+    side = normalize(cross(forward, vec3(0, 1, 0))) * head * 0.7'f32
+    back = tip - forward
+    fill = vec4(red, 0.5'f32 * strength)
+  renderer.addQuad([back - side, tip, tip, back + side],
+    [vec2(0), vec2(0), vec2(0), vec2(0)], fill, 0)
+  let edge = vec4(red, 0.55'f32 * strength)
+  renderer.addLine(back - side, tip, eye, 0.07 * scale, edge)
+  renderer.addLine(back + side, tip, eye, 0.07 * scale, edge)
+  renderer.addLine(back - side, back + side, eye, 0.07 * scale, edge)
+
 proc addTargetRing*(renderer: var VfxRenderer, center, eye: Vec3,
     radius: float32, strength: float32) =
   for i in 0 ..< 64:

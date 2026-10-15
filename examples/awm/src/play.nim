@@ -55,6 +55,11 @@ type
     heroClass*: HeroClass
     startedAt*: float32
 
+  FadingArrow* = object
+    ## A target just chosen: its arrow stays where it was aimed and fades.
+    start*, finish*: Vec3
+    bornAt*: float32  ## Table time it was first drawn, or -1 until then.
+
   CastSpell* = object
     ## A played spell floating above its caster's board. It's already in the
     ## discard pile in the rules; it flies there once the table settles.
@@ -66,6 +71,9 @@ type
     ## What the table shows on top of the game's state.
     pendingTargeting*: bool
     pendingCardIndex*: int
+    pendingSourceId*: int
+      ## The card in play whose rule is being aimed: a minion just played,
+      ## or a trigger's card. 0 while it is still in hand.
     pendingCard*: Card
     pendingChoices*: seq[Choice]
     pendingPicks*: seq[Choice]  ## Targets chosen so far for pendingCard.
@@ -90,6 +98,8 @@ type
     lastDrawStart*: float32
     levelUps*: seq[LevelUpBadge]
       ## Class icons rising beside the heroes that just levelled up.
+    fadingArrows*: seq[FadingArrow]
+      ## Targets just chosen, by anyone: their arrows fade where they were.
     heroDeaths*: seq[float32]
       ## When each player's hero started dying, or -1 while alive.
     deathDiscard*: seq[float32]
@@ -130,6 +140,12 @@ const
   ChoosePickSeconds* = 0.32'f32  ## The chosen card taking the table.
   AttackLungeDuration* = 0.22'f32
   AttackReturnDuration* = 0.30'f32
+
+proc aiming*(play: TablePlay): bool =
+  ## The human is picking a target on the table for the pending card or
+  ## trigger (not a branch on the choose screen).
+  play.pendingTargeting and play.pendingChoices.len > 0 and
+    play.pendingChoices[0].kind != OptionChoice
 
 proc choosing*(play: TablePlay): bool =
   ## The pending card is offering branches to choose between, so the table
@@ -539,24 +555,31 @@ proc inspectedCard*(
     handOwner = -1
 ): tuple[found: bool, card: Card, power, toughness: int,
     keywords: KeywordLine] =
-  ## The card to show large: the hovered hand card, else the closest board
-  ## card under the mouse with its live stats, else the visible top of a
-  ## discard pile. `handOwner` is whose hand `hoverIndex` is in (default:
-  ## the current player).
+  ## The card to show large. While aiming: a legal target under the mouse,
+  ## else the card whose rule is being aimed. Otherwise the hovered hand
+  ## card, the closest board card under the mouse with its live stats, or
+  ## the visible top of a discard pile. `handOwner` is whose hand
+  ## `hoverIndex` is in (default: the current player).
   result.power = -1
   result.toughness = -1
-  let
-    owner = if handOwner >= 0: handOwner else: game.currentPlayer
-    player = game.players[owner]
-  if hoverIndex >= 0 and hoverIndex < player.hand.len and
-      not play.animations.handCardSuppressed(owner, hoverIndex) and
-      not play.queuedEvents.queuedDraw(owner, hoverIndex):
-    result.card = player.hand[hoverIndex]
+  proc show(result: var tuple[found: bool, card: Card, power, toughness: int,
+      keywords: KeywordLine], minion: MinionState) =
+    ## A card in play, with its live stats.
+    result.card = minion.card
     result.found = true
-    return
+    if minion.card.kind == Minion:
+      result.power = minion.power
+      result.toughness = minion.currentToughness
+      result.keywords = minion.keywordLine
+    else:
+      result.power = -1
+      result.toughness = -1
+      result.keywords = KeywordLine()
   # One card: the closest under the mouse. Its stats come from it alone,
   # never left over from another card the mouse also touches.
-  var nearest = high(float32)
+  var
+    nearest = high(float32)
+    under = (found: false, owner: -1, index: -1)
   for owner in 0 ..< game.playerCount:
     for i, minion in game.players[owner].board:
       if play.animations.boardCardSuppressed(minion.id) or
@@ -567,17 +590,31 @@ proc inspectedCard*(
       if offset < 0 or offset >= nearest:
         continue
       nearest = offset
-      result.card = minion.card
-      result.found = true
-      if result.card.kind == Minion:
-        result.power = minion.power
-        result.toughness = minion.currentToughness
-        result.keywords = minion.keywordLine
-      else:
-        result.power = -1
-        result.toughness = -1
-        result.keywords = KeywordLine()
-  if result.found:
+      under = (found: true, owner: owner, index: i)
+  if play.aiming:
+    # A legal target under the mouse; otherwise the card whose rule is
+    # being aimed (the branch taken, for one that offered a choice).
+    if under.found:
+      let minion = game.players[under.owner].board[under.index]
+      if play.pendingChoices.choiceIsLegal(
+          creatureChoice(under.owner, minion.id)):
+        result.show(minion)
+        return
+    result.card = play.pendingCard.pickedFace(play.pendingPicks,
+      game.boardCards())
+    result.found = true
+    return
+  let
+    owner = if handOwner >= 0: handOwner else: game.currentPlayer
+    player = game.players[owner]
+  if hoverIndex >= 0 and hoverIndex < player.hand.len and
+      not play.animations.handCardSuppressed(owner, hoverIndex) and
+      not play.queuedEvents.queuedDraw(owner, hoverIndex):
+    result.card = player.hand[hoverIndex]
+    result.found = true
+    return
+  if under.found:
+    result.show(game.players[under.owner].board[under.index])
     return
   # The visible top of a discard pile, matching how the pile is drawn:
   # cards still flying there or still dying on the board aren't shown.
@@ -648,6 +685,7 @@ proc playHandCard*(
         )
         play.pendingCard = card
         play.pendingCardIndex = -1
+        play.pendingSourceId = minionId
         play.pendingPicks.setLen(0)
         play.pendingChoices = game.availableChoices(card)
         result = true
@@ -665,6 +703,7 @@ proc playHandCard*(
     else:
       play.pendingCard = card
       play.pendingCardIndex = handIndex
+      play.pendingSourceId = 0
       play.pendingPicks.setLen(0)
       play.pendingChoices = game.availableChoices(handIndex)
       if play.pendingChoices.len == 0:
@@ -746,6 +785,14 @@ proc chooseOptions*(play: TablePlay, game: GameState): seq[Card] =
       game.boardCards()):
     result.add play.pendingCard.optionCard(option)
 
+type ArrowSource = tuple[found: bool, point: Vec3, inHand: bool]
+  ## Where an arrow starts: a card in play or in a hand.
+
+proc aimSource(play: TablePlay, game: GameState,
+    layout: TableLayout): ArrowSource
+proc addChoiceArrows(play: var TablePlay, game: GameState,
+    layout: TableLayout, source: ArrowSource, choices: openArray[Choice])
+
 proc takePick*(
     play: var TablePlay,
     game: var GameState,
@@ -754,6 +801,8 @@ proc takePick*(
 ) =
   ## Records one answered choice. The card resolves once its last choice is
   ## in; a `choose` reveals the branch's own targets when its option lands.
+  ## A target chosen leaves its arrow behind, fading.
+  play.addChoiceArrows(game, layout, play.aimSource(game, layout), [selected])
   let card = play.pendingCard
   let picks = play.pendingPicks & selected
   let board = game.boardCards()
@@ -791,13 +840,15 @@ proc takePick*(
       game.currentPlayer,
       game.players[game.currentPlayer].hand.len
     )[play.pendingCardIndex]
-  let resolved =
-    if play.pendingTrigger:
-      game.resolvePendingTrigger(picks)
-    elif card.kind != Spell:
-      game.runMinionRules(card, picks)
-    else:
-      game.playCard(play.pendingCardIndex, picks)
+  let
+    triggerName = game.waitingTriggerName()
+    resolved =
+      if play.pendingTrigger:
+        game.resolvePendingTrigger(picks)
+      elif card.kind != Spell:
+        game.runMinionRules(card, picks)
+      else:
+        game.playCard(play.pendingCardIndex, picks)
   if resolved and spellAnimation:
     # A card that offered a choice floats as the branch that was taken.
     play.holdCastSpell(layout, card.pickedFace(picks, board), spellClass,
@@ -805,7 +856,7 @@ proc takePick*(
   if resolved:
     play.statusMessage =
       if play.pendingTrigger:
-        &"{card.name}'s trigger resolves."
+        &"{triggerName} resolves."
       elif card.kind != Spell:
         if selected.isNoTarget:
           &"{card.name}'s rule finishes without a target."
@@ -879,7 +930,7 @@ proc updateTargeting*(
       else: card.rules
   if play.pendingTrigger and cancel:
     play.statusMessage =
-      &"{card.name}'s trigger can't be canceled: choose a target."
+      &"{game.waitingTriggerName()} can't be canceled: choose a target."
   elif cancel:
     if card.kind != Spell:
       discard game.runMinionRules(card, NoTarget)
@@ -1509,10 +1560,11 @@ proc startTriggerTargeting*(play: var TablePlay, game: GameState) =
   play.pendingTrigger = true
   play.pendingCard = waiting.card
   play.pendingCardIndex = -1
+  play.pendingSourceId = game.pendingTriggers[0].sourceId
   play.pendingPicks.setLen(0)
   play.pendingChoices = game.triggerChoices()
   play.selectedAttacker = 0
-  play.statusMessage = &"{waiting.card.name}'s trigger needs a target."
+  play.statusMessage = &"{game.waitingTriggerName()} needs a target."
 
 proc playHelp*(play: TablePlay, human: bool): string =
   ## The standing hint for what the mouse does now.
@@ -1583,6 +1635,144 @@ proc addAttackCard*(
   )
   vfx.addCardGlow(atkPose, true, true, true, time)
 
+const ArrowFadeSeconds* = 1.4'f32
+  ## How long a chosen target's arrow takes to fade.
+
+proc boardSource(play: TablePlay, game: GameState, layout: TableLayout,
+    minionId: int): ArrowSource =
+  ## A card in play, as an arrow's start.
+  let location = game.minionLocation(minionId)
+  if location.found:
+    result = (true, play.liveBoardPose(layout, location.player,
+      location.index, game.players[location.player].board.len).position,
+      false)
+
+proc handSource(game: GameState, layout: TableLayout,
+    player, handIndex: int): ArrowSource =
+  ## A card in a hand, as an arrow's start.
+  let hand = game.players[player].hand
+  if handIndex in 0 ..< hand.len:
+    result = (true, layout.handPoses(player, hand.len)[handIndex].position,
+      true)
+
+proc aimSource(play: TablePlay, game: GameState,
+    layout: TableLayout): ArrowSource =
+  ## The card whose rule the human is aiming: in play, or still in hand.
+  if play.pendingSourceId != 0:
+    play.boardSource(game, layout, play.pendingSourceId)
+  else:
+    handSource(game, layout, game.actingPlayer(), play.pendingCardIndex)
+
+proc arrowEnds(play: TablePlay, game: GameState, layout: TableLayout,
+    source: ArrowSource, target: Choice,
+    aimPoint = vec3(0)): tuple[ok: bool, start, finish: Vec3] =
+  ## Where an arrow from `source` to `target` runs: its head lands on the
+  ## table just short of the card or hero, where it reads clearly. A target
+  ## that is neither aims at `aimPoint` on the table instead.
+  if not source.found:
+    return
+  var
+    start = source.point + vec3(0, 0.3, 0)
+    finish: Vec3
+    standoff = 0'f32
+  case target.kind
+  of HeroChoice, CreatureChoice:
+    if target.kind == CreatureChoice and
+        not game.minionLocation(target.creatureId).found:
+      return
+    finish = play.attackPointFor(game, layout, target) +
+      (if target.kind == HeroChoice: vec3(0, 0.25, 0) else: vec3(0, 0.3, 0))
+    standoff = if target.kind == HeroChoice: 0.8'f32 else: 0.6'f32
+  else:
+    finish = aimPoint + vec3(0, 0.3, 0)
+  let flat = vec3(finish.x - start.x, 0, finish.z - start.z)
+  if length(flat) > 0.001'f32:
+    # Short hops keep most of their length.
+    finish -= normalize(flat) * min(standoff, length(flat) * 0.35'f32)
+    # A card in hand faces the camera: leave from its edge, not its art.
+    if source.inHand:
+      start += normalize(flat) * 0.6'f32
+  (true, start, finish)
+
+proc addChoiceArrows(play: var TablePlay, game: GameState,
+    layout: TableLayout, source: ArrowSource, choices: openArray[Choice]) =
+  ## Leaves a fading arrow for each target chosen; picks of a branch, and
+  ## no target, leave none.
+  for choice in choices:
+    if choice.kind in {HeroChoice, CreatureChoice}:
+      let ends = play.arrowEnds(game, layout, source, choice)
+      if ends.ok:
+        play.fadingArrows.add FadingArrow(start: ends.start,
+          finish: ends.finish, bornAt: -1)
+
+proc addActionArrows*(play: var TablePlay, layout: TableLayout,
+    before, after: GameState, action: ReplayAction) =
+  ## The arrows of an action a bot or a replay just took: from the card it
+  ## played (still in hand, or where a minion landed) or the trigger's card,
+  ## to each target as it stood when chosen.
+  let choices = action.choices.toChoices
+  case action.kind
+  of ActionPlayCard:
+    let
+      player = action.playerId.int
+      hand = before.players[player].hand
+    if action.handIndex notin 0 ..< hand.len:
+      return
+    if hand[action.handIndex].kind == Spell:
+      play.addChoiceArrows(before, layout,
+        handSource(before, layout, player, action.handIndex.int), choices)
+    else:
+      # It played into play with the id the game had next; aim from where
+      # it landed, at targets as they stood.
+      let landed = play.boardSource(after, layout, before.nextMinionId)
+      play.addChoiceArrows(before, layout, landed, choices)
+  of ActionResolveTrigger:
+    if before.pendingTriggers.len > 0:
+      play.addChoiceArrows(before, layout,
+        play.boardSource(before, layout, before.pendingTriggers[0].sourceId),
+        choices)
+  else:
+    discard
+
+proc arrowScale(eye, start, finish: Vec3): float32 =
+  ## Bigger from a farther camera, so the arrow reads the same on the ring.
+  max(1'f32, length(eye - (start + finish) * 0.5'f32) / 16'f32)
+
+proc addTargetingArrow*(vfx: var VfxRenderer, play: var TablePlay,
+    game: GameState, layout: TableLayout, window: Window,
+    viewProjection: Mat4, hovered: Choice, eye: Vec3, time: float32) =
+  ## The arrows of chosen targets, fading where they were aimed; and while a
+  ## card is aimed, a live arrow from it to the target under the mouse, or
+  ## to the mouse on the table when there is none.
+  var kept: seq[FadingArrow]
+  for arrow in play.fadingArrows.mitems:
+    if arrow.bornAt < 0:
+      arrow.bornAt = time
+    let left = 1 - (time - arrow.bornAt) / ArrowFadeSeconds
+    if left <= 0:
+      continue
+    vfx.addTargetingArrow(arrow.start, arrow.finish, eye, time,
+      left * left, arrowScale(eye, arrow.start, arrow.finish))
+    kept.add arrow
+  play.fadingArrows = kept
+  if not play.aiming:
+    return
+  let legal = not hovered.isCanceled and
+    play.pendingChoices.choiceIsLegal(hovered) and
+    hovered.kind in {HeroChoice, CreatureChoice}
+  var aim = vec3(0)
+  if not legal:
+    let mouse = mousePlanePoint(window, viewProjection, CardPlaneY)
+    if not mouse.hit:
+      return
+    aim = mouse.point
+  let ends = play.arrowEnds(game, layout, play.aimSource(game, layout),
+    if legal: hovered else: Canceled, aim)
+  if ends.ok:
+    vfx.addTargetingArrow(ends.start, ends.finish, eye, time,
+      if legal: 1.0'f32 else: 0.55'f32,
+      arrowScale(eye, ends.start, ends.finish))
+
 proc addAttackRing*(vfx: var VfxRenderer, play: TablePlay, eye: Vec3) =
   ## The ring under what the attackers are lunging at.
   if play.attackActive and not play.attackTarget.isCanceled:
@@ -1646,6 +1836,7 @@ proc updateBots*(
             play.statusMessage = name & " is attacking..."
           of BotPlayedCard, BotResolvedTrigger, BotTossed, BotEndedTurn:
             if game.applyAction(vm.action):
+              play.addActionArrows(layout, before, game, vm.action)
               play.animateTransition(layout, before, game,
                 vm.action.choices.toChoices)
               play.statusMessage = name & " is playing..."

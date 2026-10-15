@@ -13,6 +13,8 @@ src/core/            the game itself: no window, no graphics
   core.nim           cards, rules and the rules DSL
   sim.nim            the match: players, turns, effects, deaths
   cardset.nim        card lookups, wire IDs and dealing decks
+  explanations.nim   what named mechanics (Ranged, Hidden...) mean, for
+                     the card inspector
   sessions.nim       saved games and the built-in bot
   bots.nim           BASIC bot scripts
 src/modes/           game modes, clients of the core
@@ -277,7 +279,9 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   the face yet.
 - Summoned minions enter at the right of their owner's board. Like played
   minions they attack from their owner's next turn, and their own on-play
-  rules don't run. A card's later rules reach them (Rally buffs its own
+  rules run for their owner, who may pick no target. That happens once the
+  card that summoned them has resolved, before any trigger already
+  waiting, so a card's later rules reach them first (Rally buffs its own
   Footsoldiers).
 - Trinkets (Plan) stay in play on their owner's board but aren't minions:
   they can't attack or be attacked, and minion targets and "all minions"
@@ -357,6 +361,6 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |
 | Mage | Bubble Shield | 4 | 2 | Spell | — | Summon 2 Bubbles |
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
-| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a minion gains Ranged; a minion gains Hidden 1; give a minion +1/-1; or give a minion -1/+1 |
+| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
 | Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
-| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card, return a minion to its owner's hand and deal 3 damage to yourself |
+| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card and deal 3 damage to yourself |

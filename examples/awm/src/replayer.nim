@@ -95,10 +95,12 @@ proc present(replayer: Replayer, play: var TablePlay, game: var GameState,
       else: replayer.playerName(game.currentPlayer) & " is thinking..."
   of ActionPlayCard:
     discard game.applyAction(action)
+    play.addActionArrows(layout, before, game, action)
     play.animateTransition(layout, before, game, action.choices.toChoices)
     play.statusMessage = name & " is playing..."
   else:
     discard game.applyAction(action)
+    play.addActionArrows(layout, before, game, action)
     play.animateTransition(layout, before, game)
     play.statusMessage = "A trigger resolves."
   replayer.checkTick(game, replayer.tick)

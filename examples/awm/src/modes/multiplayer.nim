@@ -469,7 +469,8 @@ when not defined(headless):
         elif play.tossPicking:
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = game.pendingToss.player)
-        elif match.current == match.viewedSeat:
+        else:
+          # The hand facing the camera can be read on any turn.
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = match.viewedSeat)
         if hoverIndex < 0 and not play.choosing:
@@ -616,6 +617,8 @@ when not defined(headless):
           vfx.drawCharacterFlash(seat + 1,
             play.activeVfx.flashStrength(heroChoice(seat)))
         vfx.addAttackRing(play, stageEye)
+        vfx.addTargetingArrow(play, match.game, table, window, stageVp,
+          hoveredTarget, stageEye, hudTime)
         vfx.addEffects(play.activeVfx, stageEye)
         vfx.draw(stageVp)
         if not inspected.found:

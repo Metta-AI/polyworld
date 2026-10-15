@@ -4,7 +4,7 @@ import std/[math, options, os, random, strformat, tables, times]
 when defined(takeScreenshot):
   import std/strutils
 import chroma, opengl, pixie, silky, vmath, windy
-import ../core/sim, ../core/sessions, ../core/bots
+import ../core/sim, ../core/sessions, ../core/bots, ../core/replays
 import ../app, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel,
   ../scene/courtyard, ../scene/heroes, ../net/web, ../scene/placement,
@@ -379,6 +379,7 @@ proc runDuel*(app: App) =
             suppressBoardId = minionId
           )
           play.pendingCardIndex = -1
+          play.pendingSourceId = minionId
           play.pendingChoices = game.availableChoices(play.pendingCard)
         else:
           play.pendingCardIndex = 0
@@ -473,6 +474,22 @@ proc runDuel*(app: App) =
         let targetId = game.players[1].board[targetIndex].id
         if game.playCard(0, creatureChoice(1, targetId)):
           play.statusMessage = "Demo: Oozification."
+      if getEnv("AWM_DEMO_BOT_BOLT") == "1":
+        # The opponent bolts the player's hero the way a bot's action lands:
+        # its arrow stays behind and fades.
+        play.animations.setLen(0)
+        game.currentPlayer = 1
+        game.players[1].heroClass = Archer
+        game.players[1].hand = @[baseCardNamed("Bolt")]
+        game.players[1].energy = 1
+        let
+          before = game.copyGameState()
+          action = ReplayAction(playerId: 1, kind: ActionPlayCard,
+            handIndex: 0, choices: @[heroChoice(0)].toReplay)
+        if game.applyAction(action):
+          play.addActionArrows(duelLayout, before, game, action)
+          play.animateTransition(duelLayout, before, game,
+            action.choices.toChoices)
       if getEnv("AWM_DEMO_CONTROL") == "1":
         # Control takes the enemy card AWM_DEMO_OOZE_TARGET picks: it flies
         # from its slot to the end of the player's board.
@@ -746,8 +763,10 @@ proc runDuel*(app: App) =
       elif play.tossPicking:
         hoverIndex = hoveredCard(window, viewProjection, game, duelLayout,
           handOwner = game.pendingToss.player)
-      elif humanTurn() or (botVms[0] != nil and botVms[1] != nil):
-        hoverIndex = hoveredCard(window, viewProjection, game, duelLayout)
+      else:
+        # The hand facing the camera can be read on any turn.
+        hoverIndex = hoveredCard(window, viewProjection, game, duelLayout,
+          handOwner = cameraPlayer())
       if hoverIndex < 0 and not play.choosing:
         var boardChoices: seq[Choice]
         for owner in 0 ..< PlayerCount:
@@ -816,7 +835,14 @@ proc runDuel*(app: App) =
           play.updateChoosing(game, duelLayout, -1, pick = false,
             cancel = false, time = animationTime)
       if getEnv("AWM_DEMO_HALO") == "1":
-        if play.pendingTargeting:
+        # AWM_DEMO_HALO_INDEX hovers that legal choice instead of the first.
+        let haloIndex = parseInt(getEnv("AWM_DEMO_HALO_INDEX", "-1"))
+        if play.pendingTargeting and
+            haloIndex in 0 ..< play.pendingChoices.len:
+          hoveredTarget = play.pendingChoices[haloIndex]
+          if hoveredTarget.kind == CreatureChoice:
+            hoveredBoard = hoveredTarget
+        elif play.pendingTargeting:
           for choice in play.pendingChoices:
             if choice.kind == CreatureChoice:
               hoveredBoard = choice
@@ -920,6 +946,8 @@ proc runDuel*(app: App) =
         vfx.drawCharacterFlash(playerIndex + 1,
           play.activeVfx.flashStrength(heroChoice(playerIndex)))
       vfx.addAttackRing(play, cameraEye)
+      vfx.addTargetingArrow(play, game, duelLayout, window, viewProjection,
+        hoveredTarget, cameraEye, hudTime)
       vfx.addEffects(play.activeVfx, cameraEye)
       vfx.draw(viewProjection)
     elif classHover.isSome:
@@ -966,7 +994,8 @@ proc runDuel*(app: App) =
         duelLayout,
         hoverIndex,
         play.choosing,
-        handOwner = if play.tossPicking: game.pendingToss.player else: -1
+        handOwner =
+          if play.tossPicking: game.pendingToss.player else: cameraPlayer()
       )
       sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,
         play, duelLayout), viewProjection,
