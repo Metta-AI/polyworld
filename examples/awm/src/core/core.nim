@@ -1971,7 +1971,8 @@ proc summon*(
 ): Rule =
   ## `summon(2, "Footsoldier")`: new base-set minions enter under `owner`'s
   ## control. Like played minions, they attack from their owner's next
-  ## turn; their own on-play rules don't run.
+  ## turn, and their own on-play rules run for that owner, once the card
+  ## that summoned them has resolved.
   SummonRule(count: count, card: card, owner: owner.effectOwner("summon"))
 
 proc checkCardNames*(card: Card, cardNamed: CardLookup) =

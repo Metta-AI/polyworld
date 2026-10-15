@@ -6,7 +6,7 @@ export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 15
+  SnapshotSchemaVersion* = 16
 
 type
   SessionOptions* = object
@@ -472,7 +472,7 @@ proc gameToJson*(game: GameState): JsonNode =
   for pending in game.pendingTriggers:
     pendingTriggers.add %*{"owner": pending.owner,
       "sourceId": pending.sourceId, "trigger": pending.trigger,
-      "attacker": choiceToJson(pending.attacker)}
+      "attacker": choiceToJson(pending.attacker), "onPlay": pending.onPlay}
   %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
     "visualEvents": visualEvents, "visualBeat": game.visualBeat,
@@ -599,11 +599,12 @@ proc gameFromJson*(node: JsonNode): GameState =
         sourceId: entry.field("sourceId").integer("trigger source", 1),
         trigger: entry.field("trigger").integer("trigger index", 0),
         attacker: if entry.hasKey("attacker"):
-          choiceFromJson(entry["attacker"]) else: Canceled)
+          choiceFromJson(entry["attacker"]) else: Canceled,
+        onPlay: entry.hasKey("onPlay") and entry["onPlay"].getBool(false))
       let location = result.minionLocation(pending.sourceId)
       if not location.found or location.player != pending.owner or
-          pending.trigger >= result.players[location.player].board[
-            location.index].heldRules.triggers().len:
+          not pending.onPlay and pending.trigger >= result.players[
+            location.player].board[location.index].heldRules.triggers().len:
         raise newException(ValueError, "Invalid snapshot pending trigger")
       result.pendingTriggers.add pending
   result.gameOver = if node.hasKey("gameOver"): node["gameOver"].getBool(false) else: false

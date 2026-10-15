@@ -840,13 +840,15 @@ proc takePick*(
       game.currentPlayer,
       game.players[game.currentPlayer].hand.len
     )[play.pendingCardIndex]
-  let resolved =
-    if play.pendingTrigger:
-      game.resolvePendingTrigger(picks)
-    elif card.kind != Spell:
-      game.runMinionRules(card, picks)
-    else:
-      game.playCard(play.pendingCardIndex, picks)
+  let
+    triggerName = game.waitingTriggerName()
+    resolved =
+      if play.pendingTrigger:
+        game.resolvePendingTrigger(picks)
+      elif card.kind != Spell:
+        game.runMinionRules(card, picks)
+      else:
+        game.playCard(play.pendingCardIndex, picks)
   if resolved and spellAnimation:
     # A card that offered a choice floats as the branch that was taken.
     play.holdCastSpell(layout, card.pickedFace(picks, board), spellClass,
@@ -854,7 +856,7 @@ proc takePick*(
   if resolved:
     play.statusMessage =
       if play.pendingTrigger:
-        &"{card.name}'s trigger resolves."
+        &"{triggerName} resolves."
       elif card.kind != Spell:
         if selected.isNoTarget:
           &"{card.name}'s rule finishes without a target."
@@ -928,7 +930,7 @@ proc updateTargeting*(
       else: card.rules
   if play.pendingTrigger and cancel:
     play.statusMessage =
-      &"{card.name}'s trigger can't be canceled: choose a target."
+      &"{game.waitingTriggerName()} can't be canceled: choose a target."
   elif cancel:
     if card.kind != Spell:
       discard game.runMinionRules(card, NoTarget)
@@ -1562,7 +1564,7 @@ proc startTriggerTargeting*(play: var TablePlay, game: GameState) =
   play.pendingPicks.setLen(0)
   play.pendingChoices = game.triggerChoices()
   play.selectedAttacker = 0
-  play.statusMessage = &"{waiting.card.name}'s trigger needs a target."
+  play.statusMessage = &"{game.waitingTriggerName()} needs a target."
 
 proc playHelp*(play: TablePlay, human: bool): string =
   ## The standing hint for what the mouse does now.

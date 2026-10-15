@@ -67,12 +67,16 @@ type
       ## before it (draw beats only wait a moment, so draws overlap).
 
   PendingTrigger* = object
-    ## A fired `on(...)` trigger, queued until it resolves. One that asks for
-    ## targets waits for its owner to choose them.
+    ## A fired `on(...)` trigger, or a summoned card's on-play rules, queued
+    ## until it resolves. One that asks for targets waits for its owner to
+    ## choose them.
     owner*: int     ## Who chooses, and who the rules resolve for.
     sourceId*: int  ## The card in play whose trigger fired.
     trigger*: int   ## Which of that card's `on(...)` rules.
     attacker*: Choice  ## The attacker, when an attack fired it.
+    onPlay*: bool
+      ## The summoned card's own printed rules, run as if it had been
+      ## played, not one of its triggers.
 
   PendingToss* = object
     ## A discard waiting for its player to choose cards from hand. Whatever
@@ -543,7 +547,9 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
   ## Each resolution starts a new beat, and so does each rule within it.
   ## A discard stops here until its player chooses; the effects after it
   ## wait in `pendingToss`.
-  var beat = low(int)
+  var
+    beat = low(int)
+    summoned = 0  ## On-play rules queued so far, which go first in order.
   for index, effect in effects:
     if effect.beat != beat:
       beat = effect.beat
@@ -611,6 +617,13 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
       game.recordVisual(SummonVfx,
         creatureChoice(effect.summonedOwner, effect.summonedId))
       game.nextMinionId = max(game.nextMinionId, effect.summonedId + 1)
+      # Its own on-play rules resolve once the card that summoned it has,
+      # before any trigger already waiting.
+      if effect.summonedCard.rules.len > effect.summonedCard.triggers.len:
+        game.pendingTriggers.insert(PendingTrigger(
+          owner: effect.summonedOwner, sourceId: effect.summonedId,
+          attacker: Canceled, onPlay: true), summoned)
+        inc summoned
     of DrawEffect:
       for drawn in 0 ..< effect.drawCount:
         if drawn > 0:
@@ -672,12 +685,18 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
 
 proc triggerSource(game: GameState,
     pending: PendingTrigger): tuple[found: bool, card: Card, rules: Rules] =
-  ## A trigger its card has lost since it fired doesn't resolve.
+  ## A trigger its card has lost since it fired doesn't resolve. A summoned
+  ## card's on-play rules are its printed ones it hasn't lost.
   let location = game.minionLocation(pending.sourceId)
   if location.found:
-    let
-      minion = game.players[location.player].board[location.index]
-      triggers = minion.heldRules.triggers()
+    let minion = game.players[location.player].board[location.index]
+    if pending.onPlay:
+      var rules: Rules
+      for rule in minion.card.rules:
+        if not minion.lost(rule):
+          rules.add rule
+      return (true, minion.card, rules)
+    let triggers = minion.heldRules.triggers()
     if pending.trigger in 0 ..< triggers.len and
         not minion.lost(triggers[pending.trigger]):
       return (true, minion.card, triggers[pending.trigger].rules)
@@ -708,6 +727,13 @@ proc waitingTriggerRules*(game: GameState): tuple[card: Card, rules: Rules] =
     let source = game.triggerSource(game.pendingTriggers[0])
     if source.found:
       return (source.card, source.rules)
+
+proc waitingTriggerName*(game: GameState): string =
+  ## How prompts name the waiting trigger: "Banner's trigger", or a
+  ## summoned card's on-play rules, "Footsoldier's rule".
+  if game.waitingTrigger:
+    result = game.waitingTriggerRules().card.name &
+      (if game.pendingTriggers[0].onPlay: "'s rule" else: "'s trigger")
 
 proc advanceTriggers(game: var GameState) =
   ## Resolves queued triggers in order until one needs its owner to choose
@@ -813,7 +839,7 @@ proc resolveTriggers(game: var GameState) {.gcsafe.} =
           if trigger.trigger.firesOnce():
             game.players[owner].board[slot].firedTurnTriggers.incl index.uint8
           game.pendingTriggers.add PendingTrigger(owner: owner,
-            sourceId: permanent.id, trigger: index)
+            sourceId: permanent.id, trigger: index, attacker: Canceled)
   game.advanceTriggers()
 
 proc playMinion*(
@@ -864,6 +890,7 @@ proc runMinionRules*(
   if not card.runRules(context):
     return false
   game.applyEffects(context.effects)
+  game.advanceTriggers()
   true
 
 proc runMinionRules*(
@@ -894,6 +921,7 @@ proc playCard*(
     game.players[playerIndex].hand.delete(cardIndex)
     game.applyEffects(context.effects)
     game.players[playerIndex].discardPile.add card
+    game.advanceTriggers()
   of Minion, Trinket:
     var played = game.copyGameState()
     let id = played.playMinion(cardIndex)

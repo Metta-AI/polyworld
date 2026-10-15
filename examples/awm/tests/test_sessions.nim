@@ -425,6 +425,39 @@ suite "waiting triggers in snapshots":
     expect ValueError:
       discard gameFromJson(invalid)
 
+  test "a turn-start trigger waiting for its owner survives a round trip":
+    var game = newGame(Mage, Warrior, 1115)
+    let me = game.currentPlayer
+    game.players[me].board = @[MinionState(id: 3, owner: me,
+      card: baseCardNamed("Morphosis Chamber"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 4
+    game.finishTurn()
+    game.finishTurn()
+    check game.waitingTrigger
+    let encoded = gameToJson(game)
+    check gameToJson(gameFromJson(encoded)) == encoded
+
+  test "a summoned card's waiting on-play rules survive a round trip":
+    var game = newGame(Mage, Warrior, 1113)
+    let
+      me = game.currentPlayer
+      enemy = 1 - me
+    game.players[enemy].board = @[MinionState(id: 2, owner: enemy,
+      card: Warrior.classCard(), currentToughness: 2)]
+    game.nextMinionId = 3
+    game.players[me].hand = @[Card(name: "Call", energyCost: 0, kind: Spell,
+      rules: rules(summon(1, "Bouncer")))]
+    check game.playCard(0)
+    check game.waitingTrigger and game.pendingTriggers[0].onPlay
+    # Snapshots hold base-set cards: the stand-in spell leaves the pile.
+    game.players[me].discardPile.setLen(game.players[me].discardPile.len - 1)
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check decoded.pendingTriggers.len == 1
+    check decoded.pendingTriggers[0].onPlay
+    check decoded.waitingTriggerName() == "Bouncer's rule"
+    check gameToJson(decoded) == encoded
+
   test "the built-in bot answers a waiting trigger for its owner":
     let snare = Card(name: "Snare", energyCost: 0, kind: Trinket,
       rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))

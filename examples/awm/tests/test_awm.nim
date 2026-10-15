@@ -1,6 +1,6 @@
 import
   std/[options, strutils, unittest],
-  ../src/awm
+  ../src/awm, ../src/core/explanations
 
 proc leads(game: var GameState, heroClass: HeroClass): int =
   ## Hands the turn to the seat of that class and returns it. Card tests
@@ -1666,6 +1666,98 @@ suite "AWM triggers that choose targets":
     check game.actingPlayer() == me
     check game.eligibleAttackers().len == 0
 
+suite "AWM summoned cards' on-play rules":
+  proc summoning(card: Card, owner = toRuleValue(You)): Rule =
+    ## `summon(1, ...)` of a card outside the base set.
+    summon(1, RuleValue[Card](kind: FixedValue, fixed: card), owner)
+
+  let
+    herald = Card(name: "Herald", energyCost: 0, kind: Minion,
+      rules: rules(draw(1)), power: 1, toughness: 1)
+    archerling = Card(name: "Archerling", energyCost: 0, kind: Minion,
+      rules: rules(damage(1, target({kind: {Minion}}))), power: 1,
+      toughness: 1)
+
+  test "they run for the summoned card's owner, as if it had been played":
+    var game = newGame(Mage, Warrior, 1151)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+      mayfly = Card(name: "Mayfly", energyCost: 0, kind: Minion,
+        rules: rules(destroy(self())), power: 1, toughness: 1)
+    game.players[me].hand = @[
+      Card(name: "Call", energyCost: 0, kind: Spell,
+        rules: @[summoning(herald)]),
+      Card(name: "Gift", energyCost: 0, kind: Spell,
+        rules: @[summoning(herald, toRuleValue(AllOpponents))]),
+      Card(name: "Hatch", energyCost: 0, kind: Spell,
+        rules: @[summoning(mayfly)])]
+    let
+      mine = game.players[me].hand.len
+      theirs = game.players[enemy].hand.len
+    check game.playCard(0)
+    check game.players[me].hand.len == mine  # Call went; Herald drew one.
+    check game.playCard(0)
+    check game.players[enemy].hand.len == theirs + 1
+    check game.players[enemy].board[^1].card.name == "Herald"
+    # `self()` is the summoned card.
+    check game.players[me].hand[0].name == "Hatch"
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.players[me].discardPile[^1].name == "Mayfly"
+    check not game.waitingTrigger
+
+  test "a targeted one waits for its owner, who may pick no target":
+    var game = newGame(Mage, Warrior, 1153)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[enemy].board = @[readyMinion(enemy, 90, Warrior.classCard())]
+    game.nextMinionId = 91
+    game.players[me].hand = @[
+      Card(name: "Muster", energyCost: 0, kind: Spell,
+        rules: @[summoning(archerling)]),
+      Card(name: "Muster", energyCost: 0, kind: Spell,
+        rules: @[summoning(archerling)])]
+    check game.playCard(0)
+    check game.waitingTrigger
+    check game.actingPlayer() == me
+    check game.waitingTriggerName() == "Archerling's rule"
+    check game.waitingTriggerRules().rules == archerling.rules
+    check creatureChoice(enemy, 90) in game.triggerChoices()
+    check NoTarget in game.triggerChoices()
+    check not game.canPlay(0)
+    check game.resolvePendingTrigger(@[creatureChoice(enemy, 90)])
+    check game.players[enemy].board[0].currentToughness == 1
+    check game.playCard(0)
+    check game.resolvePendingTrigger(@[NoTarget])
+    check not game.waitingTrigger
+    check game.players[enemy].board[0].currentToughness == 1
+
+  test "they resolve after the card that summoned them":
+    # Sapper hits every minion for 1; Bolster's later +0/+1 lands first, so
+    # the Sapper survives its own blast.
+    let sapper = Card(name: "Sapper", energyCost: 0, kind: Minion,
+      rules: rules(damage(1, game.board.getCards({kind: {Minion}}))),
+      power: 1, toughness: 1)
+    var game = newGame(Warrior, Warrior, 1155)
+    let me = game.leads(Warrior)
+    game.players[me].hand = @[Card(name: "Bolster", energyCost: 0,
+      kind: Spell, rules: rules(summoning(sapper), addPowerToughness(0, 1,
+        game.board.getCards({kind: {Minion}, owner: You}))))]
+    check game.playCard(0)
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].currentToughness == 1
+
+  test "a summoned card with only triggers queues nothing":
+    var game = newGame(Mage, Warrior, 1157)
+    let me = game.leads(Mage)
+    game.players[me].hand = @[baseCardNamed("Bubble Shield")]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    check game.players[me].board.len == 2
+    check game.pendingTriggers.len == 0
+
 suite "AWM presentation beats":
   test "Oozification's Oozes come a beat after its splat and destroy":
     var game = newGame(Mage, Warrior, 1201)
@@ -3002,3 +3094,37 @@ suite "AWM steal and Control":
     let hand = game.players[me].hand.len
     game.finishTurn()
     check game.players[me].hand.len == hand + 2
+
+suite "AWM rule explanations":
+  test "a card explains the mechanics its rules print, in reading order":
+    check baseCardNamed("Spirit").mechanics() ==
+      @[HiddenMechanic, RangedMechanic]
+    check baseCardNamed("Sharpshooter").mechanics() == @[RangedMechanic]
+    check baseCardNamed("Summon Primordial").mechanics() == @[SummonMechanic]
+    check baseCardNamed("Control").mechanics() == @[StealMechanic]
+    check baseCardNamed("Archer").mechanics() == @[OffClassMechanic]
+
+  test "mechanics nested in choices, triggers and gained or lost rules count":
+    check baseCardNamed("Morphosis Chamber").mechanics() ==
+      @[RangedMechanic, HiddenMechanic]
+    check baseCardNamed("Duel").mechanics() == @[RangedMechanic, FightMechanic]
+    check baseCardNamed("Banner").mechanics() == @[SummonMechanic]
+
+  test "plain verbs explain themselves":
+    for name in ["Bolt", "Overcharge", "Hail of Arrows", "Explode", "Swords",
+        "Wildfire", "Study", "Plan", "Overwork", "Bear", "Bouncer", "Bubble",
+        "Reload"]:
+      check baseCardNamed(name).mechanics().len == 0
+
+  test "a keyword gained in play is explained after the printed ones":
+    check baseCardNamed("Bear").mechanics({Ranged}) == @[RangedMechanic]
+    check baseCardNamed("Sniper").mechanics({Ranged}) == @[RangedMechanic]
+
+  test "every mechanic has an explanation and a base card that prints it":
+    var printed: set[Mechanic]
+    for card in baseCards:
+      for mechanic in card.mechanics():
+        printed.incl mechanic
+    for mechanic in Mechanic:
+      check Explanations[mechanic].len > 0
+      check mechanic in printed

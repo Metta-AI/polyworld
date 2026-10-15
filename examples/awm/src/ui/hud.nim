@@ -1,10 +1,10 @@
 ## The screen-space HUD every game mode draws with: panels, the turn header,
 ## prompts, buttons, the card inspector and the pile tooltip. No world or
 ## camera state.
-import std/[math, options, os, strformat, tables]
+import std/[math, options, os, strformat, strutils, tables]
 import chroma, pixie, silky, vmath, windy
-import ../core/sim, cardfaces, ../scene/cardrenderer, ../play, ../scene/table,
-  ../vfx/vfxrenderer
+import ../core/[explanations, sim], cardfaces, ../scene/cardrenderer, ../play,
+  ../scene/table, ../vfx/vfxrenderer
 import polyworld/[assets, chrome, viewers]
 
 const
@@ -108,10 +108,61 @@ proc cardReadingRect*(window: Window): UiRect =
   UiRect(origin: vec2(28, 198),
     size: vec2(height * CardFaceWidth.float32 / CardFaceHeight.float32, height))
 
+const
+  ExplanationGap = 14'f32  ## Between the inspected card and its explanations.
+  ExplanationPadding = 20'f32
+  ExplanationSpacing = 12'f32  ## Between one explanation and the next.
+  ExplanationsReserve = 350'f32
+    ## The room the multiplayer column keeps under the inspected card for
+    ## its explanations, gap included: two, the most a base card has.
+
+proc wrappedLines(sk: Silky, font, text: string, width: float32): seq[string] =
+  ## `text` broken between words into lines no wider than `width`.
+  for word in text.split(' '):
+    if result.len > 0 and
+        sk.getTextSize(font, result[^1] & " " & word).x <= width:
+      result[^1].add " " & word
+    else:
+      result.add word
+
+proc drawRuleExplanations(sk: Silky, mechanics: seq[Mechanic], origin: Vec2,
+    width: float32) =
+  ## A panel `width` wide from `origin` down: each mechanic's name, then
+  ## what it means.
+  if mechanics.len == 0:
+    return
+  let
+    textWidth = width - ExplanationPadding * 2
+    nameHeight = sk.getTextSize("Prompt", "A").y
+    lineHeight = sk.getTextSize("Small", "A").y
+  var
+    entries: seq[seq[string]]
+    height = ExplanationPadding * 2 +
+      float32(mechanics.len - 1) * ExplanationSpacing
+  for mechanic in mechanics:
+    entries.add sk.wrappedLines("Small", Explanations[mechanic], textWidth)
+    height += nameHeight + entries[^1].len.float32 * lineHeight
+  # The HUD notices' dark slate, framed by their gold hairline.
+  const Edge = rgbx(164, 134, 82, 255)
+  sk.drawRect(origin, vec2(width, height), rgbx(12, 19, 23, 232))
+  sk.drawRect(origin, vec2(width, 2), Edge)
+  sk.drawRect(origin + vec2(0, height - 2), vec2(width, 2), Edge)
+  sk.drawRect(origin, vec2(2, height), Edge)
+  sk.drawRect(origin + vec2(width - 2, 0), vec2(2, height), Edge)
+  var at = origin + vec2(ExplanationPadding, ExplanationPadding)
+  for index, mechanic in mechanics:
+    discard sk.drawText("Prompt", $mechanic, at, HudGold)
+    at.y += nameHeight
+    for line in entries[index]:
+      discard sk.drawText("Small", line, at, HudIvory)
+      at.y += lineHeight
+    at.y += ExplanationSpacing
+
 proc drawCardReading*(sk: Silky, rect: UiRect, card: Card, power = -1,
     toughness = -1, keywords = KeywordLine(), extraCost = 0): bool =
-  ## The large preview of the inspected card, in `rect`. A minion in play
-  ## passes its live stats (toughness >= 0). True when the preview is shown.
+  ## The large preview of the inspected card, in `rect`, with what its
+  ## mechanics mean underneath. A minion in play passes its live stats
+  ## (toughness >= 0). True when the preview is shown.
   when defined(takeScreenshot):
     if getEnv("AWM_CAPTURE_NO_HOVER") == "1":
       return false
@@ -119,6 +170,8 @@ proc drawCardReading*(sk: Silky, rect: UiRect, card: Card, power = -1,
   if toughness >= 0 or extraCost > 0:
     sk.drawMinionOverlays(card, power, toughness, keywords, rect.origin,
       rect.size, extraCost)
+  sk.drawRuleExplanations(card.mechanics(keywords.added),
+    rect.origin + vec2(0, rect.size.y + ExplanationGap), rect.size.x)
   true
 
 proc drawCardReading*(sk: Silky, window: Window, card: Card, power = -1,
@@ -301,13 +354,15 @@ proc playerPanelColumnRect*(window: Window, count, index: int,
 
 proc cardReadingColumnRect*(window: Window, bottom: float32): UiRect =
   ## The preview over the right-hand column of player panels: the same size
-  ## as the duel's, flush with the panels' right edge and centered on the
-  ## column's space between the top and `bottom`.
+  ## as the duel's, flush with the panels' right edge. It and the room for
+  ## its explanations are centered on the column's space between the top
+  ## and `bottom`.
   const Margin = 18'f32
   let size = cardReadingRect(window).size
   UiRect(
     origin: vec2(playerPanelColumnX(window) + PlayerPanelWidth - size.x,
-      max(Margin, Margin + (bottom - Margin - size.y) * 0.5'f32)),
+      max(Margin, Margin +
+        (bottom - Margin - size.y - ExplanationsReserve) * 0.5'f32)),
     size: size)
 
 proc drawPlayerPanelColumn*(sk: Silky, window: Window,
@@ -406,7 +461,8 @@ proc drawTargetPrompt*(sk: Silky, window: Window, play: TablePlay,
     accent =
       HudClassInk[game.players[game.actingPlayer()].heroClass]
     progress = if count > 1: &" ({step + 1} of {count})" else: ""
-    source = if play.pendingTrigger: &"{card.name}'s trigger" else: card.name
+    source =
+      if play.pendingTrigger: game.waitingTriggerName() else: card.name
     hint =
       if play.pendingTrigger:
         "Click the empty board for no target."

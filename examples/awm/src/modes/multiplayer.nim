@@ -469,7 +469,8 @@ when not defined(headless):
         elif play.tossPicking:
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = game.pendingToss.player)
-        elif match.current == match.viewedSeat:
+        else:
+          # The hand facing the camera can be read on any turn.
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = match.viewedSeat)
         if hoverIndex < 0 and not play.choosing:

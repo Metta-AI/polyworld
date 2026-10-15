@@ -763,8 +763,10 @@ proc runDuel*(app: App) =
       elif play.tossPicking:
         hoverIndex = hoveredCard(window, viewProjection, game, duelLayout,
           handOwner = game.pendingToss.player)
-      elif humanTurn() or (botVms[0] != nil and botVms[1] != nil):
-        hoverIndex = hoveredCard(window, viewProjection, game, duelLayout)
+      else:
+        # The hand facing the camera can be read on any turn.
+        hoverIndex = hoveredCard(window, viewProjection, game, duelLayout,
+          handOwner = cameraPlayer())
       if hoverIndex < 0 and not play.choosing:
         var boardChoices: seq[Choice]
         for owner in 0 ..< PlayerCount:
@@ -992,7 +994,8 @@ proc runDuel*(app: App) =
         duelLayout,
         hoverIndex,
         play.choosing,
-        handOwner = if play.tossPicking: game.pendingToss.player else: -1
+        handOwner =
+          if play.tossPicking: game.pendingToss.player else: cameraPlayer()
       )
       sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,
         play, duelLayout), viewProjection,
