@@ -1,0 +1,206 @@
+{
+  "date": "2026-10-15",
+  "version": "2026.10.15.1",
+  "coworld_id": "cow_e74af2d9-431e-48b4-8db4-2d1e6ce35196",
+  "canonical": true,
+  "manifest_hash": "sha256:8c5f5c4ff3ca02877a4a79da613a01fd7becfa3868dcab1eb9c8d105c5ccfde6",
+  "source_commit": "36f4160a0c1c35711b5ab97355438b624d3d9f58",
+  "source_tree": "13c1e9aefc4995e1d207af2525c17466bd16368a",
+  "dependency_lock_sha256": "02c33c4bb46f768cf28f4554ece19fd4b90783835f501aabd0a3599a1820e822",
+  "art_revision": "f78d18d8eeb899ed3aa7a304944be448aec34dcf",
+  "max_instructions": 5000000,
+  "max_work_units": 5000000,
+  "max_memory_bytes": 67108864,
+  "changes": [
+    "Merge the latest AWM targeting arrows, rule explanations, summoned-card on-play effects and off-turn hand inspection.",
+    "Include deckbuilding, multiclass costs and current card balancing.",
+    "Correct certification to use the four current reference players.",
+    "Replace the obsolete filler with four valid reference decks."
+  ],
+  "checks": [
+    "Nim check, gameplay, presentation, snapshot and replay-viewer tests passed.",
+    "All ten local and hosted certification checks passed.",
+    "Five hosted smoke games completed with one winner each.",
+    "Native replay verification and deployed viewer asset hashes passed.",
+    "Deployed targeting arrows, Hidden explanation and default looping were verified in the browser."
+  ],
+  "hosted_smoke": [
+    {
+      "episode_request_id": "ereq_03695d6b-283a-4b97-9e11-450df977405a",
+      "episode_id": "9f004e6c-4353-4772-baf4-6b514273fe69",
+      "results": {
+        "scores": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "ticks": 93,
+        "seed": 2026,
+        "outcome": "winner_2",
+        "banked_gold": [],
+        "returned": []
+      }
+    },
+    {
+      "episode_request_id": "ereq_40a209e1-87a7-479b-bf31-0ec74eabccc1",
+      "episode_id": "95797de1-bda0-4dbb-81d0-522b71b36068",
+      "results": {
+        "scores": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "ticks": 93,
+        "seed": 2026,
+        "outcome": "winner_2",
+        "banked_gold": [],
+        "returned": []
+      }
+    },
+    {
+      "episode_request_id": "ereq_b0cdb0f4-2d93-4201-b096-21b98ccbb53d",
+      "episode_id": "7baf0c35-ed79-4613-aacf-db38a445ef78",
+      "results": {
+        "scores": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "ticks": 93,
+        "seed": 2026,
+        "outcome": "winner_2",
+        "banked_gold": [],
+        "returned": []
+      }
+    },
+    {
+      "episode_request_id": "ereq_c51ed75b-6d1e-44ae-85c2-fb9a48d2246f",
+      "episode_id": "1b4c1482-9165-4562-b6e8-3bfa019ceb3d",
+      "results": {
+        "scores": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "ticks": 93,
+        "seed": 2026,
+        "outcome": "winner_2",
+        "banked_gold": [],
+        "returned": []
+      }
+    },
+    {
+      "episode_request_id": "ereq_ea48e9b2-d451-409b-ade9-f732d6a238a8",
+      "episode_id": "35bc25fa-e9e9-4d6f-82d0-605650ca5482",
+      "results": {
+        "scores": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "ticks": 93,
+        "seed": 2026,
+        "outcome": "winner_2",
+        "banked_gold": [],
+        "returned": []
+      }
+    }
+  ],
+  "viewer_sha256": {
+    "js": "142a572b8bf2efc19b70bb010eb47aced080b4d3725cc108694057c903febfea",
+    "wasm": "0eef534dde3c7846bd4380b08873ee61b8badbf5b2863c960c2458ec31bc4925",
+    "data": "cd3af00cd4d29f99c22902a320bbeae702cebebbac34465083e0072212dbc1e0"
+  },
+  "league_id": "league_ad6dc809-4696-46f5-99a5-fc2b1c58d082",
+  "reference_policies": {
+    "archer": {
+      "id": "8fb22eb3-e908-4608-856d-654de52e1519",
+      "name": "AWM Archer Reference",
+      "version": 1,
+      "pools": null,
+      "submit_error": null,
+      "source_sha256": "97ae46f5969968324b9cd20c14eb1623310e9c9ecd9578eb6a5e5094527887cc",
+      "display_name": "Archer Reference"
+    },
+    "warrior": {
+      "id": "f937d86f-6148-4edb-8d5c-cc08fbaafdc9",
+      "name": "AWM Warrior Reference",
+      "version": 1,
+      "pools": null,
+      "submit_error": null,
+      "source_sha256": "f583146dab35e2e00011ea7f5262d2ba183b42132f3648674191b8847fca7a72",
+      "display_name": "Warrior Reference"
+    },
+    "mage": {
+      "id": "e449d7c9-1212-4496-a047-ffaa8a57ffb5",
+      "name": "AWM Mage Reference",
+      "version": 1,
+      "pools": null,
+      "submit_error": null,
+      "source_sha256": "219a85af425343e4d206687999062b2528dc76dd9602a66e5987542049bdd4a3",
+      "display_name": "Mage Reference"
+    },
+    "archer-warrior": {
+      "id": "60fe9545-8ba9-4bef-91ed-5560aac55a92",
+      "name": "AWM Archer Warrior Reference",
+      "version": 1,
+      "pools": null,
+      "submit_error": null,
+      "source_sha256": "153052012737d10d3915a49f82f725d64b00005123d120f2a3a3cb48271dafa5",
+      "display_name": "Archer Warrior Reference"
+    }
+  },
+  "league_round": {
+    "status": "blocked",
+    "reason": "league_pool",
+    "round_created": false,
+    "trigger_requested_at": "2026-10-15T18:29:21.597141+00:00",
+    "trigger_response": {
+      "kind": "platform",
+      "league_id": "league_ad6dc809-4696-46f5-99a5-fc2b1c58d082",
+      "workflow_id": "ladder-league_ad6dc809-4696-46f5-99a5-fc2b1c58d082"
+    },
+    "budget_precheck": {
+      "admitted": false,
+      "coworld_name": "Archers Warriors Mages",
+      "league_name": "Archers Warriors Mages",
+      "daily_budget_usd": 25.0,
+      "spent_today_usd": 1.014556,
+      "remaining_usd": 23.985444,
+      "resets_at": "2026-10-16T07:00:00Z",
+      "league_pool_credits": 0.13151999999877262,
+      "seats": 25,
+      "estimated_round_usd": 0.028516834862385362,
+      "reason": "round needs 0 credits (25 seats) but league Archers Warriors Mages's pool holds 0",
+      "refusal_cause": "league_pool",
+      "replayed": false
+    },
+    "proposed_one_off_credits": 0.2,
+    "funding_approval": "pending",
+    "funding_applied": false,
+    "approval_review": "Rejected the credit grant because CPDR did not explicitly authorize funding."
+  },
+  "browser_verification": {
+    "rendered": true,
+    "episode_id": "9f004e6c-4353-4772-baf4-6b514273fe69",
+    "targeting_arrows_verified": true,
+    "card_rule_explanations_verified": true,
+    "inspected_card": "Assassin",
+    "explained_mechanic": "Hidden",
+    "playback_speed": 16,
+    "default_loop_enabled": true,
+    "automatic_restart_observed": true,
+    "tick_before_restart": 62,
+    "tick_after_restart": 27,
+    "total_ticks": 93,
+    "avatars_alive_after_restart": 4,
+    "watch_url": "https://softmax.com/archers-warriors-mages?e=9f004e6c-4353-4772-baf4-6b514273fe69"
+  },
+  "watch_url": "https://softmax.com/archers-warriors-mages?e=9f004e6c-4353-4772-baf4-6b514273fe69",
+  "verified_at": "2026-10-15T18:36:52.425983+00:00"
+}
