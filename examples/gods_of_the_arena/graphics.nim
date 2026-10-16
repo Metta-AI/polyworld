@@ -275,6 +275,7 @@ proc runGraphics*() =
       partNodes(model.file.root).applySkin(
         characterLibrary.presetManifest(recipe.preset),
         color(rgb[0], rgb[1], rgb[2], 1))
+      neutralEyes[i].merge()
       neutralModels[i] = model
       for clip, name in MeleeCreep.creepAnimationNames():
         neutralClips[i][clip] = model.clipIndex(name)
@@ -286,6 +287,7 @@ proc runGraphics*() =
           CreepTargetHeight,
           footmanEyes[team][kind]
         )
+        footmanEyes[team][kind].merge()
         footmanModels[team][kind] = model
         for i, name in kind.creepAnimationNames():
           footmanRenderClips[team][kind][i] = model.clipIndex(name)
@@ -296,6 +298,7 @@ proc runGraphics*() =
         godEyes[team]
       )
       god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
+      godEyes[team].merge()
       godModels[team] = god
       godRenderClips[team] = [
         god.clipIndex("Idle_Loop"),
@@ -310,6 +313,7 @@ proc runGraphics*() =
         heroEyes[class]
       )
       model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
+      heroEyes[class].merge()
       heroModels[class] = model
       for i, name in class.heroAnimationNames():
         heroRenderClips[class][i] = model.clipIndex(name)
