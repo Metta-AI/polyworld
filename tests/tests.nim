@@ -10,6 +10,7 @@ import
   test_body_layers,
   test_chrome,
   test_characters,
+  test_character_meshes,
   test_cli,
   test_crewrift,
   test_crewrift_skins,
