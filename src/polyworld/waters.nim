@@ -33,25 +33,27 @@
 ## with the water's depth up to refractionDepth, so the shoreline seam stays closed; a
 ## push landing on something in front of the water falls back to the straight lookup.
 ##
-## Shorelines: each pixel marches outward across the water's surface in 8 directions,
-## projecting each probe to the screen and comparing it with the copied depth: where the
-## scene there stands just above the surface (by less than shoreHeight), it is shore, or
-## something standing in the water; higher things seen there (a canopy or roof hanging over
-## the water) are not. The nearest hit, refined by bisection, gives the distance to the
-## shore; all the hits give the direction to it. Two effects use them:
-##   foam: a tileable noise texture, in world units at foamScale, flowing toward the
-##         shore: every direction that reaches land pulls the flow toward it (weighted by
-##         1 / distance^2, so it turns smoothly around bends and islands), and two copies
-##         of the noise slide along it half a cycle apart, crossfading as each restarts
-##         (the flow-map technique). It shows where it exceeds a threshold that falls from
-##         1 at foamDistance to 0 at the waterline.
-##   fade: the water, foam included, blends into the scene behind it as it nears the shore,
-##         alpha = (distance / fadeDistance)^fadeCurve.
+## Shorelines: each water layer has a shore distance field, built once from the terrain
+## (see buildShoreFields): a grid of ShoreFieldResolution samples per world unit over the
+## water and a margin around it, where ground above the water's surface is land, holding
+## each sample's exact distance to the nearest land (a Euclidean distance transform). The
+## water reads it once per pixel, filtered, so the distance is smooth, follows the visible
+## bank and does not change with the camera. Two effects use it:
+##   shoreline: a strip of foamColor foamDistance wide along the shore, with a soft outer
+##              edge (foamSoftness, a fraction of its width) and foamOpacity. foamNoise
+##              breaks it into foam: a tileable noise texture, foamScale world units across,
+##              flowing toward the shore at foamSpeed along the field's gradient (the exact
+##              direction to the nearest shore). Two copies of the noise slide along it half
+##              a cycle apart, crossfading as each restarts (the flow-map technique), and
+##              show where they exceed a threshold that rises across the strip, so the foam
+##              is mostly solid at the waterline and scattered at the strip's outer edge.
+##   fade: the water, shoreline included, blends into the scene behind it as it nears the
+##         shore, alpha = (distance / fadeDistance)^fadeCurve.
 
 import
   std/[math, random, times],
   chroma, opengl, shady, vmath,
-  profiles, quadterrain
+  pathing, profiles, quadterrain
 
 const
   ShaderTarget =
@@ -63,10 +65,10 @@ const
   ReflectionUnit = 10
   SceneDepthUnit = 11
   SceneColorUnit = 12
-  FoamNoiseUnit = 13
-  ShoreDirections = 8 # directions the shore search marches in
-  ShoreSteps = 6 # steps along each, before bisecting the nearest hit
-  MaxShoreSearch = 12'f32 # world units; the search reaches the larger of foam and fade distance
+  ShoreFieldUnit = 13
+  FoamNoiseUnit = 14
+  ShoreFieldResolution* = 4 ## shore field samples per world unit
+  ShoreFieldReach* = 8'f32 ## the furthest shore distance the field holds, in world units
   MaxWaves* = 32
 
 type
@@ -91,15 +93,15 @@ type
     glintSharpness*: float32 ## higher makes glints smaller and tighter
     refraction*: float32 ## how far the ripples bend what is seen through the water
     refractionDepth*: float32 ## water depth at which the bending reaches full strength
-    foamColor*: Vec3
-    foamDistance*: float32 ## how far from the shore foam reaches
+    foamColor*: Vec3 ## the shoreline strip's colour
+    foamDistance*: float32 ## the shoreline strip's width, from the waterline
+    foamOpacity*: float32 ## 0 no shoreline strip, 1 solid
+    foamSoftness*: float32 ## how much of the strip's width its outer edge softens over
+    foamNoise*: float32 ## 0 a flat strip, 1 broken into noisy foam
     foamScale*: float32 ## world units across one tile of the foam's noise
     foamSpeed*: float32 ## world units per second the foam drifts toward the shore
-    foamOpacity*: float32 ## 0 no foam, 1 solid foam colour
-    foamSoftness*: float32 ## how soft the foam's edges are
     fadeDistance*: float32 ## distance from the shore over which the water fades in
     fadeCurve*: float32 ## 1 fades evenly; above 1 stays clear longer near the shore
-    shoreHeight*: float32 ## height above the water that still counts as its shore
 
   WaterBody* = object
     ## A water layer of the terrain and how to draw it.
@@ -113,8 +115,8 @@ const
     waveScale: 1.5, waveSpeed: 0.7, waveDrag: 0.46, waveCount: 12, rippleFade: 150,
     distortion: 0.5, glintStrength: 40, glintSharpness: 300, refraction: 0.25,
     refractionDepth: 0.12, foamColor: vec3(1'f32, 1, 1), foamDistance: 0.95,
-    foamScale: 1.5, foamSpeed: 0.4, foamOpacity: 1, foamSoftness: 0.28,
-    fadeDistance: 1.13, fadeCurve: 1, shoreHeight: 1)
+    foamOpacity: 1, foamSoftness: 0.28, foamNoise: 1, foamScale: 1.5, foamSpeed: 0.4,
+    fadeDistance: 1.13, fadeCurve: 1)
     ## A calm lake or river.
   OceanWaterParams* = WaterParams(color: vec3(0.03'f32, 0.152, 0.178),
     colorStrength: 0.5, lift: 0, reflectiveness: 0.2, fresnelStrength: 1,
@@ -122,8 +124,8 @@ const
     waveScale: 2.74, waveSpeed: 0.7, waveDrag: 0.31, waveCount: 15, rippleFade: 150,
     distortion: 0.9, glintStrength: 40, glintSharpness: 2874, refraction: 0.25,
     refractionDepth: 0.12, foamColor: vec3(1'f32, 1, 1), foamDistance: 3.61,
-    foamScale: 3.51, foamSpeed: 0.99, foamOpacity: 0.68, foamSoftness: 0.4,
-    fadeDistance: 0.3, fadeCurve: 1.02, shoreHeight: 3.5)
+    foamOpacity: 0.68, foamSoftness: 0.4, foamNoise: 1, foamScale: 3.51, foamSpeed: 0.99,
+    fadeDistance: 0.3, fadeCurve: 1.02)
     ## An open sea around an island, with tall banks.
 
 ## Water shader.
@@ -133,7 +135,9 @@ var
   reflectionTex: Uniform[Sampler2D]
   sceneDepthTex: Uniform[Sampler2D]
   sceneColorTex: Uniform[Sampler2D]
-  foamNoise: Uniform[Sampler2D]
+  shoreField: Uniform[Sampler2D] # distance to the nearest shore, in world units
+  foamNoiseTex: Uniform[Sampler2D]
+  shoreFieldBounds: Uniform[Vec4] # the field's world x, z origin and x, z size
   inverseViewProjection: Uniform[Mat4]
   depthViewport: Uniform[Vec4] # the view's x, y, width, height as fractions of the window
   cameraPos: Uniform[Vec3] # drawWater sets it
@@ -147,8 +151,8 @@ var
   waveHeight, waveScale, waveSpeed, waveDrag, waveCount: Uniform[float32]
   rippleFade, distortion, refraction, refractionDepth: Uniform[float32]
   foamColor: Uniform[Vec3]
-  foamDistance, foamScale, foamSpeed, foamOpacity, foamSoftness: Uniform[float32]
-  fadeDistance, fadeCurve, shoreHeight: Uniform[float32]
+  foamDistance, foamOpacity, foamSoftness, foamNoise, foamScale, foamSpeed: Uniform[float32]
+  fadeDistance, fadeCurve: Uniform[float32]
 
 proc watersVert(gl_Position: var Vec4, vertPos: Vec3, worldPos: var Vec3,
     screenPos: var Vec4) =
@@ -195,23 +199,6 @@ proc sceneHeight(uv: Vec2): float32 =
     point = inverseViewProjection *
       vec4(ndc.x, ndc.y, texture(sceneDepthTex, uv).x * 2.0 - 1.0, 1.0)
   result = point.y / point.w
-
-proc landAt(x, z, surface: float32): float32 =
-  ## Whether the scene seen at world (x, surface, z) is the water's shore: just above the
-  ## surface is 1 (land), anything else 0, and -1 off this view (unknown).
-  let clip = mvp * vec4(x, surface, z, 1.0)
-  if clip.w <= 0.0:
-    return -1.0
-  let uv = vec2(
-    depthViewport.x + (clip.x / clip.w * 0.5 + 0.5) * depthViewport.z,
-    depthViewport.y + (clip.y / clip.w * 0.5 + 0.5) * depthViewport.w)
-  if uv.x < depthViewport.x or uv.y < depthViewport.y or
-      uv.x >= depthViewport.x + depthViewport.z or uv.y >= depthViewport.y + depthViewport.w:
-    return -1.0
-  let height = sceneHeight(uv)
-  if height > surface and height < surface + shoreHeight:
-    return 1.0
-  return 0.0
 
 proc watersFrag(fragColor: var Vec4, worldPos: Vec3, screenPos: Vec4) =
   ## Shows the scene behind this pixel, bent by the ripples and tinted, with the
@@ -263,65 +250,48 @@ proc watersFrag(fragColor: var Vec4, worldPos: Vec3, screenPos: Vec4) =
     # reflection * r + (the tinted, refracted scene) * (1 - r); sheen and glint can
     # exceed 1 (the sun).
     color = seen * (1.0 - r) + reflection * r + sheen + glint
-    searchRadius = min(max(foamDistance, fadeDistance), MaxShoreSearch)
-  # The shore: march outward across the water's surface in every direction. Each
-  # direction that reaches land pulls the direction to the shore toward it, weighted by
-  # 1 / distance^2 so it turns smoothly; the nearest hit is bisected for the distance.
-  var
-    toShore = vec2(0.0, 0.0)
-    nearestWater = 0.0
-    nearestShore = searchRadius
-    nearestDirection = vec2(0.0, 0.0)
-  for d in 0 ..< ShoreDirections:
-    let
-      angle = float32(d) * (6.2831853 / float32(ShoreDirections))
-      direction = vec2(cos(angle), sin(angle))
-    var previous = 0.0
-    for s in 1 .. ShoreSteps:
-      let
-        reach = searchRadius * float32(s) / float32(ShoreSteps)
-        land = landAt(worldPos.x + direction.x * reach, worldPos.z + direction.y * reach,
-          worldPos.y)
-      if land < 0.0:
-        break
-      if land > 0.5:
-        toShore = toShore + direction / max(reach * reach, 0.01)
-        if reach < nearestShore:
-          nearestShore = reach
-          nearestWater = previous
-          nearestDirection = direction
-        break
-      previous = reach
-  if nearestShore < searchRadius:
-    for b in 0 ..< 4:
-      let middle = (nearestWater + nearestShore) * 0.5
-      if landAt(worldPos.x + nearestDirection.x * middle,
-          worldPos.z + nearestDirection.y * middle, worldPos.y) > 0.5:
-        nearestShore = middle
-      else:
-        nearestWater = middle
-  if length(toShore) > 0.0:
-    toShore = normalize(toShore)
   let
-    shoreDistance = nearestShore
-    # Foam: two copies of the noise slide toward the shore, half a cycle apart, each
-    # fading out as it restarts (with a fresh offset), so the motion never jumps or
-    # smears; it shows above a threshold that falls to the waterline.
-    nearShore = 1.0 - clamp(shoreDistance / max(foamDistance, 0.001), 0.0, 1.0)
+    # The distance to the shore, from this layer's field; beyond it, far from any shore.
+    fieldUv = vec2((worldPos.x - shoreFieldBounds.x) / shoreFieldBounds.z,
+      (worldPos.z - shoreFieldBounds.y) / shoreFieldBounds.w)
+  var
+    shoreDistance = 1000.0
+    toShore = vec2(0.0, 0.0)
+  if fieldUv.x >= 0.0 and fieldUv.y >= 0.0 and fieldUv.x <= 1.0 and fieldUv.y <= 1.0:
+    shoreDistance = texture(shoreField, fieldUv).x
+    # The direction to the shore: down the field's gradient, a sample to each side.
+    let
+      stepUv = vec2(1.0 / (ShoreFieldResolution * shoreFieldBounds.z),
+        1.0 / (ShoreFieldResolution * shoreFieldBounds.w))
+      gradient = vec2(
+        texture(shoreField, fieldUv + vec2(stepUv.x, 0.0)).x -
+          texture(shoreField, fieldUv - vec2(stepUv.x, 0.0)).x,
+        texture(shoreField, fieldUv + vec2(0.0, stepUv.y)).x -
+          texture(shoreField, fieldUv - vec2(0.0, stepUv.y)).x)
+    if length(gradient) > 0.0001:
+      toShore = -normalize(gradient)
+  let
+    # Shoreline: a strip foamDistance wide from the waterline, its outer edge softened
+    # over foamSoftness of its width.
+    width = max(foamDistance, 0.001)
+    strip = 1.0 - smoothstep(width * (1.0 - foamSoftness), width, shoreDistance)
+    # Foam noise: two copies slide toward the shore, half a cycle apart, each fading out
+    # as it restarts (with a fresh offset), so the motion never jumps or smears.
     scale = max(foamScale, 0.01)
     cycle = rippleClock * foamSpeed / scale
     phase0 = fract(cycle)
     phase1 = fract(cycle + 0.5)
-    uv0: Vec2 = (xz - toShore * (phase0 * scale)) / scale +
-      vec2(0.37, 0.61) * floor(cycle)
+    uv0: Vec2 = (xz - toShore * (phase0 * scale)) / scale + vec2(0.37, 0.61) * floor(cycle)
     uv1: Vec2 = (xz - toShore * (phase1 * scale)) / scale +
       vec2(0.61, 0.37) * floor(cycle + 0.5)
-    foamNoiseValue = mix(texture(foamNoise, uv0).x, texture(foamNoise, uv1).x,
+    noise = mix(texture(foamNoiseTex, uv0).x, texture(foamNoiseTex, uv1).x,
       abs(phase0 - 0.5) * 2.0)
-    # Away from the shore the threshold is 1, which the noise never passes.
-    foam = smoothstep(1.0 - nearShore, 1.0 - nearShore + foamSoftness, foamNoiseValue) *
-      foamOpacity
-    # Fade: the water, foam included, gives way to the scene behind it toward the shore.
+    # The noise shows above a threshold rising across the strip, over the noise's
+    # middle range: mostly foam at the waterline, scattered patches at the outer edge.
+    threshold = mix(0.3, 0.7, clamp(shoreDistance / width, 0.0, 1.0))
+    broken = smoothstep(threshold - 0.05, threshold + 0.05, noise)
+    foam = strip * mix(1.0, broken, foamNoise) * foamOpacity
+    # Fade: the water, shoreline included, gives way to the scene behind it toward the shore.
     alpha = pow(clamp(shoreDistance / max(fadeDistance, 0.001), 0.0, 1.0), fadeCurve)
     straight = texture(sceneColorTex, depthUv).xyz
     shaded: Vec3 = mix(straight, mix(color, foamColor, foam), alpha)
@@ -351,6 +321,11 @@ proc waterSkyFrag(fragColor: var Vec4, ndc: Vec2) =
 
 ## Runtime.
 
+type ShoreField = object
+  ## One water layer's distance to its shore, as a texture over a world rectangle.
+  texture: GLuint
+  origin, size: Vec2 ## world x, z of the field's corner, and its x, z extent
+
 let startTime = epochTime()
 
 var
@@ -358,6 +333,7 @@ var
   reflectionSize: IVec2
   sceneCopyFbo, depthCopy, colorCopy, foamNoiseTexture: GLuint
   sceneCopySize: IVec2
+  shoreFields: seq[ShoreField] ## per terrain layer; built lazily by drawWaterBody
   skyProgram, skyVertexArray, skyVertexBuffer: GLuint
 
 proc tileableNoise(size = 256): seq[uint8] =
@@ -427,7 +403,8 @@ proc initWaters*() =
   glUniform1i(glGetUniformLocation(program, "reflectionTex"), ReflectionUnit)
   glUniform1i(glGetUniformLocation(program, "sceneDepthTex"), SceneDepthUnit)
   glUniform1i(glGetUniformLocation(program, "sceneColorTex"), SceneColorUnit)
-  glUniform1i(glGetUniformLocation(program, "foamNoise"), FoamNoiseUnit)
+  glUniform1i(glGetUniformLocation(program, "shoreField"), ShoreFieldUnit)
+  glUniform1i(glGetUniformLocation(program, "foamNoiseTex"), FoamNoiseUnit)
   glUseProgram(0)
   glGenFramebuffers(1, sceneCopyFbo.addr)
   glGenTextures(1, depthCopy.addr)
@@ -553,6 +530,113 @@ proc beginReflection*(size: IVec2) {.measure.} =
   glViewport(0, 0, size.x, size.y)
   glClear(GL_DEPTH_BUFFER_BIT)
 
+proc distanceTransform1D(f: openArray[float32], d: var openArray[float32],
+    v: var seq[int], z: var seq[float32]) =
+  ## Felzenszwalb and Huttenlocher's exact 1D squared distance transform: d[q] is the
+  ## lowest (q - p)^2 + f[p] over all p.
+  let n = f.len
+  var k = 0
+  v[0] = 0
+  z[0] = -Inf
+  z[1] = Inf
+  for q in 1 ..< n:
+    var s = ((f[q] + float32(q * q)) - (f[v[k]] + float32(v[k] * v[k]))) /
+      float32(2 * q - 2 * v[k])
+    while s <= z[k]:
+      dec k
+      s = ((f[q] + float32(q * q)) - (f[v[k]] + float32(v[k] * v[k]))) /
+        float32(2 * q - 2 * v[k])
+    inc k
+    v[k] = q
+    z[k] = s
+    z[k + 1] = Inf
+  k = 0
+  for q in 0 ..< n:
+    while z[k + 1] < float32(q):
+      inc k
+    d[q] = float32((q - v[k]) * (q - v[k])) + f[v[k]]
+
+proc buildShoreField(layerIndex: int): ShoreField =
+  ## Samples the visible ground around one water layer, ShoreFieldResolution times per
+  ## world unit: ground above the water's surface is land. Each sample holds its distance
+  ## to the nearest land, from the 2D Euclidean distance transform (columns, then rows),
+  ## capped at ShoreFieldReach.
+  let layer = layers[layerIndex]
+  var
+    loX = int.high
+    loZ = int.high
+    hiX = int.low
+    hiZ = int.low
+  for z in 0 ..< layer.depth:
+    for x in 0 ..< layer.width:
+      if layer.tiles[z * layer.width + x].exists:
+        loX = min(loX, x)
+        loZ = min(loZ, z)
+        hiX = max(hiX, x)
+        hiZ = max(hiZ, z)
+  if loX > hiX:
+    return
+  let
+    margin = ShoreFieldReach
+    surface = waterLayerSurfaces[layerIndex]
+    resolution = ShoreFieldResolution.float32
+  result.origin = vec2((layer.originX + loX).float32 - HalfGrid - margin,
+    (layer.originZ + loZ).float32 - HalfGrid - margin)
+  result.size = vec2((hiX - loX + 1).float32 + 2 * margin,
+    (hiZ - loZ + 1).float32 + 2 * margin)
+  let
+    w = int(result.size.x * resolution)
+    h = int(result.size.y * resolution)
+    far = float32((w + h) * (w + h))
+  var squared = newSeq[float32](w * h)
+  for y in 0 ..< h:
+    for x in 0 ..< w:
+      let
+        worldX = result.origin.x + (x.float32 + 0.5) / resolution
+        worldZ = result.origin.y + (y.float32 + 0.5) / resolution
+        ground = surfaceHeight(worldX, worldZ) + groundOffset(worldX, worldZ)
+      squared[y * w + x] = if ground >= surface: 0'f32 else: far
+  var
+    line = newSeq[float32](max(w, h))
+    lineOut = newSeq[float32](max(w, h))
+    v = newSeq[int](max(w, h))
+    z = newSeq[float32](max(w, h) + 1)
+  for x in 0 ..< w:
+    for y in 0 ..< h: line[y] = squared[y * w + x]
+    distanceTransform1D(line.toOpenArray(0, h - 1), lineOut.toOpenArray(0, h - 1), v, z)
+    for y in 0 ..< h: squared[y * w + x] = lineOut[y]
+  var distances = newSeq[float32](w * h)
+  for y in 0 ..< h:
+    for x in 0 ..< w: line[x] = squared[y * w + x]
+    distanceTransform1D(line.toOpenArray(0, w - 1), lineOut.toOpenArray(0, w - 1), v, z)
+    for x in 0 ..< w:
+      distances[y * w + x] = min(sqrt(lineOut[x]) / resolution, ShoreFieldReach)
+  glGenTextures(1, result.texture.addr)
+  glBindTexture(GL_TEXTURE_2D, result.texture)
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F.GLint, w.GLsizei, h.GLsizei, 0, GL_RED,
+    cGL_FLOAT, distances[0].addr)
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  glBindTexture(GL_TEXTURE_2D, 0)
+
+proc buildShoreFields*() =
+  ## (Re)builds every water layer's shore distance field from the current terrain.
+  ## drawWaterBody builds them on first use; call this after the terrain or its
+  ## relief changes.
+  for field in shoreFields:
+    if field.texture != 0:
+      var texture = field.texture
+      glDeleteTextures(1, texture.addr)
+  shoreFields.setLen(layers.len)
+  for i in 0 ..< layers.len:
+    shoreFields[i] =
+      if layers[i].water and i < waterLayerSurfaces.len: buildShoreField(i)
+      else: ShoreField()
+
 proc captureScene*(size: IVec2) {.measure.} =
   ## Copies the window's colour and depth into colorCopy and depthCopy. The depth texture
   ## matches the window's 24-bit depth, 8-bit stencil format, which a depth blit requires;
@@ -594,6 +678,8 @@ proc reflecting*(params: WaterParams): bool =
 proc drawWaterBody*(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize: IVec2,
     sunToward: Vec3, sunLight: Color, rect: IVec4, reflected: bool) {.measure.} =
   ## Draws one body of water over the captured scene.
+  if shoreFields.len != layers.len:
+    buildShoreFields()
   let
     params = body.params
     vertices = waterLayerRanges[body.layer]
@@ -635,19 +721,24 @@ proc drawWaterBody*(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize
   uniform("refractionDepth", max(params.refractionDepth, 0.001))
   uniform("foamColor", params.foamColor)
   uniform("foamDistance", params.foamDistance)
+  uniform("foamOpacity", params.foamOpacity)
+  # GLSL leaves smoothstep undefined for equal edges.
+  uniform("foamSoftness", clamp(params.foamSoftness, 0.01, 1))
+  uniform("foamNoise", clamp(params.foamNoise, 0, 1))
   uniform("foamScale", params.foamScale)
   uniform("foamSpeed", params.foamSpeed)
-  uniform("foamOpacity", params.foamOpacity)
-  uniform("foamSoftness", params.foamSoftness)
   uniform("fadeDistance", params.fadeDistance)
   uniform("fadeCurve", params.fadeCurve)
-  uniform("shoreHeight", params.shoreHeight)
+  let field = shoreFields[body.layer]
+  glUniform4f(glGetUniformLocation(program, "shoreFieldBounds"), field.origin.x,
+    field.origin.y, max(field.size.x, 0.001), max(field.size.y, 0.001))
   # Wrapped every 10,000 s to keep float32 precision; the jump is rare and brief.
   uniform("rippleClock", float32((epochTime() - startTime) mod 10_000))
   glUseProgram(0)
   for (unit, texture) in [
     (ReflectionUnit, if reflected: reflectionColor else: blankTexture),
     (SceneDepthUnit, depthCopy), (SceneColorUnit, colorCopy),
+    (ShoreFieldUnit, shoreFields[body.layer].texture),
     (FoamNoiseUnit, foamNoiseTexture)
   ]:
     glActiveTexture(GLenum(GL_TEXTURE0.int + unit))
