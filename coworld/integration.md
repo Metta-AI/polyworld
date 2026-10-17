@@ -3,7 +3,9 @@
 `-d:coworld` selects a native headless server. The wrapper is imported only by
 Coworld builds. Desktop, ordinary headless, and WASM builds do not import Mummy.
 `-d:emscripten -d:replayViewer` selects the static replay bootstrap and enables
-looping. Each game retains its simulation, BASIC resource limits and early endings.
+looping by default. Each game retains its simulation, BASIC resource limits and early endings.
+Embedding pages can seek, pause, pick and project through the
+[replay control API](../docs/replay-control.md), which GotA supports.
 
 The packages are `coworld/gota`, `coworld/lvd`, `coworld/cta`, and `coworld/awm`.
 Each contains a manifest template, Compose definition, unchanged BASIC baseline,
@@ -138,8 +140,11 @@ working-directory restoration, and failure logs.
 Serve the repository over HTTP to run
 `python3 coworld/tools/test_browser_with_playwright.py`. It checks actual WASM
 rendering and full replay hashes, seeking, speed, iframe resizing, readiness,
-and visible errors. It supports a host Chrome executable or container Chromium for
-ARM and x86 coverage. `tools/replay_probe.html` captures the Softmax iframe protocol.
+visible errors and the GotA replay control API (`--control-only` runs only that;
+`--gpu` adds seek responsiveness checks with hardware rendering). It supports a
+host Chrome executable or container Chromium for ARM and x86 coverage.
+`coworld/tools/replay_probe.html` captures the Softmax iframe protocol and sends
+replay control commands. The GotA check expects a 28,909-tick recording.
 
 CTA stores authoritative per-hero banked gold and return flags.
 They are cloned, restored and hashed with the world. Surviving returned heroes tied
