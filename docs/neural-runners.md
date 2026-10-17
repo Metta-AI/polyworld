@@ -73,14 +73,18 @@ No common neural manifest is required. Architectures define their own binary
 formats, and unused auxiliary files remain read-only resources.
 
 Zippy reads the archive and returns the BASIC entry and binary resources as
-strings. Uploads are limited to 16 MiB and packages to 256 files. The loader
+strings. Uploads are limited to 16 MiB and packages to 256 files. Decoded
+source, resource contents, resource names and accounting overhead share a
+64 MiB package budget. Each extraction receives the remaining budget and
+rejects excess output during decompression, even with false ZIP size fields.
+This bounds retained package data, not total process memory. The loader
 requires one BASIC file and canonical resource paths. ZIP decoding, compression
 support and checksum checks belong to Zippy, including stored, deflated and
 ZIP64 archives. Polyworld does not implement ZIP parsing or decompression.
 
 After unpacking, the VM compiler applies its existing BASIC source limit.
-Native model and buffer limits apply when the neural runner is used. There is
-no separate expanded-size limit in the ZIP decoder. The current Zippy reader
+Native model and buffer limits apply when the neural runner is used.
+The current Zippy reader
 requires a filename, so byte uploads temporarily stage the compressed archive;
 entry contents stay in memory, and the temporary ZIP is removed after reading.
 Errors use `PolicyError`, `BasicError` or `NeuralError` and reach the existing

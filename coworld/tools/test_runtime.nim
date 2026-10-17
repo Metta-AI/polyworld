@@ -113,9 +113,15 @@ proc episode(
 ) =
   ## Runs one local roster and inspects outputs at the completion marker.
   doAssert scripts.len == count
-  let directory = createTempDir("coworld-" & game & "-", "")
+  let
+    evidenceRoot = getEnv("COWORLD_TEST_ARTIFACTS")
+    directory = createTempDir("coworld-" & game & "-", "",
+      if evidenceRoot.len > 0: evidenceRoot else: getTempDir())
   defer:
-    removeDir(directory)
+    if evidenceRoot.len == 0:
+      removeDir(directory)
+    else:
+      echo "Runtime evidence: ", directory
   let listener = newSocket()
   listener.bindAddr(Port(0), "127.0.0.1")
   let port = listener.getLocalAddr()[1]
@@ -387,6 +393,28 @@ print "PACKAGE-PASSED"
   scripts[0] = "PK\x03\x04corrupt"
   episode("gota", 10, scripts, failure = true)
   echo "GOTA extensionless ZIP, mixed roster and package failures passed"
+
+  # A small upload must not bypass the aggregate decoded-package budget.
+  scripts[0] = zipFixture([("policy.bas", "end"),
+    ("first.bin", repeat('x', MaxUnpackedBytes div 2)),
+    ("second.bin", repeat('y', MaxUnpackedBytes div 2))], true)
+  episode("gota", 10, scripts, failure = true,
+    expectedRuntimeError = "Uncompressed data exceeds output limit")
+
+  # Both directory and local sizes lie; enforcement must count actual output.
+  scripts[0] = zipFixture([("policy.bas", "end"),
+    ("oversized.bin", repeat('x', MaxUnpackedBytes + 1))], true)
+  let
+    local = scripts[0].find("PK\x03\x04", 4)
+    central = scripts[0].find("PK\x01\x02")
+    resourceCentral = scripts[0].find("PK\x01\x02", central + 4)
+  doAssert local >= 0 and central >= 0 and resourceCentral >= 0
+  for offset in [local + 22, resourceCentral + 24]:
+    for byte in 0 ..< 4:
+      scripts[0][offset + byte] = '\0'
+  episode("gota", 10, scripts, failure = true,
+    expectedRuntimeError = "Uncompressed data exceeds output limit")
+  echo "GOTA aggregate and false-size ZIP limits report player failure"
 
   scripts[0] = zipFixture([("policy.bas",
     repeat("' Oversized source for VM compilation.\n", 2000))], true)
