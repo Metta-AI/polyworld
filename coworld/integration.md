@@ -131,6 +131,9 @@ It uses the binaries in `tmp/coworld` to check
 extensionless and empty sources, slot-specific print and annotation output, optional
 annotation destinations, compilation failure,
 disabled VMs, health/Ping/Pong, completion ordering and the 10 MiB log bound.
+GotA also checks aggregate decoded-package limits and forged ZIP size metadata.
+Set `COWORLD_TEST_ARTIFACTS` to an existing directory to retain each episode's
+inputs, logs, status, results and replay for independent inspection.
 
 `nim r coworld/tools/test_tools.nim` checks concurrent build subprocesses,
 working-directory restoration, and failure logs.

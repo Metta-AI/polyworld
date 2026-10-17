@@ -5,6 +5,7 @@ import
 const
   MaxPackageBytes* = 16 * 1024 * 1024
   MaxPackageEntries* = 256
+  MaxUnpackedBytes* = 64 * 1024 * 1024
 
 type
   PolicyError* = object of CatchableError
@@ -54,11 +55,14 @@ proc unpackPolicy(path: string): Policy =
       program = name
   if program.len == 0:
     fail("ZIP package must contain exactly one .bas file")
-  result.source = archive.extractFile(program)
+  result.source = archive.extractFile(program, MaxUnpackedBytes)
   result.memoryBytes = int64(result.source.len)
   for name in names:
     if name != program:
-      let bytes = archive.extractFile(name)
+      let remaining = MaxUnpackedBytes - int(result.memoryBytes) - name.len - 128
+      if remaining < 0:
+        fail("Unpacked policy exceeds 64 MiB")
+      let bytes = archive.extractFile(name, remaining)
       result.files.add PolicyFile(name: name, bytes: bytes)
       result.memoryBytes += int64(name.len) + int64(bytes.len) + 128
 
