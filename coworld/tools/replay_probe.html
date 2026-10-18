@@ -11,5 +11,7 @@ window.addEventListener('message', event => {
     window.replayMessages.push(event.data);
   }
 });
+// Sends one replay control command over the cross-origin postMessage bridge.
+window.sendReplay = data => frame.contentWindow.postMessage({dst: 'coworld-replay', ...data}, '*');
 frame.src = new URLSearchParams(location.search).get('viewer');
 </script>
