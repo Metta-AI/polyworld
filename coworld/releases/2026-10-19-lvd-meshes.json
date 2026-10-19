@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-19",
+  "version": "2026.10.19.1",
+  "status": "uploaded_certification_blocked",
+  "coworld_id": "cow_c7b784fd-f577-44a4-9023-8e302f3c2a15",
+  "canonical": false,
+  "source_commit": "4f9ad8e6482207fce294a92ebf69bd9879dbc13d",
+  "art_commit": "f78d18d8eeb899ed3aa7a304944be448aec34dcf",
+  "replay_version": 23,
+  "manifest_hash": "sha256:db9bc9b154318d8d017c4451efde7c576f67ac45bf75e28309461e686a847bff",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:fbda52da7d35ba6228f15fa15b3cc3d56cad90de20e088474f056162338028a1",
+  "viewer_bundle": "sha256:df942f215c1261a8164115c98a292fc66724f0c785ad5de9ce2e7cec767d7532",
+  "changes": [
+    "Merge LvD body, clothing, hands and equipment through the existing GotA character pipeline.",
+    "Merge both freshly loaded character models and cached faction variants.",
+    "Reuse the retained merged character pose for selected-unit outlines."
+  ],
+  "checks": {
+    "nim_check": "passed",
+    "tests": "Full suite, model-cache deformation checks and retained-pose OpenGL checks passed.",
+    "ci": {
+      "url": "https://github.com/Metta-AI/polyworld/actions/runs/39306413228",
+      "status": "passed",
+      "platforms": [
+        "Linux",
+        "macOS",
+        "Windows"
+      ]
+    },
+    "local_certification": "10 steps passed",
+    "hosted_smoke_games": 5,
+    "hosted_smoke_scores_verified": 30,
+    "replay": "Local Linux and hosted smoke replays verified natively; every recorded tick matched.",
+    "browser": "Hosted WASM replay rendered six-player gameplay without browser errors or warnings.",
+    "hosted_assets": {
+      "lvd.js": {
+        "bytes": 328315,
+        "sha256": "6dff5e3bd84a079443d31ad648515bffbfa267a476ad2b26ccc9dcd4b83b4828",
+        "matches_build": true
+      },
+      "lvd.wasm": {
+        "bytes": 5229458,
+        "sha256": "02ce8ac00c862de54834713b081e58a1f6d5f08d3f69db0fe65cf32cfc1124f5",
+        "matches_build": true
+      },
+      "lvd.data": {
+        "bytes": 28119138,
+        "sha256": "daa624b7a6afc785f923c8f4d99b80eabcb1322e060f12396059b7de092ba8b4",
+        "matches_build": true
+      },
+      "loading-logo.png": {
+        "bytes": 128561,
+        "sha256": "6ffaf9987d85ad251a3bdafc63ed3a225e1030ef617d6765ecb881c3fc294901",
+        "matches_build": true
+      }
+    },
+    "benchmark": {
+      "scope": "96 characters: pose preparation, two sun-depth passes and main rendering.",
+      "median_ms_before": [
+        38.359,
+        37.957,
+        40.777,
+        37.234
+      ],
+      "median_ms_after": [
+        4.774,
+        4.756,
+        4.787,
+        4.72
+      ],
+      "draw_calls_before": 9468,
+      "draw_calls_after": 288
+    }
+  },
+  "league_id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+  "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+  "players_per_game": 6,
+  "league_settings_preserved": true,
+  "previous_canonical_coworld_id": "cow_bfb94ffa-b387-456b-a3ad-7b0bbf7168d9",
+  "new_round_triggered": false,
+  "certification_blocker": {
+    "kind": "platform_error",
+    "attempts": 2,
+    "contract_version": "main-1e7dc7ffd758",
+    "job_ids": [
+      "ccc4c00a-c04f-4253-bf3f-ff67950bb4fc",
+      "f6851da4-9bf8-4b35-bda7-30b0aade9de1"
+    ],
+    "detail": "The orchestrator-certifier-runner service account cannot patch secrets in the orchestrator namespace. Both jobs failed before a certification verdict.",
+    "next_step": "Repair the platform certifier permissions, retry certification for this Coworld ID, confirm canonical promotion, then trigger one LvD league round."
+  },
+  "hosted_smoke_episode_request_ids": [
+    "ereq_026e0e50-b949-4c26-b37c-ebc0c96fe6e8",
+    "ereq_1dbcf39b-3d0b-44a8-9e88-32ce35f99222",
+    "ereq_41934676-6a27-41f3-9ad6-fd93853f65d5",
+    "ereq_8d7d742e-55f9-4e01-b482-1befe243a364",
+    "ereq_c9716ddd-a4d0-490d-a0ff-a4a2fed4a8e5"
+  ],
+  "replay": {
+    "kind": "hosted_smoke",
+    "episode_request_id": "ereq_026e0e50-b949-4c26-b37c-ebc0c96fe6e8",
+    "episode_id": "788b9a6e-bd4b-449d-9e30-8de561a8067e",
+    "viewer_url": "https://d1kovwradqjymp.cloudfront.net/bundles/df942f215c1261a8164115c98a292fc66724f0c785ad5de9ce2e7cec767d7532/f9df968a0ee641e684bcd29be2f6a125/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2F2282aa31-edba-4f7f-963f-3f3d5d8d2bda.replay"
+  },
+  "limitations": [
+    "League promotion and the requested new round remain blocked by hosted platform certification.",
+    "The rendering benchmark measures character work, not whole-game FPS."
+  ],
+  "verified_at": "2026-10-19T19:12:29.160943+00:00"
+}
