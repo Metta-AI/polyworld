@@ -78,6 +78,7 @@ var
   previousUnitPositions: Table[int32, Vec3]
   previousUnitFacings: Table[int32, float32]
   unitPoses: seq[CharacterPose]
+  outlinePose: CharacterPose
   terrainVisionTick = int32.low
   terrainVisionMode = int32.low
 
@@ -241,7 +242,7 @@ proc runGraphics*() =
       6
     )
 
-  ## Both players share the approved CharGen equipment and CC0 animations.
+  ## Players share the approved CharGen equipment and CC0 animations.
   var
     unitModels = newSeq[array[UnitKind, CharacterModel]](run.world.players.len)
     unitClips = newSeq[array[UnitKind, array[AnimationSlot, int]]](
@@ -1033,14 +1034,15 @@ proc runGraphics*() =
         if unit.animation == DeathAnimation or
             unit.animation == VictoryAnimation:
           animTime = min(animTime, clipDuration(model, clip))
-        drawCharacter(
-          scene,
+        scene.prepareCharacter(
+          outlinePose,
           model,
           renderPoint(unit),
           renderFacing(unit),
           clip,
           animTime
         )
+        scene.drawCharacter(outlinePose)
       finishCharacters(scene)
     if anyBuilding:
       for id in selectedIds:

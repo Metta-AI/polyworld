@@ -30,18 +30,24 @@ proc readDepth(): seq[float32] =
     result[0].addr
   )
 
-block:
-  let window = newWindow(
-    "Character pose verification",
-    ivec2(256, 256),
-    vsync = false
-  )
-  defer:
-    window.close()
-  window.makeContextCurrent()
-  loadExtensions()
-  pollEvents()
-  initSunShadows()
+proc drawReference(
+  scene: CharacterScene,
+  model: CharacterModel,
+  position: Vec3,
+  facing: float32,
+  clip: int,
+  time: float32
+) =
+  ## Compares retained poses to freshly sampled poses of the same geometry.
+  if model.mergedMeshes.len == 0:
+    scene.drawCharacter(model, position, facing, clip, time)
+  else:
+    var pose: CharacterPose
+    scene.prepareCharacter(pose, model, position, facing, clip, time)
+    scene.drawCharacter(pose)
+
+proc checkPoses(window: Window, merged: bool) =
+  ## Verifies retained snapshots with original parts and merged outfits.
   var cache: UnitModelCache
   let
     scene = CharacterScene(toon: newToonContext(), shading: ToonCharacters)
@@ -56,6 +62,9 @@ block:
   let
     secondModel = cache.loadUnitModel(manifest, variant, PeonUnit)
     freshModel = loadUnitModel(manifest, variant, PeonUnit)
+  if not merged:
+    for character in [model, secondModel, freshModel]:
+      character.mergedMeshes.setLen(0)
   scene.toon.view = lookAt(vec3(2, 2, 4), vec3(0, 0.6, 0), vec3(0, 1, 0))
   scene.toon.proj = ortho(-1.2'f, 1.2'f, -1.2'f, 1.2'f, 0.1'f, 100'f)
   scene.toon.cameraPosition = vec3(2, 2, 4)
@@ -64,8 +73,8 @@ block:
   scene.prepareCharacter(second, secondModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
   sunShadowsEnabled = false
   clearFrame(window.size)
-  scene.drawCharacter(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
-  scene.drawCharacter(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
+  scene.drawReference(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
+  scene.drawReference(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
   let reference = readColors(window.size)
   clearFrame(window.size)
   scene.drawCharacter(first)
@@ -76,14 +85,14 @@ block:
     if pixel.r > 0 or pixel.g > 0 or pixel.b > 0:
       inc visible
   doAssert visible > 100, "Characters must cover visible pixels."
-  echo "Prepared and immediate character color passes match"
+  echo "Retained character color passes match; merged = ", merged
 
   sunShadowsEnabled = true
   scene.sunDepthPass = true
   for step in 0 .. 1:
     beginSunDepthPass(step)
-    scene.drawCharacter(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
-    scene.drawCharacter(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
+    scene.drawReference(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
+    scene.drawReference(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
     let referenceDepth = readDepth()
     endSunDepthPass(window.size)
     beginSunDepthPass(step)
@@ -97,7 +106,7 @@ block:
         covered = true
     doAssert covered, "Characters must cast shadows."
   doAssert glGetError() == GL_NO_ERROR
-  echo "Prepared and immediate character shadow passes match"
+  echo "Retained character shadow passes match; merged = ", merged
 
   proc drawPasses(time: float32) =
     ## Warms and exercises shared poses across shadow and color draws.
@@ -125,3 +134,18 @@ block:
     doAssert after[0] == before[0], "Character passes must reuse storage."
     echo "Character preparation and four draw passes allocate zero"
   doAssert glGetError() == GL_NO_ERROR
+
+block:
+  let window = newWindow(
+    "Character pose verification",
+    ivec2(256, 256),
+    vsync = false
+  )
+  defer:
+    window.close()
+  window.makeContextCurrent()
+  loadExtensions()
+  pollEvents()
+  initSunShadows()
+  for merged in [false, true]:
+    checkPoses(window, merged)

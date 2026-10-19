@@ -78,6 +78,7 @@ proc loadUnitModel*(
   for name, node in nodes:
     node.visible = visibility[name]
     node.baseVisible = node.visible
+  discard result.mergeCharacterParts()
 
 proc copyUnitModel(source: CharacterModel): CharacterModel =
   ## Copies mutable rigs and materials while retaining immutable GPU geometry.
@@ -174,6 +175,7 @@ proc loadUnitModel*(
     partNodes(result.file.root).applySkin(
       inventory, color(rgb[0], rgb[1], rgb[2], 1)
     )
+    discard result.mergeCharacterParts()
   cache.appearances.add UnitAppearance(
     preset: preset, kind: kind, skin: entry.skinRgb, model: result
   )
