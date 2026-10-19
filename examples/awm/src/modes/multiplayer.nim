@@ -123,7 +123,8 @@ when not defined(headless):
   when defined(takeScreenshot):
     import std/strutils
   import chroma, opengl, silky, vmath, windy
-  import ../app, ../ui/hud, ../scene/table, ../play, ../scene/cardrenderer,
+  import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
+    ../scene/cardrenderer,
     ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel, ../scene/courtyard,
     ../scene/heroes, ../net/web, ../ui/tuning
   import polyworld/[characters, chrome, viewers]
@@ -300,6 +301,7 @@ when not defined(headless):
         tuningTarget("opponent's hand", previewView.farHand),
         tuningTarget("camera", previewView.camera)])
     window.onFrame = proc() =
+      benchBeginFrame()
       var previewDt = frameDelta(previewLastFrame)
       hudTime += previewDt
       if app.replay != nil:
@@ -565,14 +567,18 @@ when not defined(headless):
       else:
         courtyard.draw(vp, eye, environmentTime, 1, stageYaw = stageYaw)
         courtyard.drawSky(vp, eye, environmentTime)
+        benchStart(CardsBuild)
         addTableCards(solid, cardSurfaces, vfx, sk, play, match.game, table,
           previewTime, match.viewedSeat, hoverIndex, hoveredBoard,
           match.humanTurn, attackChoices, play.selectedAttacker,
           play.lungingMinion(), eye)
         addAttackCard(solid, cardSurfaces, vfx, sk, play, match.game, table,
           previewTime)
+        benchStop(CardsBuild)
         solid.draw(stageVp)
+        benchStart(CardsDraw)
         cardSurfaces.draw(sk, stageVp)
+        benchStop(CardsDraw)
       beginCharacters(scene, window, stageView, projection, stageEye)
       scene.lightLikeCourtyard(1)
       if choosingClasses:
@@ -639,6 +645,7 @@ when not defined(headless):
         glDisable(GL_MULTISAMPLE)
       glActiveTexture(GL_TEXTURE0)
       glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+      benchStart(Ui)
       sk.beginUi(window, window.size)
       if choosingClasses:
         let picked = classSelection(vp, sessionOptions.human, not uiCapturesMouse)
@@ -735,7 +742,10 @@ when not defined(headless):
         app.replay.drawTransport(sk, window)
       when PostPanelControls:
         drawPostPanel(sk, window, post, courtyard)
+      benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
       sk.endUi()
+      benchStop(Ui)
+      benchEndFrame("multiplayer " & $layout.playerCount)
       when defined(takeScreenshot):
         captureScreenshot(window, previewScreenshotFrame,
           max(1, parseInt(getEnv("AWM_CAPTURE_FRAME", "20"))),

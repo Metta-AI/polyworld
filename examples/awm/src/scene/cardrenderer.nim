@@ -174,6 +174,10 @@ iterator overlayImages(card: Card, power, toughness: int,
 proc clear*(renderer: var CardRenderer) =
   renderer.vertices.setLen(0)
 
+proc quadCount*(renderer: CardRenderer): int =
+  ## Quads queued this frame, for the benchmark.
+  renderer.vertices.len div 54
+
 proc addSurface*(renderer: var CardRenderer, sk: Silky,
     corners: array[4, Vec3], imageKey: string, brightness = 1.0'f32,
     damageFlash = 0.0'f32, tint = vec3(1, 1, 1)) =

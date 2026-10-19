@@ -5,7 +5,7 @@ when defined(takeScreenshot):
   import std/strutils
 import chroma, opengl, pixie, silky, vmath, windy
 import ../core/sim, ../core/sessions, ../core/bots, ../core/replays
-import ../app, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
+import ../app, ../bench, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel,
   ../scene/courtyard, ../scene/heroes, ../net/web, ../scene/placement,
   ../ui/tuning, ../replayer
@@ -690,6 +690,7 @@ proc runDuel*(app: App) =
     tuner.announce(duelTuningTargets())
 
   window.onFrame = proc() =
+    benchBeginFrame()
     var dt = frameDelta(lastFrameTime)
     hudTime += dt
     if app.replay != nil:
@@ -864,6 +865,7 @@ proc runDuel*(app: App) =
     if phase == PlayGame:
       play.presentVisualEvents(game, duelLayout, animationTime)
 
+    benchStart(CardsBuild)
     solid.clear()
     cardSurfaces.clear()
     vfx.clear()
@@ -874,6 +876,7 @@ proc runDuel*(app: App) =
         play.lungingMinion(), cameraEye)
       addAttackCard(solid, cardSurfaces, vfx, sk, play, game, duelLayout,
         animationTime)
+    benchStop(CardsBuild)
 
     if window.buttonPressed[KeyF8]:
       post.settings.enabled = not post.settings.enabled
@@ -899,7 +902,9 @@ proc runDuel*(app: App) =
       selectionStage.drawSky(viewProjection, cameraEye, environmentTime,
         brightness = 0.22)
     solid.draw(viewProjection)
+    benchStart(CardsDraw)
     cardSurfaces.draw(sk, viewProjection)
+    benchStop(CardsDraw)
 
     beginCharacters(scene, window, view, projection, cameraEye)
     scene.lightLikeCourtyard(currentSide)
@@ -961,6 +966,7 @@ proc runDuel*(app: App) =
       glDisable(GL_MULTISAMPLE)
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+    benchStart(Ui)
     sk.beginUi(window, window.size)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     when PostLayerControls:
@@ -1066,7 +1072,10 @@ proc runDuel*(app: App) =
       app.replay.drawTransport(sk, window)
     when PostPanelControls:
       drawPostPanel(sk, window, post, courtyard)
+    benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
     sk.endUi()
+    benchStop(Ui)
+    benchEndFrame("duel")
     when defined(takeScreenshot):
       if existsEnv("AWM_CAPTURE_SEQUENCE"):
         inc screenshotFrame
