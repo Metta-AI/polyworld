@@ -1,11 +1,12 @@
 import
   std/times,
-  polyworld/player
+  polyworld/[player, actioncam]
 
 echo "Testing play starts on and pauseOnStart is off by default"
 block:
   var p = initPlayer(live = true, durationTicks = 100)
   doAssert p.playing
+  doAssert not p.repeating
   doAssert p.speed == 1
   p = initPlayer(
     live = false,
@@ -16,6 +17,21 @@ block:
   doAssert not p.playing
   doAssert p.speed == 4
   doAssert p.speedIndex == 2
+
+echo "Testing recorded replay defaults and explicit overrides"
+block:
+  let replay = initPlayer(live = false, durationTicks = 100)
+  doAssert replay.playing
+  doAssert replay.repeating
+  doAssert initActionCam().enabled
+  let paused = initPlayer(
+    live = false,
+    durationTicks = 100,
+    playing = false,
+    repeating = false
+  )
+  doAssert not paused.playing
+  doAssert not paused.repeating
 
 echo "Testing live timeline uses duration until the match ends"
 block:
@@ -47,7 +63,7 @@ block:
 echo "Testing repeat rewinds at the end"
 block:
   var p = initPlayer(live = false, durationTicks = 24)
-  p.repeating = true
+  doAssert p.repeating
   p.sync(24, 24, true)
   p.startFrame(1.0, 24)
   doAssert not p.shouldTick(0)

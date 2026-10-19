@@ -85,15 +85,13 @@ proc initPlayer*(
     durationTicks: int32,
     playing = true,
     speed = 1'i32,
-    repeating = false
+    repeating = not live
 ): Player =
-  ## Creates a transport that starts in play unless asked to pause.
+  ## Starts in play; recorded transports loop unless asked otherwise.
   result.live = live
   result.durationTicks = max(durationTicks, 0)
   result.playing = playing
   result.repeating = repeating
-  when defined(replayViewer):
-    result.repeating = repeating or not live
   result.speedIndex = speedIndexOf(speed)
   result.restoreTick = -1
   result.targetTick = -1
@@ -203,7 +201,7 @@ proc shouldTick*(
   ## Returns whether one more simulation tick belongs in this frame.
   ## Paused seeks run until they land so single-tick steps stay exact.
   if player.reachedEnd:
-    if player.repeating:
+    if player.repeating and player.timelineEnd > 0:
       player.seekTo(0, automatic = true)
       return false
     player.playing = false

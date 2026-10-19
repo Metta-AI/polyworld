@@ -257,7 +257,8 @@ proc runGraphics*() =
 
   let demoMode = options.playerSlot == 0 or run.replayMode
   var demoCamera = initDemoCamera(VillagerCount)
-  actionCam.takeManual()
+  if not run.replayMode:
+    actionCam.takeManual()
 
   ## Replay scaffolding
 
