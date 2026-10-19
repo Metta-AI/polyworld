@@ -10,11 +10,11 @@
 import
   std/[math, tables, times],
   chroma, fixxy, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, chargen, clickmarks, common, inputs,
+  polyworld/[actioncam, assets, characters, clickmarks, common, inputs,
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
     terrainsurfaces, viewers, visions, worldbars, worldtexts],
-  assets, content, maps, sim, game, replays, ui, controls
+  appearances, assets, content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -32,11 +32,13 @@ const
   FacingHalfWidth = 0.18'f32
 
 type
-  HeroVisual = object
-    ## Holds client-only animation smoothing for one actor slot.
+  ActorVisual = object
+    ## Retains animation timing and one prepared pose for an actor slot.
     angle: float32
     animTime: float32
     clip: int
+    visible: bool
+    pose: CharacterPose
 
   SeekCheckpoint = object
     ## Captures all authoritative state needed for an exact replay seek.
@@ -287,40 +289,12 @@ proc runGraphics*() =
     worldShapes = initShapeRenderer()
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
-  var heroModels: array[HeroClass, CharacterModel]
-  var monsterModels: array[Species, CharacterModel]
+    models: CharacterModels
   profileBlock "models":
-    let
-      library = readManifest(ChargenLibrary)
-      roster = readCharacterRoster()
-
-    proc loadPresetModel(preset: Preset, height: float32): CharacterModel =
-      ## Assembles existing equipment and preserves the authored face colors.
-      result = loadCharacterModel(
-        readPresetCharacter(ChargenLibrary, library, preset, CharacterClips),
-        height
-      )
-      result.fitCharacterHeight(height, result.clipIndex("Idle_Loop"))
-      for category in library.presetManifest(preset).categories:
-        if category.key in ["Eyes", "Mouth", "Brow"]:
-          for item in category.items:
-            result.unlitParts.add item.nodes
-
-    for class in HeroClass:
-      heroModels[class] = loadPresetModel(
-        library.namedPreset(HeroPresets[class]), HeroTargetHeight
-      )
-    for species in Species:
-      let
-        entry = roster.mobs[species.ord]
-        model = loadPresetModel(
-          entry.preset, HeroTargetHeight * RankScales[species.monsterRank]
-        )
-        rgb = entry.skinRgb
-      partNodes(model.file.root).applySkin(
-        library.presetManifest(entry.preset), color(rgb[0], rgb[1], rgb[2], 1)
-      )
-      monsterModels[species] = model
+    models = loadCharacterModels()
+  let
+    heroModels = models.heroes
+    monsterModels = models.monsters
   drawSplash(sk, window, splash.name)
 
   var
@@ -342,7 +316,7 @@ proc runGraphics*() =
     monsterAttack[species] = model.clipIndex(clips[2])
 
   var
-    visuals: seq[HeroVisual]
+    visuals: seq[ActorVisual]
     previousActorPositions: Table[int32, Vec3]
     previousActorFacings: Table[int32, float32]
     renderAlpha = 1.0'f32
@@ -1122,25 +1096,11 @@ proc runGraphics*() =
     ## Draws one actor silhouette and composites it in `outlineColor`.
     if slot < 0 or slot >= run.world.actors.len or slot >= visuals.len:
       return
-    let actor = run.world.actors[slot]
-    if actor.id == 0:
+    if not visuals[slot].visible:
       return
-    let model =
-      if actor.kind == HeroActor:
-        heroModels[actor.heroClass]
-      else:
-        monsterModels[actor.species]
     selectionOutline.beginMask(window.size)
     beginCharacters(scene, window, view, projection, cameraEye)
-    drawCharacter(
-      scene,
-      model,
-      actorRenderPosition(actor),
-      visuals[slot].angle,
-      visuals[slot].clip,
-      visuals[slot].animTime,
-      color(1, 1, 1, 1)
-    )
+    scene.drawCharacter(visuals[slot].pose)
     finishCharacters(scene)
     selectionOutline.drawOutline(outlineColor)
 
@@ -1490,19 +1450,15 @@ proc runGraphics*() =
         # the same range, so hidden floors above never cast down into view.
         let visibleFrom = selectedViewLevel()
 
-        # One loop for both passes: actors render into
-        # the sun's depth map first, then for the camera. The turn smoothing
-        # and clip time advance exactly once per frame, in whichever pass
-        # runs first.
-        proc drawWorldActors(advanceVisuals: bool) =
-          if visuals.len < run.world.actors.len:
-            visuals.setLen(run.world.actors.len)
+        profileBlock "prepare character poses":
+          visuals.setLen(run.world.actors.len)
           for slot in 0 ..< run.world.actors.len:
+            visuals[slot].visible = false
             let actor = run.world.actors[slot]
             if actor.id == 0 or not actor.alive:
               continue
             if int(actor.home.level) < visibleFrom:
-              continue     # above the cut, so not drawn
+              continue
             if actor.kind == MonsterActor and not selectedVisible(actor.home):
               continue
             let
@@ -1511,9 +1467,7 @@ proc runGraphics*() =
               model =
                 if hero: heroModels[actor.heroClass]
                 else: monsterModels[actor.species]
-            if advanceVisuals:
-              visuals[slot].angle = actorRenderFacing(actor)
-              let wantedClip =
+              wantedClip =
                 if actor.busy:
                   if hero: heroAttack[actor.heroClass]
                   else: monsterAttack[actor.species]
@@ -1523,27 +1477,36 @@ proc runGraphics*() =
                 else:
                   if hero: heroIdle[actor.heroClass]
                   else: monsterIdle[actor.species]
-              if visuals[slot].clip != wantedClip:
-                visuals[slot].clip = wantedClip
-                visuals[slot].animTime = 0
-              if active:
-                visuals[slot].animTime += dt * transport.speed.float32
-            drawCharacter(
-              scene, model, position, visuals[slot].angle,
-              visuals[slot].clip, visuals[slot].animTime)
+            visuals[slot].angle = actorRenderFacing(actor)
+            if visuals[slot].clip != wantedClip:
+              visuals[slot].clip = wantedClip
+              visuals[slot].animTime = 0
+            if active:
+              visuals[slot].animTime += dt * transport.speed.float32
+            scene.prepareCharacter(
+              visuals[slot].pose,
+              model,
+              position,
+              visuals[slot].angle,
+              visuals[slot].clip,
+              visuals[slot].animTime
+            )
+            visuals[slot].visible = true
 
-        let shadowPassRan =
-          sunShadowsActive() and layerVertexRanges.len > visibleFrom
-        if shadowPassRan:
+        proc drawWorldActors() =
+          ## Reuses each actor's pose for shadows, color and outlines.
+          for visual in visuals.mitems:
+            if visual.visible:
+              scene.drawCharacter(visual.pose)
+
+        if sunShadowsActive() and layerVertexRanges.len > visibleFrom:
           sunDepthPasses(window.size):
             drawTerrainSunDepth(
               layerVertexRanges[visibleFrom].a,
               layerVertexRanges[^1].b - layerVertexRanges[visibleFrom].a + 1
             )
             scene.sunDepthPass = true
-            # The turn smoothing and clip times advance in the first pass
-            # only, so both maps and the camera see the same frame.
-            drawWorldActors(advanceVisuals = sunPassIndex == 0)
+            drawWorldActors()
             scene.sunDepthPass = false
 
         glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
@@ -1565,7 +1528,7 @@ proc runGraphics*() =
           )
 
         beginCharacters(scene, window, view, projection, eye)
-        drawWorldActors(advanceVisuals = not shadowPassRan)
+        drawWorldActors()
         finishCharacters(scene)
         particles.drawParticles(
           viewProjection,
