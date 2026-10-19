@@ -2,6 +2,8 @@
 
 when defined(headless):
   import game
+  initializeOptions()
+  initializeMatch()
   runHeadless()
   when defined(coworld):
     import polyworld/coworld
@@ -15,5 +17,10 @@ when defined(headless):
       outcome: run.world.outcome()
     ), run.world.totalXp())
 else:
-  import graphics
-  runGraphics()
+  import windy, game, graphics, frontend
+  initializeOptions()
+  if options.botGroups.len > 0 or options.replayPath.len > 0:
+    initializeMatch()
+    runGraphics()
+  if window == nil or not window.closeRequested:
+    runFrontend()

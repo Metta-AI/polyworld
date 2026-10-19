@@ -853,10 +853,11 @@ proc drawUi*(
   ## Draws every Silky HUD panel for the current frame.
   if run.world.phase == Drafting:
     sk.drawDraft(window, currentLayout(window).gameAreaSize, transport.playing)
-    transport.drawTransport(
-      sk, window, currentLayout(window).transportPanel, actionCam,
-      followSelection, addr statsState.toggled
-    )
+    if not run.networked:
+      transport.drawTransport(
+        sk, window, currentLayout(window).transportPanel, actionCam,
+        followSelection, addr statsState.toggled
+      )
     return
   if shopOpen and options.playerSlot > 0 and not run.replayMode:
     sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
@@ -1448,14 +1449,15 @@ proc drawUi*(
       run.hashCheck.error
     )
 
-  transport.drawTransport(
-    sk,
-    window,
-    chrome.layout.transportPanel,
-    actionCam,
-    followSelection,
-    addr statsState.toggled
-  )
+  if not run.networked:
+    transport.drawTransport(
+      sk,
+      window,
+      chrome.layout.transportPanel,
+      actionCam,
+      followSelection,
+      addr statsState.toggled
+    )
   let creep = footmanById(run.world, primaryId)
   hudScratch.setLen(0)
   if creep.id == 0:

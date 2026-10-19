@@ -104,6 +104,9 @@ import
   test_tile_paths,
   test_viewers,
   test_visions,
-  test_worldtexts
+  test_worldtexts,
+  test_rooms,
+  test_roomclients,
+  test_gota_multiplayer
 
 echo "All tests passed"

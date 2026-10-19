@@ -1,0 +1,13 @@
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: tools/gameserver/Dockerfile
+    restart: unless-stopped
+    environment:
+      BIND: 0.0.0.0
+      PORT: 8090
+    ports:
+      - "127.0.0.1:8090:8090"
+    mem_limit: 2g
+    cpus: 2

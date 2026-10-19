@@ -4,18 +4,18 @@ import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  cameras, controls, faces, lighting, spelleffects,
+  cameras, controls, faces, lighting, spelleffects, multiplayer,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
   polyworld/chargen, polyworld/common, polyworld/pathing,
-  polyworld/tapes, polyworld/toon,
+  polyworld/tapes, polyworld/toon, polyworld/metrics,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
   polyworld/profiles,
   polyworld/quadterrain,
   polyworld/shadows,
   polyworld/terrainsurfaces, polyworld/waters,
   polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
-    visions, worldbars, worldtexts]
+    visions, worldbars, worldtexts, connections, roomclients, rooms, menus]
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -33,6 +33,8 @@ const
   CryptSpawnSurface = CryptRockSurface + 4
 
 type
+  MatchMenuPage = enum
+    HiddenMatchMenu, PauseMenu, MatchSettings
   GraphicsError = object of CatchableError
   GodAnimation = enum
     GodIdle, GodDeath, GodVictory
@@ -109,11 +111,31 @@ proc addHudIcons(builder: AtlasBuilder) =
   builder.addThemeLogo(LogoPath)
 
 var
-  window: Window
-  sk: Silky
+  window*: Window
+  sk*: Silky
+  terrainReady: bool
+  sharedScene: CharacterScene
+  towerPacks: array[Team, PropPack]
 
-proc runGraphics*() =
-  ## Runs the native or Emscripten graphical spectator.
+  neutralModels: array[6, CharacterModel]
+  neutralClips: array[6, array[6, int]]
+  neutralEyes: array[6, DeathEyes]
+  footmanModels: array[Team, array[CreepKind, CharacterModel]]
+  footmanRenderClips: array[Team, array[CreepKind, array[6, int]]]
+  godModels: array[Team, CharacterModel]
+  godRenderClips: array[Team, array[GodAnimation, int]]
+  heroModels: array[HeroClass, CharacterModel]
+  heroRenderClips: array[HeroClass, array[5, int]]
+  heroCastClips: array[HeroClass, int]
+  heroPortalClips: array[HeroClass, int]
+  footmanEyes: array[Team, array[CreepKind, DeathEyes]]
+  godEyes: array[Team, DeathEyes]
+  heroEyes: array[HeroClass, DeathEyes]
+
+proc initializeGraphics*() =
+  ## Creates the application window and shared atlas exactly once.
+  if window != nil:
+    return
   when ProfileWarmupFrames > 0:
     finishGameProfile()
   else:
@@ -153,16 +175,34 @@ proc runGraphics*() =
       options.vsync,
       msaa = msaa4x
     )
+proc runGraphics*(
+    network: NetworkMatch = nil, connection: Connection = nil
+): bool {.discardable.} =
+  ## Runs one match on the existing window and releases match-owned resources.
+  initializeGraphics()
+  clearPlayerCommands()
+  clearProps()
+  var
+    leaveMatch, quitToMenu, leaveRequested: bool
+    matchMenu = HiddenMatchMenu
+    preferences = Preferences()
+    saveError: string
+  try:
+    preferences = readPreferences("Polyworld GotA")
+  except CatchableError as error:
+    saveError = error.msg
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     amplitude = 2.8'f
     seed = ArenaSeed
     installWaters()
-    initTerrain(
-      GotaTreeStyle, GeneratedTerrain, NoRocks, ArenaTextures,
-      settings = GotaTerrainAssets
-    )
-    initWaters()
+    if not terrainReady:
+      initTerrain(
+        GotaTreeStyle, GeneratedTerrain, NoRocks, ArenaTextures,
+        settings = GotaTerrainAssets
+      )
+      initWaters()
+      terrainReady = true
     terrainUnboostedMaterial = CourtyardSurface.float32
     let landscape = buildLandscape(
       layers[GroundLayer],
@@ -223,102 +263,91 @@ proc runGraphics*() =
       vec3(0.8'f),
       2
     )
-  let scene = newCharacterScene(window)
+  if sharedScene == nil:
+    sharedScene = newCharacterScene(window)
+  let scene = sharedScene
   scene.useToonShading()
   var
-    neutralModels: array[6, CharacterModel]
-    neutralClips: array[6, array[6, int]]
-    neutralEyes: array[6, DeathEyes]
-    footmanModels: array[Team, array[CreepKind, CharacterModel]]
-    footmanRenderClips: array[Team, array[CreepKind, array[6, int]]]
-    godModels: array[Team, CharacterModel]
-    godRenderClips: array[Team, array[GodAnimation, int]]
-    heroModels: array[HeroClass, CharacterModel]
-    heroRenderClips: array[HeroClass, array[5, int]]
-    heroCastClips: array[HeroClass, int]
-    heroPortalClips: array[HeroClass, int]
-    footmanEyes: array[Team, array[CreepKind, DeathEyes]]
-    godEyes: array[Team, DeathEyes]
-    heroEyes: array[HeroClass, DeathEyes]
     worldCharacters: seq[WorldCharacter]
     worldCharacterCount: int
     directorSubjects: seq[Subject]
-  profileBlock "models":
-    let
-      characterLibrary = readManifest(ChargenLibrary)
-      deadEyes = characterLibrary.deathEyesPart()
-
-    proc loadPresetModel(
-      preset: Preset,
-      clips: openArray[string],
-      height: float32,
-      eyes: var DeathEyes
-    ): CharacterModel =
-      ## Loads one generated character with its authored face materials.
-      let inventory = characterLibrary.presetManifest(preset)
-      result = loadCharacterModel(
-        readPresetCharacter(ChargenLibrary, characterLibrary, preset, clips),
-        height
-      )
-      for category in inventory.categories:
-        if category.key in ["Eyes", "Mouth", "Brow"]:
-          for item in category.items:
-            result.unlitParts.add item.nodes
-      eyes = initDeathEyes(result, ChargenLibrary, inventory, deadEyes)
-
-    for i, recipe in neutralRecipes():
+  if heroModels[HeroClass.low] == nil:
+    profileBlock "models":
       let
-        model = loadPresetModel(
-          recipe.preset, CreepClips, NeutralTargetHeight, neutralEyes[i])
-        rgb = recipe.skinRgb
-      model.fitCharacterHeight(NeutralTargetHeight, model.clipIndex("Sword_Idle"))
-      partNodes(model.file.root).applySkin(
-        characterLibrary.presetManifest(recipe.preset),
-        color(rgb[0], rgb[1], rgb[2], 1))
-      neutralEyes[i].merge()
-      neutralModels[i] = model
-      for clip, name in MeleeCreep.creepAnimationNames():
-        neutralClips[i][clip] = model.clipIndex(name)
-    for team in Team:
-      for kind in CreepKind:
-        let model = loadPresetModel(
-          characterLibrary.creepPreset(team.ord, kind),
-          CreepClips,
-          CreepTargetHeight,
-          footmanEyes[team][kind]
+        characterLibrary = readManifest(ChargenLibrary)
+        deadEyes = characterLibrary.deathEyesPart()
+
+      proc loadPresetModel(
+        preset: Preset,
+        clips: openArray[string],
+        height: float32,
+        eyes: var DeathEyes
+      ): CharacterModel =
+        ## Loads one generated character with its authored face materials.
+        let inventory = characterLibrary.presetManifest(preset)
+        result = loadCharacterModel(
+          readPresetCharacter(ChargenLibrary, characterLibrary, preset, clips),
+          height
         )
-        footmanEyes[team][kind].merge()
-        footmanModels[team][kind] = model
-        for i, name in kind.creepAnimationNames():
-          footmanRenderClips[team][kind][i] = model.clipIndex(name)
-      let god = loadPresetModel(
-        characterLibrary.namedPreset(GodPresets[ord(team)]),
-        GodClips,
-        GodTargetHeight,
-        godEyes[team]
-      )
-      god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
-      godEyes[team].merge()
-      godModels[team] = god
-      godRenderClips[team] = [
-        god.clipIndex("Idle_Loop"),
-        god.clipIndex("Death01"),
-        god.clipIndex("Dance_Loop")
-      ]
-    for class in HeroClass:
-      let model = loadPresetModel(
-        characterLibrary.namedPreset(HeroPresets[class]),
-        HeroClips,
-        HeroTargetHeight,
-        heroEyes[class]
-      )
-      model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
-      heroEyes[class].merge()
-      heroModels[class] = model
-      for i, name in class.heroAnimationNames():
-        heroRenderClips[class][i] = model.clipIndex(name)
-      heroCastClips[class] = model.clipIndex("Spell_Simple_Shoot")
-      heroPortalClips[class] = model.clipIndex("Spell_Simple_Idle_Loop")
+        for category in inventory.categories:
+          if category.key in ["Eyes", "Mouth", "Brow"]:
+            for item in category.items:
+              result.unlitParts.add item.nodes
+        eyes = initDeathEyes(result, ChargenLibrary, inventory, deadEyes)
+
+      for i, recipe in neutralRecipes():
+        let
+          model = loadPresetModel(
+            recipe.preset, CreepClips, NeutralTargetHeight, neutralEyes[i])
+          rgb = recipe.skinRgb
+        model.fitCharacterHeight(NeutralTargetHeight, model.clipIndex("Sword_Idle"))
+        partNodes(model.file.root).applySkin(
+          characterLibrary.presetManifest(recipe.preset),
+          color(rgb[0], rgb[1], rgb[2], 1))
+        neutralEyes[i].merge()
+        neutralModels[i] = model
+        for clip, name in MeleeCreep.creepAnimationNames():
+          neutralClips[i][clip] = model.clipIndex(name)
+      for team in Team:
+        for kind in CreepKind:
+          let model = loadPresetModel(
+            characterLibrary.creepPreset(team.ord, kind),
+            CreepClips,
+            CreepTargetHeight,
+            footmanEyes[team][kind]
+          )
+          footmanEyes[team][kind].merge()
+          footmanModels[team][kind] = model
+          for i, name in kind.creepAnimationNames():
+            footmanRenderClips[team][kind][i] = model.clipIndex(name)
+        let god = loadPresetModel(
+          characterLibrary.namedPreset(GodPresets[ord(team)]),
+          GodClips,
+          GodTargetHeight,
+          godEyes[team]
+        )
+        god.fitCharacterHeight(GodTargetHeight, god.clipIndex("Idle_Loop"))
+        godEyes[team].merge()
+        godModels[team] = god
+        godRenderClips[team] = [
+          god.clipIndex("Idle_Loop"),
+          god.clipIndex("Death01"),
+          god.clipIndex("Dance_Loop")
+        ]
+      for class in HeroClass:
+        let model = loadPresetModel(
+          characterLibrary.namedPreset(HeroPresets[class]),
+          HeroClips,
+          HeroTargetHeight,
+          heroEyes[class]
+        )
+        model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
+        heroEyes[class].merge()
+        heroModels[class] = model
+        for i, name in class.heroAnimationNames():
+          heroRenderClips[class][i] = model.clipIndex(name)
+        heroCastClips[class] = model.clipIndex("Spell_Simple_Shoot")
+        heroPortalClips[class] = model.clipIndex("Spell_Simple_Idle_Loop")
   var
     particles = initParticleSystem()
     spellEffects = initSpellRenderer()
@@ -433,18 +462,17 @@ proc runGraphics*() =
         modelScale,
         stretch = stretch
       )
-  var
-    towerPacks: array[Team, PropPack]
-    grove: Grove
+  var grove: Grove
   let brush = mixBrush(layers[GroundLayer], run.map.preset.seed)
   profileBlock "props":
     for team in Team:
-      towerPacks[team] = loadPropPack(
-        fortModelPaths(team.ord),
-        textured = true,
-        textureSize = FortTextureSize,
-        mergeNodes = true
-      )
+      if towerPacks[team] == nil:
+        towerPacks[team] = loadPropPack(
+          fortModelPaths(team.ord),
+          textured = true,
+          textureSize = FortTextureSize,
+          mergeNodes = true
+        )
       for name in FortModelNames:
         doAssert towerPacks[team].hasProp(name), "Missing fort model: " & name
     towerPacks.placeStaticStructures()
@@ -1043,6 +1071,20 @@ proc runGraphics*() =
     )
 
   window.onButtonPress = proc(button: Button) =
+    if button == KeyEscape:
+      if quitToMenu:
+        return
+      matchMenu =
+        if matchMenu == HiddenMatchMenu: PauseMenu
+        elif matchMenu == MatchSettings: PauseMenu
+        else: HiddenMatchMenu
+      shopOpen = false
+      armedAbility = -1
+      armedItem = -1
+      attackMoveArmed = false
+      return
+    if matchMenu != HiddenMatchMenu:
+      return
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
         if button == KeyB:
@@ -1050,17 +1092,11 @@ proc runGraphics*() =
           armedAbility = -1
           armedItem = -1
           return
-        if button == KeyEscape:
-          shopOpen = false
-          armedAbility = -1
-          armedItem = -1
-          attackMoveArmed = false
-          return
         if shopOpen and button != KeySpace:
           return
     if handleChromeKey(button):
       return
-    if button == KeySpace:
+    if button == KeySpace and network == nil:
       transport.handleKey(button)
     elif button == KeyC:
       actionCam.toggle(followSelection)
@@ -1442,7 +1478,7 @@ proc runGraphics*() =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
     syncViewMode()
-    if shopOpen or run.world.phase == Drafting:
+    if matchMenu != HiddenMatchMenu or shopOpen or run.world.phase == Drafting:
       selectionStarted = false
       rightOrderStarted = false
       minimapPanning = false
@@ -1870,7 +1906,7 @@ proc runGraphics*() =
           target.position
         )
 
-  proc advanceRenderedSimulation() =
+  proc advanceRenderedSimulation(packet = RoomMessage()) =
     ## Advances one simulation tick and starts any new god animation.
     let wasGameOver = run.world.gameOver
     var
@@ -1883,7 +1919,10 @@ proc runGraphics*() =
     for footman in run.world.footmen:
       oldFootmanLanded[footman.id] = footman.damageLanded
     captureUnitPositions()
-    advanceGame()
+    if network == nil:
+      advanceGame()
+    else:
+      network.applyPacket(packet)
     for i, hero in run.world.heroes:
       if oldPortalEnds[i] > 0 and hero.portalEnds == 0:
         previousUnitPositions[hero.id] = renderPoint(hero.position)
@@ -1892,8 +1931,8 @@ proc runGraphics*() =
       oldHeroLanded,
       oldFootmanLanded
     )
-    if int(run.world.tick) mod SeekCheckpointTicks == 0 or
-        int32(run.world.tick) == transport.timelineEnd:
+    if network == nil and (int(run.world.tick) mod SeekCheckpointTicks == 0 or
+        int32(run.world.tick) == transport.timelineEnd):
       if replayCheckpoints.len == 0 or
           replayCheckpoints[^1].tick < int(run.world.tick):
         replayCheckpoints.add captureCheckpoint()
@@ -1930,7 +1969,7 @@ proc runGraphics*() =
             replayCheckpoints[^1].tick < int(run.world.tick):
           replayCheckpoints.add captureCheckpoint()
 
-  if not run.replayMode:
+  if not run.replayMode and network == nil:
     startReplayRecording(uint32(options.maximumTicks))
   replayCheckpoints = @[captureCheckpoint()]
 
@@ -2006,6 +2045,7 @@ proc runGraphics*() =
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
+    networkElapsed = 0.0'f
   when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
     var profileWarmup = 0
 
@@ -2023,7 +2063,8 @@ proc runGraphics*() =
       let dt = frameDelta(lastFrameTime)
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
-      if not transport.playing or viewingSeeking:
+      if (network == nil and not transport.playing) or viewingSeeking or
+        (network != nil and network.client.snapshot.phase != rooms.Playing):
         viewingDt = 0
       if cameraSeekSerial != transport.seekSerial:
         actionCam.resetDirector(transport.automaticSeek)
@@ -2037,32 +2078,65 @@ proc runGraphics*() =
         else: int32(run.replayPlayer.data.hashes.len)
       transport.durationTicks = run.durationTicks()
       transport.sync(int32(run.world.tick), recorded, run.finished())
-      let restoreTick = transport.takeRestore()
-      if restoreTick >= 0:
-        restoreTo(restoreTick)
-        transport.durationTicks = run.durationTicks()
-        transport.sync(int32(run.world.tick), recorded, run.finished())
-      feedGotaActions(observeTick = true)
-      transport.startFrame(dt, TickRate)
-      let frameStart = epochTime()
-      run.historyPlayback = transport.inHistory
-      profileBlock "simulate":
-        while transport.shouldTick(frameStart):
-          if atLiveTickCap(
-              int32(run.world.tick),
-              transport.durationTicks,
-              transport.live
-          ):
-            break
-          run.historyPlayback = transport.inHistory
-          advanceRenderedSimulation()
-          let recordedNow =
-            if run.recorder != nil: int32(run.recorder.data.hashes.len)
-            else: int32(run.replayPlayer.data.hashes.len)
+      if network != nil:
+        connection.pump()
+        if quitToMenu:
+          if network.client.snapshot.room.len == 0:
+            leaveMatch = true
+          elif not leaveRequested and network.client.snapshot.phase in
+            {rooms.Ended, Desynced}:
+              network.client.send(RoomMessage(kind: LeaveRoom))
+              leaveRequested = true
+        transport.playing = not network.finished and
+          network.client.snapshot.phase == rooms.Playing
+        transport.speedIndex = 0
+        run.historyPlayback = false
+        networkElapsed += dt
+        try:
+          network.flushSubmissions()
+          var packet: RoomMessage
+          let started = epochTime()
+          while not network.finished and network.client.takeTick(packet):
+            advanceRenderedSimulation(packet)
+            networkElapsed = 0
+            if epochTime() - started > 0.012:
+              break
+        except RoomsError as error:
+          network.abort(error.msg)
+        connection.pump()
+        transport.sync(run.world.tick, run.world.tick, run.finished())
+      else:
+        let restoreTick = transport.takeRestore()
+        if restoreTick >= 0:
+          restoreTo(restoreTick)
           transport.durationTicks = run.durationTicks()
-          transport.sync(int32(run.world.tick), recordedNow, run.finished())
-      let active = simulationActive(transport)
-      if active:
+          transport.sync(int32(run.world.tick), recorded, run.finished())
+        feedGotaActions(observeTick = true)
+        transport.startFrame(dt, TickRate)
+        let frameStart = epochTime()
+        run.historyPlayback = transport.inHistory
+        profileBlock "simulate":
+          while transport.shouldTick(frameStart):
+            if atLiveTickCap(
+                int32(run.world.tick),
+                transport.durationTicks,
+                transport.live
+            ):
+              break
+            run.historyPlayback = transport.inHistory
+            advanceRenderedSimulation()
+            let recordedNow =
+              if run.recorder != nil: int32(run.recorder.data.hashes.len)
+              else: int32(run.replayPlayer.data.hashes.len)
+            transport.durationTicks = run.durationTicks()
+            transport.sync(int32(run.world.tick), recordedNow, run.finished())
+      let active = if network == nil: simulationActive(transport)
+                   else: not network.finished and
+                     network.client.snapshot.phase == rooms.Playing
+      if network != nil:
+        renderAlpha = clamp(networkElapsed / SimulationStep, 0.0'f, 1.0'f)
+        animationAlpha = if active: renderAlpha else: 0
+      elif active:
         renderAlpha = clamp(
           transport.accumulator / SimulationStep,
           0.0'f32,
@@ -2394,22 +2468,128 @@ proc runGraphics*() =
             glDisable(GL_MULTISAMPLE)
           glActiveTexture(GL_TEXTURE0)
           glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-          sk.beginUi(window, window.size)
-          drawUi(
-            sk,
-            window,
-            transport,
-            cameraTarget,
-            cameraDistance,
-            viewMode,
-            primaryId,
-            selectedIds,
-            followSelection,
-            actionCam,
-            focusPlayerHero
-          )
+          var menuOrigin: Vec2
+          if matchMenu == HiddenMatchMenu:
+            sk.beginUi(window, window.size)
+          else:
+            menuOrigin = sk.beginMenu(window, "Gods of the Arena", "Match menu")
+          if matchMenu == HiddenMatchMenu:
+            drawUi(
+              sk,
+              window,
+              transport,
+              cameraTarget,
+              cameraDistance,
+              viewMode,
+              primaryId,
+              selectedIds,
+              followSelection,
+              actionCam,
+              focusPlayerHero
+            )
+          let width = window.size.x.float32 / sk.uiScale
+          if matchMenu == HiddenMatchMenu and (network == nil or
+            network.client.snapshot.phase in {rooms.Ended, Desynced}):
+              if sk.menuButton(window,
+                if network == nil: "Return to menu" else: "Return to lobby",
+                vec2(width - 190, 8), 180):
+                leaveMatch = true
+              if run.recorder != nil and sk.menuButton(window, "Save replay",
+                vec2(width - 380, 8), 180,
+                run.world.tick == run.recorder.data.hashes.len):
+                  try:
+                    run.sampleMetrics(true)
+                    run.recorder.data.metrics = run.history.replayMetrics()
+                    saveReplayFile(run.recorder.data.encodeReplay())
+                    saveError = ""
+                  except CatchableError as error:
+                    saveError = error.msg
+          if network != nil:
+            var ownsSeat = false
+            for seat in network.client.snapshot.seats:
+              if seat.owner == network.client.participant:
+                ownsSeat = true
+            if matchMenu == HiddenMatchMenu and not ownsSeat and
+              sk.menuButton(window, "Leave match",
+              vec2(width - 190, 48), 180):
+                network.client.send(RoomMessage(kind: LeaveRoom))
+                leaveMatch = true
+            var status = network.client.status
+            if network.client.error.len > 0:
+              status = network.client.error
+            if status.len == 0:
+              status = "Multiplayer / tick " & $run.world.tick
+            sk.menuLabel(status, vec2(20, window.size.y.float32 / sk.uiScale - 42),
+              width - 40, MenuAccent)
+          if saveError.len > 0:
+            sk.menuLabel(saveError, vec2(20, 45), width - 40, MenuAccent)
+          if matchMenu != HiddenMatchMenu:
+            let origin = menuOrigin
+            try:
+              if quitToMenu:
+                sk.menuLabel("Leaving match...", origin)
+                sk.menuLabel("Waiting for the server to confirm.",
+                  origin + vec2(0, 46), color = MenuMuted)
+              elif matchMenu == MatchSettings:
+                if sk.settingsPanel(window, preferences, "Polyworld GotA", origin):
+                  matchMenu = PauseMenu
+              else:
+                let
+                  paused = if network == nil: not transport.playing
+                           else: network.client.snapshot.flag
+                  activeMatch = network == nil or
+                    network.client.snapshot.phase in {rooms.Playing, Waiting}
+                var controller = network == nil
+                if network != nil:
+                  for seat in network.client.snapshot.seats:
+                    if seat.owner == network.client.participant:
+                      controller = true
+                sk.menuLabel(
+                  if paused: "Match paused" else: "Match running",
+                  origin, color = MenuAccent)
+                if sk.menuButton(window, "Return to game", origin + vec2(0, 46), 340):
+                  matchMenu = HiddenMatchMenu
+                if sk.menuButton(window,
+                  if paused: "Resume match" else: "Pause match",
+                  origin + vec2(0, 96), 340, controller and activeMatch):
+                    if network == nil:
+                      transport.togglePlay()
+                    else:
+                      network.client.send(RoomMessage(
+                        kind: PauseMatch, match: network.client.match,
+                        flag: not paused
+                      ))
+                if sk.menuButton(window, "Settings", origin + vec2(0, 146), 340):
+                  matchMenu = MatchSettings
+                if sk.menuButton(window, "Quit to main menu",
+                  origin + vec2(0, 196), 340):
+                    quitToMenu = true
+                    if network == nil:
+                      leaveMatch = true
+                    elif controller and activeMatch:
+                      network.abort("Match ended by a player quitting to the main menu")
+                    else:
+                      network.client.send(RoomMessage(kind: LeaveRoom))
+                      leaveRequested = true
+                if network != nil:
+                  sk.menuLabel(network.client.status,
+                    origin + vec2(0, 260), 1040, MenuMuted)
+                  sk.menuLabel(
+                    if controller and activeMatch:
+                      "Quitting ends this match for everyone. Pausing keeps everyone connected."
+                    else:
+                      "Spectators can leave, but cannot pause the match.",
+                    origin + vec2(0, 310), 1040, MenuMuted)
+                else:
+                  sk.menuLabel("Opening this menu does not pause. Use Pause match.",
+                    origin + vec2(0, 260), 1040, MenuMuted)
+            except CatchableError as error:
+              saveError = error.msg
+            if saveError.len > 0:
+              sk.menuLabel(saveError, origin + vec2(0, 390), 1040, MenuAccent)
           sk.endUi()
-          drawStatsOverlay(sk, window)
+          if matchMenu == HiddenMatchMenu:
+            drawStatsOverlay(sk, window)
       when defined(takeScreenshot) and ActiveTracePath.len == 0:
         captureScreenshot(
           window,
@@ -2427,17 +2607,28 @@ proc runGraphics*() =
       when not defined(emscripten):
         window.closeRequested = true
 
-  while not window.closeRequested:
+  while not window.closeRequested and not leaveMatch:
+    if network != nil:
+      connection.pump()
     pollEvents()
     waitForDisplay()
 
+  window.onFrame = nil
+  window.onButtonPress = nil
+  clearPlayerCommands()
   if not run.replayMode:
     saveRecording()
   clickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
+  waypointShapes.closeShapeRenderer()
+  waypointText.closeWorldBarRenderer()
   worldBarRenderer.closeWorldBarRenderer()
   particles.closeParticles()
   spellEffects.closeSpellRenderer()
   selectionOutline.closeSelectionOutline()
   occlusionOutline.closeSelectionOutline()
   finishGameProfile()
+  clearSceneProps()
+  grove.trees.closePropPack()
+  grove.rocks.closePropPack()
+  result = quitToMenu

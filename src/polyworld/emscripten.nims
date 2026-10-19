@@ -45,6 +45,13 @@ proc setupEmscripten*(exampleDir: string, game = "") =
         "width=\"320\" height=\"240\" src=\"loading-logo.png\" " &
         "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
+    if game == "gota":
+      preload.add " --preload-file " & quoteShell(
+        exampleDir / "players/base.bas" & "@/policies/gota/base.bas")
+      switch("passL", "-s EXPORTED_FUNCTIONS=" &
+        "_main,_malloc,_free,_windy_websocket_open_callback," &
+        "_windy_websocket_message_callback,_windy_websocket_error_callback," &
+        "_windy_websocket_close_callback")
     let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
     if not fileExists(shellFile) or readFile(shellFile) != shell:
       writeFile(shellFile, shell)

@@ -2988,6 +2988,35 @@ proc releaseTexturedBatch(batch: var TexturedBatch) =
     glDeleteVertexArrays(1, batch.depthVertexArray.addr)
   batch = TexturedBatch()
 
+proc clearSceneProps*() =
+  ## Releases match placements and their batches while keeping shared assets.
+  propPlacements.setLen(0)
+  for batch in texturedBatches.mitems:
+    releaseTexturedBatch(batch)
+  texturedBatches.setLen(0)
+
+proc closePropPack*(pack: PropPack) =
+  ## Releases a generated pack after removing its placements from the scene.
+  if pack == nil:
+    return
+  for model in pack.models:
+    glDeleteBuffers(1, model.vertexBuffer.addr)
+    glDeleteBuffers(1, model.texturedVertexBuffer.addr)
+    glDeleteVertexArrays(1, model.vertexArray.addr)
+    glDeleteVertexArrays(1, model.depthVertexArray.addr)
+    glDeleteVertexArrays(1, model.texturedVertexArray.addr)
+    glDeleteVertexArrays(1, model.texturedDepthVertexArray.addr)
+    model.vertexBuffer = 0
+    model.texturedVertexBuffer = 0
+    model.vertexArray = 0
+    model.depthVertexArray = 0
+    model.texturedVertexArray = 0
+    model.texturedDepthVertexArray = 0
+  glDeleteTextures(1, pack.textureArray.addr)
+  pack.textureArray = 0
+  pack.models.setLen(0)
+  pack.names.clear()
+
 proc rebuildTexturedBatches() {.measure.} =
   ## Preserves clean buffers and uploads only changed textured groups.
   prepareTexturedBatches()

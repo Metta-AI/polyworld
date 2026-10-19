@@ -4,7 +4,6 @@
 ## `apply*` procs the BASIC bots use.
 
 import
-  polyworld/metrics,
   content, sim, replays
 
 type
@@ -172,80 +171,25 @@ proc activatePlayerAbility*(
     return true
   armedAbility = slotId
 
-proc recordCommand(game: Game, command: PlayerCommand) =
-  ## Writes one human command attempt onto the live tape.
-  if game.recorder == nil:
-    return
-  let tick = uint32(game.world.tick)
-  case command.kind
-  of CommandDraft:
-    game.recorder.record ReplayAction(
-      tick: tick, heroId: command.heroId, kind: ActionDraft,
-      first: command.first
-    )
-  of CommandWalk:
-    game.recorder.recordWalkTo(
-      tick, command.heroId, command.first, command.second
-    )
-  of CommandAttack:
-    game.recorder.recordAttackTarget(tick, command.heroId, command.first)
-  of CommandAttackMove:
-    game.recorder.recordAttackMove(
-      tick, command.heroId, command.first, command.second
-    )
-  of CommandBuy:
-    game.recorder.recordBuyItem(tick, command.heroId, command.first)
-  of CommandUse:
-    game.recorder.recordUseItem(tick, command.heroId, command.first)
-  of CommandUseAt:
-    game.recorder.recordUseItemAt(
-      tick, command.heroId, command.slot, command.first, command.second
-    )
-  of CommandLevelAbility:
-    game.recorder.recordLevelAbility(tick, command.heroId, command.slot)
-  of CommandBuyback:
-    game.recorder.recordBuyback(tick, command.heroId)
+proc action(command: PlayerCommand, tick: int32): ReplayAction =
+  ## Converts a human intent to the same payload used by bot commands.
+  const Kinds: array[PlayerCommandKind, uint8] = [
+    ActionDraft, ActionWalkTo, ActionAttackTarget, ActionAttackMove,
+    ActionBuyItem, ActionUseItem, ActionUseItemAt, ActionCastTarget,
+    ActionCastPoint, ActionLevelAbility, ActionBuyback
+  ]
+  ReplayAction(
+    tick: uint32(tick), heroId: command.heroId, kind: Kinds[command.kind],
+    first: command.first, second: command.second, slot: command.slot
+  )
 
-  of CommandCastTarget, CommandCastPoint:
-    game.recorder.recordCast(
-      tick, command.heroId, command.slot, command.first, command.second,
-      command.kind == CommandCastPoint
-    )
-
-proc applyCommand(game: Game, command: PlayerCommand): bool =
-  ## Applies one queued command through the bot validators.
-  case command.kind
-  of CommandDraft:
-    game.world.applyDraft(command.heroId, command.first)
-  of CommandWalk:
-    applyWalkTo(
-      game.world, command.heroId, command.first, command.second
-    )
-  of CommandAttack:
-    applyAttackTarget(game.world, command.heroId, command.first)
-  of CommandAttackMove:
-    applyAttackMove(
-      game.world, command.heroId, command.first, command.second
-    )
-  of CommandBuy:
-    applyBuyItem(game.world, command.heroId, command.first)
-  of CommandUse:
-    applyUseItem(game.world, command.heroId, command.first)
-  of CommandUseAt:
-    applyUseItemAt(
-      game.world, command.heroId, command.slot, command.first, command.second
-    )
-  of CommandLevelAbility:
-    applyLevelAbility(game.world, command.heroId, command.slot)
-  of CommandBuyback:
-    applyBuyback(game.world, command.heroId)
-
-  of CommandCastTarget:
-    applyCastTarget(game.world, command.heroId, command.slot, command.first)
-  of CommandCastPoint:
-    applyCastPoint(
-      game.world, command.heroId, command.slot, command.first, command.second
-    )
+proc clearPlayerCommands*() =
+  ## Releases input from the previous match before creating another one.
+  pending.setLen(0)
+  armedAbility = -1
+  armedItem = -1
+  shopOpen = false
+  purchaseReceipt = PurchaseReceipt()
 
 proc flushPlayerCommands*(game: Game) =
   ## Drains the human queue on a decision tick.
@@ -254,14 +198,9 @@ proc flushPlayerCommands*(game: Game) =
   let commands = pending
   pending.setLen(0)
   for command in commands:
-    game.recordCommand(command)
-    let accepted = game.applyCommand(command)
-    if command.kind == CommandBuy:
+    let accepted = game.submitAction(command.action(game.world.tick))
+    if command.kind == CommandBuy and not game.networked:
       purchaseReceipt = PurchaseReceipt(
         serial: purchaseReceipt.serial + 1,
         heroId: command.heroId, itemId: command.first, accepted: accepted
-      )
-    if accepted:
-      game.metrics.command(
-        heroIndex(game.world, command.heroId), game.world.tick
       )

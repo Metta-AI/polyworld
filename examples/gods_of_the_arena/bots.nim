@@ -276,7 +276,7 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityRestore: spec.restore
     of AbilityManaCost: spec.manaCost
 
-proc sendChat*(
+proc deliverChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Routes chat according to this game's player and team rules.
@@ -296,6 +296,27 @@ proc sendChat*(
         continue
     if game.inboxes[recipient].push(id, text):
       inc result
+
+proc sendChat*(
+    game: Game, sender, target: int, text: openArray[char]
+): int32 =
+  ## Sends local mailbox traffic or queues it for authoritative delivery.
+  if game.networked:
+    if sender notin 0 ..< game.world.heroes.len or
+      target < -2 or target >= game.world.heroes.len or
+      text.len > MaxChatBytes or game.submissions.len >= 1024:
+        return 0
+    var message = newString(text.len)
+    for i in 0 ..< text.len:
+      message[i] = text[i]
+    game.submissions.add GameSubmission(
+      mailbox: true, text: message,
+      action: ReplayAction(
+        heroId: game.world.heroes[sender].id, first: int32(target)
+      )
+    )
+    return 1
+  game.deliverChat(sender, target, text)
 
 proc infoFunctions(host: var Host, heroId: int32) =
   ## Exposes ordinary scalar facts shared by BASIC and neural policies.
@@ -456,6 +477,21 @@ proc finishStructuredAction(heroId: int32, accepted: bool) =
       activeGame.refreshOwnStructures(index)
       vm.structureGlobal("lastAction.accepted").value = toValue(accepted)
 
+proc publishActionResult*(game: Game, heroId: int32, accepted: bool) =
+  ## Updates BASIC feedback only when an authoritative command executes.
+  activeGame = game
+  finishStructuredAction(heroId, accepted)
+
+proc requestAction(action: ReplayAction): bool =
+  ## Preserves immediate offline results and queue-only multiplayer results.
+  try:
+    result = activeGame.submitAction(action)
+  except ReplayError as error:
+    activeGame.recordingError = error.msg
+    raise newException(BasicError, "replay recording failed: " & error.msg)
+  if not activeGame.networked:
+    finishStructuredAction(action.heroId, result)
+
 proc initHeroHost(
     heroId: int32,
     policy: Policy = nil,
@@ -522,22 +558,12 @@ proc initHeroHost(
     discard result.addData(name, layer.int32)
 
   let draftHeroProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Records and validates the active player's hero choice.
-    try:
-      activeGame.recorder.record ReplayAction(
-        tick: uint32(activeGame.world.tick), heroId: heroId,
-        kind: ActionDraft, first: arguments[0]
-      )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyDraft(heroId, arguments[0])
-    if accepted:
-      activeGame.metrics.command(
-        activeGame.world.heroIndex(heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionDraft, first: arguments[0]
+    )))
+
   let draftedClassProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads any player's public selection, including the opposing team.
     activeGame.world.draftedClass(arguments[0])
@@ -628,88 +654,31 @@ proc initHeroHost(
     var team: Team
     let value = scriptObject(activeGame.world, heroId, int(arguments[0]), team)
     int32(value != nil and value.alive)
-  let walkToProc: NumericHostProc = proc(
-      arguments: openArray[Value]
-  ): Value =
+  let walkToProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
+    ## Submits this hero's command through the shared game action path.
     let (x, y, offset) = splitTilePoint(fixedVec2(
       arguments[0].asFixed, arguments[1].asFixed))
-    try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordWalkTo(
-          uint32(activeGame.world.tick),
-          heroId,
-          x,
-          y,
-          offset
-        )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(
-        BasicError,
-        "replay recording failed: " & error.msg
-      )
-    let accepted = applyWalkTo(
-      activeGame.world, heroId, x, y, offset
-    )
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
-  let attackMoveProc: NumericHostProc = proc(
-      arguments: openArray[Value]
-  ): Value =
-    ## Records and applies the same attack-move order used by human players.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionWalkTo, first: x, second: y, offset: offset
+    )))
+
+  let attackMoveProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
+    ## Submits this hero's command through the shared game action path.
     let (x, y, offset) = splitTilePoint(fixedVec2(
       arguments[0].asFixed, arguments[1].asFixed))
-    try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.record ReplayAction(
-          tick: uint32(activeGame.world.tick),
-          heroId: heroId,
-          kind: ActionAttackMove,
-          first: x,
-          second: y,
-          offset: offset
-        )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyAttackMove(
-      heroId, x, y, offset
-    )
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
-  let attackTargetProc: HostProc = proc(
-      arguments: openArray[int32]
-  ): int32 =
-    try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordAttackTarget(
-          uint32(activeGame.world.tick),
-          heroId,
-          arguments[0]
-        )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(
-        BasicError,
-        "replay recording failed: " & error.msg
-      )
-    let accepted = applyAttackTarget(
-      activeGame.world, heroId, arguments[0]
-    )
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionAttackMove, first: x, second: y, offset: offset
+    )))
+
+  let attackTargetProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionAttackTarget, first: arguments[0]
+    )))
+
   let itemIdProc: HostProc = proc(
       arguments: openArray[int32]
   ): int32 =
@@ -739,113 +708,46 @@ proc initHeroHost(
   let inOwnSpawnProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reports whether the hero is receiving spawn-room recovery.
     int32(activeGame.world.heroById(heroId).inOwnSpawn)
-  let buyItemProc: HostProc = proc(
-      arguments: openArray[int32]
-  ): int32 =
-    try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordBuyItem(
-          uint32(activeGame.world.tick),
-          heroId,
-          arguments[0]
-        )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(
-        BasicError,
-        "replay recording failed: " & error.msg
-      )
-    let accepted = applyBuyItem(
-      activeGame.world, heroId, arguments[0]
-    )
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+  let buyItemProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionBuyItem, first: arguments[0]
+    )))
+
   let buybackPriceProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads this hero's current buyback price from the shared rules.
     activeGame.world.buybackPrice(heroId)
   let buybackProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Records and attempts a buyback using only this hero's gold.
-    try:
-      activeGame.recorder.recordBuyback(
-        uint32(activeGame.world.tick), heroId
-      )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyBuyback(heroId)
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
-  let useItemProc: HostProc = proc(
-      arguments: openArray[int32]
-  ): int32 =
-    try:
-      if activeGame.recorder != nil:
-        activeGame.recorder.recordUseItem(
-          uint32(activeGame.world.tick),
-          heroId,
-          arguments[0]
-        )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(
-        BasicError,
-        "replay recording failed: " & error.msg
-      )
-    let accepted = applyUseItem(
-      activeGame.world, heroId, arguments[0]
-    )
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionBuyback
+    )))
+
+  let useItemProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionUseItem, first: arguments[0]
+    )))
 
   let useItemAtProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
-    ## Records and attempts a scroll channel at fractional map coordinates.
-    let
-      (x, y, offset) = splitTilePoint(fixedVec2(
-        arguments[1].asFixed, arguments[2].asFixed))
-      slot = arguments[0].asInt
-    try:
-      activeGame.recorder.recordUseItemAt(
-        uint32(activeGame.world.tick), heroId, slot, x, y, offset
-      )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyUseItemAt(heroId, slot, x, y, offset)
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    ## Submits this hero's command through the shared game action path.
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      arguments[1].asFixed, arguments[2].asFixed))
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionUseItemAt, slot: arguments[0].asInt, first: x, second: y, offset: offset
+    )))
 
   let levelAbilityProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Records and spends a point through the shared upgrade validator.
-    try:
-      activeGame.recorder.recordLevelAbility(
-        uint32(activeGame.world.tick), heroId, arguments[0]
-      )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyLevelAbility(heroId, arguments[0])
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionLevelAbility, slot: arguments[0]
+    )))
+
   let abilityPointsProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads unspent points immediately, including after an upgrade.
     let index = activeGame.world.heroIndex(heroId)
@@ -867,49 +769,21 @@ proc initHeroHost(
     discard result.addFunction(name, 1, abilityProc(heroId, field), 4)
 
   let castTargetProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Records and attempts an explicit object-targeted spell.
-    let slot = arguments[0]
-    try:
-      activeGame.recorder.recordCast(
-        uint32(activeGame.world.tick), heroId, slot, arguments[1], 0, false
-      )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyCastTarget(heroId, slot, arguments[1])
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    ## Submits this hero's command through the shared game action path.
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionCastTarget, slot: arguments[0], first: arguments[1]
+    )))
+
   let castPointProc: NumericHostProc = proc(arguments: openArray[Value]): Value =
-    ## Records and attempts a ground-aimed spell.
+    ## Submits this hero's command through the shared game action path.
     let (x, y, offset) = splitTilePoint(fixedVec2(
       arguments[1].asFixed, arguments[2].asFixed))
-    let slot = arguments[0].asInt
-    try:
-      activeGame.recorder.recordCast(
-        uint32(activeGame.world.tick),
-        heroId,
-        slot,
-        x,
-        y,
-        true,
-        offset
-      )
-    except ReplayError as error:
-      activeGame.recordingError = error.msg
-      raise newException(BasicError, "replay recording failed: " & error.msg)
-    let accepted = activeGame.world.applyCastPoint(
-      heroId, slot, x, y, offset
-    )
-    if accepted:
-      activeGame.metrics.command(
-        heroIndex(activeGame.world, heroId), activeGame.world.tick
-      )
-    finishStructuredAction(heroId, accepted)
-    int32(accepted)
+    int32(requestAction(ReplayAction(
+      tick: uint32(activeGame.world.tick), heroId: heroId,
+      kind: ActionCastPoint, slot: arguments[0].asInt, first: x, second: y, offset: offset
+    )))
+
   let abilityChargesProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads remaining charges for one of this hero's four ability slots.
     let index = heroIndex(activeGame.world, heroId)
@@ -1047,18 +921,15 @@ proc neuralLimits(): Limits =
   result = heroVmLimits()
   result.maxNativeMemoryBytes = NativeMemoryBytes
 
-proc loadBots*(
+proc loadBotSources*(
     game: Game,
-    groups: openArray[BotGroup],
-    playerSlot = 0'i32
+    sources: openArray[string]
 ) =
   ## Loads bot files into every hero slot except the optional human slot.
   activeGame = game
   let
     limits = neuralLimits()
     schema = initHeroHost(0)
-    kinds = controllerKinds(game.world.heroes.len, playerSlot)
-    sources = groups.expandBotSources(kinds)
   game.heroVms = newSeq[HeroVm](game.world.heroes.len)
   game.structuredBots = false
   game.inboxes.setLen(game.world.heroes.len)
@@ -1066,7 +937,7 @@ proc loadBots*(
     inbox = newMailbox()
   var bound = false
   for i in 0 ..< game.world.heroes.len:
-    if kinds[i] == PlayerController:
+    if i >= sources.len or sources[i].len == 0:
       continue
     let llm = newLlmClient(i)
     let policy =
@@ -1109,6 +980,13 @@ proc loadBots*(
     llm.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))
+
+proc loadBots*(
+    game: Game, groups: openArray[BotGroup], playerSlot = 0'i32
+) =
+  ## Expands offline policies while leaving the optional human seat empty.
+  let kinds = controllerKinds(game.world.heroes.len, playerSlot)
+  game.loadBotSources(groups.expandBotSources(kinds))
 
 proc runHeroScript(game: Game, index: int) =
   ## Runs one bounded BASIC decision, including while awaiting respawn.
@@ -1212,5 +1090,6 @@ proc runBotDecisions*(game: Game) {.measure.} =
   for offset in 0 ..< game.world.heroes.len:
     let index = (game.world.heroTurnStart + offset) mod game.world.heroes.len
     runHeroScript(game, index)
-  game.world.heroTurnStart =
-    (game.world.heroTurnStart + 1) mod game.world.heroes.len
+  if not game.networked:
+    game.world.heroTurnStart =
+      (game.world.heroTurnStart + 1) mod game.world.heroes.len

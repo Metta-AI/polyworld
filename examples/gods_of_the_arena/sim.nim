@@ -325,6 +325,10 @@ type
     observationsFrozen: bool
     observedObjects: seq[WorldObject]
     observedSpells: array[Team, seq[SpellCast]]
+  GameSubmission* = object
+    action*: ReplayAction
+    mailbox*: bool
+    text*: string
   Game* = ref object
     ## One match session. World is the hashable sim; everything else is
     ## tape, map, and agents.
@@ -339,6 +343,10 @@ type
     historyPlayback*: bool
     replayMode*: bool
     recordingError*: string
+    networked*: bool
+    submissions*: seq[GameSubmission]
+    networkActions*: seq[ReplayAction]
+    actionResults*: seq[tuple[action: ReplayAction, accepted: bool]]
     heroVms*: seq[HeroVm]
     structuredBots*: bool
     structureCounts*: array[Team, array[8, int32]]
@@ -4948,7 +4956,7 @@ proc applyCastPoint*(
     offset
   )
 
-proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.} =
+proc applyReplayAction*(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
   case action.kind
   of ActionWalkTo:
@@ -4980,6 +4988,28 @@ proc applyReplayAction(world: World, action: ReplayAction): bool {.discardable.}
     applyDraft(world, action.heroId, action.first)
   else:
     raise newException(ReplayError, "replay action kind is invalid")
+
+proc submitAction*(game: Game, action: ReplayAction): bool =
+  ## Queues multiplayer intents or executes and records offline commands.
+  if game.networked:
+    if game.submissions.len >= 1024:
+      return false
+    game.submissions.add GameSubmission(action: action)
+    return true
+  game.recorder.record(action)
+  result = game.world.applyReplayAction(action)
+  if result:
+    game.metrics.command(game.world.heroIndex(action.heroId), game.world.tick)
+
+proc applyNetworkActions(game: Game) =
+  ## Applies the same validated, ordered tick commands on every client.
+  for action in game.networkActions:
+    game.recorder.record(action)
+    let accepted = game.world.applyReplayAction(action)
+    game.actionResults.add (action, accepted)
+    if accepted:
+      game.metrics.command(game.world.heroIndex(action.heroId), game.world.tick)
+  game.networkActions.setLen(0)
 
 proc nearestEnemy(
     world: World, hero: Hero, radius: int32
@@ -5629,6 +5659,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       while game.replayPlayer.takeActionAt(uint32(world.tick), action):
         if world.applyReplayAction(action):
           game.metrics.command(world.heroIndex(action.heroId), world.tick)
+    elif game.networked:
+      game.applyNetworkActions()
     elif decide and onHeroTurn != nil:
       onHeroTurn()
     if world.phase == Drafting and world.draftTicksLeft() == 0:
@@ -5666,10 +5698,12 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       while game.replayPlayer.takeActionAt(uint32(world.tick), action):
         if applyReplayAction(world, action):
           game.metrics.command(heroIndex(world, action.heroId), world.tick)
+    if game.networked:
+      game.applyNetworkActions()
     dec world.heroTurnTicks
     if world.heroTurnTicks <= 0:
       world.heroTurnTicks += DecisionTicks
-      if game.historyPlayback:
+      if game.historyPlayback or game.networked:
         world.heroTurnStart = (world.heroTurnStart + 1) mod world.heroes.len
       else:
         profileBlock "decisions":

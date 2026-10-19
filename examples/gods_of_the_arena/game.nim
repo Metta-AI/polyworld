@@ -17,7 +17,7 @@ import
 when defined(coworld):
   import polyworld/coworld
 
-var matchConfig = GotaConfig(seed: ArenaSeed)
+var matchConfig* = GotaConfig(seed: ArenaSeed)
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
@@ -49,7 +49,7 @@ proc usage() =
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 
-proc parseGameOptions(): GameOptions =
+proc parseGameOptions(validateMatch: bool): GameOptions =
   ## Parses runtime game, bot, replay, and simulation configuration.
   let arguments = commandLineParams()
   var index = 0
@@ -108,23 +108,26 @@ proc parseGameOptions(): GameOptions =
       else:
         fail("unknown argument: " & argument)
     inc index
-  result.validateGameOptions(
-    HeroClassCount,
-    "live games require exactly 10 bots"
-  )
+  if validateMatch or result.botGroups.len > 0 or result.replayPath.len > 0:
+    result.validateGameOptions(
+      HeroClassCount,
+      "live games require exactly 10 bots"
+    )
 
-var options* =
+var
+  options*: GameOptions
+  run*: Game
+
+proc initializeOptions*() =
+  ## Parses startup arguments without constructing a match on import.
   when defined(coworld):
-    block:
-      let hosted = coworldOptions(10)
-      matchConfig = parseConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
-      hosted
+    options = coworldOptions(10)
+    matchConfig = parseConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
   else:
-    parseGameOptions()
+    options = parseGameOptions(defined(headless))
 
-var run*: Game
-
-block:
+proc initializeMatch*() =
+  ## Creates a fresh local or replay session from explicit startup settings.
   startGameProfile()
   var
     replayMode = options.replayPath.len > 0
@@ -345,3 +348,30 @@ when defined(headless):
     else:
       saveRecording()
     printHeadlessSummary(steps, started)
+
+proc initializeLocalMatch*(
+    config: GotaConfig, sources: openArray[string], humanSeat: int
+) =
+  ## Builds a menu-configured local match without changing private policy files.
+  matchConfig = config
+  options.seed = config.seed
+  options.maximumTicks = config.maxTicks
+  options.spawnIntervalTicks = config.spawnIntervalTicks
+  options.playerSlot = int32(humanSeat + 1)
+  options.replayPath = ""
+  options.recordPath = ""
+  options.pauseOnStart = false
+  options.speed = 1
+  clearPlayerCommands()
+  let map = generateMap(config.seed, config.mapPreset)
+  run = newGame(
+    map, config.spawnIntervalTicks, HeroClassCount, false, ReplayData(),
+    draftMode = config.draftMode
+  )
+  run.loadBotSources(sources)
+  run.recorder = initReplayRecorder(
+    currentSetup(run, uint32(config.maxTicks)), map.preset
+  )
+  run.recorder.data.config = config
+  run.recorder.data.config.playerSlot = options.playerSlot
+  run.replayPlayer = ReplayPlayer(data: run.recorder.data)

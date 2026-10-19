@@ -18,6 +18,10 @@ elif defined(recordLvd):
 else:
   import ../examples/call_to_adventure/[content, game, replays, sim]
 
+when defined(recordGota):
+  initializeOptions()
+  initializeMatch()
+
 when not defined(headless):
   {.error: "Recording tests require -d:headless.".}
 

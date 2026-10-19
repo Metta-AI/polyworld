@@ -41,6 +41,9 @@ import
   test_gota_drafts,
   test_gota_training,
   test_llms,
-  test_llm_hosts
+  test_llm_hosts,
+  test_rooms,
+  test_roomclients,
+  test_gota_multiplayer
 
 echo "CI tests passed"
