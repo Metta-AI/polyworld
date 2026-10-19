@@ -1,0 +1,84 @@
+{
+  "date": "2026-10-19",
+  "version": "2026.10.19.1",
+  "status": "uploaded_certification_blocked",
+  "coworld_id": "cow_e298c5f1-de8a-4505-aad2-d99d926f4e06",
+  "canonical": false,
+  "source_commit": "0ae60fc45ea2f9e553ee4d66a1f600b02c0e2f7d",
+  "art_commit": "f78d18d8eeb899ed3aa7a304944be448aec34dcf",
+  "replay_version": 23,
+  "manifest_hash": "sha256:841270ddf869534d4eda62aa6b0e4f749edd9919012ff2c89ce515cb75c6535a",
+  "server_image": "public.ecr.aws/q5f4m8t9/cogames@sha256:2183a639f5adeef4bd6d8a3a3b9164258f45bc0eeb1a176f3b3607b80d3bcbd0",
+  "viewer_bundle": "sha256:8f5ef6abc7597e8785379488236d52684474fcd663e04d10a73c7df226af1555",
+  "changes": [
+    "Merge all 20 CTA hero and monster models using the existing Gota character pipeline.",
+    "Reduce 28 to 121 primitive draws to one per character per toon render pass.",
+    "Prepare character poses once per frame and reuse them for shadow, main and outline rendering."
+  ],
+  "checks": {
+    "nim_check": "passed",
+    "tests": "Full suite and CTA character integration checks passed.",
+    "local_certification": "10 steps passed",
+    "hosted_smoke_games": 5,
+    "hosted_smoke_scores_verified": 20,
+    "replay": "Local Linux and hosted smoke replay verified natively: 14884 ticks, 52407 actions, final hash 000000004E9E2E1D.",
+    "browser": "Packaged and hosted WASM viewers rendered animated characters without browser warnings or errors.",
+    "hosted_assets": {
+      "cta.js": {
+        "sha256": "98d271885d0b3363de5f9822e0730937deec0edc17996265141c1ff21cbec576",
+        "bytes": 336365,
+        "matches_build": true
+      },
+      "cta.wasm": {
+        "sha256": "a3fb39d9160ebcd5319b8499609376620d9dfb7efa9534ad057b21ed27bba1ba",
+        "bytes": 4738420,
+        "matches_build": true
+      },
+      "cta.data": {
+        "sha256": "c624a0b2789cb8e89544fbd4f44b51097758f51ec4a1487b5c72e2454dda92c0",
+        "bytes": 26263219,
+        "matches_build": true
+      },
+      "loading-logo.png": {
+        "sha256": "febfaac412691bde4e3500c9f78eab29f00a6d77df897e95376e3b745fc007fe",
+        "bytes": 128697,
+        "matches_build": true
+      }
+    }
+  },
+  "league_id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+  "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+  "league_settings_preserved": true,
+  "previous_canonical_coworld_id": "cow_66468412-ef68-49ff-a304-2ca7708de506",
+  "new_round_triggered": false,
+  "certification_blocker": {
+    "kind": "platform_error",
+    "attempts": 2,
+    "contract_version": "main-1e7dc7ffd758",
+    "job_ids": [
+      "3804b36e-744a-49eb-8df4-f1dadf54dcc9",
+      "558ef188-a6bb-4d14-b72b-a6b38c61d92a"
+    ],
+    "detail": "The orchestrator-certifier-runner service account cannot patch secrets in the orchestrator namespace. Both jobs failed before a certification verdict.",
+    "next_step": "Repair the platform certifier permissions, retry certification, confirm canonical promotion, then trigger one CTA league round."
+  },
+  "hosted_smoke_episode_request_ids": [
+    "ereq_0a0a398a-32b8-4d6c-ab9d-cbcb9eec9d08",
+    "ereq_15bef80b-6acf-46c8-ab80-9b7cebbe3e52",
+    "ereq_1e70cfef-32d1-4c07-97aa-dea410be3368",
+    "ereq_a0ccf9e5-0a1e-4b0b-8a23-f8735ef338b6",
+    "ereq_e5b40931-47c3-4594-9db3-a0f697b7c0f4"
+  ],
+  "replay": {
+    "kind": "hosted_smoke",
+    "episode_request_id": "ereq_0a0a398a-32b8-4d6c-ab9d-cbcb9eec9d08",
+    "episode_id": "c0029c5c-964a-463b-a012-f46ddad5e10b",
+    "viewer_url": "https://d1kovwradqjymp.cloudfront.net/bundles/8f5ef6abc7597e8785379488236d52684474fcd663e04d10a73c7df226af1555/e2197de1cbc34f0f988fbf32f9724be2/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2Ff078301f-ef51-4263-973d-bd136013206e.replay"
+  },
+  "limitations": [
+    "Local Softmax services were unavailable; local Docker certification and five hosted smoke games passed.",
+    "League promotion and the requested new round remain blocked by hosted platform certification.",
+    "No FPS benchmark was performed."
+  ],
+  "verified_at": "2026-10-19T18:53:53.732733+00:00"
+}
