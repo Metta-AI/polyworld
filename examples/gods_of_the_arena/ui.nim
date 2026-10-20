@@ -158,7 +158,9 @@ proc statsContains(window: Window, mouse: Vec2): bool =
 
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
-  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
+  not window.statsContains(sk.mousePos) and
+    window.mousePressed(MouseLeft, aliases = options.playerSlot <= 0 or run.replayMode) and
+    panel.contains(sk.mousePos)
 
 proc drawBuyback(
     sk: Silky,
@@ -226,6 +228,13 @@ proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
 
+proc inspectionPanel(window: Window): GameUiPanel =
+  ## Places unit inspection below the top HUD without replacing hero controls.
+  let chrome = currentChrome(window)
+  GameUiPanel(origin: vec2(chrome.score.origin.x,
+    max(chrome.score.origin.y + chrome.score.size.y,
+      chrome.heroes.origin.y + chrome.heroes.size.y) + 12), size: vec2(298, 104))
+
 proc mouseOverUi*(
     window: Window,
     mouse: Vec2,
@@ -236,7 +245,11 @@ proc mouseOverUi*(
     window.statsContains(mouse) or mouseOverDebugMenu(mouse):
       return true
   let chrome = currentChrome(window)
-  if primaryId == 0:
+  if options.playerSlot > 0 and not run.replayMode and primaryId != 0 and
+      primaryId != run.world.heroes[options.playerSlot - 1].id and
+      window.inspectionPanel().contains(mouse):
+    return true
+  if primaryId == 0 and (options.playerSlot <= 0 or run.replayMode):
     result = mouseOverPanels(
       mouse,
       chrome.layout,
@@ -554,10 +567,11 @@ proc updateMinimapCamera*(
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
-  if window.mousePressed(MouseLeft) and area.contains(mouse):
+  let aliases = options.playerSlot <= 0 or run.replayMode
+  if window.mousePressed(MouseLeft, aliases) and area.contains(mouse):
     minimapPanning = true
     followSelection = false
-  if not window.mouseDown(MouseLeft):
+  if not window.mouseDown(MouseLeft, aliases):
     minimapPanning = false
   if minimapPanning:
     let point = minimapWorldPoint(
@@ -740,18 +754,16 @@ proc drawHeroPortrait(
   )
   if window.hudClicked(sk, portrait):
     actionCam.takeManual()
-    selectHeroCard(
-      primaryId,
-      selectedIds,
-      followSelection,
-      hero.id,
-      window.buttonDown[KeyLeftShift] or
-        window.buttonDown[KeyRightShift]
-    )
-    if options.playerSlot > 0 and
-        not run.replayMode and
-        hero.id == run.world.heroes[options.playerSlot - 1].id:
-      focusPlayerHero = true
+    if options.playerSlot > 0 and not run.replayMode:
+      primaryId = hero.id
+      selectedIds = @[hero.id]
+      if hero.id == run.world.heroes[options.playerSlot - 1].id:
+        focusPlayerHero = true
+    else:
+      selectHeroCard(
+        primaryId, selectedIds, followSelection, hero.id,
+        window.buttonDown[KeyLeftShift] or window.buttonDown[KeyRightShift]
+      )
 
 proc drawHeroMeters(
     sk: Silky,
@@ -878,12 +890,32 @@ proc drawUi*(
     inventory = inventoryPanel.inventoryPanels()
     details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
-  let detailId =
-    if actionCam.enabled and actionCam.locked: actionCam.lockId
-    else: primaryId
+  let
+    playerHero = options.playerSlot > 0 and not run.replayMode
+    playerHeroId = if playerHero: run.world.heroes[options.playerSlot - 1].id else: 0'i32
+    detailId =
+      if playerHero: playerHeroId
+      elif actionCam.enabled and actionCam.locked: actionCam.lockId
+      else: primaryId
   var selection = selectedUnit(detailId, viewMode)
   if selection.id != 0:
     discard sk.beginFrame(chrome.details)
+
+  if playerHero and primaryId != 0 and primaryId != playerHeroId:
+    let inspected = selectedUnit(primaryId, viewMode)
+    if inspected.id != 0:
+      let panel = window.inspectionPanel()
+      sk.drawRect(panel.origin, panel.size, rgbx(8, 10, 16, 230))
+      sk.drawLabel("INSPECTING", panel.origin + vec2(12, 8),
+        vec2(274, 18), rgbx(166, 174, 190, 255), "Small")
+      sk.drawLabel(inspected.callsign, panel.origin + vec2(12, 28),
+        vec2(274, 24), rgbx(247, 221, 143, 255), "Bold")
+      sk.drawLabel(&"HP {int(inspected.hp)} / {int(inspected.maxHp)}",
+        panel.origin + vec2(12, 54), vec2(274, 20),
+        rgbx(236, 238, 244, 255), "Hud")
+      sk.drawLabel(&"Mana {int(inspected.mana)} / {int(inspected.maxMana)}",
+        panel.origin + vec2(12, 76), vec2(274, 20),
+        rgbx(238, 202, 65, 255), "Small")
 
   for i, label in ["TOWERS", "KILLS", "DEATHS"]:
     let pos = scoreSlots.headers[i].origin
@@ -1149,13 +1181,6 @@ proc drawUi*(
             item.itemSpec.cooldownTicks)
         else:
           sk.drawWellImage(well, "")
-  let playerHero =
-    options.playerSlot > 0 and not run.replayMode
-  let playerHeroId =
-    if playerHero:
-      run.world.heroes[options.playerSlot - 1].id
-    else:
-      0'i32
   if playerHero:
     sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
     sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
@@ -1404,7 +1429,9 @@ proc drawUi*(
         window, inventory.contents, hero, playerHero, transport.playing
       )
   hudScratch.setLen(0)
-  if playerHero and armedItem >= 0:
+  if playerHero and attackMoveArmed:
+    hudScratch.add "LEFT-CLICK: ATTACK-MOVE"
+  elif playerHero and armedItem >= 0:
     hudScratch.add "RIGHT-CLICK MAP"
   elif inventoryHero.id != 0 and inventoryHero.channelTicks > 0:
     hudScratch.add "TELEPORTING "

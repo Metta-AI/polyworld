@@ -37,6 +37,7 @@ var
   purchaseReceipt*: PurchaseReceipt
   armedAbility* = -1'i32
   armedItem* = -1'i32
+  attackMoveArmed* = false
   shopOpen* = false
 
 proc queueDraft*(heroId, classId: int32) =
@@ -189,6 +190,7 @@ proc clearPlayerCommands*() =
   armedAbility = -1
   armedItem = -1
   shopOpen = false
+  attackMoveArmed = false
   purchaseReceipt = PurchaseReceipt()
 
 proc flushPlayerCommands*(game: Game) =
