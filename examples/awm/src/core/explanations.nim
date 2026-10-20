@@ -23,9 +23,8 @@ const
       "Takes no combat damage from minions without Ranged, attacking or " &
       "defending. Spells and other card effects still damage it.",
     HiddenMechanic:
-      "Can't be attacked, but can still attack, and card effects still " &
-      "reach it. Hidden 1 lasts until its owner's next turn starts, " &
-      "Hidden 2 a turn longer; plain Hidden lasts while it stays in play.",
+      "Can't be attacked. Hidden(N) Lasts N turns of the owner." &
+      "Plain Hidden lasts while it stays in play.",
     SummonMechanic:
       "Puts the named card into play. Summoned minions can " &
       "attack from their owner's next turn.",
@@ -33,13 +32,11 @@ const
       "The two minions deal their power to each other at once, as in " &
       "combat, so Ranged applies. Neither uses up its attack.",
     StealMechanic:
-      "The minion joins your board for good, keeping its damage and " &
-      "changes, and can attack from your next turn. Returned or slain, it " &
+      "The card in play joins your board. Returned or destroyed, it " &
       "still goes to its owner's hand or discard pile.",
     OffClassMechanic:
       "Cards of a class other than your hero's cost " & $OffClassCost &
-      " more energy, shown as a purple +X. Class cards you control lower " &
-      "that extra cost."
+      " more energy. Class cards you control lower that extra cost."
   ]
 
   KeywordMechanics: array[Keyword, Mechanic] = [

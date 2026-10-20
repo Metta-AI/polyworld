@@ -153,9 +153,12 @@ when not defined(headless):
         if count == 1: 0.0'f32
         else: min(BoardSpacing, BoardSpread / (count - 1).float32)
       start = -spacing * (count - 1).float32 * 0.5'f32
+      # A crowded row overlaps: each card lies a little over the one before.
+      lift = if spacing < CardWidth: RowOverlapLift else: 0'f32
     for i in 0 ..< count:
       result.add balcony.place(CardPose(position: balcony.boardZone +
-        vec3(start + spacing * i.float32, CardHeight * 0.5'f32, 0)))
+        vec3(start + spacing * i.float32,
+          CardHeight * 0.5'f32 + lift * i.float32, 0)))
 
   proc handPoses(layout: MultiplayerLayout, view: MultiplayerView,
       viewedSeat, seat, count: int): seq[CardPose] =
@@ -540,8 +543,8 @@ when not defined(headless):
         attackHoverTarget = hoveredWorldTarget(window, stageVp, match.game,
           play, table, attackChoices)
       let inspected =
-        if choosingClasses or play.choosing: (found: false, card: Card(), power: -1,
-          toughness: -1, keywords: KeywordLine())
+        if choosingClasses or play.choosing:
+          InspectedCard(power: -1, toughness: -1)
         else: inspectedCard(window, stageVp, match.game, play, table,
           hoverIndex,
           if play.tossPicking: match.game.pendingToss.player
@@ -656,8 +659,8 @@ when not defined(headless):
         if inspected.found:
           discard sk.drawCardReading(
             cardReadingColumnRect(window, panelsBottom), inspected.card,
-            inspected.power, inspected.toughness, inspected.keywords,
-            match.game.extraCost(match.viewedSeat, inspected.card))
+            inspected.power, inspected.toughness, inspected.rules,
+            inspected.extraCost)
         else:
           sk.drawPlayerPanelColumn(window, match.seats, match.current,
             match.humanSeat, panelsBottom, hudTime, names)
@@ -743,6 +746,7 @@ when not defined(headless):
       when PostPanelControls:
         drawPostPanel(sk, window, post, courtyard)
       benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
+      sk.flushCardFaces()
       sk.endUi()
       benchStop(Ui)
       benchEndFrame("multiplayer " & $layout.playerCount)

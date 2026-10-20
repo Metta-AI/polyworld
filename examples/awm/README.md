@@ -273,9 +273,8 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   minion until the start of its owner's next turn (a longer hiding stands),
   and a gained trigger fires from then on. A gained on-play rule never runs.
   Losing `hidden()` ends any hiding. Gaining a rule back undoes its loss.
-  Gained and lost keywords show on the card's type line (green "MINION ·
-  RANGED", red "MINION · LOST RANGED"); other gained rules don't show on
-  the face yet.
+  The card's rules box shows the change: its printed rules in order, lost
+  ones in red and struck through, then the gained ones in green.
 - Summoned minions enter at the right of their owner's board. Like played
   minions they attack from their owner's next turn, and their own on-play
   rules run for their owner, who may pick no target. That happens once the
@@ -292,8 +291,8 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   fight is combat without an attack: both minions deal their power at
   once, Ranged applies, and it doesn't use up either minion's attack.
 - A deck may carry cards of another class. An off-class card costs 3 more
-  energy, shown as a purple `+X` beside its printed cost, and the surcharge
-  never takes a card below its printed price. The class cards (Archer,
+  energy, and its crystal shows the total in red; the surcharge never takes
+  a card below its printed price. The class cards (Archer,
   Warrior, Mage) belong to no class, cost nothing, and stay in play as
   trinkets: each one you control takes 1 off the surcharge on cards of the
   class it names, and announces itself with that class's icon beside your

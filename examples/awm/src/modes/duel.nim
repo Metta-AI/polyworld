@@ -107,10 +107,13 @@ proc boardPoses(playerIndex, count: int): seq[CardPose] =
         min(1.75'f32, 9.0'f32 / (count - 1).float32)
     start = -spacing * (count - 1).float32 * 0.5'f32
     z = playerIndex.seatSide() * 1.25'f32
+    # A crowded row overlaps: each card lies a little over the one before.
+    lift = if spacing < CardWidth: RowOverlapLift else: 0'f32
   result.setLen(count)
   for i in 0 ..< count:
     result[i] = CardPose(
-      position: vec3(start + spacing * i.float32, CardPlaneY, z),
+      position: vec3(start + spacing * i.float32, CardPlaneY + lift * i.float32,
+        z),
       yaw: playerIndex.ownerYaw()
     )
 
@@ -166,14 +169,13 @@ proc drawCardReadingView(
     let player = game.players[
       if handOwner >= 0: handOwner else: game.currentPlayer]
     if getEnv("AWM_DEMO_CARD_HOVER") == "1" and player.hand.len > 0:
-      inspected.card = player.hand[0]
-      inspected.found = true
+      inspected = InspectedCard(found: true, card: player.hand[0],
+        power: -1, toughness: -1,
+        extraCost: game.extraCost(if handOwner >= 0: handOwner
+          else: game.currentPlayer, player.hand[0]))
   if not inspected.found:
     return
-  sk.drawCardReading(window, inspected.card, inspected.power,
-    inspected.toughness, inspected.keywords,
-    game.extraCost(if handOwner >= 0: handOwner else: game.currentPlayer,
-      inspected.card))
+  sk.drawCardReading(window, inspected)
 
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
@@ -1073,6 +1075,7 @@ proc runDuel*(app: App) =
     when PostPanelControls:
       drawPostPanel(sk, window, post, courtyard)
     benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
+    sk.flushCardFaces()
     sk.endUi()
     benchStop(Ui)
     benchEndFrame("duel")

@@ -130,6 +130,25 @@ proc liveRules*(minion: MinionState): Rules =
 proc keywords*(minion: MinionState): set[Keyword] =
   minion.liveRules.keywords()
 
+proc ruleLines*(minion: MinionState): seq[RuleLine] =
+  ## Its rules against its printed ones, for its face: the printed rules in
+  ## order, each kept or lost, then the ones it gained. Empty while they are
+  ## just the printed rules.
+  if minion.gainedRules.len == 0 and minion.lostRules.len == 0:
+    return
+  var changed = false
+  for rule in minion.card.rules:
+    let change = if minion.lost(rule): LostRule else: KeptRule
+    changed = changed or change == LostRule
+    result.add RuleLine(rule: rule, change: change)
+  for rule in minion.gainedRules:
+    if not minion.lost(rule):
+      changed = true
+      result.add RuleLine(rule: rule, change: GainedRule)
+  if not changed:
+    # It lost only rules it never had, or regained what it lost.
+    result.setLen(0)
+
 proc lostKeywords*(minion: MinionState): set[Keyword] =
   ## Printed keywords it no longer has, for the card face.
   minion.card.keywords() - minion.keywords()

@@ -1051,6 +1051,9 @@ suite "AWM Duel and Shields":
     check sniper.card == baseCard("Sniper", 2)
     check game.choiceLabel(creatureChoice(enemy, 2)).endsWith(
       "(2/5, lost Ranged)")
+    # Its face strikes the printed Ranged out.
+    check sniper.ruleLines ==
+      @[RuleLine(rule: sniper.card.rules[0], change: LostRule)]
 
   test "Shields raises every friendly minion's toughness":
     var game = newGame(Warrior, Warrior, 631)
@@ -2042,16 +2045,16 @@ suite "AWM class cards and off-class costs":
 
 suite "AWM option faces":
   test "every branch a card offers has a face of its own":
-    # The table shows one card per branch, so each needs its own baked
-    # face. Pillage's choice comes after a target, which is why the faces
-    # are collected from the whole card and not from the pick being made.
+    # The table shows one card per branch, so each needs a face of its own.
+    # Pillage's choice comes after a target, which is why the faces are
+    # collected from the whole card and not from the pick being made.
     let pillage = baseCard("pillage-4")
     check pillage.options().len == 0
     check pillage.everyOption().len == 2
     check baseCard("overcharge-3").everyOption().len == 2
     check baseCard("bolt-1").everyOption().len == 0
-    # A face is baked per printed text, so each branch must read
-    # differently from its card and from the other branches.
+    # Each branch must read differently from its card and from the other
+    # branches, or the choice would offer cards that look the same.
     for card in baseCards:
       var printed = @[card.ruleText()]
       for option in card.everyOption():
@@ -2822,6 +2825,10 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check bear.lostKeywords == {}
     check bear.card == baseCardNamed("Bear")
     check game.choiceLabel(creatureChoice(me, 2)).endsWith("(3/2, Ranged)")
+    # Its face adds the gained Ranged after its (empty) printed rules.
+    check bear.ruleLines.len == 1
+    check bear.ruleLines[0].change == GainedRule
+    check bear.ruleLines[0].rule.text(bear.card) == "Ranged"
     check game.players[enemy].board[0].addedKeywords == {}
 
   test "a gained Ranged takes no damage back from a minion without it":
@@ -3128,3 +3135,27 @@ suite "AWM rule explanations":
     for mechanic in Mechanic:
       check Explanations[mechanic].len > 0
       check mechanic in printed
+
+suite "rule lines":
+  test "a card in play as printed has none":
+    check MinionState(card: baseCard("Sniper", 2)).ruleLines.len == 0
+
+  test "printed rules come first, kept or lost, then the gained ones":
+    let
+      card = baseCard("Sharpshooter", 3)
+      gained = hidden(1)
+      minion = MinionState(card: card, gainedRules: @[gained],
+        lostRules: @[Rule(ranged())])
+    check minion.ruleLines == @[
+      RuleLine(rule: card.rules[0], change: LostRule),
+      RuleLine(rule: card.rules[1], change: KeptRule),
+      RuleLine(rule: gained, change: GainedRule)]
+
+  test "losing a rule it never had changes nothing":
+    check MinionState(card: baseCard("Bear", 2),
+      lostRules: @[Rule(ranged())]).ruleLines.len == 0
+
+  test "a gained rule lost again leaves the printed rules":
+    let gained = hidden(1)
+    check MinionState(card: baseCard("Bear", 2), gainedRules: @[gained],
+      lostRules: @[gained]).ruleLines.len == 0

@@ -181,6 +181,17 @@ type
 
   Rules* = seq[Rule]
 
+  RuleChange* = enum
+    ## How a rule of a card in play stands against its printed rules.
+    KeptRule
+    GainedRule
+    LostRule
+
+  RuleLine* = object
+    ## One rule as a card in play shows it.
+    rule*: Rule
+    change*: RuleChange
+
   Card* = object
     name*: string
     energyCost*: int

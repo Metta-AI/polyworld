@@ -121,10 +121,6 @@ type
     visualRng*: Rand
       ## Visual seeds never advance the game's RNG.
 
-proc keywordLine*(minion: MinionState): KeywordLine =
-  ## Its gained and lost keywords, for the type line on its face.
-  KeywordLine(added: minion.addedKeywords, lost: minion.lostKeywords)
-
 proc drawFaceUp*(layout: TableLayout, player: int): bool =
   if layout.drawVisible.isNil: layout.handVisible(player)
   else: layout.drawVisible(player)
@@ -545,6 +541,15 @@ proc resetTable*(play: var TablePlay) =
     visualRng: play.visualRng
   )
 
+type
+  InspectedCard* = object
+    ## The card the inspector shows large, as the table shows it.
+    found*: bool
+    card*: Card
+    power*, toughness*: int  ## A minion in play's live stats, else -1.
+    rules*: seq[RuleLine]  ## A card in play's changed rules.
+    extraCost*: int  ## A card in hand's surcharge.
+
 proc inspectedCard*(
     window: Window,
     viewProjection: Mat4,
@@ -553,28 +558,25 @@ proc inspectedCard*(
     layout: TableLayout,
     hoverIndex: int,
     handOwner = -1
-): tuple[found: bool, card: Card, power, toughness: int,
-    keywords: KeywordLine] =
+): InspectedCard =
   ## The card to show large. While aiming: a legal target under the mouse,
   ## else the card whose rule is being aimed. Otherwise the hovered hand
   ## card, the closest board card under the mouse with its live stats, or
-  ## the visible top of a discard pile. `handOwner` is whose hand
-  ## `hoverIndex` is in (default: the current player).
+  ## the visible top of a discard pile, as printed. `handOwner` is whose
+  ## hand `hoverIndex` is in (default: the current player).
   result.power = -1
   result.toughness = -1
-  proc show(result: var tuple[found: bool, card: Card, power, toughness: int,
-      keywords: KeywordLine], minion: MinionState) =
-    ## A card in play, with its live stats.
+  proc show(result: var InspectedCard, minion: MinionState) =
+    ## A card in play, with its live stats and rules.
     result.card = minion.card
     result.found = true
+    result.rules = minion.ruleLines
     if minion.card.kind == Minion:
       result.power = minion.power
       result.toughness = minion.currentToughness
-      result.keywords = minion.keywordLine
     else:
       result.power = -1
       result.toughness = -1
-      result.keywords = KeywordLine()
   # One card: the closest under the mouse. Its stats come from it alone,
   # never left over from another card the mouse also touches.
   var
@@ -603,6 +605,7 @@ proc inspectedCard*(
     result.card = play.pendingCard.pickedFace(play.pendingPicks,
       game.boardCards())
     result.found = true
+    result.extraCost = game.extraCost(game.currentPlayer, play.pendingCard)
     return
   let
     owner = if handOwner >= 0: handOwner else: game.currentPlayer
@@ -612,6 +615,7 @@ proc inspectedCard*(
       not play.queuedEvents.queuedDraw(owner, hoverIndex):
     result.card = player.hand[hoverIndex]
     result.found = true
+    result.extraCost = game.extraCost(owner, result.card)
     return
   if under.found:
     result.show(game.players[under.owner].board[under.index])
@@ -1410,7 +1414,7 @@ proc addTableCards*(
         currentPower = minion.power,
         currentToughness = minion.currentToughness,
         damageFlash = play.activeVfx.flashStrength(minionChoice),
-        keywordLine = minion.keywordLine,
+        ruleLines = minion.ruleLines,
         # Hidden from everyone but its owner, who sees it as it is.
         veiled = minion.hiddenTurns != 0 and playerIndex != viewer
       )
@@ -1631,7 +1635,7 @@ proc addAttackCard*(
     card = atkMinion.card,
     currentPower = atkMinion.power,
     currentToughness = atkMinion.currentToughness,
-    keywordLine = atkMinion.keywordLine
+    ruleLines = atkMinion.ruleLines
   )
   vfx.addCardGlow(atkPose, true, true, true, time)
 
