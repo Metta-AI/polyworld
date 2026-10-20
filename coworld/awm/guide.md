@@ -166,6 +166,14 @@ Ranged or Hidden 1; Duel takes Ranged away). `boardHasKeyword` follows them.
 A hidden minion (Ambusher, Spirit) can't be attacked and never appears among
 `attackChoiceCount`'s choices, though cards that aim at it still reach it.
 
+Post, a one-energy Archer trinket, readies and copies every Archer minion
+costing 3 or less that you play from hand while it is in play, and each Post
+copies on its own. Ready minions (keyword 1) can attack the turn they enter
+play, so the minion and its copy can both attack at once. A copy is summoned
+as its original is, buffs included, so its on-play rules run again: a copied
+Sharpshooter's shot waits as a trigger for you to aim (`triggerTargets`). Post
+lasts 3: it leaves play by itself as your third turn from now starts.
+
 The Mage precon holds four copies of `Summon Primordial`, an eight-energy spell.
 Choose a hero, return all cards on that hero's board to their hand, then
 summon a 10/10 Primordial on your board. You may choose your own hero.

@@ -46,16 +46,18 @@ suite "AWM base set":
   test "the Archer deck is forty cards of every Archer card":
     let deck = Archer.baseDeck()
     check deck.len == DeckSize
-    var counts: array[10, int]
+    var counts: array[11, int]
     const ids = ["bolt-1", "sniper-2", "sharpshooter-3", "hail-of-arrows-3",
       "overcharge-3", "explode-3", "ambusher-3", "assassin-6", "reload-2",
-      "wildfire-6"]
+      "wildfire-6", "post-1"]
     for card in deck:
       check card.class == some(Archer)
       for index, id in ids:
         if card == baseCard(id):
           inc counts[index]
-    check counts == [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+    # Eleven Archer cards leave four slots of slack: Post takes them from
+    # Explode, Assassin and Reload.
+    check counts == [4, 4, 4, 4, 4, 2, 4, 3, 3, 4, 4]
 
   test "Bolt is a targeted two-damage spell":
     let bolt = Archer.classCard()
@@ -3159,3 +3161,395 @@ suite "rule lines":
     let gained = hidden(1)
     check MinionState(card: baseCard("Bear", 2), gainedRules: @[gained],
       lostRules: @[gained]).ruleLines.len == 0
+
+suite "AWM number filters":
+  test "number filters read as rules text":
+    check target({kind: {Minion}, energyCost: atMost(3)}).text() ==
+      "a minion that costs 3 or less"
+    check target({kind: {Minion}, energyCost: eq(2)}).text() ==
+      "a minion that costs 2"
+    check target({kind: {Minion}, owner: AllOpponents,
+      energyCost: notEq(2)}).text() == "an enemy minion that doesn't cost 2"
+    check target({kind: {Minion}, power: atLeast(3)}).text() ==
+      "a minion with power 3 or more"
+    check target({kind: {Minion}, toughness: between(2, 4)}).text() ==
+      "a minion with toughness 2 to 4"
+    check target({kind: {Minion}, power: notEq(0)}).text() ==
+      "a minion with power other than 0"
+    check Card(kind: Spell, rules: rules(damage(1, game.board.getCards(
+      {kind: {Minion}, owner: AllOpponents, energyCost: atMost(2)})))
+      ).ruleText() == "Deal 1 damage to all enemy minions that cost 2 or less."
+    check Card(kind: Spell, rules: rules(destroy(target({kind: {Minion},
+      energyCost: atLeast(5), power: atLeast(4)})))).ruleText() ==
+      "Destroy a minion that costs 5 or more and with power 4 or more."
+
+  test "a target offers only the cards that meet its numbers, never a hero":
+    var game = newGame(Archer, Warrior, 3301)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[enemy].board = @[
+      readyMinion(enemy, 1, baseCard("footsoldier-1")),
+      readyMinion(enemy, 2, baseCard("bear-2")),
+      readyMinion(enemy, 3, baseCard("commander-5"))]
+    game.nextMinionId = 4
+    game.players[me].hand = @[Card(name: "Snipe", energyCost: 0, kind: Spell,
+      rules: rules(damage(1, target({kind: {Minion, Hero},
+        energyCost: atMost(2)}))))]
+    check game.availableChoices(0) ==
+      @[creatureChoice(enemy, 1), creatureChoice(enemy, 2)]
+
+  test "power and toughness read a minion's live stats":
+    var game = newGame(Warrior, Archer, 3303)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    var
+      bear = readyMinion(enemy, 1, baseCard("bear-2"))
+      footsoldier = readyMinion(enemy, 2, baseCard("footsoldier-1"))
+    bear.bonusPower = 1  # 4/2 now
+    footsoldier.currentToughness = 1  # hurt: 1/1
+    game.players[enemy].board = @[bear, footsoldier]
+    game.nextMinionId = 3
+    game.players[me].hand = @[
+      Card(name: "Cull", energyCost: 0, kind: Spell, rules: rules(destroy(
+        game.board.getCards({kind: {Minion}, toughness: atMost(1)})))),
+      Card(name: "Fell", energyCost: 0, kind: Spell, rules: rules(destroy(
+        target({kind: {Minion}, power: atLeast(4)}))))]
+    check game.availableChoices(1) == @[creatureChoice(enemy, 1)]
+    check game.playCard(0)
+    check game.players[enemy].board.len == 1
+    check game.players[enemy].board[0].id == 1
+
+  test "every bound is inclusive, and only minions have power or toughness":
+    let context = RuleContext()
+    check @[statFilter(CostStat, between(2, 3))].meets(
+      baseCard("sniper-2"), 2, 1, context)
+    check @[statFilter(CostStat, between(2, 3))].meets(
+      baseCard("sharpshooter-3"), 3, 1, context)
+    check not @[statFilter(CostStat, between(2, 3))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check @[statFilter(CostStat, atMost(1))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check @[statFilter(CostStat, notEq(3))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check not @[statFilter(PowerStat, atLeast(0))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check not @[statFilter(ToughnessStat, atMost(9))].meets(
+      baseCard("banner-3"), 0, 0, context)
+
+suite "AWM Lasts":
+  let tent = Card(name: "Tent", energyCost: 0, kind: Trinket,
+    rules: rules(lasts(2)))
+
+  test "lasts prints its count":
+    check tent.ruleText() == "Lasts 2."
+    check tent.lastsTurns() == 2
+    check baseCard("bear-2").lastsTurns() == 0
+    check Card(kind: Spell, rules: rules(gain(lasts(1),
+      target({kind: {Minion}})))).ruleText() == "A minion gains Lasts 1."
+
+  test "a lasting card leaves as its owner's Nth turn from now starts":
+    var game = newGame(Archer, Warrior, 3311)
+    let me = game.leads(Archer)
+    game.players[me].hand = @[tent]
+    check game.playCard(0)
+    check game.players[me].board[0].lastsTurns == 2
+    game.finishTurn()  # the opponent's turn counts nothing
+    check game.players[me].board[0].lastsTurns == 2
+    game.finishTurn()  # its owner's next turn: one to go
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].lastsTurns == 1
+    game.finishTurn()
+    game.finishTurn()  # its owner's second turn from now: gone
+    check game.players[me].board.len == 0
+    check game.players[me].discardPile[^1].name == "Tent"
+    var died = false
+    for event in game.visualEvents:
+      if event.kind == DeathVfx and event.card.name == "Tent":
+        died = true
+    check died
+
+  test "it leaves before that turn's triggers":
+    let lantern = Card(name: "Lantern", energyCost: 0, kind: Trinket,
+      rules: rules(lasts(1), on(eachTurn(You), draw(1))))
+    var game = newGame(Archer, Warrior, 3313)
+    let me = game.leads(Archer)
+    game.players[me].hand = @[lantern]
+    check game.playCard(0)
+    game.finishTurn()
+    let before = game.players[me].hand.len
+    game.finishTurn()  # its owner's turn: only the turn's own draw
+    check game.players[me].board.len == 0
+    check game.players[me].hand.len == before + 1
+
+  test "gaining Lasts starts a count, and losing it stops one":
+    var game = newGame(Archer, Warrior, 3315)
+    let me = game.leads(Archer)
+    game.players[me].board = @[
+      readyMinion(me, 1, baseCard("bear-2")),
+      MinionState(id: 2, owner: me, card: tent, lastsTurns: 2,
+        enteredTurn: game.turnNumber)]
+    game.nextMinionId = 3
+    game.players[me].hand = @[
+      Card(name: "Mark", energyCost: 0, kind: Spell,
+        rules: rules(gain(lasts(1), target({kind: {Minion}})))),
+      Card(name: "Stake", energyCost: 0, kind: Spell,
+        rules: rules(lose(lasts(1), target({kind: {Trinket}}))))]
+    check game.playCard(0, creatureChoice(me, 1))
+    check game.players[me].board[0].lastsTurns == 1
+    check game.playCard(0, creatureChoice(me, 2))
+    check game.players[me].board[1].lastsTurns == 0
+    for turn in 0 ..< 4:
+      game.finishTurn()
+    # The Bear ran out on its owner's next turn; the Tent no longer counts.
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].card.name == "Tent"
+
+suite "AWM played triggers and Post":
+  proc postGame(seed: int64): (GameState, int, int) =
+    ## The Archer's turn with Post in play and energy to spare.
+    var game = newGame(Archer, Warrior, seed)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("post-1"), enteredTurn: game.turnNumber, lastsTurns: 2)]
+    game.nextMinionId = 2
+    game.players[me].energy = 20
+    (game, me, enemy)
+
+  test "Post prints a trigger that readies and copies cheap Archer minions":
+    let post = baseCard("post-1")
+    check post.kind == Trinket
+    check post.class == some(Archer)
+    check post.lastsTurns() == 3
+    check post.ruleText() == "Lasts 3.\n" &
+      "When you play an Archer minion that costs 3 or less, it gains Ready, " &
+      "summon a copy of it."
+    check baseCardNamed("Post").mechanics() ==
+      @[LastsMechanic, ReadyMechanic, SummonMechanic]
+
+  test "trigger parts join with and while all are orders, else with commas":
+    check Card(kind: Trinket, rules: rules(on(eachTurn(You), draw(1),
+      damage(1, You)))).ruleText() ==
+      "At the start of each of your turns, draw 1 card and deal 1 damage " &
+      "to yourself."
+    check Card(kind: Trinket, rules: rules(on(eachTurn(You),
+      gain(ranged(), target({kind: {Minion}})), draw(1)))).ruleText() ==
+      "At the start of each of your turns, a minion gains Ranged, " &
+      "draw 1 card."
+
+  test "a cheap Archer minion enters Ready, with a Ready copy":
+    var (game, me, enemy) = postGame(3321)
+    game.players[me].hand = @[baseCard("sniper-2")]
+    check game.playCard(0)
+    check game.players[me].board.len == 3
+    check game.players[me].board[1].card.name == "Sniper"
+    check game.players[me].board[2].card.name == "Sniper"
+    check game.players[me].board[1].id != game.players[me].board[2].id
+    check not game.waitingTrigger
+    # Both gained Ready, so both swing the turn they came in.
+    for slot in 1 .. 2:
+      check game.players[me].board[slot].hasKeyword(Ready)
+      check game.attack(game.players[me].board[slot].id, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 4
+
+  test "the copy runs its own on-play rules, aimed afresh":
+    var (game, me, enemy) = postGame(3323)
+    game.players[me].hand = @[baseCard("sharpshooter-3")]
+    let life = game.players[enemy].life
+    check game.playCard(0, heroChoice(enemy))
+    check game.players[enemy].life == life - 1
+    # Like any summoned card's rule, the copy's shot waits for its owner.
+    check game.waitingTrigger
+    check game.actingPlayer() == me
+    check game.waitingTriggerName() == "Sharpshooter's rule"
+    check game.resolvePendingTrigger(@[heroChoice(enemy)])
+    check game.players[enemy].life == life - 2
+    check game.players[me].board.len == 3
+
+  test "expensive, off-class, spells and opponents' plays make no copy":
+    var (game, me, enemy) = postGame(3325)
+    game.players[me].hand = @[baseCard("assassin-6"), baseCard("bolt-1"),
+      baseCard("bear-2")]
+    check game.playCard(0)
+    check game.players[me].board.len == 2
+    check not game.players[me].board[1].hasKeyword(Ready)
+    check game.playCard(0, heroChoice(enemy))
+    check game.players[me].board.len == 2
+    # A Warrior Bear costs 2, but Post only copies Archer cards.
+    check game.playCard(0)
+    check game.players[me].board.len == 3
+    check not game.players[me].board[2].hasKeyword(Ready)
+    game.finishTurn()
+    game.players[enemy].hand = @[baseCard("footsoldier-1")]
+    game.players[enemy].energy = 1
+    check game.playCard(0)
+    check game.players[enemy].board.len == 1
+
+  test "two Posts make two copies, and copies are never copied":
+    var (game, me, _) = postGame(3327)
+    game.players[me].board.add MinionState(id: 2, owner: me,
+      card: baseCard("post-1"), enteredTurn: game.turnNumber, lastsTurns: 2)
+    game.nextMinionId = 3
+    game.players[me].hand = @[baseCard("ambusher-3")]
+    check game.playCard(0)
+    var ambushers = 0
+    for minion in game.players[me].board:
+      if minion.card.name == "Ambusher":
+        inc ambushers
+        check minion.hiddenTurns == 1
+    check ambushers == 3
+
+  test "a copy enters as its original is: buffs, gained rules and all":
+    # Drill sits before Post, so its buff lands on the played minion first.
+    let drill = Card(name: "Drill", energyCost: 0, kind: Trinket,
+      rules: rules(on(played(You, {kind: {Minion}}),
+        addPowerToughness(1, 1, getPlayed()))))
+    check drill.ruleText() == "When you play a minion, give it +1/+1."
+    var (game, me, _) = postGame(3335)
+    game.players[me].board.insert(MinionState(id: 2, owner: me, card: drill,
+      enteredTurn: game.turnNumber), 0)
+    game.nextMinionId = 3
+    game.players[me].hand = @[baseCard("sniper-2")]
+    check game.playCard(0)
+    let
+      original = game.players[me].board[2]
+      copy = game.players[me].board[3]
+    check original.power == 3 and original.currentToughness == 2
+    check copy.card == original.card
+    check copy.power == 3 and copy.currentToughness == 2
+    check copy.hasKeyword(Ready) and copy.canAttack
+    # Drill doesn't buff the copy: a summon isn't played.
+    check copy.bonusPower == 1
+
+  test "a bounced copy goes back to its owner's hand as a card":
+    var (game, me, enemy) = postGame(3329)
+    game.players[me].hand = @[baseCard("sniper-2")]
+    check game.playCard(0)
+    let copy = game.players[me].board[2].id
+    game.finishTurn()
+    game.players[enemy].hand = @[baseCard("bouncer-1")]
+    game.players[enemy].energy = 9
+    check game.playCard(0, creatureChoice(me, copy))
+    check game.players[me].hand[^1].name == "Sniper"
+
+  test "a card's own play doesn't fire its triggers; later plays do":
+    let echo = Card(name: "Echo", energyCost: 0, kind: Trinket,
+      rules: rules(on(played(You, {}), draw(1))))
+    check echo.ruleText() == "When you play a card, draw 1 card."
+    var game = newGame(Archer, Warrior, 3331)
+    let me = game.leads(Archer)
+    game.players[me].hand = @[echo, Card(name: "Spark", energyCost: 0,
+      kind: Spell, rules: rules(damage(1, You)))]
+    check game.playCard(0)
+    check game.players[me].hand.len == 1
+    check game.playCard(0)  # Spark goes, and Echo draws once it resolves
+    check game.players[me].hand.len == 1
+
+  test "played(AnyOpponent) watches every opponent":
+    let spy = Card(name: "Spy", energyCost: 0, kind: Trinket,
+      rules: rules(on(played(AnyOpponent, {kind: {Spell}}), draw(1))))
+    check spy.ruleText() == "When an opponent plays a spell, draw 1 card."
+    var game = newGame(Archer, Warrior, 3333)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: spy,
+      enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    game.finishTurn()
+    let hand = game.players[me].hand.len
+    game.players[enemy].hand = @[baseCard("swords-2")]
+    game.players[enemy].energy = 2
+    check game.playCard(0)
+    check game.players[me].hand.len == hand + 1
+
+suite "AWM Ready":
+  let raider = Card(name: "Raider", energyCost: 0, kind: Minion,
+    rules: rules(ready()), power: 2, toughness: 1)
+
+  test "Ready prints as a keyword and is explained":
+    check raider.ruleText() == "Ready"
+    check raider.mechanics() == @[ReadyMechanic]
+    check Explanations[ReadyMechanic].len > 0
+
+  test "a Ready minion attacks the turn it is played or summoned":
+    var game = newGame(Archer, Warrior, 3341)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].hand = @[raider, Card(name: "Call", energyCost: 0,
+      kind: Spell, rules: rules(summon(1,
+        RuleValue[Card](kind: FixedValue, fixed: raider))))]
+    check game.playCard(0)
+    check game.playCard(0)
+    for minion in game.players[me].board:
+      check minion.canAttack
+      check game.attack(minion.id, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 4
+
+  test "gaining Ready readies a fresh minion; it doesn't give back an attack":
+    var game = newGame(Warrior, Archer, 3343)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    let rally = Card(name: "Hurry", energyCost: 0, kind: Spell,
+      rules: rules(gain(ready(), target({kind: {Minion}, owner: You}))))
+    game.players[me].hand = @[baseCard("bear-2"), rally, rally]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    let bear = game.players[me].board[0].id
+    check not game.attack(bear, heroChoice(enemy))
+    check game.playCard(0, creatureChoice(me, bear))
+    check game.attack(bear, heroChoice(enemy))
+    check game.playCard(0, creatureChoice(me, bear))
+    check not game.attack(bear, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 3
+
+  test "losing Ready the turn it entered takes back that turn's attack":
+    var game = newGame(Archer, Warrior, 3345)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].hand = @[raider, Card(name: "Slow", energyCost: 0,
+      kind: Spell, rules: rules(lose(ready(), target({kind: {Minion}}))))]
+    check game.playCard(0)
+    let id = game.players[me].board[0].id
+    check game.playCard(0, creatureChoice(me, id))
+    check not game.attack(id, heroChoice(enemy))
+
+suite "AWM class filters":
+  test "a class filter reads as an adjective":
+    check target({kind: {Minion}, class: {Archer}}).text() ==
+      "an Archer minion"
+    check target({kind: {Minion}, owner: You, class: {Warrior}}).text() ==
+      "a friendly Warrior minion"
+    check target({kind: {Minion}, class: {Warrior, Mage},
+      energyCost: atMost(2)}).text() ==
+      "a Warrior or Mage minion that costs 2 or less"
+    check Card(kind: Spell, rules: rules(damage(1, game.board.getCards(
+      {kind: {Minion}, owner: AllOpponents, class: {Archer}})))).ruleText() ==
+      "Deal 1 damage to all enemy Archer minions."
+
+  test "it picks only cards of those classes, never a hero or class card":
+    var game = newGame(Warrior, Archer, 3351)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    let classCard = MinionState(id: 3, owner: enemy,
+      card: baseCardNamed("Archer"), enteredTurn: game.turnNumber)
+    game.players[enemy].board = @[
+      readyMinion(enemy, 1, baseCard("sniper-2")),
+      readyMinion(enemy, 2, baseCard("bear-2")), classCard]
+    game.nextMinionId = 4
+    game.players[me].hand = @[
+      Card(name: "Hunt", energyCost: 0, kind: Spell, rules: rules(damage(1,
+        target({kind: {Minion, Hero, Trinket}, class: {Archer}})))),
+      Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(destroy(
+        game.board.getCards({class: {Archer}}))))]
+    check game.availableChoices(0) == @[creatureChoice(enemy, 1)]
+    check game.playCard(1)
+    check game.players[enemy].board.len == 2
+    check game.players[enemy].board[0].id == 2

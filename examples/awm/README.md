@@ -303,6 +303,13 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   Spells and other card effects still reach it, it attacks as usual, and
   attacking doesn't reveal it. Its owner sees it normally; everyone else
   sees it in shadow.
+- A lasting card (Post) leaves play by itself: `lasts(3)` sends it to its
+  owner's discard pile as their third turn from now starts, before that
+  turn's triggers, counting down exactly as `hidden(3)` does. Gained, a
+  count starts (a longer one already running stands); lost, it stops.
+- A Ready minion can attack the turn it enters play, played or summoned.
+  Gaining Ready (`gain(ready(), ...)`) lets it attack that turn if it
+  hasn't yet; losing it the turn it entered takes that attack back.
 - `steal` (Control) takes a minion for good: it moves to the end of your
   board with its damage, buffs and gained or lost rules, and attacks from
   your next turn, like a minion just played. Its triggers fire for you. It
@@ -314,6 +321,23 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 - `on(eachTurn(...))` fires at the start of every one of that player's
   turns, for as long as the card is in play; `on(nextTurn(...))` fires
   once.
+- `on(played(You, {kind: {Minion}, class: {Archer}, energyCost:
+  atMost(3)}), ...)` fires each time that player plays a matching card
+  from hand, once the card has resolved. `getPlayed()` is that card:
+  rules that act on cards in play (`gain(ready(), getPlayed())`) reach it
+  while it's still in play, and `summon(1, getPlayed())` copies it as it
+  is then, with its damage, buffs and gained or lost rules (so Post's
+  copies are Ready too). Summoned and repeated cards aren't played, so
+  copies are never copied, and a card's own play doesn't fire its
+  triggers. Each Post fires on its own: two of them make two copies. A
+  copy is a summon, so it runs its on-play rules again (Sharpshooter
+  shoots twice) and goes to its owner's hand, printed, if bounced.
+- Filters (`target`, `getCards`, `played`) take numbers too:
+  `energyCost:` (printed, without the off-class surcharge), `power:` and
+  `toughness:` (live in play), each with `eq(n)`, `notEq(n)`, `atMost(n)`,
+  `atLeast(n)` or `between(a, b)`, all inclusive; and `class: {Archer}`
+  (any of the classes listed). Heroes and class cards have no card class,
+  and heroes no numbers, so those filters never pick them.
 - A card that offers a choice (Overcharge) asks for it first: the table
   dims and shows one card per branch, each printing that branch alone.
   Click one to take it, or cancel with the button, a click off the cards,
@@ -334,11 +358,12 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Archer | Sharpshooter | 4 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
 | Archer | Hail of Arrows | 4 | 3 | Spell | — | 1 damage to all enemy minions |
 | Archer | Overcharge | 4 | 3 | Spell | — | Choose: 1 damage to a minion and its owner; or 3 damage to a minion, its owner and yourself |
-| Archer | Explode | 4 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
+| Archer | Explode | 2 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
 | Archer | Ambusher | 4 | 3 | Minion | 2/2 | Hidden 1 |
-| Archer | Assassin | 4 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
-| Archer | Reload | 4 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
+| Archer | Assassin | 3 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
+| Archer | Reload | 3 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
 | Archer | Wildfire | 4 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
+| Archer | Post | 4 | 1 | Trinket | — | Lasts 3; when you play an Archer minion that costs 3 or less, it gains Ready, summon a copy of it (buffs and all) |
 | Warrior | Bear | 4 | 2 | Minion | 3/2 | — |
 | Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
 | Warrior | Shields | 4 | 1 | Spell | — | Friendly minions get +0/+1 permanently |

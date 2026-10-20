@@ -71,7 +71,8 @@
 '   handId$(i) returns the unique printed card name.
 '   cardName$(id$), cardRules$(id$), cardKind(id$), cardClass(id$)
 '   cardCost(id$), cardPower(id$), cardToughness(id$)
-'   cardHasKeyword(id$, k), boardHasKeyword(p, i, k): k=0 is Ranged.
+'   cardHasKeyword(id$, k), boardHasKeyword(p, i, k): k=0 is Ranged,
+'   1 is Ready.
 '   boardPower(p, i), boardHp(p, i), boardKind(p, i)
 '   boardReady(p, i), boardAttacked(p, i)
 '   playerLife(p), playerEnergy(p), playerTotalEnergy(p)
@@ -102,11 +103,12 @@ IF selectingClass THEN
   deckCard("Sharpshooter", 4)
   deckCard("Hail of Arrows", 4)
   deckCard("Overcharge", 4)
-  deckCard("Explode", 4)
+  deckCard("Explode", 2)
   deckCard("Ambusher", 4)
-  deckCard("Assassin", 4)
-  deckCard("Reload", 4)
+  deckCard("Assassin", 3)
+  deckCard("Reload", 3)
   deckCard("Wildfire", 4)
+  deckCard("Post", 4)
   END
 END IF
 

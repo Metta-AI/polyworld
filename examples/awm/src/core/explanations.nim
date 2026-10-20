@@ -11,7 +11,9 @@ type
   Mechanic* = enum
     ## The mechanics that get an explanation, by the word the card prints.
     RangedMechanic = "Ranged"
+    ReadyMechanic = "Ready"
     HiddenMechanic = "Hidden"
+    LastsMechanic = "Lasts"
     SummonMechanic = "Summon"
     FightMechanic = "Fight"
     StealMechanic = "Gain control"
@@ -22,9 +24,15 @@ const
     RangedMechanic:
       "Takes no combat damage from minions without Ranged, attacking or " &
       "defending. Spells and other card effects still damage it.",
+    ReadyMechanic:
+      "Can attack the turn it enters play. Gained later, it can attack " &
+      "that turn, if it hasn't already.",
     HiddenMechanic:
       "Can't be attacked. Hidden(N) Lasts N turns of the owner." &
       "Plain Hidden lasts while it stays in play.",
+    LastsMechanic:
+      "Leaves play by itself. Lasts N goes to the discard pile as its " &
+      "owner's Nth turn from now starts, counting down like Hidden(N).",
     SummonMechanic:
       "Puts the named card into play. Summoned minions can " &
       "attack from their owner's next turn.",
@@ -40,13 +48,15 @@ const
   ]
 
   KeywordMechanics: array[Keyword, Mechanic] = [
-    Ranged: RangedMechanic
+    Ranged: RangedMechanic,
+    Ready: ReadyMechanic
   ]
 
 proc mechanic(rule: Rule): Option[Mechanic] =
   ## The mechanic this rule prints, not counting the rules inside it.
   if rule of KeywordRule: some(KeywordMechanics[KeywordRule(rule).keyword])
   elif rule of HiddenRule: some(HiddenMechanic)
+  elif rule of LastsRule: some(LastsMechanic)
   elif rule of SummonRule: some(SummonMechanic)
   elif rule of FightRule: some(FightMechanic)
   elif rule of StealRule: some(StealMechanic)

@@ -6,7 +6,7 @@ export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 16
+  SnapshotSchemaVersion* = 17
 
 type
   SessionOptions* = object
@@ -348,6 +348,8 @@ proc effectToJson(effect: Effect): JsonNode =
     result["summonedId"] = %effect.summonedId
     result["summonedOwner"] = %effect.summonedOwner
     result["summonedCard"] = cardToJson(effect.summonedCard)
+    if effect.summonedFrom != 0:
+      result["summonedFrom"] = %effect.summonedFrom
   of DestroyEffect:
     result["destroyedId"] = %effect.destroyedId
   of DrawEffect:
@@ -400,7 +402,9 @@ proc effectFromJson(node: JsonNode): Effect =
     of SummonEffect:
       Effect(kind: kind, summonedId: int("summonedId", 1),
         summonedOwner: player("summonedOwner"),
-        summonedCard: cardFromJson(node.field("summonedCard")))
+        summonedCard: cardFromJson(node.field("summonedCard")),
+        summonedFrom: if node.hasKey("summonedFrom"):
+          int("summonedFrom", 1) else: 0)
     of DestroyEffect:
       Effect(kind: kind, destroyedId: int("destroyedId", 1))
     of DrawEffect:
@@ -424,7 +428,7 @@ proc gameToJson*(game: GameState): JsonNode =
   for player in game.players:
     var board = newJArray()
     for minion in player.board:
-      board.add %*{"id": minion.id, "owner": minion.owner,
+      var entry = %*{"id": minion.id, "owner": minion.owner,
         "card": cardToJson(minion.card),
         "currentToughness": minion.currentToughness,
         "bonusPower": minion.bonusPower,
@@ -437,6 +441,11 @@ proc gameToJson*(game: GameState): JsonNode =
         "hiddenTurns": minion.hiddenTurns,
         "stolenFrom": (if minion.stolenFrom.isSome: %minion.stolenFrom.get
           else: newJNull())}
+      # Only lasting cards carry a count, so other states (and the replay
+      # hashes taken from them) read as before Lasts existed.
+      if minion.lastsTurns != 0:
+        entry["lastsTurns"] = %minion.lastsTurns
+      board.add entry
     players.add %*{"heroClass": player.heroClass.classId(),
       "life": player.life, "totalEnergy": player.totalEnergy,
       "energy": player.energy, "deck": cardsToJson(player.deck),
@@ -470,9 +479,14 @@ proc gameToJson*(game: GameState): JsonNode =
       "text": game.pendingToss.text, "remaining": remaining}
   var pendingTriggers = newJArray()
   for pending in game.pendingTriggers:
-    pendingTriggers.add %*{"owner": pending.owner,
+    var entry = %*{"owner": pending.owner,
       "sourceId": pending.sourceId, "trigger": pending.trigger,
       "attacker": choiceToJson(pending.attacker), "onPlay": pending.onPlay}
+    if pending.played.name.len > 0:
+      entry["played"] = cardToJson(pending.played)
+    if pending.playedId != 0:
+      entry["playedId"] = %pending.playedId
+    pendingTriggers.add entry
   %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
     "visualEvents": visualEvents, "visualBeat": game.visualBeat,
@@ -529,6 +543,8 @@ proc gameFromJson*(node: JsonNode): GameState =
         hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false,
         hiddenTurns: if entry.hasKey("hiddenTurns"):
           entry["hiddenTurns"].integer("hidden turns", Always) else: 0,
+        lastsTurns: if entry.hasKey("lastsTurns"):
+          entry["lastsTurns"].integer("lasting turns", 0) else: 0,
         stolenFrom: if entry.hasKey("stolenFrom") and
             entry["stolenFrom"].kind != JNull:
           some(entry["stolenFrom"].integer("stolen from", 0, PlayerCount - 1))
@@ -600,7 +616,11 @@ proc gameFromJson*(node: JsonNode): GameState =
         trigger: entry.field("trigger").integer("trigger index", 0),
         attacker: if entry.hasKey("attacker"):
           choiceFromJson(entry["attacker"]) else: Canceled,
-        onPlay: entry.hasKey("onPlay") and entry["onPlay"].getBool(false))
+        onPlay: entry.hasKey("onPlay") and entry["onPlay"].getBool(false),
+        played: if entry.hasKey("played"): cardFromJson(entry["played"])
+          else: Card(),
+        playedId: if entry.hasKey("playedId"):
+          entry["playedId"].integer("played card", 1) else: 0)
       let location = result.minionLocation(pending.sourceId)
       if not location.found or location.player != pending.owner or
           not pending.onPlay and pending.trigger >= result.players[

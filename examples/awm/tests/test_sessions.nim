@@ -561,3 +561,44 @@ suite "stolen minions":
         check event.fromPlayer == enemy
         check event.card == baseCardNamed("Bear")
     check steals == 1
+
+suite "lasting cards and played triggers in snapshots":
+  test "a Lasts count and a waiting played trigger's card round trip":
+    var game = newGame(Archer, Warrior, 1121)
+    game.currentPlayer = 0
+    game.players[0].board = @[
+      MinionState(id: 3, owner: 0, card: baseCard("post-1"),
+        enteredTurn: game.turnNumber, lastsTurns: 2),
+      MinionState(id: 4, owner: 0, card: baseCard("post-1"),
+        enteredTurn: game.turnNumber, lastsTurns: 1)]
+    game.nextMinionId = 5
+    game.players[0].hand = @[baseCard("sharpshooter-3")]
+    game.players[0].energy = 3
+    check game.playCard(0, heroChoice(1))
+    # The first Post's copy waits to aim; the second Post's trigger waits
+    # behind it, holding the card that was played.
+    check game.waitingTrigger
+    check game.pendingTriggers.len == 2
+    check game.pendingTriggers[1].played == baseCard("sharpshooter-3")
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check decoded.players[0].board[0].lastsTurns == 2
+    check decoded.players[0].board[1].lastsTurns == 1
+    check decoded.pendingTriggers[1].played == baseCard("sharpshooter-3")
+    check game.pendingTriggers[1].playedId != 0
+    check decoded.pendingTriggers[1].playedId ==
+      game.pendingTriggers[1].playedId
+    check gameToJson(decoded) == encoded
+
+  test "states without lasting cards or plays encode as before":
+    var game = newGame(Archer, Warrior, 1123)
+    let me = game.currentPlayer
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("plan-3"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    game.pendingTriggers = @[PendingTrigger(owner: me, sourceId: 1,
+      trigger: 0, attacker: Canceled)]
+    let encoded = gameToJson(game)
+    check not encoded["players"][me]["board"][0].hasKey("lastsTurns")
+    check not encoded["pendingTriggers"][0].hasKey("played")
+    check not encoded["pendingTriggers"][0].hasKey("playedId")

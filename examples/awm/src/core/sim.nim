@@ -30,6 +30,9 @@ type
     hiddenTurns*: int
       ## It can't be attacked: for this many more of its owner's turns, or
       ## for as long as it is in play when it is `Always`. 0 is in the open.
+    lastsTurns*: int
+      ## It leaves play as its owner's turn starts after this many more of
+      ## them have begun (`lasts(n)`). 0 when it doesn't run out.
     stolenFrom*: Option[int]
       ## Whose card it is, when someone else (`owner`) controls it now. It
       ## goes back to that player's hand or discard pile.
@@ -77,6 +80,9 @@ type
     onPlay*: bool
       ## The summoned card's own printed rules, run as if it had been
       ## played, not one of its triggers.
+    played*: Card
+      ## The card whose play fired it, for `getPlayed()`. Unnamed otherwise.
+    playedId*: int  ## That card's id in play; 0 for a spell.
 
   PendingToss* = object
     ## A discard waiting for its player to choose cards from hand. Whatever
@@ -175,6 +181,13 @@ proc gainRule(minion: var MinionState, rule: Rule) =
   if turns != 0 and minion.hiddenTurns != Always:
     minion.hiddenTurns =
       if turns == Always: Always else: max(minion.hiddenTurns, turns)
+  # A Lasts count starts the same way: a longer one already running stands.
+  let lasting = @[rule].lastsTurns()
+  if lasting > 0:
+    minion.lastsTurns = max(minion.lastsTurns, lasting)
+  # Ready lets it attack at once; an attack it already made stays made.
+  if Ready in @[rule].keywords():
+    minion.canAttack = true
 
 proc loseRule(minion: var MinionState, rule: Rule) =
   for pattern in minion.lostRules:
@@ -183,6 +196,8 @@ proc loseRule(minion: var MinionState, rule: Rule) =
   minion.lostRules.add rule
   if rule of HiddenRule:
     minion.hiddenTurns = 0
+  if rule of LastsRule:
+    minion.lastsTurns = 0
 
 proc hasKeyword*(minion: MinionState, keyword: Keyword): bool =
   keyword in minion.keywords()
@@ -238,6 +253,7 @@ proc nextPlayer*(game: GameState, player: int): int =
       return candidate
 
 proc resolveTriggers(game: var GameState) {.gcsafe.}
+proc destroyMinion(game: var GameState, player, index: int)
 proc drawVisibly(game: var GameState, player: int): bool {.gcsafe.}
 proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.}
 
@@ -297,12 +313,27 @@ proc beginTurn*(game: var GameState) =
       game.players[playerIndex].drewFromEmpty = true
       game.checkWinCondition()
   if game.gameOver or game.dead(playerIndex): return
+  var expired: seq[int]
   for minion in game.players[playerIndex].board.mitems:
     minion.canAttack = true
     minion.hasAttacked = false
     # A hidden minion comes into the open as its owner's turns pass.
     if minion.hiddenTurns > 0:
       dec minion.hiddenTurns
+    # A lasting card runs out the same way, and leaves before triggers.
+    if minion.lastsTurns > 0:
+      dec minion.lastsTurns
+      if minion.lastsTurns == 0:
+        expired.add minion.id
+  if expired.len > 0:
+    inc game.visualBeat
+    for id in expired:
+      var slot = -1
+      for index, minion in game.players[playerIndex].board:
+        if minion.id == id:
+          slot = index
+      if slot >= 0:
+        game.destroyMinion(playerIndex, slot)
   game.resolveTriggers()
 
 proc newGame*(
@@ -589,8 +620,13 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
     of LoseRuleEffect:
       let location = game.minionLocation(effect.loserId)
       if location.found:
-        game.players[location.player].board[location.index].loseRule(
-          effect.lostRule)
+        template minion: untyped =
+          game.players[location.player].board[location.index]
+        minion.loseRule(effect.lostRule)
+        # Losing Ready the turn it entered takes back that turn's attack.
+        if Ready in @[effect.lostRule].keywords() and
+            minion.enteredTurn == game.turnNumber:
+          minion.canAttack = false
     of GainRuleEffect:
       let location = game.minionLocation(effect.gainerId)
       if location.found:
@@ -625,14 +661,28 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
         effect.toughnessChange
       game.destroyIfSlain(location.player, location.index)
     of SummonEffect:
-      game.players[effect.summonedOwner].board.add MinionState(
+      var entering = MinionState(
         id: effect.summonedId, owner: effect.summonedOwner,
         card: effect.summonedCard,
         currentToughness:
           if effect.summonedCard.kind == Minion: effect.summonedCard.toughness
           else: 0,
         enteredTurn: game.turnNumber,
-        hiddenTurns: effect.summonedCard.hiddenTurns())
+        hiddenTurns: effect.summonedCard.hiddenTurns(),
+        lastsTurns: effect.summonedCard.lastsTurns())
+      # A copy enters as its original is now: damage and buffs, gained and
+      # lost rules, and the counts of its Hidden and Lasts.
+      let original = game.minionLocation(effect.summonedFrom)
+      if effect.summonedFrom != 0 and original.found:
+        let source = game.players[original.player].board[original.index]
+        entering.currentToughness = source.currentToughness
+        entering.bonusPower = source.bonusPower
+        entering.gainedRules = source.gainedRules
+        entering.lostRules = source.lostRules
+        entering.hiddenTurns = source.hiddenTurns
+        entering.lastsTurns = source.lastsTurns
+      entering.canAttack = entering.hasKeyword(Ready)
+      game.players[effect.summonedOwner].board.add entering
       game.recordVisual(SummonVfx,
         creatureChoice(effect.summonedOwner, effect.summonedId))
       game.nextMinionId = max(game.nextMinionId, effect.summonedId + 1)
@@ -725,6 +775,8 @@ proc triggerContext(game: GameState, pending: PendingTrigger,
   result = game.ruleContext(picks, allowNoTarget = true,
     sourcePlayer = pending.owner, sourceId = pending.sourceId)
   result.attacker = pending.attacker
+  result.played = pending.played
+  result.playedId = pending.playedId
 
 proc triggerChoices*(game: GameState, picked: seq[Choice] = @[]): seq[Choice] =
   ## Legal choices for the waiting trigger's next target, after `picked`.
@@ -883,7 +935,9 @@ proc playMinion*(
     card: card,
     currentToughness: if card.kind == Minion: card.toughness else: 0,
     enteredTurn: game.turnNumber,
-    hiddenTurns: card.hiddenTurns()
+    hiddenTurns: card.hiddenTurns(),
+    lastsTurns: card.lastsTurns(),
+    canAttack: Ready in card.keywords()
   )
   inc game.nextMinionId
 
@@ -920,12 +974,36 @@ proc runMinionRules*(
 ): bool =
   game.runMinionRules(card, @[choice], sourceId)
 
+proc queuePlayTriggers(game: var GameState, player: int, card: Card,
+    playedId: int) =
+  ## After a card played from hand resolves: queues the played triggers of
+  ## cards in play that watch it, the current player's first, then resolves
+  ## the queue in order. The played card's own triggers don't fire for it.
+  if game.gameOver:
+    return
+  for offset in 0 ..< game.playerCount:
+    let owner = (game.currentPlayer + offset) mod game.playerCount
+    for permanent in game.players[owner].board:
+      if permanent.id == playedId:
+        continue
+      for index, trigger in permanent.heldRules.triggers():
+        if permanent.lost(trigger):
+          continue
+        var context = game.ruleContext(allowNoTarget = true,
+          sourcePlayer = owner, sourceId = permanent.id)
+        if trigger.trigger.firesOnPlay(context, player, card):
+          game.pendingTriggers.add PendingTrigger(owner: owner,
+            sourceId: permanent.id, trigger: index, attacker: Canceled,
+            played: card, playedId: playedId)
+  game.advanceTriggers()
+
 proc playCard*(
     game: var GameState,
     cardIndex: int,
     choices: seq[Choice]
 ): bool =
-  ## `choices` answers the card's targets in order (Duel takes two).
+  ## `choices` answers the card's targets in order (Duel takes two). Once
+  ## it resolves, played triggers watching it fire.
   if not game.canPlay(cardIndex):
     return false
   let
@@ -941,11 +1019,13 @@ proc playCard*(
     game.applyEffects(context.effects)
     game.players[playerIndex].discardPile.add card
     game.advanceTriggers()
+    game.queuePlayTriggers(playerIndex, card, 0)
   of Minion, Trinket:
     var played = game.copyGameState()
     let id = played.playMinion(cardIndex)
     if id == 0 or not played.runMinionRules(card, choices, id):
       return false
+    played.queuePlayTriggers(playerIndex, card, id)
     game = played
   true
 

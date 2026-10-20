@@ -71,7 +71,8 @@
 '   handId$(i) returns the unique printed card name.
 '   cardName$(id$), cardRules$(id$), cardKind(id$), cardClass(id$)
 '   cardCost(id$), cardPower(id$), cardToughness(id$)
-'   cardHasKeyword(id$, k), boardHasKeyword(p, i, k): k=0 is Ranged.
+'   cardHasKeyword(id$, k), boardHasKeyword(p, i, k): k=0 is Ranged,
+'   1 is Ready.
 '   boardPower(p, i), boardHp(p, i), boardKind(p, i)
 '   boardReady(p, i), boardAttacked(p, i)
 '   playerLife(p), playerEnergy(p), playerTotalEnergy(p)

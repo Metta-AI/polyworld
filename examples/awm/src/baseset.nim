@@ -103,6 +103,17 @@ let archer = [
         damage(1, game.players, vfx = ExplosionVfx)
       )
     )
+  ),
+  Card(
+    name: "Post", energyCost: 1,
+    class: some(Archer), kind: Trinket,
+    rules: rules(
+      lasts(3),
+      on(played(You, {kind: {Minion}, class: {Archer}, energyCost: atMost(3)}),
+        gain(ready(), getPlayed()),
+        summon(1, getPlayed())
+      )
+    )
   )
 ]
 
@@ -312,8 +323,9 @@ const
 
   baseDeckLists*: array[HeroClass, seq[(string, int)]] = [
     Archer: @[("Bolt", 4), ("Sniper", 4), ("Sharpshooter", 4),
-      ("Hail of Arrows", 4), ("Overcharge", 4), ("Explode", 4),
-      ("Ambusher", 4), ("Assassin", 4), ("Reload", 4), ("Wildfire", 4)],
+      ("Hail of Arrows", 4), ("Overcharge", 4), ("Explode", 2),
+      ("Ambusher", 4), ("Assassin", 3), ("Reload", 3), ("Wildfire", 4),
+      ("Post", 4)],
     Warrior: @[("Bear", 4), ("Swords", 4), ("Shields", 4), ("Duel", 4),
       ("Tactician", 4), ("Footsoldier", 4), ("Commander", 4), ("Rally", 4),
       ("Banner", 4), ("Pillage", 4)],
