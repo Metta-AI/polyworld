@@ -1430,7 +1430,7 @@ proc drawUi*(
       )
   hudScratch.setLen(0)
   if playerHero and attackMoveArmed:
-    hudScratch.add "LEFT-CLICK: ATTACK-MOVE"
+    hudScratch.add "ATTACK-MOVE"
   elif playerHero and armedItem >= 0:
     hudScratch.add "RIGHT-CLICK MAP"
   elif inventoryHero.id != 0 and inventoryHero.channelTicks > 0:
