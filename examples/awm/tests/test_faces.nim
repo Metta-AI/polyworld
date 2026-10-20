@@ -1,44 +1,14 @@
-## Live faces, composed from their layers on the CPU, against the reference
-## renderer, which composes the whole face in one image. Every layer above
-## the chrome is opaque wherever the chrome is, so the GPU draws exactly
-## these pixels at 1:1; only the chrome blends, over the art.
-import std/[sequtils, sets, strutils, unittest]
-import pixie
-import ../src/core/sim, ../src/ui/[cardfaces, facelayers]
+## Card faces as silky lays them out (silkyfaces.nim), from the fonts baked
+## into the UI atlas: every face the table can show fits its text in its
+## boxes, and a face shows the state of its card.
+import std/[sequtils, sets, strutils, tables, unittest]
+import pixie, silky
+import ../src/core/[sim, cardset], ../src/baseset,
+  ../src/ui/[cardfaces, silkyfaces]
 
-const ChromeOverArt = 1
-  ## The reference draws the frame and then the crystals over the art; a
-  ## face draws them over the art already composed, which rounds a few of
-  ## the crystal's edge pixels over the art differently.
-
-proc compose(state: FaceState): Image =
-  result = newImage(CardFaceWidth, CardFaceHeight)
-  for layer in state.faceLayers():
-    let part = layer.part.facePart
-    result.draw(part.image, translate(part.at))
-
-proc reference(state: FaceState): Image =
-  state.card.renderCardFace(state.power, state.toughness,
-    rules = state.rules, extraCost = state.extraCost)
-
-proc worstDiff(a, b: Image): int =
-  for i in 0 ..< a.data.len:
-    let
-      x = a.data[i]
-      y = b.data[i]
-    result = max(result, max(max(abs(x.r.int - y.r.int),
-      abs(x.g.int - y.g.int)), max(abs(x.b.int - y.b.int),
-      abs(x.a.int - y.a.int))))
-
-proc inkPixels(image: Image, ink: string, box: Rect): int =
-  ## Pixels in `box` close to `ink`: the body of its glyphs.
-  let color = parseHtmlColor(ink).rgbx()
-  for y in box.y.int ..< int(box.y + box.h):
-    for x in box.x.int ..< int(box.x + box.w):
-      let pixel = image[x, y]
-      if abs(pixel.r.int - color.r.int) + abs(pixel.g.int - color.g.int) +
-          abs(pixel.b.int - color.b.int) < 40:
-        inc result
+let builder = newAtlasBuilder(5632, 4)
+builder.addFaceAssets()
+let fonts = builder.atlas.fonts
 
 proc changed(card: Card, gained, lost: Rules): FaceState =
   ## A card in play whose rules changed.
@@ -46,72 +16,80 @@ proc changed(card: Card, gained, lost: Rules): FaceState =
     rules: MinionState(card: card, gainedRules: gained,
       lostRules: lost).ruleLines)
 
-suite "live card faces":
-  test "every face the table can show composes to the reference":
+proc printed(card: Card): FaceState =
+  FaceState(card: card, power: -1, toughness: -1)
+
+proc textIn(state: FaceState, box: Rect): TextBlock =
+  for text in state.faceText():
+    if text.box == box:
+      return text
+
+proc laidRules(state: FaceState): LaidText =
+  fonts.layout(state.textIn(RulesBox))
+
+suite "card faces":
+  test "every face the table can show fits its text in its boxes":
+    # Silky places glyphs on whole pixels down and quarter pixels across.
+    # A few rules (Morphosis Chamber's, Overcharge's) overflow their box
+    # even at the smallest size; there the text may spill as far as
+    # `renderCardFace`'s does, and no further.
+    const Slack = 1'f32
     for state in everyFaceState(baseCards):
-      let diff = worstDiff(state.compose(), state.reference())
-      checkpoint state.card.name & " (" & $state.power & "/" &
-        $state.toughness & ", +" & $state.extraCost & ") differs by " & $diff
-      check diff <= ChromeOverArt
+      for text in state.faceText():
+        let
+          laid = fonts.layout(text)
+          bounds = text.box or fitFaceText(text.runs, text.box, text.style).ink
+        checkpoint state.card.name & ": " & text.runs.mapIt(it.text).join()
+        check laid.font.len > 0
+        check laid.ink.x >= bounds.x - Slack
+        check laid.ink.y >= bounds.y - Slack
+        check laid.ink.x + laid.ink.w <= bounds.x + bounds.w + Slack
+        check laid.ink.y + laid.ink.h <= bounds.y + bounds.h + Slack
 
   test "an off-class minion in hand keeps its printed stats":
-    # The old overlay patches drew a red 0 toughness here, from the hand's
-    # -1.
     let
       bear = baseCardNamed("Bear")
       hand = FaceState(card: bear, power: -1, toughness: -1, extraCost: 3)
-      printed = FaceState(card: bear, power: bear.power,
-        toughness: bear.toughness, extraCost: 3)
-    check worstDiff(hand.compose(), printed.compose()) == 0
+    check hand.textIn(PowerBox).runs == @[TextRun(text: $bear.power,
+      ink: StatInk)]
+    check hand.textIn(ToughnessBox).runs == @[TextRun(text: $bear.toughness,
+      ink: StatInk)]
+
+  test "a card that costs its holder more shows the total in red":
+    let bolt = baseCardNamed("Bolt")
+    check bolt.printed.faceText()[0].runs == @[TextRun(
+      text: $bolt.energyCost, ink: CostInk)]
+    check FaceState(card: bolt, power: -1, toughness: -1,
+      extraCost: OffClassCost).faceText()[0].runs == @[TextRun(
+      text: $(bolt.energyCost + OffClassCost), ink: DebuffedInk)]
+
+  test "changed rules show in place, gained in green and lost struck in red":
+    let
+      sharpshooter = baseCardNamed("Sharpshooter")
+      commander = baseCardNamed("Commander")
+      lost = sharpshooter.changed(@[], @[Rule(ranged())]).laidRules
+      gained = baseCardNamed("Bear").changed(@[Rule(ranged()), hidden(1)],
+        @[]).laidRules
+      both = commander.changed(@[on(eachTurn(You), draw(1))],
+        commander.rules).laidRules
+    check lost.lines.mapIt((it.text, it.ink, it.struck)) == @[
+      ("Ranged", LostRuleInk, true),
+      ("Deal 1 damage to any target.", RulesInk, false)]
+    check gained.lines.mapIt((it.text, it.ink, it.struck)) == @[
+      ("Ranged", GainedRuleInk, false), ("Hidden 1.", GainedRuleInk, false)]
+    check both.lines[0].text == "Summon 2 Footsoldiers."
+    check both.lines[0].struck and both.lines[0].ink == LostRuleInk
+    check both.lines[1 .. ^1].allIt(it.ink == GainedRuleInk and not it.struck)
+    check both.lines[1 .. ^1].mapIt(it.text).join(" ") ==
+      "At the start of each of your turns, draw 1 card."
+    # The printed face has a single ink, nothing struck.
+    check sharpshooter.printed.laidRules.lines.allIt(it.ink == RulesInk and
+      not it.struck)
 
   test "every branch of a choice gets a face of its own":
     for card in baseCards:
       var texts: HashSet[string]
       for option in card.everyOption():
-        let layers = FaceState(card: card.optionCard(option), power: -1,
-          toughness: -1).faceLayers()
-        texts.incl layers[^1].part & layers[^2].part
+        texts.incl card.optionCard(option).printed.textIn(RulesBox).runs.mapIt(
+          it.text).join()
       check texts.len == card.everyOption().len
-
-  test "text a face first shows mid-game is laid out once":
-    for state in everyFaceState(baseCards):
-      discard state.faceLayers()
-    discard takeNewParts()
-    let state = FaceState(card: baseCardNamed("Bear"), power: 57,
-      toughness: 2)
-    discard state.faceLayers()
-    check takeNewParts().len == 1  # "57"; the rest was laid out already.
-    discard state.faceLayers()
-    check takeNewParts().len == 0
-
-  test "changed rules show in place, gained in green and lost struck in red":
-    let
-      sharpshooter = baseCardNamed("Sharpshooter")
-      bear = baseCardNamed("Bear")
-      commander = baseCardNamed("Commander")
-      lost = sharpshooter.changed(@[], @[Rule(ranged())])
-      gained = bear.changed(@[Rule(ranged()), hidden(1)], @[])
-      both = commander.changed(@[on(eachTurn(You), draw(1))],
-        commander.rules)
-    for state in [lost, gained, both]:
-      checkpoint state.card.name
-      let face = state.compose()
-      check worstDiff(face, state.reference()) <= ChromeOverArt
-    let printed = FaceState(card: sharpshooter, power: -1, toughness: -1)
-    check printed.compose().inkPixels(LostRuleInk, RulesBox) == 0
-    check lost.compose().inkPixels(LostRuleInk, RulesBox) > 100
-    check lost.compose().inkPixels(GainedRuleInk, RulesBox) == 0
-    check gained.compose().inkPixels(GainedRuleInk, RulesBox) > 100
-    check gained.compose().inkPixels(LostRuleInk, RulesBox) == 0
-    check both.compose().inkPixels(LostRuleInk, RulesBox) > 100
-    check both.compose().inkPixels(GainedRuleInk, RulesBox) > 100
-
-  test "a card that costs its holder more shows the total in red":
-    let
-      bolt = baseCardNamed("Bolt")
-      surcharged = FaceState(card: bolt, power: -1, toughness: -1,
-        extraCost: OffClassCost)
-      cost = "/" & DebuffedInk & "/1:" & $(bolt.energyCost + OffClassCost)
-    check surcharged.faceLayers().anyIt(it.part.endsWith(cost))
-    check FaceState(card: bolt, power: -1, toughness: -1).faceLayers().anyIt(
-      it.part.endsWith("/" & CostInk & "/1:" & $bolt.energyCost))

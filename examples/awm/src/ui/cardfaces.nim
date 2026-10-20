@@ -1,9 +1,8 @@
 ## Card faces from independently editable illustration, frame, icon and font
-## assets. The game draws a face live from parts made here (see
-## facelayers.nim): the art crop, the chrome (frame and icons) and its text,
-## laid out by the same fit as below. `renderCardFace` composes a whole face
-## on the CPU: it is the reference the live faces are tested against, and
-## what tools draw previews with.
+## assets: the face's layout, its inks, and the images silky draws faces from
+## (silkyfaces.nim). `renderCardFace` composes a whole face on the CPU with
+## pixie: what tools draw previews with, and the reference silky's text
+## sizes are fitted from.
 
 import std/[os, options, strutils, tables]
 import pixie
@@ -286,17 +285,6 @@ proc ruleRuns*(card: Card, lines: openArray[RuleLine]): seq[TextRun] =
 proc drawStat(image: Image, value: int, buff: Buff, box: Rect) =
   image.drawText($value, box.x, box.y, box.w, box.h, 68, buff.ink(StatInk),
     true)
-
-proc renderChrome*(kind: CardKind): Image =
-  ## Everything on a face that isn't art or text, for one kind of card: the
-  ## frame and its icons, drawn exactly as `renderCardFace` draws them.
-  result = frameImage(kind).copy()
-  result.draw(energyIcon(), translate(vec2(CostBox.x, CostBox.y)))
-  if kind == Minion:
-    result.draw(powerIcon(), translate(PowerIconAt))
-    result.draw(toughnessIcon(), translate(ToughnessIconAt))
-  else:
-    result.drawArcaneMark()
 
 proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
     showStats = true, rules: openArray[RuleLine] = [], extraCost = 0): Image =

@@ -95,7 +95,7 @@ proc buildUiAtlas*(cardAssets: string): AtlasBuilder =
   ## The UI atlas: every card face part, the HUD's images and its fonts.
   ## Raises when they outgrow it. Call initCardAssets first.
   result = newHudAtlas(5632)
-  result.addFaceParts()
+  result.addFaceAssets()
   result.addAwmHudAssets(cardAssets)
   when PostPanelControls:
     # Silky's widget images, for the screen-effects tuning window.

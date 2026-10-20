@@ -868,6 +868,9 @@ proc runDuel*(app: App) =
       play.presentVisualEvents(game, duelLayout, animationTime)
 
     benchStart(CardsBuild)
+    # Silky's frame starts here: it draws card faces into their textures as
+    # the cards are built.
+    sk.beginUi(window, window.size)
     solid.clear()
     cardSurfaces.clear()
     vfx.clear()
@@ -969,7 +972,6 @@ proc runDuel*(app: App) =
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
     benchStart(Ui)
-    sk.beginUi(window, window.size)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     when PostLayerControls:
       if post.settings.enabled and post.layer != FinalLayer:
@@ -1075,8 +1077,8 @@ proc runDuel*(app: App) =
     when PostPanelControls:
       drawPostPanel(sk, window, post, courtyard)
     benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
-    sk.flushCardFaces()
     sk.endUi()
+    sk.drawHudFaces()
     benchStop(Ui)
     benchEndFrame("duel")
     when defined(takeScreenshot):

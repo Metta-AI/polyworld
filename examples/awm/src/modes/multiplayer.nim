@@ -561,6 +561,9 @@ when not defined(headless):
       glStencilMask(0xff)
       glClearStencil(0)
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+      # Silky's frame starts here: it draws card faces into their textures as
+      # the cards are built.
+      sk.beginUi(window, window.size)
       solid.clear()
       cardSurfaces.clear()
       vfx.clear()
@@ -649,7 +652,6 @@ when not defined(headless):
       glActiveTexture(GL_TEXTURE0)
       glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
       benchStart(Ui)
-      sk.beginUi(window, window.size)
       if choosingClasses:
         let picked = classSelection(vp, sessionOptions.human, not uiCapturesMouse)
         if picked.isSome:
@@ -746,8 +748,8 @@ when not defined(headless):
       when PostPanelControls:
         drawPostPanel(sk, window, post, courtyard)
       benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
-      sk.flushCardFaces()
       sk.endUi()
+      sk.drawHudFaces()
       benchStop(Ui)
       benchEndFrame("multiplayer " & $layout.playerCount)
       when defined(takeScreenshot):

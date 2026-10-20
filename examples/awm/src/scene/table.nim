@@ -714,8 +714,7 @@ proc addFlyingCards*(renderer: var SolidRenderer, faces: var CardRenderer,
       pose,
       animation.heroClass,
       # A draw yet to set off lies exactly on its deck's top card. Face
-      # down it looks just like that card; face up it would win the tie
-      # (cards meet at equal depth in draw order) and show early.
+      # down it looks just like that card, whichever of the two wins.
       animation.hidden or (animation.fromDeck and animation.elapsed <= 0),
       true,
       false,
