@@ -88,7 +88,7 @@ proc currentLayout*(window: Window): GameUiLayout =
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
       gameUiScale(window),
-    TransportHeight
+    (if run.networked: 0.0'f32 else: TransportHeight)
   )
 
 var
