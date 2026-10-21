@@ -319,6 +319,8 @@ type
       tossPlayer*, tossCount*: int
       tossSource*: string  ## The card that asked, for the prompt.
       tossText*: string    ## Its rule text, for the prompt.
+      tossSourcePlayer*: int  ## Whose rules asked.
+      tossSourceId*: int   ## The asking card in play; 0 for a spell.
     of TargetVfxEffect:
       targetVfx*: VfxKind
       visualTarget*: Choice
@@ -2103,7 +2105,8 @@ method run*(
     return false
   for player in resolved.players:
     context.effects.add Effect(kind: TossEffect, tossPlayer: player,
-      tossCount: count, tossSource: card.name, tossText: rule.text(card))
+      tossCount: count, tossSource: card.name, tossText: rule.text(card),
+      tossSourcePlayer: context.sourcePlayer, tossSourceId: context.sourceId)
   true
 
 proc toss*(

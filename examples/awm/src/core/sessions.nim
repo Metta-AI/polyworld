@@ -360,6 +360,10 @@ proc effectToJson(effect: Effect): JsonNode =
     result["tossCount"] = %effect.tossCount
     result["tossSource"] = %effect.tossSource
     result["tossText"] = %effect.tossText
+    if effect.tossSourcePlayer >= 0:
+      result["tossSourcePlayer"] = %effect.tossSourcePlayer
+    if effect.tossSourceId != 0:
+      result["tossSourceId"] = %effect.tossSourceId
   of TargetVfxEffect:
     result["targetVfx"] = %ord(effect.targetVfx)
     result["visualTarget"] = choiceToJson(effect.visualTarget)
@@ -414,7 +418,11 @@ proc effectFromJson(node: JsonNode): Effect =
       Effect(kind: kind, tossPlayer: player("tossPlayer"),
         tossCount: int("tossCount", 0),
         tossSource: node.field("tossSource").stringValue("toss source"),
-        tossText: node.field("tossText").stringValue("toss text"))
+        tossText: node.field("tossText").stringValue("toss text"),
+        tossSourcePlayer: if node.hasKey("tossSourcePlayer"):
+          player("tossSourcePlayer") else: -1,
+        tossSourceId: if node.hasKey("tossSourceId"):
+          int("tossSourceId", 1) else: 0)
     of TargetVfxEffect:
       Effect(kind: kind, targetVfx: VfxKind(node.field("targetVfx").integer(
           "effect VFX", ord(low(VfxKind)), ord(high(VfxKind)))),
@@ -477,6 +485,10 @@ proc gameToJson*(game: GameState): JsonNode =
     pendingToss = %*{"player": game.pendingToss.player,
       "count": game.pendingToss.count, "source": game.pendingToss.source,
       "text": game.pendingToss.text, "remaining": remaining}
+    if game.pendingToss.sourcePlayer >= 0:
+      pendingToss["sourcePlayer"] = %game.pendingToss.sourcePlayer
+    if game.pendingToss.sourceId != 0:
+      pendingToss["sourceId"] = %game.pendingToss.sourceId
   var pendingTriggers = newJArray()
   for pending in game.pendingTriggers:
     var entry = %*{"owner": pending.owner,
@@ -596,7 +608,12 @@ proc gameFromJson*(node: JsonNode): GameState =
       player: entry.field("player").integer("toss player", 0, PlayerCount - 1),
       count: entry.field("count").integer("toss count", 1),
       source: entry.field("source").stringValue("toss source"),
-      text: entry.field("text").stringValue("toss text"))
+      text: entry.field("text").stringValue("toss text"),
+      sourcePlayer: if entry.hasKey("sourcePlayer"):
+        entry["sourcePlayer"].integer("toss source player", 0,
+          PlayerCount - 1) else: -1,
+      sourceId: if entry.hasKey("sourceId"):
+        entry["sourceId"].integer("toss source card", 1) else: 0)
     if pending.count > result.players[pending.player].hand.len:
       raise newException(ValueError, "Invalid snapshot pending toss")
     let remaining = entry.field("remaining")

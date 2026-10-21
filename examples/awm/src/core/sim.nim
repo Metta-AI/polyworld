@@ -90,6 +90,8 @@ type
     player*: int
     count*: int  ## Already capped at the hand size.
     source*, text*: string  ## The asking card and its rule, for prompts.
+    sourcePlayer*: int  ## Whose rules asked.
+    sourceId*: int  ## The asking card in play; 0 for a spell.
     remaining*: seq[Effect]  ## The resolution's later effects, in order.
 
   GameState* = object
@@ -706,6 +708,8 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
       if count > 0:
         game.pendingToss = PendingToss(player: effect.tossPlayer,
           count: count, source: effect.tossSource, text: effect.tossText,
+          sourcePlayer: effect.tossSourcePlayer,
+          sourceId: effect.tossSourceId,
           remaining: @(effects.toOpenArray(index + 1, effects.high)))
         game.checkWinCondition()
         return

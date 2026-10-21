@@ -1,12 +1,17 @@
 import
   std/[options, sequtils, strutils],
-  ../src/core/[bots, match, replays, sim]
+  ../src/core/[bots, match, replays, ruletree, sim]
 
 proc ready(owner, id: int, card: Card): MinionState =
   ## Creates an existing minion ready to attack in a regression fixture.
   MinionState(owner: owner, id: id, card: card,
     currentToughness: (if card.kind == Minion: card.toughness else: 0),
     canAttack: true)
+
+proc basicText(text: string): string =
+  ## A BASIC string expression for `text`, its quotes and line breaks too.
+  "\"" & text.replace("\"", "\"\"").replace("\n", "\" + chr$(10) + \"") &
+    "\""
 
 proc scripted(source: string, seats = 2): BotMatch =
   ## Starts a match with the same script in every seat.
@@ -202,6 +207,118 @@ wend
     human.players[player].board[0].currentToughness
   doAssert played.bots[owner].action.playerId == owner.int32
 
+echo "Scripts see whose trigger or discard asks, from which card, and why"
+block:
+  # An attack fired it: the card, its words, whose it is and the attacker.
+  let snare = Card(name: "Snare", kind: Trinket, class: some(Mage),
+    rules: rules(on(attacked(You), damage(1, target({kind: {Minion}})))))
+  var played = scripted("""
+dim picks(0)
+if triggerCard$() <> "Snare" or cardName$(triggerCard$()) <> "Snare" then stop
+if triggerRules$() <> """ & basicText(snare.triggers()[0].text(snare)) & """ then stop
+if triggerOwner() <> selfPlayer or triggerOnPlay() <> 0 then stop
+if triggerSourceId() <> boardId(selfPlayer, 0) then stop
+if triggerAttackerOwner() <> currentPlayer then stop
+if triggerAttackerId() <> boardId(currentPlayer, 0) then stop
+if triggerPlayed$() <> "" or triggerPlayedId() <> 0 then stop
+if tossCard$() <> "" or tossRules$() <> "" then stop
+if tossOwner() >= 0 or tossSourceId() <> 0 then stop
+resolveTrigger("picks")
+""")
+  let player = played.game.currentPlayer
+  let owner = played.game.nextPlayer(player)
+  played.game.players[owner].board = @[ready(owner, 1, snare)]
+  played.game.players[player].board = @[ready(player, 2, baseCardNamed("Bear"))]
+  played.game.nextMinionId = 3
+  played.game.pendingTriggers = @[PendingTrigger(owner: owner,
+    sourceId: 1, trigger: 0, attacker: creatureChoice(player, 2))]
+  doAssert played.step()
+  doAssert played.bots[owner].action.kind == ActionResolveTrigger
+
+block:
+  # A play fired it: the played card, as it entered play.
+  let watch = Card(name: "Watch", kind: Trinket, class: some(Mage),
+    rules: rules(on(played(AnyOpponent, {kind: {Minion}}),
+      damage(1, target({kind: {Minion}})))))
+  var played = scripted("""
+dim picks(0)
+if triggerCard$() <> "Watch" or triggerOwner() <> selfPlayer then stop
+if triggerPlayed$() <> "Bear" or cardName$(triggerPlayed$()) <> "Bear" then stop
+if triggerPlayedId() <> boardId(currentPlayer, 0) then stop
+if triggerAttackerOwner() >= 0 or triggerAttackerId() <> 0 then stop
+resolveTrigger("picks")
+""")
+  let player = played.game.currentPlayer
+  let owner = played.game.nextPlayer(player)
+  played.game.players[owner].board = @[ready(owner, 1, watch)]
+  played.game.nextMinionId = 2
+  played.game.players[player].hand = @[baseCardNamed("Bear")]
+  played.game.players[player].energy = 10
+  doAssert played.game.playCard(0, @[])
+  doAssert played.game.waitingTrigger
+  doAssert played.step()
+  doAssert played.bots[owner].action.kind == ActionResolveTrigger
+
+block:
+  # A summoned card's on-play rules are its rules, not a trigger.
+  let bouncer = baseCardNamed("Bouncer")
+  var played = scripted("""
+dim picks(0)
+if triggerCard$() <> "Bouncer" or triggerOnPlay() <> 1 then stop
+if triggerRules$() <> """ & basicText(bouncer.ruleText()) & """ then stop
+if triggerSourceId() <> boardId(selfPlayer, 0) then stop
+resolveTrigger("picks")
+""")
+  let owner = played.game.currentPlayer
+  played.game.players[owner].board = @[ready(owner, 1, bouncer)]
+  played.game.nextMinionId = 2
+  played.game.pendingTriggers = @[PendingTrigger(owner: owner,
+    sourceId: 1, attacker: Canceled, onPlay: true)]
+  doAssert played.step()
+  doAssert played.bots[owner].action.kind == ActionResolveTrigger
+
+block:
+  # Another player's minion asks you to discard.
+  let pickpocket = Card(name: "Pickpocket", energyCost: 1, kind: Minion,
+    class: some(Mage), rules: rules(toss(1, AllOpponents)),
+    power: 1, toughness: 1)
+  var played = scripted("""
+dim picks(0)
+if tossCard$() <> "Pickpocket" or cardName$(tossCard$()) <> "Pickpocket" then stop
+if tossRules$() <> """ & basicText(pickpocket.ruleText()) & """ then stop
+if tossOwner() <> currentPlayer or tossOwner() = selfPlayer then stop
+if tossSourceId() <> boardId(currentPlayer, 0) then stop
+if triggerCard$() <> "" or triggerOwner() >= 0 then stop
+discardCards("picks")
+""")
+  let player = played.game.currentPlayer
+  let owner = played.game.nextPlayer(player)
+  played.game.players[player].hand = @[pickpocket]
+  played.game.players[player].energy = 10
+  played.game.players[owner].hand = @[baseCardNamed("Bear")]
+  doAssert played.game.playCard(0, @[])
+  doAssert played.game.pendingToss.sourcePlayer == player
+  doAssert played.game.pendingToss.sourceId ==
+    played.game.players[player].board[0].id
+  doAssert played.step()
+  doAssert played.bots[owner].action.kind == ActionToss
+
+block:
+  # Each offered option reads as its own card.
+  let overcharge = baseCardNamed("Overcharge")
+  var played = scripted("""
+if optionRules$(0, "picks", 0, 0) <> """ &
+    basicText(overcharge.optionCard(overcharge.options()[0]).ruleText()) & """ then stop
+if optionRules$(0, "picks", 0, 1) <> """ &
+    basicText(overcharge.optionCard(overcharge.options()[1]).ruleText()) & """ then stop
+if optionRules$(0, "picks", 0, 2) <> "" then stop
+endTurn()
+""")
+  let player = played.game.currentPlayer
+  played.game.players[player].hand = @[overcharge]
+  doAssert played.step()
+  doAssert played.bots[player].action.kind == ActionEndTurn
+
 echo "A newly played Bouncer can target itself just as in the human UI"
 block:
   var played = scripted("""
@@ -342,6 +459,14 @@ block:
 
 echo "Printed identity and live stats cover hand and every player's board"
 block:
+  var sniper = ready(3, 1, baseCardNamed("Sniper"))
+  sniper.bonusPower = 3
+  sniper.lostRules = @[baseCardNamed("Sniper").rules[0]]
+  sniper.gainedRules = @[baseCardNamed("Spirit").rules[0]]
+  sniper.hasAttacked = true
+  sniper.stolenFrom = some(1)
+  let liveText = sniper.card.optionCard(sniper.liveRules).ruleText()
+  doAssert liveText.len > 0 and liveText != sniper.card.ruleText()
   var played = scripted("""
 if handId$(0) <> "Bouncer" then stop
 if cardName$(handId$(0)) <> handName$(0) then stop
@@ -357,21 +482,123 @@ if cardHasKeyword(boardCard$(3, 0), 0) <> 1 then stop
 if boardHasKeyword(3, 0, 0) <> 0 then stop
 if boardReady(3, 0) <> 0 or boardAttacked(3, 0) <> 1 then stop
 if boardKind(3, 1) <> 2 then stop
+if cardRules$(boardCard$(3, 0)) <> """ & basicText(sniper.card.ruleText()) & """ then stop
+if boardRules$(3, 0) <> """ & basicText(liveText) & """ then stop
+if boardStolenFrom(3, 0) <> 1 or boardStolenFrom(3, 1) >= 0 then stop
 if selfPlayer <> 3 and playerHandSize(3) <> 5 then stop
 if playerLife(3) <> 20 then stop
 endTurn()
 """, 4)
   let player = played.game.currentPlayer
   played.game.players[player].hand = @[baseCardNamed("Bouncer")]
-  var sniper = ready(3, 1, baseCardNamed("Sniper"))
-  sniper.bonusPower = 3
-  sniper.lostRules = @[baseCardNamed("Sniper").rules[0]]
-  sniper.hasAttacked = true
   played.game.players[3].board = @[
     sniper, ready(3, 2, baseCardNamed("Bubble"))]
   played.game.nextMinionId = 3
   doAssert played.step()
   doAssert played.bots[player].action.kind == ActionEndTurn
+
+echo "Scripts read any card's rules as a tree of DSL nodes"
+block:
+  # Printed rules: Lasts, a played trigger and its filters, what it does.
+  let postLasts = baseCardNamed("Post").lastsTurns()
+  var played = scripted("""
+n = rulesOfCard("Post")
+if n = 0 or n <> nodeCount() then stop
+l = nodeFind("lasts", -1)
+if l < 0 or nodeParent(l) <> -1 or nodeRole$(l) <> "rules" then stop
+if nodeValue(nodeChild(l, "turns")) <> """ & $postLasts & """ then stop
+o = nodeFind("on", -1)
+t = nodeChild(o, "trigger")
+if nodeKind$(t) <> "played" or nodeText$(nodeChild(t, "player")) <> "You" then stop
+if nodeText$(nodeChild(t, "kind")) <> "Minion" then stop
+if nodeText$(nodeChild(t, "class")) <> "Archer" then stop
+c = nodeChild(t, "energyCost")
+if nodeKind$(c) <> "atMost" or nodeValue(nodeChild(c, "low")) <> 3 then stop
+g = nodeChild(o, "rules")
+if nodeKind$(g) <> "gain" or nodeKind$(nodeChild(g, "rule")) <> "ready" then stop
+if nodeKind$(nodeChild(g, "what")) <> "getPlayed" then stop
+s = nodeFind("summon", -1)
+if nodeParent(s) <> o or nodeKind$(nodeChild(s, "card")) <> "getPlayed" then stop
+if nodeText$(s) <> """ & basicText(baseCardNamed("Post").triggers()[0].rules[1].text(
+    baseCardNamed("Post"))) & """ then stop
+' Values that read the game, and a target's owner.
+if rulesOfCard("Explode") = 0 then stop
+a = nodeChild(nodeFind("damage", -1), "amount")
+if nodeKind$(a) <> "power" or nodeKind$(nodeChild(a, "target")) <> "getTarget" then stop
+w = nodeChild(nodeFind("destroy", -1), "what")
+if nodeKind$(w) <> "target" or nodeText$(nodeChild(w, "owner")) <> "Friendly" then stop
+' A choice's branches, in order.
+if rulesOfCard("Overcharge") = 0 then stop
+b = nodeChild(nodeFind("choose", -1), "options")
+if nodeKind$(b) <> "rules" or nodeValue(b) <> 0 then stop
+b = nodeFind("rules", b)
+if nodeValue(b) <> 1 or nodeParent(b) <> nodeFind("choose", -1) then stop
+' Nothing selected, nothing out of range.
+if rulesOfCard("No Such Card") <> 0 or nodeCount() <> 0 then stop
+if nodeKind$(0) <> "" or nodeParent(0) <> -1 or nodeChild(0, "rules") <> -1 then stop
+endTurn()
+""")
+  let player = played.game.currentPlayer
+  doAssert played.step()
+  doAssert played.bots[player].action.kind == ActionEndTurn
+
+block:
+  # Live rules in play, and how long Hidden and Lasts still run.
+  var played = scripted("""
+if rulesOfBoard(selfPlayer, 0) = 0 then stop
+if nodeFind("ranged", -1) >= 0 or nodeFind("hidden", -1) < 0 then stop
+if nodeValue(nodeChild(nodeFind("hidden", -1), "turns")) <> -1 then stop
+if rulesOfCard(boardCard$(selfPlayer, 0)) = 0 then stop
+if nodeFind("ranged", -1) < 0 or nodeFind("hidden", -1) >= 0 then stop
+if boardHiddenTurns(selfPlayer, 0) <> -1 or boardHiddenTurns(selfPlayer, 1) <> 0 then stop
+if boardLastsTurns(selfPlayer, 1) <> 1 or boardLastsTurns(selfPlayer, 0) <> 0 then stop
+if rulesOfTrigger() <> 0 then stop
+endTurn()
+""")
+  let player = played.game.currentPlayer
+  var sniper = ready(player, 1, baseCardNamed("Sniper"))
+  sniper.lostRules = @[baseCardNamed("Sniper").rules[0]]
+  sniper.gainedRules = @[baseCardNamed("Spirit").rules[0]]
+  sniper.hiddenTurns = Always
+  var post = ready(player, 2, baseCardNamed("Post"))
+  post.lastsTurns = 1
+  played.game.players[player].board = @[sniper, post]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  doAssert played.bots[player].action.kind == ActionEndTurn
+
+block:
+  # The waiting trigger's own rule, its trigger first.
+  let snare = Card(name: "Snare", kind: Trinket, class: some(Mage),
+    rules: rules(on(attacked(You), damage(1, target({kind: {Minion}})))))
+  var played = scripted("""
+dim picks(0)
+if rulesOfTrigger() = 0 or nodeKind$(0) <> "on" then stop
+t = nodeChild(0, "trigger")
+if nodeKind$(t) <> "attacked" or nodeText$(nodeChild(t, "player")) <> "You" then stop
+d = nodeChild(0, "rules")
+if nodeKind$(d) <> "damage" or nodeValue(nodeChild(d, "amount")) <> 1 then stop
+if nodeText$(nodeChild(nodeChild(d, "what"), "kind")) <> "Minion" then stop
+if nodeText$(0) <> triggerRules$() then stop
+resolveTrigger("picks")
+""")
+  let player = played.game.currentPlayer
+  let owner = played.game.nextPlayer(player)
+  played.game.players[owner].board = @[ready(owner, 1, snare)]
+  played.game.players[player].board = @[ready(player, 2, baseCardNamed("Bear"))]
+  played.game.nextMinionId = 3
+  played.game.pendingTriggers = @[PendingTrigger(owner: owner,
+    sourceId: 1, trigger: 0, attacker: creatureChoice(player, 2))]
+  doAssert played.step()
+  doAssert played.bots[owner].action.kind == ActionResolveTrigger
+
+echo "Every base card's rules read as a tree with nothing unknown"
+for card in baseCards:
+  let tree = card.rules.ruleNodes(card)
+  doAssert tree.len > 0 or card.rules.len == 0
+  for n, node in tree:
+    doAssert node.kind != "unknown", card.name & ": " & node.text
+    doAssert node.parent in -1 ..< n, card.name
 
 echo "Large hands and boards have no automatic thirty-card turn cap"
 block:

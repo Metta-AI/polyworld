@@ -75,6 +75,9 @@
 '   1 is Ready.
 '   boardPower(p, i), boardHp(p, i), boardKind(p, i)
 '   boardReady(p, i), boardAttacked(p, i)
+'   boardRules$(p, i)                 its rules now: gained, less lost
+'   boardStolenFrom(p, i)             whose card it is, -1 unless stolen
+'   boardHiddenTurns(p, i), boardLastsTurns(p, i)  turns left, -1 is always
 '   playerLife(p), playerEnergy(p), playerTotalEnergy(p)
 '   playerHandSize(p), playerDeckSize(p), playerDead(p)
 '   attackChoiceCount(id), attackChoiceKind(id, choice)
@@ -91,10 +94,28 @@
 '   nextChoiceKind(handIndex, "picks", pickedCount, choice)
 '   nextChoiceOwner(handIndex, "picks", pickedCount, choice)
 '   nextChoiceId(handIndex, "picks", pickedCount, choice)
+'   optionRules$(handIndex, "picks", pickedCount, option) a branch's words
 ' Use handIndex = -1 for trigger queries. Prefix queries include earlier picks.
 ' Successful commands return 1; refused commands return 0 and do nothing.
 ' Exactly one successful command is allowed per decision. END alone is not
 ' an action. A decision with no action stops the match with a player error.
+'
+' WHO AND WHAT ASKS ("", -1 or 0 while nothing waits)
+'   triggerCard$(), triggerRules$()    the waiting trigger's card and words
+'   triggerOwner(), triggerSourceId()  whose effect it is, its card's boardId
+'   triggerOnPlay()                    1 for a summoned card's on-play rules
+'   triggerAttackerOwner(), triggerAttackerId()  the attack that fired it
+'   triggerPlayed$(), triggerPlayedId()  the card whose play fired it
+'   tossCard$(), tossRules$()          the card asking you to discard
+'   tossOwner(), tossSourceId()        whose effect it is, its card's boardId
+'
+' RULES TREE (select one, then read nodes 0 to nodeCount() - 1)
+'   rulesOfCard(id$), rulesOfBoard(p, i), rulesOfTrigger()  select it, count
+'   nodeKind$(n)   the DSL call: "damage", "on", "lasts", "target", "fixed"
+'   nodeRole$(n)   its part of the parent: "amount", "what", "turns"
+'   nodeParent(n)  -1 for the card's own rules
+'   nodeValue(n), nodeText$(n)  its number or ordinal, and its words
+'   nodeChild(n, role$), nodeFind(kind$, after)  -1 when there is none
 
 IF selectingClass THEN
   pickClass(1)          ' Warrior

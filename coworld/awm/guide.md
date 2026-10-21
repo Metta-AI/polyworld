@@ -80,6 +80,9 @@ particular permanent, including duplicates of the same card.
 | `boardPower(p, i)`, `boardHp(p, i)` | Live power and remaining toughness |
 | `boardReady(p, i)`, `boardAttacked(p, i)` | Attack readiness and whether it attacked this turn |
 | `boardHasKeyword(p, i, k)` | Current keyword state, including gained and removed keywords |
+| `boardRules$(p, i)` | Its rules now, as text: printed and gained, less the lost ones |
+| `boardStolenFrom(p, i)` | Whose card it is while another player controls it; -1 otherwise |
+| `boardHiddenTurns(p, i)`, `boardLastsTurns(p, i)` | How many more of its owner's turns it stays Hidden or in play; Hidden -1 is for good, 0 is neither |
 | `cardName$(id$)`, `cardRules$(id$)` | Printed name and the same rules text humans see |
 | `cardKind(id$)`, `cardClass(id$)`, `cardCost(id$)` | Printed kind, class (-1 for neutral), and energy cost |
 | `cardPower(id$)`, `cardToughness(id$)`, `cardHasKeyword(id$, k)` | Printed stats and keywords before buffs, gains, or losses |
@@ -155,13 +158,14 @@ A choice of branches arrives as choice kind 4: the choice index is the
 branch, and it names no game object, so its owner is -1. Weigh the branches
 with `optionDamage(handIndex, "picks", pickedCount, option)` and
 `optionSelfDamage(...)`, which report what a branch deals and what it costs
-your own hero. `nextHelpsTarget`, `nextIntent`, and `nextAmount` describe the
+your own hero, and read its words with `optionRules$(...)`. `nextHelpsTarget`, `nextIntent`, and `nextAmount` describe the
 next target the same way, following earlier picks: intent 1 is damage,
 2 a buff, 3 a weaken, 4 a bounce, 5 a destroy, 6 a lost keyword, and 7 a
 steal (Control takes an enemy minion for good).
 
 A card in play can gain or lose rules (Morphosis Chamber gives a minion
-Ranged or Hidden 1; Duel takes Ranged away). `boardHasKeyword` follows them.
+Ranged or Hidden 1; Duel takes Ranged away). `boardHasKeyword` follows them,
+and `boardRules$` and `rulesOfBoard` read the rules a card has now.
 
 A hidden minion (Ambusher, Spirit) can't be attacked and never appears among
 `attackChoiceCount`'s choices, though cards that aim at it still reach it.
@@ -180,6 +184,74 @@ summon a 10/10 Primordial on your board. You may choose your own hero.
 Primordial itself has no board-clearing effect. Bouncing and replaying it
 restores the minion without clearing any board, and it cannot attack again
 that turn. Another board clear requires another `Summon Primordial` spell.
+
+## Who is asking
+
+A waiting trigger or discard tells your script what asked for it, as the
+human prompt does. While nothing waits, the string queries return `""`, the
+owners -1, and the IDs 0. IDs match `boardId(p, i)`; card strings work with
+`cardName$`, `cardRules$` and the other card queries.
+
+| Query | Waiting trigger |
+| --- | --- |
+| `triggerCard$()`, `triggerRules$()` | The card whose trigger waits, and that trigger's whole sentence ("When your hero is attacked, ...") |
+| `triggerOwner()` | Whose effect it is: the player it resolves for, which is you |
+| `triggerSourceId()` | That card's ID in play |
+| `triggerOnPlay()` | 1 when these are a summoned card's on-play rules, not an `on(...)` trigger |
+| `triggerAttackerOwner()`, `triggerAttackerId()` | The attacker, when an attack fired it |
+| `triggerPlayed$()`, `triggerPlayedId()` | The card whose play fired it (ID 0 for a spell); `currentPlayer` played it |
+
+| Query | Waiting discard |
+| --- | --- |
+| `tossCard$()`, `tossRules$()` | The card asking you to discard, and its rule |
+| `tossOwner()` | Whose effect it is: often another player's spell or minion |
+| `tossSourceId()` | The asking card's ID in play; 0 for a spell |
+
+## Rules tree
+
+Every card's rules can be read as the tree they are written as, node by
+node, without parsing text. Select a tree, then read nodes `0` to
+`nodeCount() - 1`; the tree stays selected until you select another.
+
+| Query | Selects |
+| --- | --- |
+| `rulesOfCard(id$)` | A card's printed rules: in your hand, in play, or any base-set card by name |
+| `rulesOfBoard(p, i)` | The rules a card in play has now: printed and gained, less the lost ones |
+| `rulesOfTrigger()` | The waiting trigger's whole `on(...)` rule, or a summoned card's on-play rules |
+
+Each returns the node count, 0 when there is nothing to read. Nodes are in
+the order the card writes them, each right after the node it belongs to.
+
+| Query | Node |
+| --- | --- |
+| `nodeKind$(n)` | The card DSL call that builds it: `damage`, `on`, `lasts`, `hidden`, `ranged`, `target`, `getTarget`, `power`, `fixed`. Kinds and classes are `set` |
+| `nodeRole$(n)` | Which part of its parent it is: `rules`, `trigger`, `amount`, `what`, `turns`, `player`, or a filter's stat, `energyCost` |
+| `nodeParent(n)` | Its parent; -1 for one of the card's own rules |
+| `nodeValue(n)` | A fixed number, or an enum's ordinal (`You` 0); -1 for `hidden()` that never ends; a `choose` branch's index |
+| `nodeText$(n)` | A rule's printed words, a fixed value as written, a set's members (`Hero,Minion`) |
+| `nodeChild(n, role$)` | Its first child in that role; -1 if none |
+| `nodeFind(kind$, after)` | The first node of that kind after `after` (-1 to start); -1 if none |
+
+Explode reads as:
+
+```
+ 0 -1 rules    destroy      Destroy a friendly minion.
+ 1  0 what     target       a friendly minion
+ 2  1 kind     set          Minion
+ 3  1 owner    fixed      0 Friendly
+ 4 -1 rules    damage       Deal the first target's power damage to any target.
+ 5  4 amount   power        the first target's power
+ 6  5 target   getTarget    the first target
+ 7  6 index    fixed      0
+ 8  4 what     target       any target
+ 9  8 kind     set          Hero,Minion
+```
+
+Spirit starts with a `hidden` node whose `turns` child is -1, so
+`nodeValue(nodeChild(nodeFind("hidden", -1), "turns"))` says how long a card
+is printed to stay Hidden; `lasts` reads the same way. A tree holds printed
+counts: `boardHiddenTurns` and `boardLastsTurns` say how many turns a card in
+play has left.
 
 ## Ticks
 

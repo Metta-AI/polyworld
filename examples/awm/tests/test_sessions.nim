@@ -512,7 +512,7 @@ suite "waiting discards":
       card: Warrior.classCard(), currentToughness: 2)]
     game.nextMinionId = 3
     game.pendingToss = PendingToss(player: me, count: 1, source: "Study",
-      text: "Discard 1 card.", remaining: @[
+      text: "Discard 1 card.", sourcePlayer: enemy, sourceId: 2, remaining: @[
         Effect(kind: DrawEffect, beat: 1, drawPlayer: me, drawCount: 1),
         Effect(kind: DamageCreatureEffect, beat: 2, damagedCreatureId: 2,
           creatureDamage: 1),
@@ -524,14 +524,29 @@ suite "waiting discards":
           lostRule: baseCardNamed("Sniper").rules[0]),
         Effect(kind: GainRuleEffect, beat: 5, gainerId: 2,
           gainedRule: baseCardNamed("Ambusher").rules[0]),
-        Effect(kind: StealEffect, beat: 6, stolenId: 2, thief: me)])
+        Effect(kind: StealEffect, beat: 6, stolenId: 2, thief: me),
+        Effect(kind: TossEffect, beat: 7, tossPlayer: me, tossCount: 1,
+          tossSource: "Study", tossText: "Discard 1 card.",
+          tossSourcePlayer: enemy, tossSourceId: 2)])
     let encoded = gameToJson(game)
     let decoded = gameFromJson(encoded)
     check decoded.waitingToss
     check decoded.pendingToss.count == 1
-    check decoded.pendingToss.remaining.len == 7
+    check decoded.pendingToss.remaining.len == 8
     check decoded.pendingToss.remaining[6].thief == me
+    check decoded.pendingToss.sourcePlayer == enemy
+    check decoded.pendingToss.sourceId == 2
+    check decoded.pendingToss.remaining[7].tossSourcePlayer == enemy
+    check decoded.pendingToss.remaining[7].tossSourceId == 2
     check gameToJson(decoded) == encoded
+    # A snapshot from before discards knew whose they were still loads.
+    var older = encoded.copy()
+    older["pendingToss"].delete("sourcePlayer")
+    older["pendingToss"].delete("sourceId")
+    let restored = gameFromJson(older)
+    check restored.pendingToss.sourcePlayer == -1
+    check restored.pendingToss.sourceId == 0
+    check gameFromJson(gameToJson(restored)).pendingToss.sourcePlayer == -1
     var invalid = encoded.copy()
     invalid["pendingToss"]["remaining"][0]["kind"] = %"NoSuchEffect"
     expect ValueError:
