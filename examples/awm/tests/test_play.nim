@@ -1,6 +1,6 @@
 ## The table state the duel and the multiplayer table share: what the human
 ## is in the middle of doing, with no window and no scene.
-import std/[options, unittest]
+import std/[options, sequtils, unittest]
 import vmath
 import ../src/play, ../src/core/[bots, replays, sim], ../src/scene/table,
   ../src/vfx/vfxrenderer
@@ -26,6 +26,48 @@ proc flatTable(): TableLayout =
   TableLayout(handPoses: poses, boardPoses: poses, deckPose: origin,
     discardPose: origin, spellPose: origin, heroPosition: feet,
     handVisible: shown)
+
+suite "a card the human plays":
+  # Twin readies and copies a played minion, as Post does, with this
+  # suite's own numbers: tuning Post moves nothing here.
+  let twin = Card(name: "Twin", energyCost: 1, class: some(Archer),
+    kind: Trinket, rules: rules(
+      lasts(2),
+      on(played(You, {kind: {Minion}, class: {Archer}, energyCost: atMost(3)}),
+        gain(ready(), getPlayed()),
+        summon(1, getPlayed()))))
+
+  proc twinTable(seed: int64): (TablePlay, GameState, int) =
+    ## An Archer's turn with Twin in play and energy to spare.
+    var game = newGame(Archer, Warrior, seed)
+    let me = game.currentPlayer
+    game.players[me].heroClass = Archer
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: twin,
+      enteredTurn: game.turnNumber, lastsTurns: twin.lastsTurns())]
+    game.nextMinionId = 2
+    game.players[me].energy = 20
+    var play = initTablePlay(1)
+    play.resetTable()
+    (play, game, me)
+
+  test "a minion played from hand fires played triggers, as a bot's does":
+    var (play, game, me) = twinTable(11)
+    game.players[me].hand = @[baseCardNamed("Sniper")]
+    check play.playHandCard(game, flatTable(), 0)
+    check game.players[me].board.mapIt(it.card.name) ==
+      @["Twin", "Sniper", "Sniper"]
+    check game.players[me].board[1].hasKeyword(Ready)
+
+  test "so does one whose rule is aimed once it is on the board":
+    var (play, game, me) = twinTable(13)
+    game.players[me].hand = @[baseCardNamed("Sharpshooter")]
+    check play.playHandCard(game, flatTable(), 0)
+    check play.pendingTargeting
+    play.takePick(game, flatTable(), heroChoice(1 - me))
+    check game.players[me].board.mapIt(it.card.name) ==
+      @["Twin", "Sharpshooter", "Sharpshooter"]
+    # The copy's own shot waits for its owner, as any summoned card's does.
+    check game.waitingTrigger
 
 suite "offering a card's options":
   proc offered(): (TablePlay, GameState) =

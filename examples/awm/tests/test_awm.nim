@@ -3306,29 +3306,34 @@ suite "AWM Lasts":
     check game.players[me].board.len == 1
     check game.players[me].board[0].card.name == "Tent"
 
-suite "AWM played triggers and Post":
-  proc postGame(seed: int64): (GameState, int, int) =
-    ## The Archer's turn with Post in play and energy to spare.
+suite "AWM played triggers":
+  # Twin plays like Post, but its numbers are this suite's: tuning Post
+  # moves nothing here.
+  let twin = Card(name: "Twin", energyCost: 1, class: some(Archer),
+    kind: Trinket, rules: rules(
+      lasts(3),
+      on(played(You, {kind: {Minion}, class: {Archer}, energyCost: atMost(3)}),
+        gain(ready(), getPlayed()),
+        summon(1, getPlayed()))))
+
+  proc twinGame(seed: int64): (GameState, int, int) =
+    ## The Archer's turn with Twin in play and energy to spare.
     var game = newGame(Archer, Warrior, seed)
     let
       me = game.leads(Archer)
       enemy = 1 - me
-    game.players[me].board = @[MinionState(id: 1, owner: me,
-      card: baseCard("post-1"), enteredTurn: game.turnNumber, lastsTurns: 2)]
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: twin,
+      enteredTurn: game.turnNumber, lastsTurns: twin.lastsTurns())]
     game.nextMinionId = 2
     game.players[me].energy = 20
     (game, me, enemy)
 
-  test "Post prints a trigger that readies and copies cheap Archer minions":
-    let post = baseCard("post-1")
-    check post.kind == Trinket
-    check post.class == some(Archer)
-    check post.lastsTurns() == 3
-    check post.ruleText() == "Lasts 3.\n" &
+  test "a trigger that readies and copies cheap Archer minions prints so":
+    check twin.lastsTurns() == 3
+    check twin.ruleText() == "Lasts 3.\n" &
       "When you play an Archer minion that costs 3 or less, it gains Ready, " &
       "summon a copy of it."
-    check baseCardNamed("Post").mechanics() ==
-      @[LastsMechanic, ReadyMechanic, SummonMechanic]
+    check twin.mechanics() == @[LastsMechanic, ReadyMechanic, SummonMechanic]
 
   test "trigger parts join with and while all are orders, else with commas":
     check Card(kind: Trinket, rules: rules(on(eachTurn(You), draw(1),
@@ -3341,7 +3346,7 @@ suite "AWM played triggers and Post":
       "draw 1 card."
 
   test "a cheap Archer minion enters Ready, with a Ready copy":
-    var (game, me, enemy) = postGame(3321)
+    var (game, me, enemy) = twinGame(3321)
     game.players[me].hand = @[baseCard("sniper-2")]
     check game.playCard(0)
     check game.players[me].board.len == 3
@@ -3355,8 +3360,20 @@ suite "AWM played triggers and Post":
       check game.attack(game.players[me].board[slot].id, heroChoice(enemy))
     check game.players[enemy].life == StartingLife - 4
 
+  test "a card the table plays in two steps fires played triggers too":
+    # The table puts a minion in play first, to aim its rules on the board,
+    # then plays it out (`finishPlay`): how a human plays one.
+    var (game, me, _) = twinGame(3329)
+    game.players[me].hand = @[baseCard("sniper-2")]
+    let id = game.playMinion(0)
+    check id != 0
+    check game.finishPlay(baseCard("sniper-2"), @[NoTarget], id)
+    check game.players[me].board.len == 3
+    check game.players[me].board[2].card.name == "Sniper"
+    check game.players[me].board[1].hasKeyword(Ready)
+
   test "the copy runs its own on-play rules, aimed afresh":
-    var (game, me, enemy) = postGame(3323)
+    var (game, me, enemy) = twinGame(3323)
     game.players[me].hand = @[baseCard("sharpshooter-3")]
     let life = game.players[enemy].life
     check game.playCard(0, heroChoice(enemy))
@@ -3370,7 +3387,7 @@ suite "AWM played triggers and Post":
     check game.players[me].board.len == 3
 
   test "expensive, off-class, spells and opponents' plays make no copy":
-    var (game, me, enemy) = postGame(3325)
+    var (game, me, enemy) = twinGame(3325)
     game.players[me].hand = @[baseCard("assassin-6"), baseCard("bolt-1"),
       baseCard("bear-2")]
     check game.playCard(0)
@@ -3378,7 +3395,7 @@ suite "AWM played triggers and Post":
     check not game.players[me].board[1].hasKeyword(Ready)
     check game.playCard(0, heroChoice(enemy))
     check game.players[me].board.len == 2
-    # A Warrior Bear costs 2, but Post only copies Archer cards.
+    # A Warrior Bear costs 2, but Twin only copies Archer cards.
     check game.playCard(0)
     check game.players[me].board.len == 3
     check not game.players[me].board[2].hasKeyword(Ready)
@@ -3388,10 +3405,10 @@ suite "AWM played triggers and Post":
     check game.playCard(0)
     check game.players[enemy].board.len == 1
 
-  test "two Posts make two copies, and copies are never copied":
-    var (game, me, _) = postGame(3327)
-    game.players[me].board.add MinionState(id: 2, owner: me,
-      card: baseCard("post-1"), enteredTurn: game.turnNumber, lastsTurns: 2)
+  test "two copiers make two copies, and copies are never copied":
+    var (game, me, _) = twinGame(3327)
+    game.players[me].board.add MinionState(id: 2, owner: me, card: twin,
+      enteredTurn: game.turnNumber, lastsTurns: twin.lastsTurns())
     game.nextMinionId = 3
     game.players[me].hand = @[baseCard("ambusher-3")]
     check game.playCard(0)
@@ -3403,12 +3420,12 @@ suite "AWM played triggers and Post":
     check ambushers == 3
 
   test "a copy enters as its original is: buffs, gained rules and all":
-    # Drill sits before Post, so its buff lands on the played minion first.
+    # Drill sits before Twin, so its buff lands on the played minion first.
     let drill = Card(name: "Drill", energyCost: 0, kind: Trinket,
       rules: rules(on(played(You, {kind: {Minion}}),
         addPowerToughness(1, 1, getPlayed()))))
     check drill.ruleText() == "When you play a minion, give it +1/+1."
-    var (game, me, _) = postGame(3335)
+    var (game, me, _) = twinGame(3335)
     game.players[me].board.insert(MinionState(id: 2, owner: me, card: drill,
       enteredTurn: game.turnNumber), 0)
     game.nextMinionId = 3
@@ -3425,7 +3442,7 @@ suite "AWM played triggers and Post":
     check copy.bonusPower == 1
 
   test "a bounced copy goes back to its owner's hand as a card":
-    var (game, me, enemy) = postGame(3329)
+    var (game, me, enemy) = twinGame(3329)
     game.players[me].hand = @[baseCard("sniper-2")]
     check game.playCard(0)
     let copy = game.players[me].board[2].id

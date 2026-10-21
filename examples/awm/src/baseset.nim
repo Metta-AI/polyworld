@@ -108,7 +108,7 @@ let archer = [
     name: "Post", energyCost: 1,
     class: some(Archer), kind: Trinket,
     rules: rules(
-      lasts(3),
+      lasts(2),
       on(played(You, {kind: {Minion}, class: {Archer}, energyCost: atMost(3)}),
         gain(ready(), getPlayed()),
         summon(1, getPlayed())

@@ -694,8 +694,7 @@ proc playHandCard*(
         play.pendingChoices = game.availableChoices(card)
         result = true
         if play.pendingChoices.selectableTargetCount() == 0:
-          discard game.runMinionRules(card, NoTarget,
-            sourceId = minionId)
+          discard game.finishPlay(card, @[NoTarget], minionId)
           play.pendingChoices.setLen(0)
           play.statusMessage =
             &"{card.name} enters play without a target."
@@ -730,7 +729,7 @@ proc playHandCard*(
     of Minion, Trinket:
       let minionId = game.playMinion(handIndex)
       if minionId != 0:
-        discard game.runMinionRules(card, sourceId = minionId)
+        discard game.finishPlay(card, @[NoTarget], minionId)
         # Its own slot, counting only the cards up to it: minions
         # its rules summon come after it and appear later.
         let
@@ -850,7 +849,7 @@ proc takePick*(
       if play.pendingTrigger:
         game.resolvePendingTrigger(picks)
       elif card.kind != Spell:
-        game.runMinionRules(card, picks)
+        game.finishPlay(card, picks, play.pendingSourceId)
       else:
         game.playCard(play.pendingCardIndex, picks)
   if resolved and spellAnimation:
@@ -937,7 +936,7 @@ proc updateTargeting*(
       &"{game.waitingTriggerName()} can't be canceled: choose a target."
   elif cancel:
     if card.kind != Spell:
-      discard game.runMinionRules(card, NoTarget)
+      discard game.finishPlay(card, @[NoTarget], play.pendingSourceId)
       play.statusMessage =
         &"{card.name}'s rule finishes without a target."
     else:

@@ -581,28 +581,26 @@ suite "lasting cards and played triggers in snapshots":
   test "a Lasts count and a waiting played trigger's card round trip":
     var game = newGame(Archer, Warrior, 1121)
     game.currentPlayer = 0
+    # Snapshots hold base-set cards: Plan carries the trigger and the
+    # counts, and the waiting trigger names a Sharpshooter in play as the
+    # card that was played. The state is the snapshot's, not any card's.
     game.players[0].board = @[
-      MinionState(id: 3, owner: 0, card: baseCard("post-1"),
+      MinionState(id: 3, owner: 0, card: baseCard("plan-3"),
         enteredTurn: game.turnNumber, lastsTurns: 2),
-      MinionState(id: 4, owner: 0, card: baseCard("post-1"),
-        enteredTurn: game.turnNumber, lastsTurns: 1)]
-    game.nextMinionId = 5
-    game.players[0].hand = @[baseCard("sharpshooter-3")]
-    game.players[0].energy = 3
-    check game.playCard(0, heroChoice(1))
-    # The first Post's copy waits to aim; the second Post's trigger waits
-    # behind it, holding the card that was played.
-    check game.waitingTrigger
-    check game.pendingTriggers.len == 2
-    check game.pendingTriggers[1].played == baseCard("sharpshooter-3")
+      MinionState(id: 4, owner: 0, card: baseCard("plan-3"),
+        enteredTurn: game.turnNumber, lastsTurns: 1),
+      MinionState(id: 5, owner: 0, card: baseCard("sharpshooter-3"),
+        currentToughness: 1, enteredTurn: game.turnNumber)]
+    game.nextMinionId = 6
+    game.pendingTriggers = @[PendingTrigger(owner: 0, sourceId: 4,
+      trigger: 0, attacker: Canceled, played: baseCard("sharpshooter-3"),
+      playedId: 5)]
     let encoded = gameToJson(game)
     let decoded = gameFromJson(encoded)
     check decoded.players[0].board[0].lastsTurns == 2
     check decoded.players[0].board[1].lastsTurns == 1
-    check decoded.pendingTriggers[1].played == baseCard("sharpshooter-3")
-    check game.pendingTriggers[1].playedId != 0
-    check decoded.pendingTriggers[1].playedId ==
-      game.pendingTriggers[1].playedId
+    check decoded.pendingTriggers[0].played == baseCard("sharpshooter-3")
+    check decoded.pendingTriggers[0].playedId == 5
     check gameToJson(decoded) == encoded
 
   test "states without lasting cards or plays encode as before":

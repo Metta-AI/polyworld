@@ -1001,6 +1001,18 @@ proc queuePlayTriggers(game: var GameState, player: int, card: Card,
             played: card, playedId: playedId)
   game.advanceTriggers()
 
+proc finishPlay*(game: var GameState, card: Card, choices: seq[Choice],
+    sourceId: int): bool =
+  ## Plays out a minion or trinket that `playMinion` put in play from hand
+  ## (`sourceId`): its own rules, then the played triggers watching it. The
+  ## table plays a card in these two steps, to aim its rules once it is on
+  ## the board; `playCard` takes both at once.
+  let player = game.currentPlayer
+  if not game.runMinionRules(card, choices, sourceId):
+    return false
+  game.queuePlayTriggers(player, card, sourceId)
+  true
+
 proc playCard*(
     game: var GameState,
     cardIndex: int,
@@ -1027,9 +1039,8 @@ proc playCard*(
   of Minion, Trinket:
     var played = game.copyGameState()
     let id = played.playMinion(cardIndex)
-    if id == 0 or not played.runMinionRules(card, choices, id):
+    if id == 0 or not played.finishPlay(card, choices, id):
       return false
-    played.queuePlayTriggers(playerIndex, card, id)
     game = played
   true
 
