@@ -906,9 +906,12 @@ proc drawUi*(
     if inspected.id != 0:
       let panel = window.inspectionPanel()
       sk.drawRect(panel.origin, panel.size, rgbx(8, 10, 16, 230))
-      sk.drawLabel("INSPECTING", panel.origin + vec2(12, 8),
+      let slot = run.world.heroIndex(inspected.id)
+      let name = if slot in 0 ..< playerNames.len: playerNames[slot] else: "INSPECTING"
+      sk.drawLabel(name, panel.origin + vec2(12, 8),
         vec2(274, 18), rgbx(166, 174, 190, 255), "Small")
-      sk.drawLabel(inspected.callsign, panel.origin + vec2(12, 28),
+      let title = inspected.callsign & (if slot >= 0: "  Lv " & $inspected.level else: "")
+      sk.drawLabel(title, panel.origin + vec2(12, 28),
         vec2(274, 24), rgbx(247, 221, 143, 255), "Bold")
       sk.drawLabel(&"HP {int(inspected.hp)} / {int(inspected.maxHp)}",
         panel.origin + vec2(12, 54), vec2(274, 20),
