@@ -19,17 +19,18 @@ proc mouseKey(button: Button): Button =
   else:
     button
 
-proc mousePressed*(window: Window, button: Button): bool =
+proc mouseButton*(buttons: ButtonView, button: Button, aliases = true): bool =
+  ## Checks a physical mouse button, optionally accepting its keyboard alias.
+  buttons[button] or (aliases and buttons[mouseKey(button)])
+
+proc mousePressed*(window: Window, button: Button, aliases = true): bool =
   ## True when the mouse button or its key alias was pressed this frame.
-  window.buttonPressed[button] or
-    window.buttonPressed[mouseKey(button)]
+  mouseButton(window.buttonPressed, button, aliases)
 
-proc mouseDown*(window: Window, button: Button): bool =
+proc mouseDown*(window: Window, button: Button, aliases = true): bool =
   ## True while the mouse button or its key alias is held.
-  window.buttonDown[button] or
-    window.buttonDown[mouseKey(button)]
+  mouseButton(window.buttonDown, button, aliases)
 
-proc mouseReleased*(window: Window, button: Button): bool =
+proc mouseReleased*(window: Window, button: Button, aliases = true): bool =
   ## True when the mouse button or its key alias was released this frame.
-  window.buttonReleased[button] or
-    window.buttonReleased[mouseKey(button)]
+  mouseButton(window.buttonReleased, button, aliases)

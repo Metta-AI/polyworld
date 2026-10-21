@@ -1044,7 +1044,6 @@ proc runGraphics*(
     rightOrderStarted = false
     selectionStarted = false
     selectionAdditive = false
-    attackMoveArmed = false
     followSelection = false
     cameraEase: CameraEase
     focusPlayerHero = false
@@ -1074,6 +1073,12 @@ proc runGraphics*(
     if button == KeyEscape:
       if quitToMenu:
         return
+      if options.playerSlot > 0 and not run.replayMode and
+          (attackMoveArmed or armedAbility >= 0 or armedItem >= 0):
+        armedAbility = -1
+        armedItem = -1
+        attackMoveArmed = false
+        return
       matchMenu =
         if matchMenu == HiddenMatchMenu: PauseMenu
         elif matchMenu == MatchSettings: PauseMenu
@@ -1091,14 +1096,22 @@ proc runGraphics*(
           shopOpen = not shopOpen
           armedAbility = -1
           armedItem = -1
+          attackMoveArmed = false
           return
         if shopOpen and button != KeySpace:
           return
+        if button == KeyA and
+            not (window.buttonDown[KeyLeftControl] or window.buttonDown[KeyRightControl]):
+          attackMoveArmed = true
+          armedAbility = -1
+          armedItem = -1
+          return
     if handleChromeKey(button):
       return
-    if button == KeySpace and network == nil:
+    if button == KeySpace and network == nil and
+        (options.playerSlot <= 0 or run.replayMode):
       transport.handleKey(button)
-    elif button == KeyC:
+    elif button == KeyC and (options.playerSlot <= 0 or run.replayMode):
       actionCam.toggle(followSelection)
     elif button == KeyT:
       scene.toggleShading()
@@ -1275,7 +1288,7 @@ proc runGraphics*(
     if not isSelected(id):
       selectedIds.add id
     primaryId = id
-    followSelection = true
+    followSelection = not playerMode()
     actionCam.takeManual()
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
@@ -1497,30 +1510,30 @@ proc runGraphics*(
       actionCam.takeManual()
       cancelCameraEase(cameraEase)
     let overUi = mouseOverUi(window, sk.mousePos, primaryId)
-    if window.buttonPressed[KeyA] and
+    if not playerMode() and window.buttonPressed[KeyA] and
         (window.buttonDown[KeyLeftControl] or
           window.buttonDown[KeyRightControl]):
       selectAllHeroes()
-    elif window.mousePressed(MouseLeft) and not overUi:
+    elif window.mousePressed(MouseLeft, aliases = not playerMode()) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
-        window.buttonDown[KeyLeftShift] or
-        window.buttonDown[KeyRightShift]
+        not playerMode() and (window.buttonDown[KeyLeftShift] or
+          window.buttonDown[KeyRightShift])
     var minimapPoint: Vec2
-    if window.mousePressed(MouseRight) and (not overUi or
+    if window.mousePressed(MouseRight, aliases = not playerMode()) and (not overUi or
       (armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint))):
       rightPressPosition = window.mousePos.vec2
       rightOrderStarted = true
-    if window.mousePressed(MouseMiddle) and
-        (not overUi or window.buttonPressed[MouseMiddleKey]):
+    if window.mousePressed(MouseMiddle, aliases = not playerMode()) and
+        (not overUi or (not playerMode() and window.buttonPressed[MouseMiddleKey])):
       if not playerMode():
         followSelection = false
         actionCam.takeManual()
       cancelCameraEase(cameraEase)
     panning =
-      window.mouseDown(MouseMiddle) and
-        (not overUi or window.buttonDown[MouseMiddleKey]) or
+      window.mouseDown(MouseMiddle, aliases = not playerMode()) and
+        (not overUi or (not playerMode() and window.buttonDown[MouseMiddleKey])) or
       (not playerMode() and not overUi and window.mouseDown(MouseRight))
 
     let delta = window.mouseDelta.vec2
@@ -1535,7 +1548,11 @@ proc runGraphics*(
           5.0'f32,
           400.0'f32
         )
-      if panning:
+      if window.focused and window.buttonDown[KeySpace]:
+        cancelCameraEase(cameraEase)
+        minimapPanning = false
+        cameraTarget = playerHeroFrame()
+      elif panning:
         cancelCameraEase(cameraEase)
         let panSpeed = cameraDistance * 0.0015
         cameraTarget.x -= delta.x * panSpeed
@@ -1651,7 +1668,6 @@ proc runGraphics*(
       queueAttackMove(heroId, mapX, mapY)
     else:
       queueWalkTo(heroId, mapX, mapY)
-    selectEntity(heroId)
     clickMarks.emitClickMark(tileCenter(walk.layer, walk.x, walk.z))
 
   proc updatePlayerSpells(viewProjection: Mat4) =
@@ -1670,7 +1686,9 @@ proc runGraphics*(
         var
           aimX = mapCoordinate(hero.position.x + hero.facing.x)
           aimY = mapCoordinate(hero.position.z + hero.facing.z)
+          targetId = 0'i32
         if not mouseOverUi(window, sk.mousePos, primaryId):
+          targetId = pickEntity(viewProjection)
           let
             (origin, direction) = mouseRay(
               window.mousePos.vec2, window.size.vec2, viewProjection
@@ -1680,14 +1698,13 @@ proc runGraphics*(
             aimX = int32(layers[ground.layer].originX + ground.x - mapOrigin())
             aimY = int32(layers[ground.layer].originZ + ground.z - mapOrigin())
         attackMoveArmed = false
-        if not activatePlayerAbility(
-          run.world, hero.id, slot.int32, primaryId, aimX, aimY
-        ):
-          selectEntity(hero.id)
+        discard activatePlayerAbility(
+          run.world, hero.id, slot.int32, targetId, aimX, aimY
+        )
 
   proc updateWorldSelection(viewProjection: Mat4) =
-    ## Selects a clicked world unit, or attacks it in player mode.
-    if not window.mouseReleased(MouseLeft):
+    ## Inspects a clicked unit or confirms an armed attack-move.
+    if not window.mouseReleased(MouseLeft, aliases = not playerMode()):
       return
     if selectionStarted and
         (window.mousePos.vec2 - selectionPressPosition).length <=
@@ -1703,21 +1720,20 @@ proc runGraphics*(
         attackMoveArmed = false
       elif picked != 0:
         selectEntity(picked, selectionAdditive)
-        if playerMode() and objectTeam(picked) != objectTeam(playerHeroId()):
-          queueAttackTarget(playerHeroId(), picked)
       elif not selectionAdditive:
         clearSelection()
     selectionStarted = false
 
   proc updatePlayerOrder(viewProjection: Mat4) =
-    ## Turns a right-click into a walk, attack-move, or chase attack.
+    ## Turns a right-click into a walk, aimed ability, or chase attack.
     if not playerMode():
       return
-    if not window.mouseReleased(MouseRight):
+    if not window.mouseReleased(MouseRight, aliases = false):
       return
     if not rightOrderStarted:
       return
     rightOrderStarted = false
+    attackMoveArmed = false
     var minimapPoint: Vec2
     if armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint):
       queueUseItemAt(
@@ -1750,7 +1766,6 @@ proc runGraphics*(
       )
       armedItem = -1
       attackMoveArmed = false
-      selectEntity(heroId)
       return
     if armedAbility >= 0:
       let
@@ -1780,7 +1795,6 @@ proc runGraphics*(
         )
       armedAbility = -1
       attackMoveArmed = false
-      selectEntity(heroId)
       return
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
