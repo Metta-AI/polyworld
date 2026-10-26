@@ -45,6 +45,9 @@ type
     playedHand*: int  ## The hand card the last decision played, or -1.
     playedChoices*: seq[Choice]  ## Its targets, one per step, in order.
     tree: RuleTree  ## The rules tree the script selected last.
+    logMatch: int  ## The match its place in the event log belongs to.
+    logSeen: int  ## The first event it hasn't read yet.
+    logFrom, logTo: int  ## The events this decision reads.
 
 const
   DataSlotNames: array[BotDataSlot, string] = [
@@ -58,6 +61,13 @@ const
     "selectingClass", "selfClass", "enemyClass"
   ]
 
+const
+  EventNames: array[GameEventKind, string] = [
+    "turn", "play", "attack", "trigger", "choice", "discard", "damage",
+    "death", "summon", "bounce", "gainControl", "stats", "gain", "lose", "draw",
+    "defeat"]
+  HandTarget = 5  ## A log target's kind for a card taken from a hand.
+
 var
   activeGame: ptr GameState
   activePlayer: int32
@@ -65,6 +75,8 @@ var
   activeVm: BotVm
   inboxes*: seq[Mailbox]
     ## One inbox per seat, replaced when bots are loaded for a match.
+  eventLog: seq[GameEvent]  ## Everything that happened this match, in order.
+  logMatch: int  ## Counts matches, so a script's place in an old log resets.
 
 proc cardChoices(handIndex: int, picked: seq[Choice] = @[]): seq[Choice] =
   ## Previews a permanent's placement so scripts can target it like humans.
@@ -129,6 +141,56 @@ proc pickedCard(handIndex: int): Card =
   else:
     Card()
 
+proc collectEvents*(game: var GameState) =
+  ## Adds what happened since the last call to every script's event log.
+  for event in game.takeEvents():
+    var event = event
+    if event.cause.len == 0 and event.causeId != 0:
+      # An attacker gone by the time its trigger resolved: its attack
+      # names it.
+      for earlier in countdown(eventLog.high, 0):
+        if eventLog[earlier].kind == AttackEvent and
+            eventLog[earlier].cardId == event.causeId:
+          event.cause = eventLog[earlier].card
+          break
+    eventLog.add event
+
+type
+  LogReader* = object
+    ## A place in the match's event log for a reader that isn't a script,
+    ## like the app's terminal.
+    match, seen: int
+
+proc readNew*(reader: var LogReader, game: var GameState): seq[GameEvent] =
+  ## Everything that happened since the reader's last call, oldest first.
+  collectEvents(game)
+  if reader.match != logMatch:
+    reader = LogReader(match: logMatch)
+  result = eventLog[min(reader.seen, eventLog.len) .. ^1]
+  reader.seen = eventLog.len
+
+proc loggedEvent(e: int): ptr GameEvent =
+  ## This decision's event `e`; nil if there's none.
+  let at = activeVm.logFrom + e
+  if e >= 0 and at < activeVm.logTo and at < eventLog.len:
+    result = addr eventLog[at]
+
+proc loggedTarget(e, t: int): ptr EventTarget =
+  ## Target `t` of this decision's event `e`; nil if there's none.
+  let event = loggedEvent(e)
+  if event != nil and t in 0 ..< event.targets.len:
+    result = addr event.targets[t]
+
+proc targetKind(target: EventTarget): int =
+  if target.fromHand: HandTarget else: target.choice.kind.ord
+
+proc targetId(target: EventTarget): int =
+  ## A minion's id, or an option's branch.
+  case target.choice.kind
+  of CreatureChoice: target.choice.creatureId
+  of OptionChoice: target.choice.option
+  else: 0
+
 proc sendChat*(sender, target: int, text: openArray[char]): int32 =
   ## Routes global broadcasts (-2) and direct messages (a seat) between
   ## players. AWM has no teams. Returns the inboxes that took a copy.
@@ -155,6 +217,7 @@ proc submitAction(action: ReplayAction): int32 =
     activePlayer.int != activeGame[].actingPlayer():
       return 0
   var trial = activeGame[].copyGameState()
+  trial.recordEvents = false
   if not trial.applyAction(action):
     return 0
   activeVm.action = action
@@ -809,6 +872,54 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   discard result.addFunction("boardLastsTurns", 2, boardLastsTurnsProc, 3)
 
   # The rules tree: select a card's rules, then read its nodes by index.
+  # The event log: what happened since this script's last decision.
+  template eventNumber(name: string, missing: int, read: untyped) =
+    discard result.addFunction(name, 1,
+      HostProc(proc(args: openArray[int32]): int32 =
+        let event {.inject.} = loggedEvent(args[0].int)
+        if event == nil: missing.int32 else: read.int32), 3)
+
+  template eventText(name: string, read: untyped) =
+    discard result.addFunction(name, 1,
+      NumericHostProc(proc(args: openArray[Value]): Value =
+        let event {.inject.} = loggedEvent(args[0].asInt.int)
+        activeVm.runtime.putString(if event == nil: "" else: read)), 8)
+
+  template targetNumber(name: string, missing: int, read: untyped) =
+    discard result.addFunction(name, 2,
+      HostProc(proc(args: openArray[int32]): int32 =
+        let target {.inject.} = loggedTarget(args[0].int, args[1].int)
+        if target == nil: missing.int32 else: read.int32), 3)
+
+  let logCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns how many events happened since your last decision.
+    max(0, activeVm.logTo - activeVm.logFrom).int32
+  discard result.addFunction("logCount", 0, logCountProc, 3)
+
+  eventText("logKind$", EventNames[event.kind])
+  eventNumber("logTurn", 0, event.turn)
+  eventNumber("logPlayer", -1, event.player)
+  eventText("logCard$", event.card)
+  eventNumber("logCardId", 0, event.cardId)
+  eventNumber("logOwner", -1, event.owner)
+  eventText("logCause$", event.cause)
+  eventNumber("logCauseId", 0, event.causeId)
+  eventNumber("logCauseOwner", -1, event.causeOwner)
+  eventNumber("logAmount", 0, event.amount)
+  eventNumber("logAmount2", 0, event.amount2)
+  eventText("logText$", event.text)
+  eventNumber("logTargetCount", 0, event.targets.len)
+  targetNumber("logTargetKind", 0, target[].targetKind)
+  targetNumber("logTargetOwner", -1, target.choice.owner)
+  targetNumber("logTargetId", 0, target[].targetId)
+
+  let logTargetCardProc: NumericHostProc =
+      proc(args: openArray[Value]): Value =
+    ## Returns the card a logged target names, or a discarded card.
+    let target = loggedTarget(args[0].asInt.int, args[1].asInt.int)
+    activeVm.runtime.putString(if target == nil: "" else: target.card)
+  discard result.addFunction("logTargetCard$", 2, logTargetCardProc, 8)
+
   let rulesOfCardProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Selects the printed rules of a string card identity.
     let card = visibleCard(activeVm.runtime.getString(args[0]))
@@ -1291,7 +1402,9 @@ proc botSchema*(): Host =
   buildBotHost(0)
 
 proc resetInboxes*(seats: int) =
-  ## Fresh, empty mailboxes for a match with `seats` players.
+  ## Fresh, empty mailboxes and event log for a match with `seats` players.
+  eventLog.setLen(0)
+  inc logMatch
   inboxes.setLen(0)
   for _ in 0 ..< seats:
     inboxes.add newMailbox()
@@ -1356,6 +1469,13 @@ proc runDecision*(vm: BotVm, game: var GameState,
   activeVm = vm
   vm.playedHand = -1
   vm.playedChoices.setLen(0)
+  # This decision reads everything since the script's last one.
+  collectEvents(game)
+  if vm.logMatch != logMatch:
+    vm.logMatch = logMatch
+    vm.logSeen = 0
+  vm.logFrom = min(vm.logSeen, eventLog.len)
+  vm.logTo = eventLog.len
 
   vm.lastError.setLen(0)
   try:
@@ -1389,6 +1509,7 @@ proc runDecision*(vm: BotVm, game: var GameState,
     vm.action = ReplayAction()
     return BotFailed
   finally:
+    vm.logSeen = vm.logTo
     activeGame = nil
     activeVm = nil
   if vm.action.kind == 0:
@@ -1428,6 +1549,12 @@ proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64): Seat =
   vm.deck.setLen(0)
   vm.deckProblems.setLen(0)
   vm.action = ReplayAction()
+  # Nothing of this match has happened yet: a reused script reads on from
+  # here, never an earlier match's events.
+  vm.logMatch = logMatch
+  vm.logSeen = eventLog.len
+  vm.logFrom = 0
+  vm.logTo = 0
   activeGame = addr setup
   activePlayer = vm.player.int32
   activeEnemy = ((vm.player + 1) mod seats).int32

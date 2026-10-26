@@ -226,3 +226,93 @@ suite "arrows of chosen targets":
     check waiting.applyAction(resolve)
     play.addActionArrows(flatTable(), held, waiting, resolve)
     check play.fadingArrows.len == 2
+
+suite "a discard with triggers behind it":
+  # This suite's own cards, so tuning Burnout or Overwork moves nothing
+  # here: Cinder asks for a discard as its owner's turn starts, Spark
+  # gives energy, Ember asks for a discard as the turn ends.
+  let
+    cinder = Card(name: "Cinder", kind: Trinket, class: some(Mage),
+      rules: rules(on(eachTurn(You), toss(1))))
+    spark = Card(name: "Spark", kind: Trinket, class: some(Mage),
+      rules: rules(on(eachTurn(You), extraEnergy(2))))
+    ember = Card(name: "Ember", kind: Trinket, class: some(Mage),
+      rules: rules(on(eachEndOfTurn(You), toss(1))))
+
+  proc inPlay(cards: varargs[Card]): (TablePlay, GameState, int) =
+    ## `cards` in play for the human, whose turn it is.
+    var game = newGame(Mage, Warrior, 11)
+    let me = game.currentPlayer
+    for i, card in cards:
+      game.players[me].board.add MinionState(id: i + 1, owner: me,
+        card: card, enteredTurn: game.turnNumber)
+    game.nextMinionId = cards.len + 1
+    var play = initTablePlay(1)
+    play.resetTable()
+    (play, game, me)
+
+  proc nextTurn(game: var GameState) =
+    ## Round to the human's next turn, its start-of-turn triggers fired.
+    game.finishTurn()
+    game.finishTurn()
+
+  proc think(play: var TablePlay, game: var GameState, time: var float32) =
+    ## Four seconds of the table while the human makes up their mind.
+    var clock = initBotClock()
+    for _ in 0 ..< 240:
+      let dt = 1'f32 / 60
+      time += dt
+      play.animations.advanceAnimations(dt)
+      play.discardFlights.advanceAnimations(dt)
+      play.activeVfx.advance(dt)
+      discard play.updateBots(game, flatTable(), [nil.BotVm, nil.BotVm],
+        clock, proc(): bool = true, dt)
+      play.presentVisualEvents(game, flatTable(), time)
+
+  test "the discard names its own card, not the trigger waiting behind it":
+    var (play, game, me) = inPlay(cinder, spark)
+    var time = 0'f32
+    game.nextTurn()
+    check game.waitingToss and game.waitingTrigger
+    play.think(game, time)
+    check play.tossPicking
+    check not play.pendingTargeting
+    check play.statusMessage == "Cinder: choose cards to discard."
+    let energy = game.players[me].energy
+    play.updateTossPicking(game, 0, pick = true, clear = false)
+    play.think(game, time)
+    # Spark's trigger needs no one: it resolves once the discard is done.
+    check not game.waitingChoice
+    check not play.pendingTargeting
+    check game.players[me].energy == energy + 2
+
+  test "two discards are asked one after the other":
+    var (play, game, me) = inPlay(cinder, cinder)
+    var time = 0'f32
+    game.nextTurn()
+    let hand = game.players[me].hand.len
+    for _ in 1 .. 2:
+      play.think(game, time)
+      check play.tossPicking
+      check not play.pendingTargeting
+      check play.statusMessage == "Cinder: choose cards to discard."
+      play.updateTossPicking(game, 0, pick = true, clear = false)
+    play.think(game, time)
+    check not game.waitingChoice
+    check not play.tossPicking and not play.pendingTargeting
+    check game.players[me].hand.len == hand - 2
+
+  test "a discard the end of the turn asks for holds it until it's made":
+    var (play, game, me) = inPlay(ember)
+    var time = 0'f32
+    let hand = game.players[me].hand.len
+    game.finishTurn()
+    play.think(game, time)
+    check game.currentPlayer == me
+    check play.tossPicking
+    check play.statusMessage == "Ember: choose cards to discard."
+    play.updateTossPicking(game, 0, pick = true, clear = false)
+    play.think(game, time)
+    check game.currentPlayer != me
+    check not play.tossPicking and not play.pendingTargeting
+    check game.players[me].hand.len == hand - 1

@@ -114,7 +114,14 @@ let archer = [
         summon(1, getPlayed())
       )
     )
-  )
+  ),
+  Card(
+    name: "Gift", energyCost: 3,
+    class: some(Archer), kind: Spell,
+    rules: rules(
+      gainControl(target({kind: {Hero}}), target({kind: {Minion, Trinket}, owner: You}), vfx = PrizeVfx)
+    )
+  ),
 ]
 
 let warrior = [
@@ -255,7 +262,7 @@ let mage = [
     )
   ),
   Card(
-    name: "Primordial", energyCost: 8,
+    name: "Primordial", energyCost: 10,
     class: some(Mage), kind: Minion,
     rules: rules(),
     power: 10, toughness: 10
@@ -282,7 +289,7 @@ let mage = [
       on(eachTurn(You),
         choose(
           gain(ranged(), target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
-          gain(hidden(1), target({kind: {Minion}}), vfx = OozeSplatVfx),
+          gain(hidden(1), target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
           addPowerToughness(1, -1, target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
           addPowerToughness(-1, 1, target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx)
         )
@@ -290,20 +297,27 @@ let mage = [
     )
   ),
   Card(
-    name: "Overwork", energyCost: 4,
+    name: "Overwork", energyCost: 3,
     class: some(Mage), kind: Trinket,
     rules: rules(
-      on(eachTurn(You),
-        draw(1),
-        damage(3, You, vfx = ExplosionVfx)
-      )
+      lasts(3), extraEnergy(2),
+      on(eachTurn(You), extraEnergy(2), draw(1)),
+      on(destroyed(self()), summon(1, "Burnout"))
+    )
+  ),
+  Card(
+    name: "Burnout", energyCost: 0,
+    class: some(Mage), kind: Trinket,
+    rules: rules(
+      lasts(3),
+      on(eachEndOfTurn(You), damage(2, You, vfx = ExplosionVfx), toss(1))
     )
   ),
   Card(
     name: "Control", energyCost: 5,
     class: some(Mage), kind: Spell,
     rules: rules(
-      steal(target({kind: {Minion}, owner: AllOpponents}), vfx = BubbleVfx)
+      gainControl(You, target({kind: {Minion}, owner: AllOpponents}), vfx = BubbleVfx)
     )
   ),
   Card(

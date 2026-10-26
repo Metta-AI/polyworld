@@ -16,7 +16,7 @@ type
     LastsMechanic = "Lasts"
     SummonMechanic = "Summon"
     FightMechanic = "Fight"
-    StealMechanic = "Gain control"
+    GainControlMechanic = "Gain control"
     OffClassMechanic = "Off-class"
 
 const
@@ -39,9 +39,9 @@ const
     FightMechanic:
       "The two minions deal their power to each other at once, as in " &
       "combat, so Ranged applies. Neither uses up its attack.",
-    StealMechanic:
-      "The card in play joins your board. Returned or destroyed, it " &
-      "still goes to its owner's hand or discard pile.",
+    GainControlMechanic:
+      "The card in play joins its new controller's board. Returned or " &
+      "destroyed, it still goes to its owner's hand or discard pile.",
     OffClassMechanic:
       "Cards of a class other than your hero's cost " & $OffClassCost &
       " more energy. Class cards you control lower that extra cost."
@@ -59,7 +59,7 @@ proc mechanic(rule: Rule): Option[Mechanic] =
   elif rule of LastsRule: some(LastsMechanic)
   elif rule of SummonRule: some(SummonMechanic)
   elif rule of FightRule: some(FightMechanic)
-  elif rule of StealRule: some(StealMechanic)
+  elif rule of GainControlRule: some(GainControlMechanic)
   elif rule of LevelUpRule: some(OffClassMechanic)
   else: none(Mechanic)
 

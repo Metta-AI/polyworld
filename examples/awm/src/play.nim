@@ -176,7 +176,7 @@ proc queuedSummon*(queued: openArray[VisualEvent], minionId: int): bool =
   ## A summoned or stolen minion whose beat hasn't played yet stays off its
   ## new board.
   for event in queued:
-    if event.kind in {SummonVfx, StealVfx} and
+    if event.kind in {SummonVfx, GainControlVfx} and
         event.target.kind == CreatureChoice and
         event.target.creatureId == minionId:
       return true
@@ -506,7 +506,7 @@ proc countHiddenSummons*(play: var TablePlay, playerCount: int) =
   play.hiddenSummons = newSeq[int](playerCount)
   for event in play.queuedEvents:
     # A stolen minion joins the end of its new board, as a summon does.
-    if event.kind in {SummonVfx, StealVfx}:
+    if event.kind in {SummonVfx, GainControlVfx}:
       inc play.hiddenSummons[event.target.owner]
 
 proc presentationIdle*(play: TablePlay, game: GameState): bool =
@@ -1133,7 +1133,7 @@ proc presentVisualEvents*(
       play.dyingMinions.add DyingMinion(target: event.target, card: event.card,
         heroClass: game.players[event.target.owner].heroClass,
         boardIndex: event.boardIndex, held: true, bouncing: true)
-    elif event.kind == StealVfx:
+    elif event.kind == GainControlVfx:
       # Keep the card in its old slot until its beat moves it across.
       let left = creatureChoice(event.fromPlayer, event.target.creatureId)
       play.dyingMinions.add DyingMinion(target: left, card: event.card,
@@ -1218,11 +1218,11 @@ proc presentVisualEvents*(
           suppressDiscardOwner = owner,
           duration =
             if dying: play.deathDiscard[owner] else: CardMoveDuration)
-      of StealVfx:
+      of GainControlVfx:
         let
           left = creatureChoice(event.fromPlayer, event.target.creatureId)
-          thief = event.target.owner
-          board = game.players[thief].board
+          controller = event.target.owner
+          board = game.players[controller].board
         var source = CardPose()
         for i in 0 ..< play.dyingMinions.len:
           if play.dyingMinions[i].bouncing and
@@ -1236,8 +1236,8 @@ proc presentVisualEvents*(
           if minion.id == event.target.creatureId:
             slot = i
         play.animations.add newCardAnimation(event.card,
-          game.players[thief].heroClass, source,
-          play.liveBoardPose(layout, thief, slot, board.len),
+          game.players[controller].heroClass, source,
+          play.liveBoardPose(layout, controller, slot, board.len),
           arcHeight = 1.0'f32, suppressBoardId = event.target.creatureId,
           duration = 0.7'f32, trackingTarget = event.target)
       of BounceVfx:
@@ -1811,6 +1811,8 @@ proc updateBots*(
   ## Animates exactly the acting script's action, using human action rules.
   ## Humans choose their own discards and trigger targets. Attacks never
   ## end a turn. A failed script stops acting without selecting a fallback.
+  ## True when a bot's action passed the turn: its End Turn, or the last
+  ## choice its turn's end waited on.
   if game.gameOver:
     # The attack that ended the match still finishes its lunge, so the
     # result can show once the table settles.
@@ -1818,8 +1820,11 @@ proc updateBots*(
     return false
   if play.presentationIdle(game) and not play.attackActive:
     if humanActs():
-      if game.waitingToss and not play.tossPicking:
-        play.startTossPicking(game)
+      if game.waitingToss:
+        # The discard comes first. Triggers queued behind it wait, and most
+        # resolve on their own once it's done: none of them asks yet.
+        if not play.tossPicking:
+          play.startTossPicking(game)
       elif game.waitingTrigger and not play.pendingTargeting:
         play.startTriggerTargeting(game)
     else:
@@ -1843,7 +1848,7 @@ proc updateBots*(
               play.animateTransition(layout, before, game,
                 vm.action.choices.toChoices)
               play.statusMessage = name & " is playing..."
-              if decision == BotEndedTurn:
+              if game.turnNumber != before.turnNumber:
                 play.statusMessage = bots.botTurnStatus(game.currentPlayer,
                   if botName.isNil: "Bot" else: botName(game.currentPlayer))
                 result = true

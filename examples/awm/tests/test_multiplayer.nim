@@ -806,7 +806,7 @@ suite "An opponent, each opponent, and turn triggers":
       "When an opponent's hero is attacked, draw 1 card."
     check Card(name: "Watch", kind: Trinket, rules: rules(
       on(nextTurn(AnyOpponent), draw(1)))).ruleText() ==
-      "At the start of an opponent's next turn, draw 1 card."
+      "On an opponent's next turn, draw 1 card."
 
   test "an opponent draws: only the one picked":
     var match = turnOf(0)

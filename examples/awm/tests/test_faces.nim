@@ -81,7 +81,7 @@ suite "card faces":
     check both.lines[0].struck and both.lines[0].ink == LostRuleInk
     check both.lines[1 .. ^1].allIt(it.ink == GainedRuleInk and not it.struck)
     check both.lines[1 .. ^1].mapIt(it.text).join(" ") ==
-      "At the start of each of your turns, draw 1 card."
+      "On each of your turns, draw 1 card."
     # The printed face has a single ink, nothing struck.
     check sharpshooter.printed.laidRules.lines.allIt(it.ink == RulesInk and
       not it.struck)

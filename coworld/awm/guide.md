@@ -160,8 +160,8 @@ with `optionDamage(handIndex, "picks", pickedCount, option)` and
 `optionSelfDamage(...)`, which report what a branch deals and what it costs
 your own hero, and read its words with `optionRules$(...)`. `nextHelpsTarget`, `nextIntent`, and `nextAmount` describe the
 next target the same way, following earlier picks: intent 1 is damage,
-2 a buff, 3 a weaken, 4 a bounce, 5 a destroy, 6 a lost keyword, and 7 a
-steal (Control takes an enemy minion for good).
+2 a buff, 3 a weaken, 4 a bounce, 5 a destroy, 6 a lost keyword, and 7
+gaining control (Control takes an enemy minion for good).
 
 A card in play can gain or lose rules (Morphosis Chamber gives a minion
 Ranged or Hidden 1; Duel takes Ranged away). `boardHasKeyword` follows them,
@@ -252,6 +252,49 @@ Spirit starts with a `hidden` node whose `turns` child is -1, so
 is printed to stay Hidden; `lasts` reads the same way. A tree holds printed
 counts: `boardHiddenTurns` and `boardLastsTurns` say how many turns a card in
 play has left.
+
+## Event log
+
+Your script runs only when it has to act, so it reads what happened in
+between from its event log: everything since its last decision, its own
+actions included, oldest first. Events are `0` to `logCount() - 1`; outside
+them the queries return `""`, -1 or 0.
+
+| Query | Event |
+| --- | --- |
+| `logKind$(e)` | What happened, below |
+| `logTurn(e)` | The turn it happened in |
+| `logPlayer(e)` | Who acted or decided, or whom it happened to |
+| `logCard$(e)`, `logCardId(e)` | The card it is about, and its ID in play (0 when it isn't in play) |
+| `logOwner(e)` | Whose that card is, or whose effect asked |
+| `logCause$(e)`, `logCauseId(e)`, `logCauseOwner(e)` | What fired a trigger: the attacker, or the card whose play fired it |
+| `logAmount(e)`, `logAmount2(e)` | Its numbers |
+| `logText$(e)` | The rule's words |
+| `logTargetCount(e)` | How many picks or cards it names |
+| `logTargetKind(e, t)`, `logTargetOwner(e, t)`, `logTargetId(e, t)`, `logTargetCard$(e, t)` | Each one, with kinds as for choices (1 no target, 2 hero, 3 minion or trinket, 4 a branch, whose ID is its index), and 5 for a card from a hand |
+
+| Kind | Player | Card | Also |
+| --- | --- | --- | --- |
+| `turn` | Whose turn starts | | |
+| `draw` | Who drew | | amount 1; the card stays hidden |
+| `play` | Who played it | The card; ID 0 for a spell | targets: its picks |
+| `attack` | The attacker's player | The attacker | amount: its power; target: what it attacked |
+| `trigger` | Who it resolves for | The trigger's card | cause; amount 1 for a summoned card's on-play rules; text; targets: its picks |
+| `choice` | Who picked | The trigger's card | cause; text; targets: the picks |
+| `discard` | Who discarded | The asking card; owner: whose effect it was | amount: how many; text; targets: the cards discarded |
+| `damage` | The hero's player, or the minion's controller | The minion; `""` for a hero | amount |
+| `death` | Its controller | The card; owner: whose discard pile it goes to | |
+| `summon` | Who it is summoned for | The card | |
+| `bounce` | Its controller | The card; owner: whose hand it goes to | |
+| `gainControl` | Who took it | The card; owner: who controlled it before | |
+| `stats` | Its controller | The card | amount: power change; amount2: toughness change |
+| `gain`, `lose` | Its controller | The card | text: the rule |
+| `defeat` | Who is out | | targets: their discarded hand |
+
+A trigger that waits for a choice shows as a `choice`, then a `trigger`
+once it is answered; one that needs none shows as a `trigger` alone. Each
+event comes before what it does: a `play` before the damage its spell deals,
+an `attack` before the damage and deaths it causes.
 
 ## Ticks
 

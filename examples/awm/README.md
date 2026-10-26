@@ -226,6 +226,17 @@ and an optional `classes` array (one of `archer`, `warrior`, `mage` per seat,
 each playing its precon; otherwise every script picks its class and deck). One tick is one game action. The winner
 scores 1, everyone else 0; a draw or a timeout scores 0 for all.
 
+### For bot creators: `steal` is now `gainControl`
+
+Control's rule was renamed from `steal` to `gainControl`. A script that
+matches it by name must now look for `"gainControl"`, both as a rule-tree
+node (`nodeKind$`, `nodeFind`) and as a log event (`logKind$`). Target
+intent 7 keeps its number; it now reads as gaining control.
+
+`boardStolenFrom(p, i)` keeps its name and meaning: whose card it is while
+another player controls it, -1 otherwise. Scripts that call it need no
+change.
+
 ### Headless matches and replays
 
 ```sh
@@ -310,17 +321,25 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 - A Ready minion can attack the turn it enters play, played or summoned.
   Gaining Ready (`gain(ready(), ...)`) lets it attack that turn if it
   hasn't yet; losing it the turn it entered takes that attack back.
-- `steal` (Control) takes a minion for good: it moves to the end of your
-  board with its damage, buffs and gained or lost rules, and attacks from
-  your next turn, like a minion just played. Its triggers fire for you. It
-  is still its owner's card: bounced, it goes to their hand, and slain, to
-  their discard pile. Stolen back by its owner, it is simply theirs again.
+- `gainControl(You, ...)` (Control) takes a minion for good: it moves to the
+  end of your board with its damage, buffs and gained or lost rules, and
+  attacks from your next turn, like a minion just played. Its triggers fire
+  for you. It is still its owner's card: bounced, it goes to their hand, and
+  slain, to their discard pile. Stolen back by its owner, it is simply
+  theirs again. `gainControl(target({kind: {Hero}}), ...)` (Gift) picks the
+  hero first, then hands them the card the same way; picking your own hero
+  leaves it where it is.
 - `repeat` (Reload) runs another card in play's printed rules again. Its
   targets are picked afresh, and anything the rules aim at their own card
   (`self()`) finds nothing and does nothing. Picking no card cancels.
 - `on(eachTurn(...))` fires at the start of every one of that player's
   turns, for as long as the card is in play; `on(nextTurn(...))` fires
   once.
+- `on(eachEndOfTurn(...))` fires as every one of that player's turns ends
+  while the card is in play, the turn it entered too. Lasts counts at turn
+  starts, so a card that runs out is gone before that turn ends. A choice
+  it asks for (Burnout's discard) holds the turn until it's made; making
+  it ends the turn.
 - `on(played(You, {kind: {Minion}, class: {Archer}, energyCost:
   atMost(3)}), ...)` fires each time that player plays a matching card
   from hand, once the card has resolved. `getPlayed()` is that card:
@@ -364,6 +383,7 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Archer | Reload | 3 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
 | Archer | Wildfire | 4 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
 | Archer | Post | 4 | 1 | Trinket | — | Lasts 3; when you play an Archer minion that costs 3 or less, it gains Ready, summon a copy of it (buffs and all) |
+| Archer | Gift | — | 3 | Spell | — | A hero gains control of a friendly minion or trinket (in no precon) |
 | Warrior | Bear | 4 | 2 | Minion | 3/2 | — |
 | Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
 | Warrior | Shields | 4 | 1 | Spell | — | Friendly minions get +0/+1 permanently |
@@ -386,4 +406,5 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
 | Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
 | Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
-| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card and deal 3 damage to yourself |
+| Mage | Overwork | 4 | 3 | Trinket | — | Lasts 3; gain 2 extra energy now, and at the start of each of your turns gain 2 extra energy and draw 1 card; when destroyed, summon a Burnout |
+| Mage | Burnout | — | 0 | Trinket | — | Lasts 3; at the end of each of your turns, deal 2 damage to yourself and discard 1 card (only summoned, by Overwork) |

@@ -101,7 +101,10 @@ type
     HeroDeathVfx
     # Presentation cue, not a card VFX: a minion changed sides. The UI flies
     # it from its old slot to the end of its new controller's board.
-    StealVfx
+    GainControlVfx
+    # A gold ribbon ties a cross over a card, its bow blooms, and confetti
+    # bursts: a gift changing hands.
+    PrizeVfx
 
   Keyword* = enum
     ## Printed minion keywords. Each prints as its own line of rules text.
@@ -257,7 +260,8 @@ type
     TossEffect
     TargetVfxEffect
     GainRuleEffect
-    StealEffect
+    GainControlEffect
+    ExtraEnergyEffect
 
   Effect* = object
     ## Rules emit effects; the authoritative game applies them.
@@ -289,11 +293,11 @@ type
       ## play; it undoes a loss of the same rule.
       gainerId*: int
       gainedRule*: Rule
-    of StealEffect:
-      ## `thief` takes control of the card in play for good. It still
+    of GainControlEffect:
+      ## `controller` takes control of the card in play for good. It still
       ## belongs to its owner, whose hand or discard pile it goes to.
-      stolenId*: int
-      thief*: int
+      controlledId*: int
+      controller*: int
     of FightEffect:
       ## Both minions deal their power to each other at once, as in combat.
       ## Resolved when applied, so earlier effects on the card count.
@@ -325,6 +329,9 @@ type
       targetVfx*: VfxKind
       visualTarget*: Choice
       vfxCard*: Card  ## The card the visual belongs to, when it needs one.
+    of ExtraEnergyEffect:
+      ## Energy on top of the player's, until their next refill.
+      energyPlayer*, energyAmount*: int
 
   BoardCard* = object
     choice*: Choice
@@ -418,7 +425,7 @@ type
     BounceIntent
     DestroyIntent
     KeywordIntent
-    StealIntent
+    GainControlIntent
 
   DamageRule* = ref object of Rule
     amount*: RuleValue[int]
@@ -453,6 +460,12 @@ type
     count*: RuleValue[int]
     player*: RuleValue[Owner]
 
+  ExtraEnergyRule* = ref object of Rule
+    ## Energy to spend now, on top of the turn's. It doesn't keep: the next
+    ## refill tops energy up to the player's total and no further.
+    amount*: RuleValue[int]
+    player*: RuleValue[Owner]
+
   TossRule* = ref object of Rule
     ## Discard cards the player chooses from their hand.
     count*: RuleValue[int]
@@ -461,16 +474,20 @@ type
   TriggerKind* = enum
     NextTurnStart  ## A player's next turn starts, after their draw.
     EachTurnStart  ## Every one of a player's turns, after their draw.
+    EachTurnEnd    ## Every one of a player's turns, as it ends.
     HeroAttacked   ## A player's hero is attacked, after the damage.
     CardAttacked   ## A card in play is attacked, after the damage.
     CardPlayed     ## A player plays a card from hand, once it resolves.
+    CardDestroyed
+      ## A card in play is destroyed (it dies, a rule destroys it, or its
+      ## Lasts runs out), once it has left play.
 
   Trigger* = object
     ## When `on(...)` rules resolve instead of on play.
     case kind*: TriggerKind
-    of NextTurnStart, EachTurnStart, HeroAttacked:
+    of NextTurnStart, EachTurnStart, EachTurnEnd, HeroAttacked:
       player*: RuleValue[Owner]
-    of CardAttacked:
+    of CardAttacked, CardDestroyed:
       card*: RuleValue[Card]
     of CardPlayed:
       playedBy*: RuleValue[Owner]
@@ -496,8 +513,10 @@ type
     what*: Selection
     vfx*: VfxKind
 
-  StealRule* = ref object of Rule
-    ## "Gain control of an enemy minion."
+  GainControlRule* = ref object of Rule
+    ## "Gain control of an enemy minion.", "A hero gains control of a
+    ## friendly minion or trinket."
+    player*: RuleValue[Owner]
     what*: Selection
     vfx*: VfxKind
 
@@ -1776,29 +1795,39 @@ method run*(rule: LoseRule, card: Card, context: var RuleContext): bool =
         loserId: choice.creatureId, lostRule: rule.rule)
   true
 
-method text*(rule: StealRule, card: Card): string =
-  ## "Gain control of an enemy minion."
-  "Gain control of " & rule.what.text(card) & "."
+# Sentences with a subject are worded further down, with the draw rule's.
+proc playerSentence(player: RuleValue[Owner], verb, verbs, rest: string,
+    card: Card): string {.gcsafe.}
 
-method choices*(rule: StealRule, card: Card,
-    context: RuleContext): seq[Choice] =
+method text*(rule: GainControlRule, card: Card): string =
+  ## "Gain control of an enemy minion.", "A hero gains control of a friendly
+  ## minion or trinket."
+  rule.player.playerSentence("gain", "gains",
+    "control of " & rule.what.text(card), card)
+
+method isCommand*(rule: GainControlRule): bool =
+  rule.player.kind == FixedValue and rule.player.fixed == You
+
+method targets*(rule: GainControlRule): seq[Target] =
+  ## Who gains control is picked first, then what they take.
+  rule.player.picks() & rule.what.picks()
+
+method intent*(rule: GainControlRule): TargetIntent = GainControlIntent
+
+method run*(rule: GainControlRule, card: Card, context: var RuleContext): bool =
   discard card
-  rule.what.candidates(context)
-
-method targets*(rule: StealRule): seq[Target] =
-  rule.what.picks()
-
-method intent*(rule: StealRule): TargetIntent = StealIntent
-
-method run*(rule: StealRule, card: Card, context: var RuleContext): bool =
-  discard card
+  let resolved = rule.player.resolvePlayers(context)
+  if not resolved.ok:
+    return false
   let selection = rule.what.resolve(context, rule.vfx)
   if not selection.ok:
     return false
+  if resolved.players.len == 0:
+    return true
   for choice in selection.chosen:
     if choice.kind == CreatureChoice:
-      context.effects.add Effect(kind: StealEffect,
-        stolenId: choice.creatureId, thief: context.sourcePlayer)
+      context.effects.add Effect(kind: GainControlEffect,
+        controlledId: choice.creatureId, controller: resolved.players[0])
   true
 
 method text*(rule: DamagePlayerRule, card: Card): string =
@@ -2002,11 +2031,16 @@ proc gain*(rule: Rule, what: Selection, vfx = NoVfx): Rule =
   ## rule that only runs on play (`damage(...)`) never gets to.
   GainRule(rule: rule, what: what, vfx: vfx)
 
-proc steal*(what: Selection, vfx = NoVfx): Rule =
-  ## `steal(target({kind: {Minion}, owner: AllOpponents}))`: you control it
-  ## from now on, at the end of your board, and it can't attack until your
-  ## next turn. Bounced or slain, it goes to its owner's hand or pile.
-  StealRule(what: what, vfx: vfx)
+proc gainControl*(player: RuleValue[Owner], what: Selection,
+    vfx = NoVfx): Rule =
+  ## `gainControl(You, target({kind: {Minion}, owner: AllOpponents}))`: you
+  ## control it from now on, at the end of your board, and it can't attack
+  ## until your next turn. `gainControl(target({kind: {Hero}}), ...)` hands
+  ## it to the hero picked. Bounced or slain, it goes to its owner's hand or
+  ## pile.
+  doAssert player.kind != FixedValue or player.fixed == You,
+    "gainControl: one player gains control: You or target({kind: {Hero}})"
+  GainControlRule(player: player, what: what, vfx: vfx)
 
 proc lose*(rule: Rule, what: Selection, vfx = NoVfx): Rule =
   ## `lose(ranged(), target({Minion}))`: the card loses every rule that
@@ -2084,6 +2118,38 @@ proc draw*(
   ## `draw(1)`, `draw(2, AllOpponents)`, `draw(1, target({Opponent}))`.
   DrawRule(count: count, player: player.effectOwner("draw"))
 
+method text*(rule: ExtraEnergyRule, card: Card): string =
+  ## "Gain 2 extra energy.", "Each opponent gains 1 extra energy."
+  rule.player.playerSentence("gain", "gains",
+    rule.amount.text(card) & " energy", card)
+
+method targets*(rule: ExtraEnergyRule): seq[Target] =
+  rule.player.picks()
+
+method run*(
+    rule: ExtraEnergyRule,
+    card: Card,
+    context: var RuleContext
+): bool =
+  discard card
+  let
+    resolved = rule.player.resolvePlayers(context)
+    amount = rule.amount.value(context)
+  if not resolved.ok:
+    return false
+  for player in resolved.players:
+    context.effects.add Effect(kind: ExtraEnergyEffect, energyPlayer: player,
+      energyAmount: amount)
+  true
+
+proc extraEnergy*(
+    amount: RuleValue[int],
+    player: RuleValue[Owner] = toRuleValue(You)
+): Rule =
+  ## `extraEnergy(2)`: energy to spend now, on top of the turn's; unspent,
+  ## it is gone at the next refill.
+  ExtraEnergyRule(amount: amount, player: player.effectOwner("extraEnergy"))
+
 method text*(rule: TossRule, card: Card): string =
   ## "Discard 1 card.", "Each opponent discards 2 cards.",
   ## "An opponent discards 1 card."
@@ -2122,6 +2188,13 @@ proc eachTurn*(player: RuleValue[Owner]): Trigger =
   ## after their draw, for as long as the card stays in play.
   Trigger(kind: EachTurnStart, player: player.triggerOwner("eachTurn"))
 
+proc eachEndOfTurn*(player: RuleValue[Owner]): Trigger =
+  ## `on(eachEndOfTurn(You), ...)`: fires as every one of that player's
+  ## turns ends while the card is in play, the turn it entered too. (Lasts
+  ## counts at turn starts: a card that runs out is gone before that turn
+  ## ends.)
+  Trigger(kind: EachTurnEnd, player: player.triggerOwner("eachEndOfTurn"))
+
 proc nextTurn*(player: RuleValue[Owner]): Trigger =
   ## `on(nextTurn(You), ...)`: fires once, when that player's next turn
   ## starts, after their draw. `nextTurn(AnyOpponent)`: when the next
@@ -2140,20 +2213,29 @@ proc text*(trigger: Trigger, card: Card): string =
       "when " & player.text(card) & "'s hero is attacked"
   of CardAttacked:
     "when " & trigger.card.text(card) & " is attacked"
+  of CardDestroyed:
+    "when " & trigger.card.text(card) & " is destroyed"
   of NextTurnStart:
     let player = trigger.player
     if player.kind == FixedValue:
-      if player.fixed == You: "at the start of your next turn"
-      else: "at the start of an opponent's next turn"
+      if player.fixed == You: "on your next turn"
+      else: "on an opponent's next turn"
     else:
-      "at the start of " & player.text(card) & "'s next turn"
+      "on " & player.text(card) & "'s next turn"
   of EachTurnStart:
     let player = trigger.player
     if player.kind == FixedValue:
-      if player.fixed == You: "at the start of each of your turns"
-      else: "at the start of each opponent's turn"
+      if player.fixed == You: "on each of your turns"
+      else: "on each opponent's turn"
     else:
-      "at the start of each of " & player.text(card) & "'s turns"
+      "on each of " & player.text(card) & "'s turns"
+  of EachTurnEnd:
+    let player = trigger.player
+    if player.kind == FixedValue:
+      if player.fixed == You: "at the end of each of your turns"
+      else: "at the end of each opponent's turn"
+    else:
+      "at the end of each of " & player.text(card) & "'s turns"
   of CardPlayed:
     let
       player = trigger.playedBy
@@ -2187,13 +2269,24 @@ proc firesAtTurnStart*(
   case trigger.kind
   of NextTurnStart, EachTurnStart:
     turnPlayer in trigger.player.players(context) and turn > enteredTurn
-  of HeroAttacked, CardAttacked, CardPlayed:
+  of EachTurnEnd, HeroAttacked, CardAttacked, CardPlayed, CardDestroyed:
     false
 
+proc firesAtTurnEnd*(
+    trigger: Trigger,
+    context: var RuleContext,
+    turnPlayer: int
+): bool =
+  ## Whether the trigger of a card in play fires as `turnPlayer`'s turn
+  ## ends: every end of a turn of a player it watches, however recently the
+  ## card entered.
+  trigger.kind == EachTurnEnd and
+    turnPlayer in trigger.player.players(context)
+
 proc firesOnce*(trigger: Trigger): bool =
-  ## Whether firing spends the trigger. An each-turn or played one never
-  ## does.
-  trigger.kind notin {EachTurnStart, CardPlayed}
+  ## Whether firing spends the trigger. An each-turn, end-of-turn or played
+  ## one never does.
+  trigger.kind notin {EachTurnStart, EachTurnEnd, CardPlayed}
 
 proc firesOnAttack*(
     trigger: Trigger,
@@ -2203,7 +2296,7 @@ proc firesOnAttack*(
   ## Whether an attack on `victim` fires the trigger. It fires after the
   ## attack's damage.
   case trigger.kind
-  of NextTurnStart, EachTurnStart, CardPlayed:
+  of NextTurnStart, EachTurnStart, EachTurnEnd, CardPlayed, CardDestroyed:
     return false
   of HeroAttacked:
     return victim.kind == HeroChoice and
@@ -2228,6 +2321,27 @@ proc attacked*(player: RuleValue[Owner]): Trigger =
 proc attacked*(card: RuleValue[Card]): Trigger =
   ## `on(attacked(self()), ...)`: when that card is attacked.
   Trigger(kind: CardAttacked, card: card)
+
+proc firesOnDestroy*(
+    trigger: Trigger,
+    context: var RuleContext,
+    goneId: int,
+    gone: Card
+): bool =
+  ## Whether the card in play `goneId` being destroyed fires the trigger.
+  if trigger.kind != CardDestroyed:
+    return false
+  if trigger.card.kind == SelfCard:
+    return goneId == context.sourceId
+  # Same printed card: name and cost, as card IDs identify it.
+  let wanted = trigger.card.value(context)
+  gone.name == wanted.name and gone.energyCost == wanted.energyCost
+
+proc destroyed*(card: RuleValue[Card]): Trigger =
+  ## `on(destroyed(self()), ...)`: when that card is destroyed, however it
+  ## goes: it dies, a rule destroys it, or its Lasts runs out. Its rules
+  ## resolve once it has left play, for whoever controlled it.
+  Trigger(kind: CardDestroyed, card: card)
 
 proc firesOnPlay*(
     trigger: Trigger,

@@ -28,7 +28,8 @@ type
 
 const
   TriggerNames: array[TriggerKind, string] = [
-    "nextTurn", "eachTurn", "attacked", "attacked", "played"]
+    "nextTurn", "eachTurn", "eachEndOfTurn", "attacked", "attacked", "played",
+    "destroyed"]
   StatNames: array[CardStat, string] = ["energyCost", "power", "toughness"]
   ComparisonNames: array[Comparison, string] = [
     "eq", "notEq", "atMost", "atLeast", "between"]
@@ -148,9 +149,9 @@ proc addTrigger(tree: var RuleTree, trigger: Trigger, parent: int,
   let node = tree.add(TriggerNames[trigger.kind], "trigger", parent,
     text = trigger.text(card))
   case trigger.kind
-  of NextTurnStart, EachTurnStart, HeroAttacked:
+  of NextTurnStart, EachTurnStart, EachTurnEnd, HeroAttacked:
     tree.addValue(trigger.player, "player", node, card)
-  of CardAttacked:
+  of CardAttacked, CardDestroyed:
     tree.addValue(trigger.card, "card", node, card)
   of CardPlayed:
     tree.addValue(trigger.playedBy, "player", node, card)
@@ -202,6 +203,11 @@ proc addRule(tree: var RuleTree, rule: Rule, role: string, parent: int,
     let at = node("draw")
     tree.addValue(draw.count, "count", at, card)
     tree.addValue(draw.player, "player", at, card)
+  elif rule of ExtraEnergyRule:
+    let energy = ExtraEnergyRule(rule)
+    let at = node("extraEnergy")
+    tree.addValue(energy.amount, "amount", at, card)
+    tree.addValue(energy.player, "player", at, card)
   elif rule of TossRule:
     let toss = TossRule(rule)
     let at = node("toss")
@@ -228,9 +234,11 @@ proc addRule(tree: var RuleTree, rule: Rule, role: string, parent: int,
     let at = node("lose")
     tree.addRule(lose.rule, "rule", at, card)
     tree.addSelection(lose.what, "what", at, card)
-  elif rule of StealRule:
-    let at = node("steal")
-    tree.addSelection(StealRule(rule).what, "what", at, card)
+  elif rule of GainControlRule:
+    let control = GainControlRule(rule)
+    let at = node("gainControl")
+    tree.addValue(control.player, "player", at, card)
+    tree.addSelection(control.what, "what", at, card)
   elif rule of FightRule:
     let fight = FightRule(rule)
     let at = node("fight")

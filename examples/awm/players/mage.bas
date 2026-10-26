@@ -43,7 +43,7 @@
 '                                  0 = nothing to judge, 1 = damage,
 '                                  2 = buff, 3 = weaken, 4 = bounce,
 '                                  5 = destroy, 6 = loses a keyword,
-'                                  7 = steal
+'                                  7 = gain control
 '   targetAmount(handIndex, step)  how much: damage dealt, stats changed
 '   choiceCount(handIndex)              number of valid targets
 '   choiceKind(handIndex, choiceIndex)  0=canceled 1=noTarget 2=hero 3=creature
@@ -116,6 +116,16 @@
 '   nodeParent(n)  -1 for the card's own rules
 '   nodeValue(n), nodeText$(n)  its number or ordinal, and its words
 '   nodeChild(n, role$), nodeFind(kind$, after)  -1 when there is none
+'
+' EVENT LOG (since your last decision, oldest first: e = 0 to logCount() - 1)
+'   logKind$(e)   turn draw play attack trigger choice discard damage death
+'                 summon bounce gainControl stats gain lose defeat
+'   logTurn(e), logPlayer(e)          when, and who acted, decided or was hit
+'   logCard$(e), logCardId(e), logOwner(e)  the card, its boardId, whose it is
+'   logCause$(e), logCauseId(e), logCauseOwner(e)  what fired a trigger
+'   logAmount(e), logAmount2(e), logText$(e)  its numbers, the rule's words
+'   logTargetCount(e), logTargetKind(e, t), logTargetOwner(e, t)
+'   logTargetId(e, t), logTargetCard$(e, t)  its picks; kind 5 is a hand card
 
 IF selectingClass THEN
   pickClass(2)          ' Mage

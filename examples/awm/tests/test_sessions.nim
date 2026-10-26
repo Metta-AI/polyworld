@@ -524,7 +524,8 @@ suite "waiting discards":
           lostRule: baseCardNamed("Sniper").rules[0]),
         Effect(kind: GainRuleEffect, beat: 5, gainerId: 2,
           gainedRule: baseCardNamed("Ambusher").rules[0]),
-        Effect(kind: StealEffect, beat: 6, stolenId: 2, thief: me),
+        Effect(kind: GainControlEffect, beat: 6, controlledId: 2,
+          controller: me),
         Effect(kind: TossEffect, beat: 7, tossPlayer: me, tossCount: 1,
           tossSource: "Study", tossText: "Discard 1 card.",
           tossSourcePlayer: enemy, tossSourceId: 2)])
@@ -533,7 +534,7 @@ suite "waiting discards":
     check decoded.waitingToss
     check decoded.pendingToss.count == 1
     check decoded.pendingToss.remaining.len == 8
-    check decoded.pendingToss.remaining[6].thief == me
+    check decoded.pendingToss.remaining[6].controller == me
     check decoded.pendingToss.sourcePlayer == enemy
     check decoded.pendingToss.sourceId == 2
     check decoded.pendingToss.remaining[7].tossSourcePlayer == enemy
@@ -553,7 +554,7 @@ suite "waiting discards":
       discard gameFromJson(invalid)
 
 suite "stolen minions":
-  test "a stolen minion and its steal round trip":
+  test "a stolen minion and its gainControl round trip":
     var game = newGame(Mage, Warrior, 1401)
     let
       me = game.currentPlayer
@@ -569,13 +570,13 @@ suite "stolen minions":
     let decoded = gameFromJson(encoded)
     check gameToJson(decoded) == encoded
     check decoded.players[me].board[0].stolenFrom == some(enemy)
-    var steals = 0
+    var takeovers = 0
     for event in decoded.visualEvents:
-      if event.kind == StealVfx:
-        inc steals
+      if event.kind == GainControlVfx:
+        inc takeovers
         check event.fromPlayer == enemy
         check event.card == baseCardNamed("Bear")
-    check steals == 1
+    check takeovers == 1
 
 suite "lasting cards and played triggers in snapshots":
   test "a Lasts count and a waiting played trigger's card round trip":
@@ -615,3 +616,49 @@ suite "lasting cards and played triggers in snapshots":
     check not encoded["players"][me]["board"][0].hasKey("lastsTurns")
     check not encoded["pendingTriggers"][0].hasKey("played")
     check not encoded["pendingTriggers"][0].hasKey("playedId")
+
+  test "a destroyed card's waiting trigger and extra energy survive":
+    var game = newGame(Mage, Warrior, 1129)
+    let
+      me = game.currentPlayer
+      overwork = MinionState(id: 7, owner: me, card: baseCard("overwork-3"),
+        enteredTurn: game.turnNumber)
+    game.nextMinionId = 8
+    # Its destroyed trigger, its second, waits behind whatever goes first.
+    game.pendingTriggers = @[PendingTrigger(owner: me, sourceId: 7,
+      trigger: 1, attacker: Canceled, departed: some(overwork))]
+    game.players[me].energy = game.players[me].totalEnergy + 2
+    let encoded = gameToJson(game)
+    let decoded = gameFromJson(encoded)
+    check decoded.pendingTriggers[0].departed.get.card == baseCard("overwork-3")
+    check decoded.players[me].energy == decoded.players[me].totalEnergy + 2
+    check gameToJson(decoded) == encoded
+    # A card still in play has not departed.
+    var stillThere = game
+    stillThere.players[me].board = @[overwork]
+    expect ValueError:
+      discard gameFromJson(gameToJson(stillThere))
+
+  test "a turn its end-of-turn discard holds survives, and the discard ends it":
+    var game = newGame(Mage, Warrior, 1131)
+    let me = game.currentPlayer
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCard("burnout-0"), enteredTurn: game.turnNumber,
+      lastsTurns: 3)]
+    game.nextMinionId = 2
+    check not gameToJson(game).hasKey("turnEnding")
+    game.finishTurn()
+    check game.waitingToss and game.turnEnding
+    let encoded = gameToJson(game)
+    var decoded = gameFromJson(encoded)
+    check decoded.turnEnding
+    check gameToJson(decoded) == encoded
+    check decoded.resolvePendingToss(@[0])
+    check decoded.currentPlayer != me
+    check not gameToJson(decoded).hasKey("turnEnding")
+    # A turn ends at once unless something waits.
+    var stuck = gameToJson(decoded)
+    stuck["turnEnding"] = %true
+    expect ValueError:
+      discard gameFromJson(stuck)
+

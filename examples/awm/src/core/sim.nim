@@ -64,7 +64,7 @@ type
     home*: Option[int]
       ## DeathVfx/BounceVfx: the player whose pile or hand the card goes to,
       ## when that isn't the one who controlled it.
-    fromPlayer*: int  ## StealVfx: whose board the minion left.
+    fromPlayer*: int  ## GainControlVfx: whose board the minion left.
     beat*: int
       ## Events of one beat present together; each beat waits for the one
       ## before it (draw beats only wait a moment, so draws overlap).
@@ -83,6 +83,9 @@ type
     played*: Card
       ## The card whose play fired it, for `getPlayed()`. Unnamed otherwise.
     playedId*: int  ## That card's id in play; 0 for a spell.
+    departed*: Option[MinionState]
+      ## The card whose trigger fired as it was destroyed: it is no longer
+      ## in play, so its trigger is read from it as it left.
 
   PendingToss* = object
     ## A discard waiting for its player to choose cards from hand. Whatever
@@ -93,6 +96,48 @@ type
     sourcePlayer*: int  ## Whose rules asked.
     sourceId*: int  ## The asking card in play; 0 for a spell.
     remaining*: seq[Effect]  ## The resolution's later effects, in order.
+
+  GameEventKind* = enum
+    ## What a bot's log says happened. Bots read each as its name without
+    ## "Event", in lower case: "turn", "play", "attack".
+    TurnEvent     ## A player's turn starts.
+    PlayEvent     ## A card is played from hand, with its picks.
+    AttackEvent   ## A minion attacks a hero or a minion.
+    TriggerEvent  ## A trigger, or a summoned card's on-play rules, resolves.
+    ChoiceEvent   ## A player picks a waiting trigger's targets.
+    DiscardEvent  ## A player picks the cards a rule makes them discard.
+    DamageEvent   ## A hero or a minion takes damage.
+    DeathEvent    ## A card leaves play for its owner's discard pile.
+    SummonEvent   ## A card enters play without being played.
+    BounceEvent   ## A card in play goes back to its owner's hand.
+    GainControlEvent    ## A player takes control of a card in play.
+    StatsEvent    ## A minion's power and toughness change.
+    GainEvent     ## A card in play gains a rule.
+    LoseEvent     ## A card in play loses a rule.
+    DrawEvent     ## A player draws a card.
+    DefeatEvent   ## A player is out, and their hand is discarded.
+
+  EventTarget* = object
+    ## A pick an event names, or a card it took from a hand.
+    choice*: Choice  ## A card from a hand is its player's hero choice.
+    card*: string  ## The card the pick names, when it names one.
+    fromHand*: bool
+
+  GameEvent* = object
+    ## One thing that happened, for bots to read after the fact.
+    kind*: GameEventKind
+    turn*: int
+    player*: int  ## Who acted or decided, or whom it happened to.
+    card*: string  ## The card it is about.
+    cardId*: int  ## That card's id in play; 0 when it isn't in play.
+    owner*: int
+      ## Whose that card is, or whose effect asked; -1 when there's none.
+    cause*: string  ## What fired a trigger: the attacker or the played card.
+    causeId*: int
+    causeOwner*: int
+    amount*, amount2*: int  ## Damage, a count, a stat change.
+    text*: string  ## The rule's words.
+    targets*: seq[EventTarget]
 
   GameState* = object
     players*: seq[PlayerState]
@@ -107,6 +152,12 @@ type
     visualEvents*: seq[VisualEvent]
     gameOver*: bool
     winner*: int
+    turnEnding*: bool
+      ## The current turn's end-of-turn triggers have fired and wait for a
+      ## choice; answering it ends the turn.
+    recordEvents*: bool  ## Whether the game keeps a log of events, for bots.
+    events*: seq[GameEvent]
+      ## What happened since the last `takeEvents`; never in a snapshot.
     rng: Rand
 
 proc copyGameState*(game: GameState): GameState {.noinline.} =
@@ -254,7 +305,17 @@ proc nextPlayer*(game: GameState, player: int): int =
     if not game.dead(candidate):
       return candidate
 
-proc resolveTriggers(game: var GameState) {.gcsafe.}
+proc newEvent(game: GameState, kind: GameEventKind,
+    player: int): GameEvent =
+  GameEvent(kind: kind, turn: game.turnNumber, player: player, owner: -1,
+    causeOwner: -1)
+
+proc takeEvents*(game: var GameState): seq[GameEvent] =
+  ## The events since the last call, oldest first.
+  result = move(game.events)
+
+proc resolveTriggers(game: var GameState, ending = false) {.gcsafe.}
+proc finishTurn*(game: var GameState)
 proc destroyMinion(game: var GameState, player, index: int)
 proc drawVisibly(game: var GameState, player: int): bool {.gcsafe.}
 proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.}
@@ -277,6 +338,7 @@ proc checkWinCondition*(game: var GameState) =
     game.visualEvents.add VisualEvent(kind: HeroDeathVfx,
       target: heroChoice(player), beat: game.visualBeat)
   for player in dying:
+    var defeat = game.newEvent(DefeatEvent, player)
     # One beat per card, last card first, so each leaves from its own slot.
     while game.players[player].hand.len > 0:
       inc game.visualBeat
@@ -288,6 +350,11 @@ proc checkWinCondition*(game: var GameState) =
         boardCount: game.players[player].hand.len, beat: game.visualBeat)
       game.players[player].hand.delete(index)
       game.players[player].discardPile.add card
+      if game.recordEvents:
+        defeat.targets.add EventTarget(choice: heroChoice(player),
+          card: card.name, fromHand: true)
+    if game.recordEvents:
+      game.events.add defeat
   var living: seq[int]
   for player in 0 ..< game.playerCount:
     if not game.dead(player):
@@ -308,6 +375,8 @@ proc checkWinCondition*(game: var GameState) =
 proc beginTurn*(game: var GameState) =
   if game.gameOver: return
   let playerIndex = game.currentPlayer
+  if game.recordEvents:
+    game.events.add game.newEvent(TurnEvent, playerIndex)
   game.players[playerIndex].refillEnergy()
   if game.turnNumber > 1:
     inc game.visualBeat
@@ -340,12 +409,15 @@ proc beginTurn*(game: var GameState) =
 
 proc newGame*(
     seats: openArray[Seat],
-    seed: int64
+    seed: int64,
+    recordEvents = false
 ): GameState =
   ## Dealt in seat order; a random seat goes first. A seat with no deck
   ## is out before the first turn, as if it had drawn from an empty deck;
   ## the first turn then goes to the next seat still in. When every seat
-  ## is out, nobody wins.
+  ## is out, nobody wins. `recordEvents` keeps a log for bots from the
+  ## start.
+  result.recordEvents = recordEvents
   result.rng = initRand(seed)
   for seat in seats:
     result.players.add initPlayer(seat, result.rng)
@@ -438,6 +510,25 @@ proc minionLocation*(
     for minionIndex, minion in game.players[playerIndex].board:
       if minion.id == minionId:
         return (true, playerIndex, minionIndex)
+
+proc eventTargets(game: GameState, picks: openArray[Choice]): seq[EventTarget] =
+  ## Picks as a log names them, with the cards in play they name now.
+  for pick in picks:
+    var target = EventTarget(choice: pick)
+    if pick.kind == CreatureChoice:
+      let location = game.minionLocation(pick.creatureId)
+      if location.found:
+        target.card =
+          game.players[location.player].board[location.index].card.name
+    result.add target
+
+proc minionEvent(game: GameState, kind: GameEventKind,
+    minion: MinionState, player: int): GameEvent =
+  ## An event about a card in play: `player` controls it.
+  result = game.newEvent(kind, player)
+  result.card = minion.card.name
+  result.cardId = minion.id
+  result.owner = minion.stolenFrom.get(minion.owner)
 
 proc ruleContext(
     game: GameState,
@@ -557,6 +648,10 @@ proc drawVisibly(game: var GameState, player: int): bool {.gcsafe.} =
     return true
   if not game.players[player].drawCard():
     return false
+  if game.recordEvents:
+    var event = game.newEvent(DrawEvent, player)
+    event.amount = 1
+    game.events.add event
   game.visualEvents.add VisualEvent(kind: DrawVfx, target: heroChoice(player),
     beat: game.visualBeat,
     boardIndex: game.players[player].hand.high,
@@ -571,9 +666,32 @@ proc home*(minion: MinionState): int =
   ## The player whose card it is: its controller, unless it was stolen.
   minion.stolenFrom.get(minion.owner)
 
+proc queueDestroyTriggers(game: var GameState, player, index: int) =
+  ## Before a card in play is destroyed: queues the destroyed triggers
+  ## watching it, the current player's cards first. Its own resolve once it
+  ## has gone, for whoever controlled it.
+  let gone = game.players[player].board[index]
+  for offset in 0 ..< game.playerCount:
+    let owner = (game.currentPlayer + offset) mod game.playerCount
+    for permanent in game.players[owner].board:
+      for trigger, rule in permanent.heldRules.triggers():
+        if permanent.lost(rule):
+          continue
+        var context = game.ruleContext(allowNoTarget = true,
+          sourcePlayer = owner, sourceId = permanent.id)
+        if rule.trigger.firesOnDestroy(context, gone.id, gone.card):
+          game.pendingTriggers.add PendingTrigger(owner: owner,
+            sourceId: permanent.id, trigger: trigger, attacker: Canceled,
+            departed: if permanent.id == gone.id: some(permanent)
+              else: none(MinionState))
+
 proc destroyMinion(game: var GameState, player, index: int) =
-  ## Sends a minion to its owner's discard pile.
+  ## Sends a minion to its owner's discard pile, queuing the destroyed
+  ## triggers watching it.
+  game.queueDestroyTriggers(player, index)
   let minion = game.players[player].board[index]
+  if game.recordEvents:
+    game.events.add game.minionEvent(DeathEvent, minion, player)
   game.recordVisual(DeathVfx, creatureChoice(player, minion.id),
     minion.card, minion.power)
   game.visualEvents[^1].home = minion.stolenFrom
@@ -591,6 +709,11 @@ proc damageMinion(game: var GameState, minionId, amount: int) =
     return
   if amount > 0:
     game.recordVisual(DamageFlashVfx, creatureChoice(location.player, minionId))
+    if game.recordEvents:
+      var event = game.minionEvent(DamageEvent,
+        game.players[location.player].board[location.index], location.player)
+      event.amount = amount
+      game.events.add event
   game.players[location.player].board[location.index].currentToughness -=
     amount
   game.destroyIfSlain(location.player, location.index)
@@ -613,6 +736,10 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
     of DamageHeroEffect:
       if effect.heroDamage > 0 and game.players[effect.heroPlayer].life > 0:
         game.recordVisual(DamageFlashVfx, heroChoice(effect.heroPlayer))
+        if game.recordEvents:
+          var event = game.newEvent(DamageEvent, effect.heroPlayer)
+          event.amount = effect.heroDamage
+          game.events.add event
       game.players[effect.heroPlayer].life = max(
         0,
         game.players[effect.heroPlayer].life - effect.heroDamage
@@ -625,6 +752,10 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
         template minion: untyped =
           game.players[location.player].board[location.index]
         minion.loseRule(effect.lostRule)
+        if game.recordEvents:
+          var event = game.minionEvent(LoseEvent, minion, location.player)
+          event.text = effect.lostRule.text(minion.card)
+          game.events.add event
         # Losing Ready the turn it entered takes back that turn's attack.
         if Ready in @[effect.lostRule].keywords() and
             minion.enteredTurn == game.turnNumber:
@@ -634,6 +765,11 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
       if location.found:
         game.players[location.player].board[location.index].gainRule(
           effect.gainedRule)
+        if game.recordEvents:
+          let minion = game.players[location.player].board[location.index]
+          var event = game.minionEvent(GainEvent, minion, location.player)
+          event.text = effect.gainedRule.text(minion.card)
+          game.events.add event
     of FightEffect:
       let
         fighter = game.minionLocation(effect.fighterId)
@@ -661,6 +797,13 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
         effect.powerChange
       game.players[location.player].board[location.index].currentToughness +=
         effect.toughnessChange
+      if game.recordEvents:
+        var event = game.minionEvent(StatsEvent,
+          game.players[location.player].board[location.index],
+          location.player)
+        event.amount = effect.powerChange
+        event.amount2 = effect.toughnessChange
+        game.events.add event
       game.destroyIfSlain(location.player, location.index)
     of SummonEffect:
       var entering = MinionState(
@@ -685,6 +828,9 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
         entering.lastsTurns = source.lastsTurns
       entering.canAttack = entering.hasKeyword(Ready)
       game.players[effect.summonedOwner].board.add entering
+      if game.recordEvents:
+        game.events.add game.minionEvent(SummonEvent, entering,
+          effect.summonedOwner)
       game.recordVisual(SummonVfx,
         creatureChoice(effect.summonedOwner, effect.summonedId))
       game.nextMinionId = max(game.nextMinionId, effect.summonedId + 1)
@@ -695,6 +841,9 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
           owner: effect.summonedOwner, sourceId: effect.summonedId,
           attacker: Canceled, onPlay: true), summoned)
         inc summoned
+    of ExtraEnergyEffect:
+      if not game.dead(effect.energyPlayer):
+        game.players[effect.energyPlayer].energy += effect.energyAmount
     of DrawEffect:
       for drawn in 0 ..< effect.drawCount:
         if drawn > 0:
@@ -725,6 +874,8 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
         minion = game.players[location.player].board[location.index]
         bounced = minion.card
         home = minion.home
+      if game.recordEvents:
+        game.events.add game.minionEvent(BounceEvent, minion, location.player)
       # Recorded while it's still on the board, so its slot is known.
       game.recordVisual(BounceVfx,
         creatureChoice(location.player, effect.bouncedCreatureId), bounced)
@@ -732,14 +883,19 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
       game.players[location.player].board.delete(location.index)
       game.players[home].hand.add bounced
       game.visualEvents[^1].handIndex = game.players[home].hand.high
-    of StealEffect:
-      let location = game.minionLocation(effect.stolenId)
-      if not location.found or location.player == effect.thief:
+    of GainControlEffect:
+      let location = game.minionLocation(effect.controlledId)
+      if not location.found or location.player == effect.controller:
         continue
       var minion = game.players[location.player].board[location.index]
+      if game.recordEvents:
+        var event = game.minionEvent(GainControlEvent, minion,
+          effect.controller)
+        event.owner = location.player
+        game.events.add event
       # Its slot is where it leaves from; the target is where it ends up.
-      game.visualEvents.add VisualEvent(kind: StealVfx,
-        target: creatureChoice(effect.thief, minion.id), card: minion.card,
+      game.visualEvents.add VisualEvent(kind: GainControlVfx,
+        target: creatureChoice(effect.controller, minion.id), card: minion.card,
         fromPlayer: location.player, boardIndex: location.index,
         boardCount: game.players[location.player].board.len,
         beat: game.visualBeat)
@@ -747,13 +903,17 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
       # Taken back by its owner, it is simply theirs again.
       if minion.stolenFrom.isNone:
         minion.stolenFrom = some(location.player)
-      elif minion.stolenFrom.get == effect.thief:
+      elif minion.stolenFrom.get == effect.controller:
         minion.stolenFrom = none(int)
-      minion.owner = effect.thief
-      # Like a minion just played: it attacks from its new owner's next turn.
+      minion.owner = effect.controller
+      # Like a minion just played: it attacks from its new owner's next
+      # turn, or at once if it is Ready. An attack from its old owner's
+      # last turn is behind it; one made this turn stays made.
       minion.enteredTurn = game.turnNumber
-      minion.canAttack = false
-      game.players[effect.thief].board.add minion
+      minion.canAttack = minion.hasKeyword(Ready)
+      if location.player != game.currentPlayer:
+        minion.hasAttacked = false
+      game.players[effect.controller].board.add minion
   game.checkWinCondition()
 
 proc triggerSource(game: GameState,
@@ -770,6 +930,13 @@ proc triggerSource(game: GameState,
           rules.add rule
       return (true, minion.card, rules)
     let triggers = minion.heldRules.triggers()
+    if pending.trigger in 0 ..< triggers.len and
+        not minion.lost(triggers[pending.trigger]):
+      return (true, minion.card, triggers[pending.trigger].rules)
+  elif pending.departed.isSome:
+    let
+      minion = pending.departed.get
+      triggers = minion.heldRules.triggers()
     if pending.trigger in 0 ..< triggers.len and
         not minion.lost(triggers[pending.trigger]):
       return (true, minion.card, triggers[pending.trigger].rules)
@@ -810,6 +977,54 @@ proc waitingTriggerName*(game: GameState): string =
     result = game.waitingTriggerRules().card.name &
       (if game.pendingTriggers[0].onPlay: "'s rule" else: "'s trigger")
 
+proc triggerText(game: GameState, pending: PendingTrigger): string =
+  ## The trigger's own words: its whole `on(...)` sentence, or a summoned
+  ## card's on-play rules it hasn't lost.
+  let location = game.minionLocation(pending.sourceId)
+  if not location.found and pending.departed.isNone:
+    return
+  let minion =
+    if location.found: game.players[location.player].board[location.index]
+    else: pending.departed.get
+  if pending.onPlay:
+    var rules: Rules
+    for rule in minion.card.rules:
+      if not (rule of OnRule) and not minion.lost(rule):
+        rules.add rule
+    return minion.card.optionCard(rules).ruleText()
+  let triggers = minion.heldRules.triggers()
+  if pending.trigger in 0 ..< triggers.len:
+    result = triggers[pending.trigger].text(minion.card)
+
+proc triggerEvent(game: GameState, kind: GameEventKind,
+    pending: PendingTrigger, picks: openArray[Choice]): GameEvent =
+  ## A trigger resolving, or its owner's picks for it: its card, what fired
+  ## it, its words and its targets.
+  result = game.newEvent(kind, pending.owner)
+  let location = game.minionLocation(pending.sourceId)
+  if location.found:
+    result = game.minionEvent(kind,
+      game.players[location.player].board[location.index], pending.owner)
+  elif pending.departed.isSome:
+    result = game.minionEvent(kind, pending.departed.get, pending.owner)
+  if pending.attacker.kind == CreatureChoice:
+    # An attacker gone by now still has its id; its attack names it.
+    result.causeId = pending.attacker.creatureId
+    result.causeOwner = pending.attacker.owner
+    let attacker = game.minionLocation(pending.attacker.creatureId)
+    if attacker.found:
+      result.cause =
+        game.players[attacker.player].board[attacker.index].card.name
+  elif pending.played.name.len > 0:
+    # Played triggers fire on the current player's play.
+    result.cause = pending.played.name
+    result.causeId = pending.playedId
+    result.causeOwner = game.currentPlayer
+  if kind == TriggerEvent:
+    result.amount = pending.onPlay.int
+  result.text = game.triggerText(pending)
+  result.targets = game.eventTargets(picks)
+
 proc advanceTriggers(game: var GameState) =
   ## Resolves queued triggers in order until one needs its owner to choose
   ## a target (and has something legal to choose), or the queue is empty.
@@ -837,12 +1052,21 @@ proc advanceTriggers(game: var GameState) =
         var answered = game.triggerContext(pending, picks)
         game.pendingTriggers.delete(0)
         if source.card.runRules(source.rules, answered):
+          if game.recordEvents:
+            game.events.add game.triggerEvent(TriggerEvent, pending, picks)
           game.applyEffects(answered.effects)
         continue
     var context = game.triggerContext(pending)
     game.pendingTriggers.delete(0)
     if source.card.runRules(source.rules, context):
+      if game.recordEvents:
+        game.events.add game.triggerEvent(TriggerEvent, pending, [])
       game.applyEffects(context.effects)
+
+proc endTurnIfDone(game: var GameState) =
+  ## An ending turn whose triggers no longer wait for anyone ends.
+  if game.turnEnding and not game.waitingChoice:
+    game.finishTurn()
 
 proc resolvePendingTrigger*(game: var GameState, choices: seq[Choice]): bool =
   ## The waiting trigger's owner answers its targets in order. A canceled
@@ -861,9 +1085,13 @@ proc resolvePendingTrigger*(game: var GameState, choices: seq[Choice]): bool =
   var context = game.triggerContext(pending, picks)
   if not source.card.runRules(source.rules, context):
     return false
+  if game.recordEvents:
+    game.events.add game.triggerEvent(ChoiceEvent, pending, picks)
+    game.events.add game.triggerEvent(TriggerEvent, pending, picks)
   game.pendingTriggers.delete(0)
   game.applyEffects(context.effects)
   game.advanceTriggers()
+  game.endTurnIfDone()
   true
 
 proc resolvePendingToss*(game: var GameState, handIndices: seq[int]): bool =
@@ -882,6 +1110,17 @@ proc resolvePendingToss*(game: var GameState, handIndices: seq[int]): bool =
     if index notin 0 ..< game.players[player].hand.len or
         index in handIndices[0 ..< i]:
       return false
+  if game.recordEvents:
+    var event = game.newEvent(DiscardEvent, player)
+    event.card = pending.source
+    event.cardId = pending.sourceId
+    event.owner = pending.sourcePlayer
+    event.amount = pending.count
+    event.text = pending.text
+    for index in handIndices:
+      event.targets.add EventTarget(choice: heroChoice(player),
+        card: game.players[player].hand[index].name, fromHand: true)
+    game.events.add event
   inc game.visualBeat
   # Highest positions first, so each event's slot is right when it leaves.
   for index in handIndices.sorted(Descending):
@@ -894,11 +1133,13 @@ proc resolvePendingToss*(game: var GameState, handIndices: seq[int]): bool =
   game.pendingToss = PendingToss()
   game.applyEffects(pending.remaining)
   game.advanceTriggers()
+  game.endTurnIfDone()
   true
 
-proc resolveTriggers(game: var GameState) {.gcsafe.} =
-  ## Queues the next-turn triggers of cards in play that fire now, the
-  ## current player's cards first, then resolves the queue in order.
+proc resolveTriggers(game: var GameState, ending = false) {.gcsafe.} =
+  ## Queues the triggers of cards in play that fire as the current player's
+  ## turn starts (or, `ending`, ends), the current player's cards first,
+  ## then resolves the queue in order.
   for offset in 0 ..< game.playerCount:
     let owner = (game.currentPlayer + offset) mod game.playerCount
     for slot in 0 ..< game.players[owner].board.len:
@@ -909,8 +1150,13 @@ proc resolveTriggers(game: var GameState) {.gcsafe.} =
           continue
         var context = game.ruleContext(allowNoTarget = true,
           sourcePlayer = owner, sourceId = permanent.id)
-        if trigger.trigger.firesAtTurnStart(context, game.currentPlayer,
-            game.turnNumber, permanent.enteredTurn):
+        let fires =
+          if ending:
+            trigger.trigger.firesAtTurnEnd(context, game.currentPlayer)
+          else:
+            trigger.trigger.firesAtTurnStart(context, game.currentPlayer,
+              game.turnNumber, permanent.enteredTurn)
+        if fires:
           if trigger.trigger.firesOnce():
             game.players[owner].board[slot].firedTurnTriggers.incl index.uint8
           game.pendingTriggers.add PendingTrigger(owner: owner,
@@ -1007,8 +1253,24 @@ proc finishPlay*(game: var GameState, card: Card, choices: seq[Choice],
   ## (`sourceId`): its own rules, then the played triggers watching it. The
   ## table plays a card in these two steps, to aim its rules once it is on
   ## the board; `playCard` takes both at once.
-  let player = game.currentPlayer
+  let
+    player = game.currentPlayer
+    logged = game.events.len
+  if game.recordEvents:
+    var picks: seq[Choice]
+    for choice in choices:
+      picks.add(if choice.isCanceled: NoTarget else: choice)
+    var event = game.newEvent(PlayEvent, player)
+    event.card = card.name
+    event.cardId = sourceId
+    event.owner = player
+    # A card that aims at nothing logs no stand-in pick.
+    if card.targetCount() > 0:
+      event.targets = game.eventTargets(picks)
+    game.events.add event
   if not game.runMinionRules(card, choices, sourceId):
+    # Not played after all: nothing happened.
+    game.events.setLen(logged)
     return false
   game.queuePlayTriggers(player, card, sourceId)
   true
@@ -1032,6 +1294,13 @@ proc playCard*(
       return false
     game.players[playerIndex].energy -= game.playCost(playerIndex, card)
     game.players[playerIndex].hand.delete(cardIndex)
+    if game.recordEvents:
+      var event = game.newEvent(PlayEvent, playerIndex)
+      event.card = card.name
+      event.owner = playerIndex
+      if card.targetCount() > 0:
+        event.targets = game.eventTargets(choices)
+      game.events.add event
     game.applyEffects(context.effects)
     game.players[playerIndex].discardPile.add card
     game.advanceTriggers()
@@ -1102,9 +1371,18 @@ proc attackHero*(game: var GameState, minionId: int,
     return false
   let location = game.minionLocation(minionId)
   let minion = game.players[location.player].board[location.index]
+  if game.recordEvents:
+    var event = game.minionEvent(AttackEvent, minion, location.player)
+    event.amount = minion.power
+    event.targets = game.eventTargets([heroChoice(targetPlayer)])
+    game.events.add event
   inc game.visualBeat
   if minion.power > 0:
     game.recordVisual(DamageFlashVfx, heroChoice(targetPlayer))
+    if game.recordEvents:
+      var event = game.newEvent(DamageEvent, targetPlayer)
+      event.amount = minion.power
+      game.events.add event
   game.players[targetPlayer].life = max(0,
     game.players[targetPlayer].life - minion.power)
   game.players[location.player].board[location.index].hasAttacked = true
@@ -1122,6 +1400,14 @@ proc attackMinion*(game: var GameState, attackerId, targetId: int): bool =
         game.attackTargets(attackerId):
     return false
   let attackerLocation = game.minionLocation(attackerId)
+  if game.recordEvents:
+    let attacker =
+      game.players[attackerLocation.player].board[attackerLocation.index]
+    var event = game.minionEvent(AttackEvent, attacker,
+      attackerLocation.player)
+    event.amount = attacker.power
+    event.targets = game.eventTargets([creatureChoice(target.player, targetId)])
+    game.events.add event
   game.players[attackerLocation.player].board[
     attackerLocation.index].hasAttacked = true
   game.applyEffects([
@@ -1147,9 +1433,18 @@ proc eligibleAttackers*(game: GameState): seq[int] =
       result.add minion.id
 
 proc finishTurn*(game: var GameState) =
-  ## The next living player's turn. One who dies drawing for it at an empty
-  ## deck loses the turn too.
+  ## Ends the turn: its end-of-turn triggers resolve, then the next living
+  ## player's turn starts. One who dies drawing for it at an empty deck
+  ## loses the turn too. While an end-of-turn trigger waits for a choice the
+  ## turn goes on; answering it ends the turn.
   if game.gameOver or game.waitingChoice: return
+  if not game.turnEnding and not game.dead(game.currentPlayer):
+    game.turnEnding = true
+    inc game.visualBeat
+    game.resolveTriggers(ending = true)
+    if game.waitingChoice: return
+  game.turnEnding = false
+  if game.gameOver: return
   while true:
     game.currentPlayer = game.nextPlayer(game.currentPlayer)
     inc game.turnNumber

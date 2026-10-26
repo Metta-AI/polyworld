@@ -1,7 +1,7 @@
 ## The multiplayer game mode: three or more seats around the ring, playing
 ## the core's game. Every seat but the human's is played by a bot script.
 import std/math
-import ../core/sim, ../core/bots, ../scene/ring
+import ../core/sim, ../core/bots, ../core/eventtext, ../scene/ring
 export ring
 
 const
@@ -54,7 +54,7 @@ proc newMultiplayerMatch*(seats: openArray[Seat], humanSeat: int,
             problem
   for bot in result.bots:
     bot.ensureSeed(seed)
-  result.game = newGame(selected, seed)
+  result.game = newGame(selected, seed, recordEvents = true)
 
 proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
     seed: int64, botSources: openArray[string] = []): MultiplayerMatch =
@@ -106,8 +106,9 @@ proc turnStatus*(match: MultiplayerMatch,
   else: match.game.playerName(match.current, names) & " is thinking..."
 
 proc endTurn*(match: var MultiplayerMatch): bool =
-  ## The core's turn change: the next seat gains energy, draws, and its
-  ## start-of-turn triggers fire. False when the turn can't end yet.
+  ## The core's turn change: the turn's end-of-turn triggers fire, then the
+  ## next seat gains energy, draws, and its start-of-turn triggers fire.
+  ## False when the turn can't end yet, or its end waits on a choice.
   let before = match.game.turnNumber
   match.game.finishTurn()
   match.game.turnNumber != before
@@ -227,6 +228,7 @@ when not defined(headless):
       previewTime = 0.0'f32
       hudTime = 0.0'f
       previewLastFrame = epochTime()
+      terminalLog: LogReader  ## Where the terminal's printout of events is.
       seatRng =
         if sessionOptions.seedGiven or defined(takeScreenshot):
           initRand(sessionOptions.seed)
@@ -356,6 +358,8 @@ when not defined(headless):
         if play.presentationIdle(match.game) and not play.attackActive and
             match.skipDeadTurn():
           turnPassed()
+        for event in terminalLog.readNew(match.game):
+          echo event.describe(names)
         orbit.advance(previewDt)
       if not choosingClasses and openingDraw:
         play.addOpeningHands(match.game, table)
@@ -468,6 +472,8 @@ when not defined(headless):
         hoveredBoard = Canceled
       if not choosingClasses:
         template game: untyped = match.game
+        # Answering what the end of your turn asked for ends it.
+        let turnBefore = game.turnNumber
         # The choose screen covers the table: nothing under it is hovered.
         if play.choosing:
           discard
@@ -524,6 +530,8 @@ when not defined(headless):
             play.presentationIdle(game) and not game.gameOver:
           hoveredTarget = play.updateTargeting(game, table, window,
             stageVp, hoverIndex, pick, cancel)
+        if game.turnNumber != turnBefore:
+          turnPassed()
         when defined(takeScreenshot):
           if getEnv("AWM_CAPTURE_NO_HOVER") == "1":
             hoverIndex = -1

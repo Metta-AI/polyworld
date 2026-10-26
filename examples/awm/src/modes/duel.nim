@@ -4,7 +4,8 @@ import std/[math, options, os, random, strformat, tables, times]
 when defined(takeScreenshot):
   import std/strutils
 import chroma, opengl, pixie, silky, vmath, windy
-import ../core/sim, ../core/sessions, ../core/bots, ../core/replays
+import ../core/sim, ../core/sessions, ../core/bots, ../core/replays,
+  ../core/eventtext
 import ../app, ../bench, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel,
   ../scene/courtyard, ../scene/heroes, ../net/web, ../scene/placement,
@@ -196,6 +197,7 @@ proc runDuel*(app: App) =
     botClassWait = 1.5'f32
   var
     botVms: seq[BotVm]
+    terminalLog: LogReader  ## Where the terminal's printout of events is.
     seedRng = initRand()
     uiCapturesMouse = false  ## The pointer is over a tuning window.
     chooseCanceled = false  ## The choose screen's button, clicked last frame.
@@ -277,7 +279,7 @@ proc runDuel*(app: App) =
       stderr.writeLine "Player ", player + 1, " has an illegal deck: ", problem
 
   proc startDuel(seats: openArray[Seat], seed: int64) =
-    game = newGame(seats, seed)
+    game = newGame(seats, seed, recordEvents = true)
     play.resetTable()
     phase = PlayGame
     play.addOpeningHands(game, duelLayout)
@@ -729,6 +731,8 @@ proc runDuel*(app: App) =
       else:
         discard play.updateBots(game, duelLayout, botVms, botClock, humanActs,
           dt)
+        for event in terminalLog.readNew(game):
+          echo event.describe()
 
     let
       aspect = window.size.x.float32 / max(window.size.y.float32, 1)
