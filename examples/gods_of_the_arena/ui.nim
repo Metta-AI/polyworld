@@ -852,7 +852,7 @@ proc drawUi*(
 ) {.measure.} =
   ## Draws every Silky HUD panel for the current frame.
   if run.world.phase == Drafting:
-    sk.drawDraft(window, currentLayout(window).gameAreaSize, transport.playing)
+    sk.drawDraft(window, currentLayout(window).size, transport.playing)
     if not run.networked:
       transport.drawTransport(
         sk, window, currentLayout(window).transportPanel, actionCam,

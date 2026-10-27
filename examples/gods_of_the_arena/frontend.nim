@@ -1,19 +1,19 @@
 import
-  std/[os, strutils, uri],
-  chroma, jsony, silky, vmath, windy,
+  std/[os, random, strutils, uri],
+  bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[chrome, connections, menus, roomclients, rooms, policies, viewers],
-  content, controls, game, graphics, multiplayer, presets, replays
+  content, controls, game, graphics, homes, lobbies, multiplayer, presets, replays
 
 const AppName = "Polyworld GotA"
 
-proc bundledBot(): LocalPolicy =
+proc bundledBot(name, file: string): LocalPolicy =
   ## Loads the base bot from the native checkout or the web data bundle.
   let path =
     when defined(emscripten):
-      "/policies/gota/base.bas"
+      "/policies/gota/" & file & ".bas"
     else:
-      currentSourcePath().parentDir / "players/base.bas"
-  LocalPolicy(name: "Base bot", bytes: readPolicyBytes(path))
+      currentSourcePath().parentDir / "players" / (file & ".bas")
+  LocalPolicy(name: name, bytes: readPolicyBytes(path))
 
 proc runFrontend*() =
   ## Owns menu, lobby, match and return transitions on the same window.
@@ -30,33 +30,52 @@ proc runFrontend*() =
     preparedRevision = 0'u32
     viewedRevision = 0'u32
     config = matchConfig
-    configText: string
+    viewedPayload: string
+    configDirty, configPending: bool
+    lobbyUi = LobbyUi()
+    rng = initRand(2026)
     publicRoom = true
-    roomPage, participantPage: int
     humanSeat = 0
     multiplayerHuman = -1
     localPolicies: array[HeroClassCount, LocalPolicy]
     networkPolicies: array[HeroClassCount, LocalPolicy]
     chosenPolicy: LocalPolicy
     launchLocal, launchNetwork: bool
+    homeFocus: int
   try:
     preferences = readPreferences(AppName)
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   preferences.applyPreferences(window)
-  let base = bundledBot()
+  let bots = @[
+    bundledBot("Base bot", "base"),
+    bundledBot("Rusher", "rusher"),
+    bundledBot("Puller", "puller"),
+    bundledBot("Jev", "jev")
+  ]
+  let base = bots[0]
   for policy in localPolicies.mitems:
     policy = base
   chosenPolicy = base
   config.seed = options.seed
   config.maxTicks = options.maximumTicks
   config.spawnIntervalTicks = options.spawnIntervalTicks
-  configText = config.toJson()
   let inviteServer = inviteParameter("server")
   if inviteServer.len > 0:
     preferences.server = inviteServer
   if invite.len > 0:
     page = MultiplayerMenu
+  if serverAddress.len > 0:
+    preferences.server = serverAddress
+    page = MultiplayerMenu
+    try:
+      connection = connect(
+        preferences.server,
+        preferences.name,
+        gotaIdentity()
+      )
+    except CatchableError as problem:
+      error = problem.msg
 
   while not window.closeRequested:
     launchLocal = false
@@ -78,7 +97,16 @@ proc runFrontend*() =
       if client.snapshot.room.len > 0:
         page = LobbyMenu
         if viewedRevision != client.snapshot.revision:
-          configText = client.snapshot.payload
+          if configPending and client.snapshot.payload == config.toJson():
+            configDirty = false
+            configPending = false
+          if viewedPayload != client.snapshot.payload:
+            try:
+              config = parseConfig(client.snapshot.payload)
+              viewedPayload = client.snapshot.payload
+              configDirty = false
+            except GotaConfigError as problem:
+              error = problem.msg
           viewedRevision = client.snapshot.revision
       if client.events.len > 0:
         let event = client.events[0]
@@ -125,224 +153,429 @@ proc runFrontend*() =
     window.onButtonPress = nil
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
-      let origin = sk.beginMenu(window, "Gods of the Arena", "Polyworld")
+      if page == HomeMenu:
+        case sk.drawHome(window, homeFocus)
+        of StayHome: discard
+        of PlaySingle:
+          page = SingleMenu
+          lobbyUi.scroll = 0
+          lobbyUi.selectedSeat = -1
+        of PlayMultiplayer:
+          page = MultiplayerMenu
+          lobbyUi.scroll = 0
+          lobbyUi.selectedSeat = -1
+        of OpenSettings: page = SettingsMenu
+        of ExitGame:
+          when not defined(emscripten):
+            window.closeRequested = true
+        if error.len > 0:
+          sk.menuLabel(error, vec2(24, 24), color = rgbx(245, 151, 139, 255))
+        sk.endUi()
+        window.presentFrame(framePaceHz)
+        reportReplayFrame(0, 0)
+        return
+      var layout: LobbyLayout
+      let origin =
+        if page == SettingsMenu:
+          sk.textStyle = "Default"
+          sk.beginSettings(window)
+        else:
+          layout = sk.beginLobby(
+            window, lobbyUi,
+            if page == MultiplayerMenu: "MULTIPLAYER" else: "BATTLE SETUP",
+            if page == MultiplayerMenu: "Create a room or join a battle."
+            else: "Assign players. Configure your match.",
+            page == MultiplayerMenu
+          )
+          layout.origin
       try:
         case page
         of HomeMenu:
-          if sk.menuButton(window, "Single player", origin):
-            page = SingleMenu
-          if sk.menuButton(window, "Multiplayer", origin + vec2(0, 50)):
-            page = MultiplayerMenu
-          if sk.menuButton(window, "Settings", origin + vec2(0, 100)):
-            page = SettingsMenu
-          when not defined(emscripten):
-            if sk.menuButton(window, "Exit to OS", origin + vec2(0, 150)):
-              window.closeRequested = true
-          sk.menuLabel("Play with friends, or bring your own bots.",
-            origin + vec2(340, 6), color = MenuMuted)
-        of SingleMenu:
-          sk.menuLabel("Single player", origin, font = "Bold")
-          sk.menuLabel("Red team", origin + vec2(0, 38), color = MenuMuted)
-          sk.menuLabel("Blue team", origin + vec2(260, 38), color = MenuMuted)
-          for i in 0 ..< HeroClassCount:
-            let
-              point = origin + vec2(float32(i div 5) * 260, 75 + float32(i mod 5) * 86)
-              label = if i == humanSeat: "You" else: localPolicies[i].name
-            sk.menuLabel("Seat " & $(i + 1) & " / " & label, point, 250)
-            if sk.menuButton(window, "Play", point + vec2(0, 29), 70):
-              humanSeat = i
-            if sk.menuButton(window, "Base", point + vec2(78, 29), 70):
-              localPolicies[i] = base
-              if humanSeat == i:
-                humanSeat = -1
-            if sk.menuButton(window, "File...", point + vec2(156, 29), 88):
-              let selected = selectPolicy()
-              if selected.bytes.len > 0:
-                localPolicies[i] = selected
-                if humanSeat == i:
-                  humanSeat = -1
-          if sk.menuButton(window, "Spectate bots only", origin + vec2(0, 520), 244):
-            humanSeat = -1
-          if sk.menuButton(window, "Start game", origin + vec2(260, 520), 244):
-            config = parseConfig(configText)
-            launchLocal = true
-          sk.menuLabel("Match settings", origin + vec2(550, 0), font = "Bold")
-          sk.menuLabel("Seed, draft, duration, waves and map preset", origin + vec2(550, 32),
-            470, MenuMuted, "Small")
-          sk.menuInput(window, "localConfig", configText, origin + vec2(550, 66),
-            470, 490, multiline = true)
-          if sk.menuButton(window, "Back", origin + vec2(0, 580), 130):
-            page = HomeMenu
+          discard
         of MultiplayerMenu:
-          sk.menuLabel("Multiplayer", origin, font = "Bold")
-          sk.menuInput(window, "server", preferences.server, origin + vec2(0, 40), 650)
-          if sk.menuButton(window, "Connect", origin + vec2(670, 40), 160):
-            if connection != nil:
+          let
+            connected = connection != nil and connection.client.welcomed
+            p = layout.origin + vec2(32, 144)
+            totalWidth = if layout.compact: 936.0'f else: 1450.0'f
+          sk.lobbyPanel(p, vec2(totalWidth, 74))
+          sk.lobbyLabel("Server", p + vec2(20, 16), 90, "LobbyBold")
+          sk.lobbyInput(window, "server", preferences.server,
+            p + vec2(112, 15), totalWidth - 470)
+          if sk.lobbyButton(if connected: "Reconnect" else: "Connect",
+            p + vec2(totalWidth - 340, 15), 160):
               connection.close()
-            connection = connect(preferences.server, preferences.name, gotaIdentity())
-            preferences.savePreferences(AppName)
-            prepared = nil
-            preparedRevision = 0
-            viewedRevision = 0
-            multiplayerHuman = -1
-            networkPolicies = default(array[HeroClassCount, LocalPolicy])
-            error = ""
-          if connection != nil:
-            let client = connection.client
-            sk.menuLabel(client.status, origin + vec2(0, 88), 1000, MenuMuted)
-            if client.welcomed:
-              sk.menuInput(window, "roomName", roomName, origin + vec2(0, 132), 360)
-              if sk.menuButton(window,
-                if publicRoom: "Public room" else: "Unlisted room",
-                origin + vec2(380, 132), 180):
-                  publicRoom = not publicRoom
-              if sk.menuButton(window, "Create room", origin + vec2(580, 132), 180):
-                config = parseConfig(configText)
-                client.send(RoomMessage(
-                  kind: CreateRoom, name: roomName, number: HeroClassCount,
-                  tickRate: uint32(TickRate), flag: publicRoom,
-                  payload: config.toJson()
-                ))
-              sk.menuInput(window, "inviteRoom", invite, origin + vec2(0, 184), 560)
-              if sk.menuButton(window, "Join invite", origin + vec2(580, 184), 180):
-                if invite.contains("?"):
-                  let parsed = parseUri(invite)
-                  for key, value in decodeQuery(parsed.query):
-                    if key == "room":
-                      invite = value
-                joinRequested = true
-              sk.menuLabel("Public rooms for this exact game version", origin + vec2(0, 242),
-                color = MenuMuted)
-              if sk.menuButton(window, "Refresh", origin + vec2(670, 236), 160):
-                client.send(RoomMessage(kind: ListRooms))
-              roomPage = min(roomPage, max(0, (client.listings.len - 1) div 7))
-              for i in roomPage * 7 ..< min(client.listings.len, (roomPage + 1) * 7):
-                let room = client.listings[i]
-                if sk.menuButton(window,
-                  room.name & "  " & $room.occupied & "/" & $room.seats & "  " & $room.phase,
-                  origin + vec2(0, 286 + float32(i mod 7) * 43), 830):
-                    client.send(RoomMessage(kind: JoinRoom, room: room.id))
-              if sk.menuButton(window, "Previous", origin + vec2(450, 620), 180,
-                roomPage > 0):
-                  dec roomPage
-              if sk.menuButton(window, "Next", origin + vec2(650, 620), 180,
-                (roomPage + 1) * 7 < client.listings.len):
-                  inc roomPage
-          if sk.menuButton(window, "Back", origin + vec2(0, 620), 130):
+              connection = connect(
+                preferences.server, preferences.name, gotaIdentity()
+              )
+              preferences.savePreferences(AppName)
+              prepared = nil
+              preparedRevision = 0
+              viewedRevision = 0
+              viewedPayload = ""
+              configPending = false
+              multiplayerHuman = -1
+              networkPolicies = default(array[HeroClassCount, LocalPolicy])
+              error = ""
+          sk.lobbyIcon("status", p + vec2(totalWidth - 156, 23), 24,
+            if connected: rgbx(130, 215, 110, 255) else: LobbyMuted)
+          sk.lobbyLabel(if connected: "Connected" else: "Offline",
+            p + vec2(totalWidth - 122, 16), 116)
+          sk.lobbyPanel(layout.left, vec2(layout.leftWidth, 622))
+          let list = layout.left + vec2(22)
+          sk.lobbyIcon("units", list + vec2(0, 8), 38)
+          sk.lobbyLabel("PUBLIC ROOMS", list + vec2(50, 0), 500,
+            "LobbyHeading")
+          sk.lobbyLabel("Rooms for this game version", list + vec2(50, 38),
+            500, tint = LobbyMuted)
+          if sk.lobbyButton("Refresh", list + vec2(layout.leftWidth - 204, 6),
+            160, "loop", connected):
+              connection.client.send(RoomMessage(kind: ListRooms))
+          sk.lobbyIcon("search", list + vec2(4, 94))
+          sk.lobbyInput(window, "roomSearch", lobbyUi.search,
+            list + vec2(44, 84), layout.leftWidth - 88)
+          sk.lobbyLabel("ROOM", list + vec2(0, 136), 360, tint = LobbyMuted)
+          sk.lobbyLabel("PLAYERS", list + vec2(390, 136), 130,
+            tint = LobbyMuted)
+          sk.lobbyLabel("STATUS", list + vec2(540, 136), 130,
+            tint = LobbyMuted)
+          var matches: seq[int]
+          if connected:
+            for i, room in connection.client.listings:
+              if lobbyUi.search.toLowerAscii() in room.name.toLowerAscii():
+                matches.add i
+          lobbyUi.roomPage = min(lobbyUi.roomPage,
+            max(0, (matches.len - 1) div 5))
+          for row in 0 ..< 5:
+            let index = lobbyUi.roomPage * 5 + row
+            if index >= matches.len:
+              break
+            let
+              room = connection.client.listings[matches[index]]
+              point = list + vec2(0, 184 + row.float32 * 68)
+              watching = room.phase != rooms.Lobby or room.occupied == room.seats
+            sk.lobbyPanel(point, vec2(layout.leftWidth - 44, 60), true)
+            sk.lobbyLabel(room.name, point + vec2(12, 10), 365, "LobbyBold")
+            sk.lobbyLabel($room.occupied & " / " & $room.seats,
+              point + vec2(390, 10), 130)
+            sk.lobbyIcon("status", point + vec2(540, 20), 20,
+              if watching: LobbyMuted else: rgbx(130, 215, 110, 255))
+            sk.lobbyLabel(if room.phase != rooms.Lobby: $room.phase
+              elif watching: "Full" else: "Open", point + vec2(570, 10), 120)
+            if sk.lobbyButton(if watching: "Watch" else: "Join",
+              point + vec2(layout.leftWidth - 184, 8), 128, "arrow_right"):
+                connection.client.send(RoomMessage(kind: JoinRoom, room: room.id))
+                lobbyUi.scroll = 0
+          if matches.len == 0:
+            sk.lobbyLabel(if connected: "No rooms found. Create one to begin."
+              else: "Connect to a server to browse rooms.",
+              list + vec2(12, 200), layout.leftWidth - 68, tint = LobbyMuted)
+          sk.lobbyLabel($matches.len & " rooms", list + vec2(0, 554), 300)
+          if sk.lobbyButton("Previous", list + vec2(430, 550), 150,
+            enabled = lobbyUi.roomPage > 0):
+              dec lobbyUi.roomPage
+          sk.lobbyLabel($(lobbyUi.roomPage + 1) & " / " &
+            $max(1, (matches.len + 4) div 5), list + vec2(600, 552), 100)
+          if sk.lobbyButton("Next", list + vec2(layout.leftWidth - 194, 550),
+            150, enabled = (lobbyUi.roomPage + 1) * 5 < matches.len):
+              inc lobbyUi.roomPage
+          sk.lobbyPanel(layout.right, vec2(layout.rightWidth, 622))
+          let
+            create = layout.right + vec2(22)
+            width = layout.rightWidth - 44
+          sk.lobbyIcon("cross", create + vec2(0, 8), 32)
+          sk.lobbyLabel("CREATE ROOM", create + vec2(44, 0), width - 44,
+            "LobbyHeading")
+          sk.lobbyLabel("Room name", create + vec2(0, 52), width)
+          sk.lobbyInput(window, "roomName", roomName,
+            create + vec2(0, 96), width)
+          sk.lobbyLabel("Visibility", create + vec2(0, 146), width)
+          if sk.lobbyButton("Public", create + vec2(0, 190),
+            width / 2 - 6, "globe", selected = publicRoom):
+              publicRoom = true
+          if sk.lobbyButton("Private", create + vec2(width / 2 + 6, 190),
+            width / 2 - 6, "lock", selected = not publicRoom):
+              publicRoom = false
+          sk.lobbyLabel(if publicRoom: "Listed in public rooms."
+            else: "Only people with an invite can join.",
+            create + vec2(0, 238), width, tint = LobbyMuted)
+          if sk.lobbyButton("Create Room", create + vec2(0, 288), width,
+            "cross", connected and roomName.strip().len > 0):
+              connection.client.send(RoomMessage(
+                kind: CreateRoom, name: roomName, number: HeroClassCount,
+                tickRate: uint32(TickRate), flag: publicRoom,
+                payload: config.toJson()
+              ))
+              lobbyUi.scroll = 0
+          sk.lobbyIcon("link", create + vec2(0, 368))
+          sk.lobbyLabel("JOIN BY INVITE", create + vec2(44, 360), width - 44,
+            "LobbyHeading")
+          sk.lobbyLabel("Invite link or room code", create + vec2(0, 410), width)
+          sk.lobbyInput(window, "inviteRoom", invite,
+            create + vec2(0, 456), width)
+          if sk.lobbyButton("Join Room", create + vec2(0, 550), width,
+            "arrow_right", connected and invite.strip().len > 0):
+              if invite.contains("?"):
+                let parsed = parseUri(invite)
+                for key, value in decodeQuery(parsed.query):
+                  if key == "room":
+                    invite = value
+              joinRequested = true
+              lobbyUi.scroll = 0
+          if sk.lobbyButton("Back", layout.footer, 190, "arrow_left"):
             connection.close()
             connection = nil
             error = ""
             page = HomeMenu
-        of LobbyMenu:
+        of SingleMenu, LobbyMenu:
           let
-            client = connection.client
-            snapshot = client.snapshot
-            editable = snapshot.phase == rooms.Lobby
-            owner = snapshot.participant == client.participant
-          sk.menuLabel(snapshot.name, origin, font = "Bold")
-          sk.menuLabel("Red team", origin + vec2(0, 38), color = MenuMuted)
-          sk.menuLabel("Blue team", origin + vec2(260, 38), color = MenuMuted)
-          for i, seat in snapshot.seats:
-            let point = origin + vec2(float32(i div 5) * 260, 75 + float32(i mod 5) * 86)
-            var label = "Open seat"
-            if seat.owner != 0:
-              label = seat.name
+            online = page == LobbyMenu
+            client = if online: connection.client else: nil
+            snapshot = if online: client.snapshot else: RoomMessage()
+            editable = not online or snapshot.phase == rooms.Lobby
+            owner = not online or snapshot.participant == client.participant
+            modal = lobbyUi.selectedSeat != -1
+          if online and snapshot.seats.len != HeroClassCount:
+            raise newException(MenusError, "GotA rooms require ten seats")
+          sk.rosterPanel(layout)
+          var
+            emptyCount = 0
+            ownCount = 0
+            readyToStart = true
+            selfReady = false
+          for i in 0 ..< HeroClassCount:
+            let
+              seat = if online: snapshot.seats[i] else: Seat()
+              empty = if online: seat.owner == 0
+                else: i != humanSeat and localPolicies[i].bytes.len == 0
+              mine = not online or seat.owner == client.participant
+              human = if online: seat.name == "Human" else: i == humanSeat
+            var
+              name = if empty: "Add player" elif human: "You"
+                elif online: seat.name else: localPolicies[i].name
+              controller = if empty: "Empty slot" elif human: "HUMAN" else: "BOT"
+            if online and not empty:
               for participant in snapshot.participants:
                 if participant.id == seat.owner:
-                  label.add " / " & participant.name
-            sk.menuLabel($(i + 1) & " " & label, point, 250, font = "Small")
-            if seat.owner == 0 and editable:
-              if sk.menuButton(window, "You", point + vec2(0, 29), 70):
-                if multiplayerHuman >= 0:
-                  client.send(RoomMessage(kind: ReleaseSeat, seat: uint32(multiplayerHuman)))
-                multiplayerHuman = i
-                networkPolicies[i] = LocalPolicy()
-                client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: "Human"))
-              if sk.menuButton(window, "Base", point + vec2(78, 29), 70):
-                networkPolicies[i] = base
-                client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: base.name))
-              if sk.menuButton(window, "Bot", point + vec2(156, 29), 88):
-                networkPolicies[i] = chosenPolicy
-                client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: chosenPolicy.name))
-            elif seat.owner == client.participant and editable:
-              if sk.menuButton(window, "Release seat", point + vec2(0, 29), 244):
-                client.send(RoomMessage(kind: ReleaseSeat, seat: uint32(i)))
-                networkPolicies[i] = LocalPolicy()
-                if multiplayerHuman == i:
-                  multiplayerHuman = -1
-          if sk.menuButton(window, "Choose local bot...", origin + vec2(0, 520), 244, editable):
-            let selected = selectPolicy()
-            if selected.bytes.len > 0:
-              chosenPolicy = selected
-          sk.menuLabel(chosenPolicy.name, origin + vec2(260, 524), 250, MenuMuted, "Small")
-          if sk.menuButton(window, "Ready", origin + vec2(0, 568), 118, editable):
-            var sources: array[HeroClassCount, string]
-            for i, policy in networkPolicies:
-              sources[i] = policy.bytes
-            prepared = prepareNetworkMatch(client, sources)
-            preparedRevision = snapshot.revision
-            client.send(RoomMessage(
-              kind: Ready, revision: snapshot.revision, hash: prepared.game.networkHash()
-            ))
-          if sk.menuButton(window, "Start", origin + vec2(128, 568), 116, editable and owner):
-            client.send(RoomMessage(kind: StartMatch))
-          if sk.menuButton(window, "Copy invite", origin + vec2(260, 568), 244):
-            copyInvite(inviteBase() & "?server=" & encodeUrl(preferences.server) &
-              "&room=" & encodeUrl(snapshot.room))
-          sk.menuLabel("Match settings", origin + vec2(550, 0), font = "Bold")
-          if owner and editable:
-            sk.menuInput(window, "roomConfig", configText, origin + vec2(550, 36),
-              470, 270, multiline = true)
-            if sk.menuButton(window, "Apply settings", origin + vec2(550, 314), 470):
-              config = parseConfig(configText)
-              client.send(RoomMessage(
-                kind: ConfigureRoom, name: snapshot.name, number: HeroClassCount,
-                tickRate: uint32(TickRate), flag: publicRoom, payload: config.toJson()
-              ))
-          else:
-            sk.menuLabel($snapshot.phase, origin + vec2(550, 38), color = MenuMuted)
-          sk.menuLabel("Participants", origin + vec2(550, 368), font = "Bold")
-          participantPage = min(participantPage,
-            max(0, (snapshot.participants.len - 1) div 6))
-          for i in participantPage * 6 ..<
-            min(snapshot.participants.len, (participantPage + 1) * 6):
+                  controller = participant.name &
+                    (if participant.ready: " / Ready" else: " / Not ready")
+                  if human:
+                    name = participant.name
+                  readyToStart = readyToStart and participant.ready and
+                    participant.connected
+                  if mine:
+                    selfReady = participant.ready
+              if mine:
+                inc ownCount
+            if empty:
+              inc emptyCount
+              readyToStart = false
+            if sk.seatButton(layout, i, name, controller, human, empty,
+              editable and (mine or empty) and not modal):
+                lobbyUi.selectedSeat = i
+          let
+            fill = layout.left + vec2(22, 548)
+            botWidth = 216.0'f
+          sk.lobbyLabel("Fill empty slots", fill, 210, "LobbyBold")
+          var botNames: seq[string]
+          for bot in bots:
+            botNames.add bot.name
+          if chosenPolicy.name notin botNames:
+            botNames.add chosenPolicy.name
+          sk.lobbySelect(window, lobbyUi.selectedBot, botNames, fill + vec2(216, 0),
+            botWidth, editable and not modal)
+          for bot in bots:
+            if bot.name == lobbyUi.selectedBot:
+              chosenPolicy = bot
+          if sk.lobbyButton("Fill " & $emptyCount & " slots",
+            fill + vec2(444, 0), 198, "cross",
+            editable and emptyCount > 0 and not modal):
+              for i in 0 ..< HeroClassCount:
+                if online:
+                  if snapshot.seats[i].owner == 0:
+                    networkPolicies[i] = chosenPolicy
+                    client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
+                      name: chosenPolicy.name))
+                elif i != humanSeat and localPolicies[i].bytes.len == 0:
+                  localPolicies[i] = chosenPolicy
+          if sk.lobbyButton(if online: "Shuffle mine" else: "Shuffle",
+            fill + vec2(654, 0), layout.leftWidth - 698, "shuffle",
+            editable and not modal):
+              var seats: seq[int]
+              for i in 0 ..< HeroClassCount:
+                if not online or snapshot.seats[i].owner == client.participant:
+                  seats.add i
+              var shuffled = seats
+              rng.shuffle(shuffled)
               let
-                participant = snapshot.participants[i]
-                point = origin + vec2(550, 408 + float32(i mod 6) * 36)
-              sk.menuLabel(participant.name &
-                (if not participant.connected: " / disconnected"
-                 elif participant.ready: " / ready" else: " / loading"),
-                point, 330, MenuMuted, "Small")
-              if owner and editable and participant.id != client.participant:
-                if sk.menuButton(window, "Remove", point + vec2(350, 0), 120):
-                  client.send(RoomMessage(kind: KickParticipant, participant: participant.id))
-          if sk.menuButton(window, "Previous", origin + vec2(550, 640), 180,
-            participantPage > 0):
-              dec participantPage
-          if sk.menuButton(window, "Next", origin + vec2(750, 640), 180,
-            (participantPage + 1) * 6 < snapshot.participants.len):
-              inc participantPage
-          if snapshot.phase in {rooms.Ended, Desynced} and owner:
-            if sk.menuButton(window, "Return to lobby", origin + vec2(0, 620), 244):
-              client.send(RoomMessage(kind: ReturnLobby))
-              client.error = ""
-              error = ""
-          elif editable or snapshot.phase in {rooms.Ended, Desynced}:
-            if sk.menuButton(window, "Leave room", origin + vec2(0, 620), 244):
-              client.send(RoomMessage(kind: LeaveRoom))
-              page = MultiplayerMenu
-              prepared = nil
-              preparedRevision = 0
-              viewedRevision = 0
-              multiplayerHuman = -1
-              networkPolicies = default(array[HeroClassCount, LocalPolicy])
+                oldPolicies = if online: networkPolicies else: localPolicies
+                oldHuman = if online: multiplayerHuman else: humanSeat
+              for j, destination in seats:
+                let source = shuffled[j]
+                if online:
+                  networkPolicies[destination] = oldPolicies[source]
+                  if oldHuman == source:
+                    multiplayerHuman = destination
+                  client.send(RoomMessage(kind: ClaimSeat,
+                    seat: uint32(destination), name: snapshot.seats[source].name))
+                else:
+                  localPolicies[destination] = oldPolicies[source]
+                  if oldHuman == source:
+                    humanSeat = destination
+          sk.lobbyLabel(if online: "Other players keep control of their seats."
+            else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
+            fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
+          if sk.configPanel(window, lobbyUi, config, layout.right, layout.rightWidth,
+            owner and editable and not modal and not configPending):
+              configDirty = online
+          if online:
+            let info = layout.left + vec2(22, 640)
+            if sk.lobbyButton("Participants", info, 190, "units", not modal):
+              lobbyUi.selectedSeat = -2
+            sk.lobbyLabel(snapshot.name, info + vec2(208, 0), 400,
+              tint = LobbyMuted)
+            if sk.lobbyButton("Copy invite", layout.footer + vec2(204, 0),
+              200, "link", not modal):
+                copyInvite(inviteBase() & "?server=" & encodeUrl(preferences.server) &
+                  "&room=" & encodeUrl(snapshot.room))
+            if sk.lobbyButton(if selfReady: "Ready" else: "Ready up",
+              layout.footer + vec2(420, 0), 190, "status",
+              editable and ownCount > 0 and not configDirty and not modal):
+                var sources: array[HeroClassCount, string]
+                for i, policy in networkPolicies:
+                  sources[i] = policy.bytes
+                prepared = prepareNetworkMatch(client, sources)
+                preparedRevision = snapshot.revision
+                client.send(RoomMessage(kind: Ready, revision: snapshot.revision,
+                  hash: prepared.game.networkHash()))
+            if configDirty and owner and editable:
+              if sk.lobbyButton("Apply Settings", layout.primary,
+                250, "settings", not modal and not configPending):
+                  discard parseConfig(config.toJson())
+                  client.send(RoomMessage(
+                    kind: ConfigureRoom, name: snapshot.name,
+                    number: HeroClassCount, tickRate: uint32(TickRate),
+                    flag: publicRoom, payload: config.toJson()
+                  ))
+                  configPending = true
+            else:
+              if sk.lobbyButton("Start Game", layout.primary,
+                250, "arrow_right",
+                owner and editable and readyToStart and not modal,
+                tint = LobbyGreen):
+                  client.send(RoomMessage(kind: StartMatch))
+            if sk.lobbyButton(
+              if owner and snapshot.phase in {rooms.Ended, Desynced}:
+                "Return to lobby" else: "Leave room",
+              layout.footer, 190, "arrow_left", not modal
+            ):
+              if owner and snapshot.phase in {rooms.Ended, Desynced}:
+                client.send(RoomMessage(kind: ReturnLobby))
+                client.error = ""
+                error = ""
+              else:
+                client.send(RoomMessage(kind: LeaveRoom))
+                page = MultiplayerMenu
+                prepared = nil
+                preparedRevision = 0
+                viewedRevision = 0
+                viewedPayload = ""
+                multiplayerHuman = -1
+                networkPolicies = default(array[HeroClassCount, LocalPolicy])
+                lobbyUi.scroll = 0
+          else:
+            if sk.lobbyButton("Back", layout.footer, 190, "arrow_left", not modal):
+              page = HomeMenu
+            if sk.lobbyButton("Start Game", layout.primary,
+              250, "arrow_right", emptyCount == 0 and not modal,
+              tint = LobbyGreen):
+                discard parseConfig(config.toJson())
+                launchLocal = true
+            sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
+              else: "Playing seat " & $(humanSeat + 1),
+              layout.left + vec2(22, 638), 800, tint = LobbyMuted)
+          let selectedSeat = lobbyUi.selectedSeat
+          let choice =
+            if modal: sk.seatPicker(window, lobbyUi, bots)
+            else: SlotChoice()
+          if choice.chosen:
+            var selected = if choice.file: selectPolicy()
+              elif choice.human or choice.clear: LocalPolicy()
+              else: bots[choice.bot]
+            if not choice.file or selected.bytes.len > 0:
+              if choice.file:
+                chosenPolicy = selected
+                lobbyUi.selectedBot = selected.name
+              if online:
+                if choice.human and multiplayerHuman >= 0 and
+                  multiplayerHuman != selectedSeat:
+                    client.send(RoomMessage(kind: ReleaseSeat,
+                      seat: uint32(multiplayerHuman)))
+                    networkPolicies[multiplayerHuman] = LocalPolicy()
+                if multiplayerHuman == selectedSeat:
+                  multiplayerHuman = -1
+                networkPolicies[selectedSeat] = selected
+                if choice.human:
+                  multiplayerHuman = selectedSeat
+                client.send(RoomMessage(
+                  kind: if choice.clear: ReleaseSeat else: ClaimSeat,
+                  seat: uint32(selectedSeat),
+                  name: if choice.human: "Human" else: selected.name
+                ))
+              else:
+                if choice.human:
+                  if humanSeat >= 0 and humanSeat != selectedSeat:
+                    localPolicies[humanSeat] = LocalPolicy()
+                  humanSeat = selectedSeat
+                elif humanSeat == selectedSeat:
+                  humanSeat = -1
+                localPolicies[selectedSeat] = selected
+              lobbyUi.selectedSeat = -1
+          if online and lobbyUi.selectedSeat == -2:
+            sk.pushLayer(PopupsLayer)
+            let
+              view = window.size.vec2 / sk.uiScale
+              at = (view - vec2(650, 500)) * 0.5'f
+            discard sk.interact(rect(vec2(0), view), true)
+            sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 180))
+            sk.lobbyPanel(at, vec2(650, 500))
+            sk.lobbyLabel("PARTICIPANTS", at + vec2(24, 16), 580,
+              "LobbyHeading")
+            lobbyUi.participantPage = min(lobbyUi.participantPage,
+              max(0, (snapshot.participants.len - 1) div 6))
+            for row in 0 ..< 6:
+              let index = lobbyUi.participantPage * 6 + row
+              if index >= snapshot.participants.len:
+                break
+              let
+                participant = snapshot.participants[index]
+                point = at + vec2(24, 76 + row.float32 * 48)
+              sk.lobbyLabel(participant.name &
+                (if not participant.connected: " / Offline"
+                 elif participant.ready: " / Ready" else: " / Not ready"),
+                point, 430)
+              if sk.lobbyButton("Remove", point + vec2(450, 0), 140,
+                enabled = owner and editable and
+                  participant.id != client.participant):
+                    client.send(RoomMessage(kind: KickParticipant,
+                      participant: participant.id))
+            if sk.lobbyButton("Previous", at + vec2(24, 422), 170,
+              enabled = lobbyUi.participantPage > 0):
+                dec lobbyUi.participantPage
+            if sk.lobbyButton("Next", at + vec2(210, 422), 170,
+              enabled = (lobbyUi.participantPage + 1) * 6 <
+                snapshot.participants.len):
+                  inc lobbyUi.participantPage
+            if sk.lobbyButton("Close", at + vec2(396, 422), 230):
+              lobbyUi.selectedSeat = -1
+            sk.popLayer()
         of SettingsMenu:
           if sk.settingsPanel(window, preferences, AppName, origin):
             page = HomeMenu
       except CatchableError as problem:
         error = problem.msg
       if error.len > 0:
-        sk.menuLabel(error, origin + vec2(0, 678), 1040, rgbx(245, 151, 139, 255), "Small")
+        sk.lobbyLabel(error, vec2(24, 0), 1400, tint = rgbx(245, 151, 139, 255))
+      sk.textStyle = "Default"
       sk.endUi()
       window.presentFrame(framePaceHz)
       reportReplayFrame(0, 0)

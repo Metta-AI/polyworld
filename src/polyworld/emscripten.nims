@@ -1,7 +1,7 @@
 ## Shared Emscripten compile recipe for Polyworld games.
 
 import
-  std/[os, strformat, strutils]
+  std/[hashes, os, strformat, strutils]
 
 proc setupEmscripten*(exampleDir: string, game = "") =
   ## Configures the wasm backend and writes the bundle next to the game.
@@ -42,12 +42,15 @@ proc setupEmscripten*(exampleDir: string, game = "") =
       if not fileExists(logoFile) or readFile(logoFile) != logoData:
         writeFile(logoFile, logoData)
       logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
-        "width=\"320\" height=\"240\" src=\"loading-logo.png\" " &
+        "width=\"320\" height=\"240\" src=\"loading-logo.png?v=" &
+        $hash(logoData) & "\" " &
         "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
     if game == "gota":
-      preload.add " --preload-file " & quoteShell(
-        exampleDir / "players/base.bas" & "@/policies/gota/base.bas")
+      for bot in ["base", "rusher", "puller", "jev"]:
+        preload.add " --preload-file " & quoteShell(
+          exampleDir / "players" / (bot & ".bas") &
+          "@/policies/gota/" & bot & ".bas")
       switch("passL", "-s EXPORTED_FUNCTIONS=" &
         "_main,_malloc,_free,_windy_websocket_open_callback," &
         "_windy_websocket_message_callback,_windy_websocket_error_callback," &

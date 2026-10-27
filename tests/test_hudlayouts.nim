@@ -49,11 +49,11 @@ for size in [
 ]:
   let layout = initGameUiLayout(size / gameUiScale(size), TransportHeight)
   let
-    draftScale = gota.draftScale(layout.gameAreaSize)
-    draftSize = layout.gameAreaSize / draftScale
+    draftScale = gota.draftScale(layout.size)
+    draftSize = layout.size / draftScale
     draft = gota.draftPanels(draftSize)
   doAssert draftScale > 0 and draftScale <= 1.5'f
-  if layout.gameAreaSize.x >= 1620 and layout.gameAreaSize.y >= 996:
+  if layout.size.x >= 1620 and layout.size.y >= 996:
     doAssert draftScale == 1.5'f
   doAssert draft.panel.inside(draftSize)
   var draftChildren = @[

@@ -8,7 +8,12 @@ const
   ControlIconNames*: array[ControlEffect, string] = [
     "", "stunned", "silenced", "rooted"
   ]
-  LogoPath* = DataRoot & "/themes/gota/gota_logo.png"
+  MenuRoot* = DataRoot & "/themes/gota/menu/"
+  LogoPath* = MenuRoot & "logo.png"
+  MenuImages* = [
+    "background", "logo", "button-single-player", "button-multiplayer",
+    "button-settings", "button-exit"
+  ]
   LicensePaths* = [
     "LICENSE", "licenses/gota.md",
     "fonts/OFL-Rubik.txt", "fonts/OFL-OverpassMono.txt",
@@ -225,6 +230,16 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
+  for asset in result.mitems:
+    if asset.source == LogoPath.assetName:
+      asset = imageAsset(LogoPath, 768)
+  for name in MenuImages:
+    if name == "logo":
+      continue
+    result.add imageAsset(
+      MenuRoot & name & ".png",
+      if name == "background": 1536 else: 768
+    )
   for path in LicensePaths:
     result.add fileAsset(path)
   result.add terrainAssets(

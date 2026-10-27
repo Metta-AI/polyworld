@@ -17,11 +17,14 @@ import
 when defined(coworld):
   import polyworld/coworld
 
-var matchConfig* = GotaConfig(seed: ArenaSeed)
+var
+  matchConfig* = GotaConfig(seed: ArenaSeed)
+  serverAddress*: string
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
   echo "Gods of the Arena"
+  echo "  --server URL           Open Multiplayer and connect to a ws/wss server."
   echo "  --bot:PATH              Fill one of the 10 hero slots."
   echo "  --bot:PATH:N            Fill N of the 10 slots with that file."
   echo "  --bot PATH[:N]          The equivalent two-argument form."
@@ -74,6 +77,11 @@ proc parseGameOptions(validateMatch: bool): GameOptions =
       discard
     else:
       case argument
+      of "--server":
+        serverAddress = arguments.argumentValue(index, "--server")
+        if not serverAddress.startsWith("ws://") and
+          not serverAddress.startsWith("wss://"):
+            fail("--server requires a ws:// or wss:// URL")
       of "--config":
         discard arguments.argumentValue(index, "--config")
       of "--draft-mode":
@@ -108,6 +116,12 @@ proc parseGameOptions(validateMatch: bool): GameOptions =
       else:
         fail("unknown argument: " & argument)
     inc index
+  if serverAddress.len > 0:
+    when defined(headless):
+      fail("--server requires the graphical client")
+    if result.botGroups.len > 0 or result.replayPath.len > 0 or
+      result.playerSlot > 0:
+        fail("--server uses lobby seats; select players and bots in the lobby")
   if validateMatch or result.botGroups.len > 0 or result.replayPath.len > 0:
     result.validateGameOptions(
       HeroClassCount,

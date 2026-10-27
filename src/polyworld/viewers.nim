@@ -187,10 +187,11 @@ proc drawSplash*(
     let
       uv = sk.atlas.entries[name]
       src = vec2(uv.width.float32, uv.height.float32)
-      area = window.size.vec2 * 0.78
+      view = window.size.vec2 / sk.uiScale
+      area = view * 0.78
       scale = min(area.x / max(src.x, 1), area.y / max(src.y, 1))
       dest = src * scale
-      pos = (window.size.vec2 - dest) * 0.5
+      pos = (view - dest) * 0.5
     sk.drawQuad(
       pos,
       dest,

@@ -45,7 +45,7 @@ type
     heroes*: array[10, GameUiPanel]
 
 proc draftScale*(size: Vec2): float32 =
-  ## Enlarges the picker by half while fitting above the replay controls.
+  ## Enlarges the picker by half while fitting within the window.
   min(
     1.5'f,
     min((size.x - 48) / PanelDraft.x, (size.y - 48) / PanelDraft.y)

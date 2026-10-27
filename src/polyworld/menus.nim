@@ -214,35 +214,50 @@ proc beginMenu*(sk: Silky, window: Window, title, subtitle: string): Vec2 =
   sk.menuLabel(subtitle, result + vec2(0, 42), width = 1040, color = MenuMuted)
   result.y += 92
 
+proc beginSettings*(sk: Silky, window: Window): Vec2 =
+  ## Centers the shared settings panel at a readable scale.
+  sk.uiScale = max(0.1'f, min(
+    window.size.x.float32 / 800,
+    window.size.y.float32 / 540
+  ))
+  sk.beginUi(window, window.size)
+  sk.clearScreen(rgbx(0, 0, 0, 255))
+  result = (window.size.vec2 / sk.uiScale - vec2(720, 440)) * 0.5'f
+
 proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
     app: string, origin: Vec2
 ): bool =
-  ## Edits and saves shared preferences without replacing a running match.
-  sk.menuLabel("Settings", origin, font = "Bold")
-  sk.menuLabel("Display name", origin + vec2(0, 44))
+  ## Edits preferences with the existing Silky theme and widgets.
+  let previous = preferences
+  sk.draw9Patch(
+    "window.9patch",
+    sk.theme.windowPatch,
+    origin - vec2(24),
+    vec2(768, 488)
+  )
+  sk.drawLabel("Settings", origin, vec2(720, 40),
+    sk.theme.defaultTextColor, "H1")
+  sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),
+    sk.theme.defaultTextColor)
   sk.menuInput(window, "displayName", preferences.name,
-    origin + vec2(210, 40), 490)
-  sk.menuLabel("Server", origin + vec2(0, 94))
+    origin + vec2(210, 64), 510)
+  sk.drawLabel("Server", origin + vec2(0, 120), vec2(210, 36),
+    sk.theme.defaultTextColor)
   sk.menuInput(window, "preferredServer", preferences.server,
-    origin + vec2(210, 90), 490)
-  if sk.menuButton(window, "Fullscreen: " & $preferences.fullscreen,
-    origin + vec2(0, 150), 340):
-      preferences.fullscreen = not preferences.fullscreen
-      preferences.applyPreferences(window)
-  if sk.menuButton(window, "FPS limit: " & $preferences.fps,
-    origin + vec2(0, 200), 340):
-      preferences.fps = case preferences.fps
-        of 30: 60
-        of 60: 120
-        of 120: 0
-        else: 30
-      preferences.applyPreferences(window)
-  if sk.menuButton(window,
-    "Visual interpolation: " & $preferences.interpolation,
-    origin + vec2(0, 250), 340):
-      preferences.interpolation = not preferences.interpolation
-      preferences.applyPreferences(window)
-  if sk.menuButton(window, "Save and back", origin + vec2(0, 320), 340):
+    origin + vec2(210, 120), 510)
+  sk.at = origin + vec2(0, 188)
+  checkBox "Fullscreen", preferences.fullscreen
+  sk.at = origin + vec2(0, 240)
+  checkBox "Visual interpolation", preferences.interpolation
+  sk.drawLabel("FPS limit", origin + vec2(0, 292), vec2(210, 36),
+    sk.theme.defaultTextColor)
+  for i, fps in [30, 60, 120, 0]:
+    sk.at = origin + vec2(210 + i.float32 * 120, 292)
+    radioButton (if fps == 0: "Unlimited" else: $fps), preferences.fps, fps
+  if preferences != previous:
+    preferences.applyPreferences(window)
+  sk.at = origin + vec2(0, 380)
+  button "Save and Back":
     preferences.savePreferences(app)
     result = true

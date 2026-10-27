@@ -4,7 +4,7 @@ import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  cameras, controls, faces, lighting, spelleffects, multiplayer,
+  cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -164,6 +164,8 @@ proc initializeGraphics*() =
     addAbilityIcons(builder)
     addItemIcons(builder)
     builder.addDefaultFonts()
+    builder.addLobbyFonts()
+    builder.addHomeAssets()
     builder.addFont(DefaultFontPath, "HeroVersus", 24.0)
     builder.addFont(DefaultFontPath, "WorldName", 32.0)
     builder.write(AtlasPath)
@@ -180,6 +182,9 @@ proc runGraphics*(
 ): bool {.discardable.} =
   ## Runs one match on the existing window and releases match-owned resources.
   initializeGraphics()
+  # Loading polls window events, so retire the lobby before drawing the splash.
+  window.onFrame = nil
+  window.onButtonPress = nil
   clearPlayerCommands()
   clearProps()
   var
@@ -1698,6 +1703,7 @@ proc runGraphics*(
         let heroId = playerHeroId()
         if picked != 0 and objectTeam(picked) != objectTeam(heroId):
           queueAttackTarget(heroId, picked)
+          selectEntity(heroId)
         else:
           issueGroundOrder(viewProjection, true)
         attackMoveArmed = false
@@ -1735,6 +1741,7 @@ proc runGraphics*(
     let
       heroId = playerHeroId()
       picked = pickEntity(viewProjection)
+    selectEntity(heroId)
     if armedItem >= 0:
       let
         (origin, direction) = mouseRay(
@@ -2471,6 +2478,8 @@ proc runGraphics*(
           var menuOrigin: Vec2
           if matchMenu == HiddenMatchMenu:
             sk.beginUi(window, window.size)
+          elif matchMenu == MatchSettings:
+            menuOrigin = sk.beginSettings(window)
           else:
             menuOrigin = sk.beginMenu(window, "Gods of the Arena", "Match menu")
           if matchMenu == HiddenMatchMenu:
