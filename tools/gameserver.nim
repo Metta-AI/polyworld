@@ -1,7 +1,7 @@
 import
-  std/[monotimes, os, strutils],
+  std/[monotimes, os],
   mummy,
-  polyworld/[relays, rooms]
+  polyworld/[cli, relays, rooms]
 
 const MaxConnections = 256
 
@@ -16,6 +16,27 @@ type
     socket: WebSocket
 
 var inbox: Channel[Input]
+
+proc serverPort(): Port =
+  ## Reads the port override before opening sockets or starting threads.
+  var value = getEnv("PORT", "8090")
+  let arguments = commandLineParams()
+  var index = 0
+  while index < arguments.len:
+    case arguments[index]
+    of "--port":
+      value = arguments.argumentValue(index, "--port")
+    of "--help", "-h":
+      echo "Usage: gameserver [--port NUMBER]"
+      echo "Port defaults to PORT or 8090; BIND defaults to 127.0.0.1."
+      quit(0)
+    else:
+      fail("unknown argument: " & arguments[index])
+    inc index
+  let port = parsePositiveInt32(value, "port")
+  if port > 65535:
+    fail("port must be between 1 and 65535")
+  Port(port)
 
 proc request(request: Request) {.gcsafe.} =
   ## Exposes health checks and the binary WebSocket endpoint.
@@ -38,25 +59,24 @@ proc websocket(
   )):
     socket.close()
 
-proc serve(server: Server) {.thread.} =
+proc serve(config: tuple[server: Server, port: Port]) {.thread.} =
   ## Runs Mummy's socket pump independently of the room scheduler.
-  let
-    port = parseInt(getEnv("PORT", "8090"))
-    address = getEnv("BIND", "127.0.0.1")
-  echo "Polyworld gameserver ws://" & address & ":" & $port & "/ws"
-  server.serve(Port(port), address)
+  let address = getEnv("BIND", "127.0.0.1")
+  echo "Polyworld gameserver ws://" & address & ":" & $uint16(config.port) & "/ws"
+  config.server.serve(config.port, address)
 
+let port = serverPort()
 inbox.open(1024)
 var
   server = newServer(
     request, websocket, workerThreads = 2,
     maxBodyLen = 0, maxMessageLen = MaxWireBytes
   )
-  thread: Thread[Server]
-  relay = Relay()
+  thread: Thread[tuple[server: Server, port: Port]]
+  relay = Relay(logEvents: true)
   connections: seq[Connection]
   nextConnection = 0
-createThread(thread, serve, server)
+createThread(thread, serve, (server, port))
 while true:
   let now = float64(getMonoTime().ticks) / 1_000_000_000.0
   for i in 0 ..< 1024:
@@ -72,15 +92,19 @@ while true:
     case input.event
     of OpenEvent:
       if connections.len >= MaxConnections:
+        relay.logEvent("connection.rejected", detail = "Connection limit reached")
         input.socket.close()
       else:
         inc nextConnection
         connections.add Connection(id: nextConnection, socket: input.socket)
+        relay.logEvent("connection.opened", nextConnection)
     of MessageEvent:
       if index >= 0:
         if input.binary:
           relay.process(connections[index].id, input.bytes, now)
         else:
+          relay.logEvent("request.rejected", connections[index].id,
+            detail = "Binary packets required")
           input.socket.send(
             RoomMessage(kind: Failure, detail: "Binary packets required").encode,
             BinaryMessage
@@ -88,6 +112,11 @@ while true:
           input.socket.close()
     of ErrorEvent, CloseEvent:
       if index >= 0:
+        relay.logEvent(
+          if input.event == ErrorEvent: "connection.error"
+          else: "connection.closed",
+          connections[index].id
+        )
         relay.disconnect(connections[index].id)
         connections.delete(index)
   relay.advance(now)

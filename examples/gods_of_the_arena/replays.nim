@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 6'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 70'u16
+  ReplayGameVersion* = 72'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -206,14 +206,16 @@ proc recordUseItem*(
     recorder: ReplayRecorder,
     tick: uint32,
     heroId,
-    slot: int32
+    slot: int32,
+    targetId = 0'i32
 ) =
   ## Records one useItem action without bot implementation details.
   recorder.record ReplayAction(
     tick: tick,
     heroId: heroId,
     kind: ActionUseItem,
-    first: slot
+    first: slot,
+    second: targetId
   )
 
 proc recordBuyback*(

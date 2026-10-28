@@ -151,6 +151,7 @@ const
   MaxItemStack* = 8
   PotionCooldownTicks* = 10 * TickRate
   PotionRecoveryTicks* = 10 * TickRate
+  PotionTargetRangeTiles* = 3
   SpawnRecoverySeconds* = 5
   PortalChannelTicks* = 3 * TickRate
   PortalCooldownTicks* = 60 * TickRate

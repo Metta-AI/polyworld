@@ -13,7 +13,7 @@ type
     index: int
     dependency: Dependency
     cache: string
-    latest: bool
+    latest, local: bool
   SyncResult = object
     index: int
     entry, error: string
@@ -26,7 +26,7 @@ when defined(posix):
     ## Locks the dependency cache across independent build processes.
 
 proc sync(job: SyncJob): string =
-  ## Resolves one dependency and preserves its detached pinned checkout.
+  ## Resolves a pin, preserving branches in the sibling development workspace.
   var dependency = job.dependency
   let
     path = job.cache / dependency.name
@@ -34,20 +34,20 @@ proc sync(job: SyncJob): string =
   if created:
     createDir(path.parentDir)
     discard command([
-      "git", "clone", "--filter=blob:none", "--no-checkout",
-      dependency.url, path
+      "git", "clone", "--filter=blob:none", dependency.url, path
     ])
-  else:
-    require(
-      command([
-        "git", "-C", path, "status", "--porcelain", "--untracked-files=no"
-      ]).len == 0,
-      "Dependency has local modifications: " & path
-    )
-  if not job.latest and not created and
-    command(["git", "-C", path, "rev-parse", "HEAD"]) == dependency.revision:
-      return [dependency.name, dependency.version, dependency.url,
-        dependency.revision].join(" ")
+  let current = command(["git", "-C", path, "rev-parse", "HEAD"])
+  if not created and
+    (not job.local or job.latest or current != dependency.revision):
+      require(
+        command([
+          "git", "-C", path, "status", "--porcelain", "--untracked-files=no"
+        ]).len == 0,
+        "Dependency has local modifications: " & path
+      )
+  if not job.latest and not created and current == dependency.revision:
+    return [dependency.name, dependency.version, dependency.url,
+      dependency.revision].join(" ")
   if job.latest:
     let fields = command([
       "git", "ls-remote", dependency.url, "HEAD"
@@ -55,11 +55,20 @@ proc sync(job: SyncJob): string =
     require(fields.len >= 2, "Unable to resolve HEAD: " & dependency.url)
     dependency.revision = fields[0]
   discard command([
-    "git", "-C", path, "fetch", "--depth=1", "origin", dependency.revision
+    "git", "-C", path, "fetch", dependency.url, dependency.revision
   ])
-  discard command([
-    "git", "-C", path, "checkout", "--detach", dependency.revision
-  ])
+  if job.local:
+    require(command(["git", "-C", path, "branch", "--show-current"]).len > 0,
+      "Local dependency must be on a branch: " & path)
+    discard command([
+      "git", "-C", path, "merge", "--ff-only", dependency.revision
+    ])
+    require(command(["git", "-C", path, "rev-parse", "HEAD"]) ==
+      dependency.revision, "Local dependency differs from the lock: " & path)
+  else:
+    discard command([
+      "git", "-C", path, "checkout", "--detach", dependency.revision
+    ])
   if job.latest:
     for manifest in walkFiles(path / "*.nimble"):
       for line in readFile(manifest).splitLines():
@@ -82,7 +91,9 @@ proc worker(job: SyncJob) {.thread.} =
 
 proc syncDependencies*(latest = false) =
   ## Synchronizes pinned dependencies and optionally updates both lock files.
-  let cache = absolutePath(getEnv("POLYWORLD_DEPS", Root / "tmp/coworld/deps"))
+  let
+    cache = normalizedPath(absolutePath(getEnv("POLYWORLD_DEPS", Root.parentDir)))
+    local = cache == Root.parentDir
   createDir(cache)
   when defined(posix):
     let lock = open(cache / ".sync.lock", fmWrite)
@@ -117,7 +128,7 @@ proc syncDependencies*(latest = false) =
       for i in 0 ..< count:
         createThread(threads[i], worker, SyncJob(
           index: start + i, dependency: dependencies[start + i],
-          cache: cache, latest: latest
+          cache: cache, latest: latest, local: local
         ))
         inc started
     finally:

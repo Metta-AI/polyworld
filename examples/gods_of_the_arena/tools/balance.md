@@ -9,7 +9,7 @@ nim c -o:tmp/gota/tools/balance examples/gods_of_the_arena/tools/balance.nim
 Use one frozen BASIC policy in all ten seats and a saved Competition game config:
 
 ```sh
-POLYWORLD_DEPS="$PWD/tmp/coworld/deps" tmp/gota/tools/balance \
+tmp/gota/tools/balance \
   --run khors-experiment \
   --policy /absolute/path/policy.bas \
   --policy-label 'khors v180' \
@@ -128,7 +128,7 @@ changes. `final.patch` includes all differences from the archived production
 source, including inherited experimental changes. Nothing is applied to production.
 
 ```sh
-POLYWORLD_DEPS="$PWD/tmp/coworld/deps" tmp/gota/tools/balance \
+tmp/gota/tools/balance \
   --run khors180-sequential-1988 \
   --policy tmp/gota/balance/khors180-10x100/policy.bas \
   --policy-label 'khors v180 (Andre von Auto)' \
@@ -175,7 +175,7 @@ The two heroes in each role necessarily oppose one another, so their decisive
 win rates sum to 100%; interpret them as comparisons within that role.
 
 ```sh
-POLYWORLD_DEPS="$PWD/tmp/coworld/deps" tmp/gota/tools/balance \
+tmp/gota/tools/balance \
   --run khors180-roles-farthest-1988 \
   --policy tmp/gota/balance/khors180-10x100/policy.bas \
   --policy-label 'khors v180, complete role draft' \
@@ -229,7 +229,7 @@ and movement decisions. It checks skill rank, charges, cooldown, mana, and silen
 Other heroes retain their previous offensive and healing decisions.
 
 ```sh
-POLYWORLD_DEPS="$PWD/tmp/coworld/deps" nim r -d:headless \
+nim r -d:headless \
   -o:tmp/gota/tools/balance_policy \
   examples/gods_of_the_arena/tools/balance_policy.nim \
   /absolute/path/original-policy.bas /absolute/path/content.nim \

@@ -64,7 +64,7 @@ proc ground(game: Game, slot: HeroAbilitySlot, tiles = 0'i32): bool =
     mapCoordinate(hero.position.z) + tiles
   )
 
-echo "Testing self and melee keys cast without a confirmation click"
+echo "Testing self casts and explicit aimed confirmation"
 block:
   let
     game = spellGame(VanguardKnight)
@@ -75,66 +75,43 @@ block:
   hero.hp -= 50
   let hp = hero.hp
   doAssert activatePlayerAbility(
-    game.world, hero.id, int32(PassiveAbility), hero.id, x, y
+    game.world, hero.id, int32(PassiveAbility)
   )
-  doAssert hero.hp == hp
   flushPlayerCommands(game)
   doAssert hero.hp > hp
   doAssert game.world.casts[^1].targetId == hero.id
-  doAssert activatePlayerAbility(
-    game.world, hero.id, int32(PrimaryAbility), hero.id, x, y
-  )
-  flushPlayerCommands(game)
-  doAssert game.world.casts.len == 2
-  doAssert game.world.casts[^1].ability == FirebrandSword
-  doAssert game.world.casts[^1].targetId == 0
-  doAssert hero.charges[PrimaryAbility] == 2
-  doAssert armedAbility == -1
-
-echo "Testing melee keys strike nearby targets and swing at distant targets"
-for distance in [60_000'i32, 180_000'i32]:
-  let
-    game = spellGame(VanguardKnight)
-    hero = game.world.heroes[0]
-    enemy = game.target(5, distance)
-  game.step()
-  hero.attackObjectId = enemy.id
-  doAssert activatePlayerAbility(
-    game.world, hero.id, int32(PrimaryAbility), hero.id, 0, 0
+  doAssert not activatePlayerAbility(
+    game.world, hero.id, int32(PrimaryAbility)
   )
   flushPlayerCommands(game)
   doAssert game.world.casts.len == 1
-  if distance < FirebrandSword.abilitySpec.range:
-    doAssert game.world.casts[0].targetId == enemy.id
-    doAssert enemy.hp == 10_000 - FirebrandSword.abilitySpec.damage
-  else:
-    doAssert game.world.casts[0].targetId == 0
-    doAssert enemy.hp == 10_000
+  doAssert armedAbility == PrimaryAbility.ord
+  queueCastPoint(hero.id, PrimaryAbility.ord.int32, x, y)
+  flushPlayerCommands(game)
+  doAssert game.world.casts.len == 2
+  doAssert game.world.casts[^1].ability == FirebrandSword
+  doAssert hero.charges[PrimaryAbility] == 2
 
-echo "Testing every Ranger key uses the same existing combat target"
-block:
+echo "Testing existing combat targets never consume aimed hotkeys"
+for class in [VanguardKnight, Ranger, DruidWarden]:
   let
-    game = spellGame(Ranger)
+    game = spellGame(class)
     hero = game.world.heroes[0]
     enemy = game.target(5, 60_000)
   game.step()
   hero.attackObjectId = enemy.id
   for slot in HeroAbilitySlot:
-    doAssert activatePlayerAbility(
-      game.world, hero.id, int32(slot), hero.id, 0, 0
+    if heroAbility(class, slot).abilitySpec.casting == SelfCast:
+      continue
+    doAssert not activatePlayerAbility(
+      game.world, hero.id, int32(slot)
     )
-    doAssert armedAbility == -1
-  doAssert game.world.casts.len == 0
-  flushPlayerCommands(game)
-  doAssert game.world.casts.len == 4
+    doAssert armedAbility == slot.ord
+    flushPlayerCommands(game)
+    doAssert game.world.casts.len == 0
   doAssert hero.attackObjectId == enemy.id
-  for spell in game.world.casts:
-    if spell.ability.abilitySpec.casting == ProjectileCast:
-      doAssert spell.targetId == enemy.id
-    else:
-      doAssert spell.spellContains(spell.ability.abilitySpec.area, enemy.position)
 
-echo "Testing selected allies receive healing despite an enemy combat target"
+echo "Testing selected allies receive confirmed healing"
 block:
   let
     game = spellGame(DruidWarden)
@@ -143,12 +120,47 @@ block:
     enemy = game.target(5, 90_000)
   game.step()
   hero.attackObjectId = enemy.id
-  doAssert activatePlayerAbility(
-    game.world, hero.id, int32(PrimaryAbility), ally.id, 0, 0
+  doAssert not activatePlayerAbility(
+    game.world, hero.id, int32(PrimaryAbility)
   )
+  queueCastTarget(hero.id, PrimaryAbility.ord.int32, ally.id)
   flushPlayerCommands(game)
   doAssert game.world.casts.len == 1
   doAssert game.world.casts[0].position == ally.position
+
+echo "Testing previews match casts without spending resources"
+for class in HeroClass:
+  let
+    game = spellGame(class)
+    hero = game.world.heroes[0]
+  game.step()
+  hero.hp -= 100
+  hero.mana -= 100
+  for slot in HeroAbilitySlot:
+    let
+      x = mapCoordinate(hero.position.x)
+      y = mapCoordinate(hero.position.z) + 1
+      mana = hero.mana
+      charges = hero.charges
+      casts = game.world.casts.len
+    var
+      point = WorldPoint(
+        x: (x - mapTiles().int32 div 2) * WorldScale + WorldScale div 2,
+        z: (y - mapTiles().int32 div 2) * WorldScale + WorldScale div 2
+      )
+      preview: SpellCast
+    point.y = fixedSurfaceHeightNear(point, hero.position.y, hero.team)
+    let error = game.world.aimAbility(hero, slot, 0, point, preview)
+    doAssert hero.mana == mana and hero.charges == charges
+    doAssert game.world.casts.len == casts
+    if error == NoActionError:
+      doAssert game.world.applyCastPoint(hero.id, slot.ord.int32, x, y)
+      let actual = game.world.casts[^1]
+      doAssert actual.position == preview.position
+      doAssert actual.origin == preview.origin
+      doAssert actual.direction == preview.direction
+      doAssert actual.impact == preview.impact
+      doAssert actual.targetId == preview.targetId
 
 echo "Testing support spells heal allies and damage enemies on both teams"
 for team in Team:
@@ -199,13 +211,13 @@ block:
   game.step()
   let mana = hero.mana
   doAssert not activatePlayerAbility(
-    game.world, hero.id, int32(PrimaryAbility), hero.id, 0, 0
+    game.world, hero.id, int32(PrimaryAbility)
   )
   doAssert armedAbility == int32(PrimaryAbility)
   enemy.state = Dying
   hero.attackObjectId = enemy.id
   doAssert not activatePlayerAbility(
-    game.world, hero.id, int32(UltimateAbility), enemy.id, 0, 0
+    game.world, hero.id, int32(UltimateAbility)
   )
   doAssert armedAbility == int32(UltimateAbility)
   flushPlayerCommands(game)
@@ -459,9 +471,10 @@ for slot in [PrimaryAbility, SecondaryAbility]:
         enemyHp = enemy.hp
         mana = hero.mana
       if aim == 0:
-        doAssert activatePlayerAbility(
-          game.world, hero.id, slot.ord.int32, enemy.id, 0, 0
+        doAssert not activatePlayerAbility(
+          game.world, hero.id, slot.ord.int32
         )
+        queueCastTarget(hero.id, slot.ord.int32, enemy.id)
         flushPlayerCommands(game)
       elif aim == 1:
         doAssert game.world.applyCastTarget(hero.id, slot.ord.int32, ally.id)

@@ -1,8 +1,8 @@
 import
   std/algorithm,
   fixxy,
-  polyworld/pathing,
-  ../examples/gods_of_the_arena/[content, maps, replays, sim]
+  polyworld/[pathing, bodies],
+  ../examples/gods_of_the_arena/[content, maps, motions, replays, sim]
 
 type Observer = enum CreepObserver, HeroObserver, TowerObserver
 
@@ -56,6 +56,33 @@ block:
   doAssert snapshot.heroes[0].movePath == expected
   world.restore(snapshot)
   doAssert world.heroes[0].movePath == expected
+
+echo "Testing heroes reverse direction within three simulation ticks"
+block:
+  let
+    game = arena()
+    hero = game.world.heroes[0]
+    origin = middle()
+  hero.hp = hero.maxHp
+  hero.state = Marching
+  hero.place(origin)
+  doAssert game.world.applyWalkTo(
+    hero.id,
+    mapCoordinate(origin.x, hero.team) + 3,
+    mapCoordinate(origin.z, hero.team)
+  )
+  let
+    waypoint = hero.movePath[hero.movePathIndex]
+    offset = fixedVec2(
+      worldToTiles(waypoint.x - origin.x, WorldScale),
+      worldToTiles(waypoint.z - origin.z, WorldScale)
+    )
+  doAssert offset != FixedVec2Zero
+  hero.body.facing = wrapAngle(motions.angle(offset) + FixedPi)
+  for i in 0 ..< 3:
+    game.tickWorld(nil)
+  doAssert hero.position.x != origin.x or hero.position.z != origin.z,
+    "The hero should finish turning and begin moving within 125 ms"
 
 proc crossing(kind: Observer, reverse, outward: bool): int32 =
   ## Acquires from the starting positions while an enemy crosses the radius.

@@ -4,9 +4,9 @@ import
   std/[math, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies,
+  cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
-  polyworld/clickmarks,
+  polyworld/clickmarks, polyworld/fxshapes,
   polyworld/chargen, polyworld/common, polyworld/pathing,
   polyworld/tapes, polyworld/toon, polyworld/metrics,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
@@ -15,7 +15,7 @@ import
   polyworld/shadows,
   polyworld/terrainsurfaces, polyworld/waters,
   polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
-    visions, worldbars, worldtexts, connections, roomclients, rooms, menus]
+    visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -183,10 +183,15 @@ proc runGraphics*(
   ## Runs one match on the existing window and releases match-owned resources.
   initializeGraphics()
   # Loading polls window events, so retire the lobby before drawing the splash.
+  window.cursor = Cursor(kind: ArrowCursor)
   window.onFrame = nil
   window.onButtonPress = nil
   clearPlayerCommands()
   clearProps()
+  let previousMouseAliases = mouseKeyAliasesEnabled
+  mouseKeyAliasesEnabled = options.playerSlot == 0 or run.replayMode
+  defer:
+    mouseKeyAliasesEnabled = previousMouseAliases
   var
     leaveMatch, quitToMenu, leaveRequested: bool
     matchMenu = HiddenMatchMenu
@@ -356,6 +361,7 @@ proc runGraphics*(
   var
     particles = initParticleSystem()
     spellEffects = initSpellRenderer()
+    arenaCursors = initArenaCursors()
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
     waypointShapes = initShapeRenderer()
@@ -1050,6 +1056,10 @@ proc runGraphics*(
     selectionStarted = false
     selectionAdditive = false
     attackMoveArmed = false
+    aimSpell: SpellCast
+    aimVisible = false
+    aimError = NoActionError
+    cursorMode = -1
     followSelection = false
     cameraEase: CameraEase
     focusPlayerHero = false
@@ -1079,6 +1089,12 @@ proc runGraphics*(
     if button == KeyEscape:
       if quitToMenu:
         return
+      if matchMenu == HiddenMatchMenu and
+        (armedAbility >= 0 or armedItem >= 0 or attackMoveArmed):
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+          return
       matchMenu =
         if matchMenu == HiddenMatchMenu: PauseMenu
         elif matchMenu == MatchSettings: PauseMenu
@@ -1099,6 +1115,12 @@ proc runGraphics*(
           return
         if shopOpen and button != KeySpace:
           return
+        if button == KeyA and not window.buttonDown[KeyLeftControl] and
+          not window.buttonDown[KeyRightControl]:
+            armedAbility = -1
+            armedItem = -1
+            attackMoveArmed = true
+            return
     if handleChromeKey(button):
       return
     if button == KeySpace and network == nil:
@@ -1115,7 +1137,8 @@ proc runGraphics*(
       activatePlayerItem(
         run.world,
         run.world.heroes[options.playerSlot - 1].id,
-        int32(if button == KeyF: 0 else: 1)
+        int32(if button == KeyF: 0 else: 1),
+        epochTime()
       )
 
   proc objectTeam(id: int32): int32 =
@@ -1473,7 +1496,8 @@ proc runGraphics*(
     rtsFollowFrame(
       unitRenderPoint(hero.id, hero.position) + vec3(0, 0.9'f32, 0),
       cameraDistance,
-      RtsGotaFollowLift
+      RtsGotaFollowLift,
+      zoomPitch(cameraDistance)
     )
 
   if playerMode():
@@ -1518,14 +1542,16 @@ proc runGraphics*(
       rightPressPosition = window.mousePos.vec2
       rightOrderStarted = true
     if window.mousePressed(MouseMiddle) and
-        (not overUi or window.buttonPressed[MouseMiddleKey]):
+        (not overUi or (mouseKeyAliasesEnabled and
+          window.buttonPressed[MouseMiddleKey])):
       if not playerMode():
         followSelection = false
         actionCam.takeManual()
       cancelCameraEase(cameraEase)
     panning =
       window.mouseDown(MouseMiddle) and
-        (not overUi or window.buttonDown[MouseMiddleKey]) or
+        (not overUi or (mouseKeyAliasesEnabled and
+          window.buttonDown[MouseMiddleKey])) or
       (not playerMode() and not overUi and window.mouseDown(MouseRight))
 
     let delta = window.mouseDelta.vec2
@@ -1538,7 +1564,7 @@ proc runGraphics*(
             window.scrollDelta.y / 3.0'f32
           ),
           5.0'f32,
-          400.0'f32
+          DefaultCameraDistance
         )
       if panning:
         cancelCameraEase(cameraEase)
@@ -1657,12 +1683,38 @@ proc runGraphics*(
     else:
       queueWalkTo(heroId, mapX, mapY)
     selectEntity(heroId)
-    clickMarks.emitClickMark(tileCenter(walk.layer, walk.x, walk.z))
 
-  proc updatePlayerSpells(viewProjection: Mat4) =
-    ## Casts quick actions and current targets, or selects an aimed ability.
-    if not playerMode() or shopOpen or run.world.phase == Drafting:
+  proc previewGroundClick(viewProjection: Mat4) =
+    ## Shows local click feedback before release or any server acknowledgement.
+    if not playerMode() or shopOpen or matchMenu != HiddenMatchMenu or
+      run.world.phase == Drafting or armedAbility >= 0 or armedItem >= 0 or
+      mouseOverUi(window, sk.mousePos, primaryId):
+        return
+    if not window.mousePressed(MouseRight) and
+      not (attackMoveArmed and window.mousePressed(MouseLeft)):
+        return
+    let
+      hero = run.world.heroById(playerHeroId())
+      picked = pickEntity(viewProjection)
+    if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
       return
+    if picked != 0 and objectTeam(picked) != objectTeam(hero.id):
+      return
+    let
+      (origin, direction) = mouseRay(
+        window.mousePos.vec2, window.size.vec2, viewProjection
+      )
+      ground = pickWalkableTile(origin, direction)
+    if ground.hit:
+      clickMarks.emitClickMark(
+        tileCenter(ground.layer, ground.x, ground.z)
+      )
+
+  proc updatePlayerSpells() =
+    ## Casts self abilities immediately and enters aiming for other spells.
+    if not playerMode() or shopOpen or run.world.phase == Drafting or
+      matchMenu != HiddenMatchMenu:
+        return
     for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
       if window.buttonPressed[key]:
         let hero = heroById(run.world, playerHeroId())
@@ -1672,26 +1724,16 @@ proc runGraphics*(
           armedItem = -1
           attackMoveArmed = false
           continue
-        var
-          aimX = mapCoordinate(hero.position.x + hero.facing.x)
-          aimY = mapCoordinate(hero.position.z + hero.facing.z)
-        if not mouseOverUi(window, sk.mousePos, primaryId):
-          let
-            (origin, direction) = mouseRay(
-              window.mousePos.vec2, window.size.vec2, viewProjection
-            )
-            ground = pickWalkableTile(origin, direction)
-          if ground.hit:
-            aimX = int32(layers[ground.layer].originX + ground.x - mapOrigin())
-            aimY = int32(layers[ground.layer].originZ + ground.z - mapOrigin())
         attackMoveArmed = false
         if not activatePlayerAbility(
-          run.world, hero.id, slot.int32, primaryId, aimX, aimY
+          run.world, hero.id, slot.int32
         ):
           selectEntity(hero.id)
 
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Selects a clicked world unit, or attacks it in player mode.
+    if playerMode() and (armedAbility >= 0 or armedItem >= 0):
+      return
     if not window.mouseReleased(MouseLeft):
       return
     if selectionStarted and
@@ -1716,16 +1758,21 @@ proc runGraphics*(
     selectionStarted = false
 
   proc updatePlayerOrder(viewProjection: Mat4) =
-    ## Turns a right-click into a walk, attack-move, or chase attack.
-    if not playerMode():
-      return
-    if not window.mouseReleased(MouseRight):
-      return
-    if not rightOrderStarted:
+    ## Confirms an aimed cast, or turns a right-click into a movement order.
+    if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
+      run.world.phase == Drafting:
+        return
+    let leftCast = (armedAbility >= 0 or armedItem >= 0) and
+      window.mouseReleased(MouseLeft) and selectionStarted
+    if leftCast:
+      selectionStarted = false
+    elif not window.mouseReleased(MouseRight) or not rightOrderStarted:
       return
     rightOrderStarted = false
     var minimapPoint: Vec2
-    if armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint):
+    if armedItem >= 0 and
+      run.world.heroById(playerHeroId()).inventory[armedItem] == PortalScroll and
+      window.minimapAim(sk.mousePos, minimapPoint):
       queueUseItemAt(
         playerHeroId(), armedItem,
         mapCoordinate(int32(minimapPoint.x * WorldScale.float32)),
@@ -1736,13 +1783,23 @@ proc runGraphics*(
       return
     if mouseOverUi(window, sk.mousePos, primaryId):
       return
-    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
+    let press = if leftCast: selectionPressPosition else: rightPressPosition
+    if (window.mousePos.vec2 - press).length > 6.0'f:
       return
     let
       heroId = playerHeroId()
       picked = pickEntity(viewProjection)
     selectEntity(heroId)
     if armedItem >= 0:
+      if run.world.heroById(heroId).inventory[armedItem] != PortalScroll:
+        let target = run.world.heroById(picked)
+        if target.id == 0 or target.hp <= 0 or target.state == Dying or
+          objectTeam(target.id) != objectTeam(heroId):
+            return
+        queueUseItem(heroId, armedItem, target.id)
+        armedItem = -1
+        attackMoveArmed = false
+        return
       let
         (origin, direction) = mouseRay(
           window.mousePos.vec2, window.size.vec2, viewProjection
@@ -1760,10 +1817,14 @@ proc runGraphics*(
       selectEntity(heroId)
       return
     if armedAbility >= 0:
+      if aimError != NoActionError:
+        return
       let
         hero = heroById(run.world, heroId)
         slot = HeroAbilitySlot(armedAbility)
-        spec = heroAbility(hero.class, slot).abilitySpec
+        spec = heroAbility(hero.class, slot).abilitySpec(
+          hero.abilityLevels[slot]
+        )
       if hero.hp <= 0 or hero.state == Dying or hero.charges[slot] <= 0 or
         hero.cooldowns[slot] > 0 or hero.mana < spec.manaCost:
           return
@@ -1796,9 +1857,164 @@ proc runGraphics*(
     issueGroundOrder(viewProjection, attackMoveArmed)
     attackMoveArmed = false
 
+  proc updateAim(viewProjection: Mat4) =
+    ## Resolves the visible aim using the same geometry as simulation casts.
+    aimVisible = false
+    aimError = NoActionError
+    var nextCursor = 0
+    if playerMode() and matchMenu == HiddenMatchMenu and not shopOpen and
+      run.world.phase != Drafting:
+        let hero = run.world.heroById(playerHeroId())
+        if hero.hp <= 0 or hero.state == Dying:
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+        elif not mouseOverUi(window, sk.mousePos, primaryId):
+          nextCursor = 1
+          if attackMoveArmed:
+            nextCursor = 2
+          if armedItem >= 0:
+            nextCursor =
+              if hero.inventory[armedItem] == PortalScroll: 3
+              else: 4 + Ability.high.ord + 1
+          if armedAbility >= 0:
+            let
+              slot = HeroAbilitySlot(armedAbility)
+              ability = heroAbility(hero.class, slot)
+              spec = ability.abilitySpec(hero.abilityLevels[slot])
+              picked = pickEntity(viewProjection)
+              targetId =
+                if picked != 0 and
+                  spec.canTarget(objectTeam(picked) == objectTeam(hero.id)):
+                    picked
+                else:
+                  0'i32
+              (origin, direction) = mouseRay(
+                window.mousePos.vec2, window.size.vec2, viewProjection
+              )
+              ground = pickWalkableTile(origin, direction)
+            nextCursor = 4 + ability.ord
+            if targetId != 0 or ground.hit:
+              var point = hero.position
+              if ground.hit:
+                let center = tileCenter(ground.layer, ground.x, ground.z)
+                point.x = int32(round(center.x * WorldScale.float32))
+                point.z = int32(round(center.z * WorldScale.float32))
+                point.y = fixedSurfaceHeightNear(
+                  point, hero.position.y, hero.team
+                )
+              aimError = run.world.aimAbility(
+                hero, slot, targetId, point, aimSpell
+              )
+              aimVisible = aimError == NoActionError
+              if aimVisible:
+                if hero.controls[StunControl].ends > run.world.tick:
+                  aimError = ActionStunned
+                elif hero.controls[SilenceControl].ends > run.world.tick:
+                  aimError = ActionSilenced
+                elif hero.portalEnds > run.world.tick:
+                  aimError = ActionChanneling
+                elif hero.abilityLevels[slot] == 0:
+                  aimError = ActionAbilityLocked
+                elif hero.cooldowns[slot] > 0:
+                  aimError = ActionCooldown
+                elif hero.charges[slot] <= 0:
+                  aimError = ActionNoCharges
+                elif hero.mana < spec.manaCost:
+                  aimError = ActionInsufficientMana
+            else:
+              aimError = ActionInvalidPoint
+    if nextCursor != cursorMode:
+      cursorMode = nextCursor
+      case cursorMode
+      of 0:
+        window.cursor = Cursor(kind: ArrowCursor)
+      of 1:
+        window.cursor = arenaCursors.move
+      of 2:
+        window.cursor = arenaCursors.attack
+      of 3:
+        window.cursor = arenaCursors.portal
+      of 4 + Ability.high.ord + 1:
+        window.cursor = arenaCursors.potion
+      else:
+        window.cursor = arenaCursors.abilities[Ability(cursorMode - 4)]
+
+  proc drawAimRing(center: Vec3, radius: float32, color: ColorRGBX) =
+    ## Draws a terrain-following range or target indicator.
+    var ring: array[65, Vec3]
+    for i in 0 .. ring.high:
+      let angle = i.float32 * 2 * PI.float32 / ring.high.float32
+      ring[i] = center + vec3(cos(angle) * radius, 0, sin(angle) * radius)
+      ring[i].y = groundHeight(ring[i].x, ring[i].z) +
+        groundOffset(ring[i].x, ring[i].z) + 0.14'f
+    worldShapes.addPolyline(ring, color, 0.04'f)
+
+  proc drawAimBanner() =
+    ## Identifies the armed command and explains how to confirm or cancel it.
+    if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
+      run.world.phase == Drafting or
+      (armedAbility < 0 and armedItem < 0 and not attackMoveArmed):
+        return
+    let
+      width = min(800.0'f, window.size.x.float32 / sk.uiScale - 32)
+      at = vec2((window.size.x.float32 / sk.uiScale - width) / 2, 146)
+    var
+      title = "Attack move"
+      detail = "Click a target or destination. Esc to cancel."
+    if armedItem >= 0:
+      let item = run.world.heroById(playerHeroId()).inventory[armedItem]
+      if item == PortalScroll:
+        title = "Portal scroll - Tower landing area"
+        detail = "Click a destination near an allied tower. Esc to cancel."
+      else:
+        title = item.itemSpec.name & " - Allied hero"
+        detail = "Click yourself or a nearby ally. Double-tap the item key for self. Esc to cancel."
+    elif armedAbility >= 0:
+      let
+        hero = run.world.heroById(playerHeroId())
+        ability = heroAbility(hero.class, HeroAbilitySlot(armedAbility))
+        spec = ability.abilitySpec(
+          hero.abilityLevels[HeroAbilitySlot(armedAbility)]
+        )
+      title = spec.name & " - "
+      case spec.casting
+      of SelfCast:
+        title.add "Self"
+      of MeleeCast:
+        title.add "Melee target"
+      of ProjectileCast:
+        title.add "Projectile path"
+      of AreaCast:
+        case spec.area.shape
+        of CircleFootprint: title.add "Ground area"
+        of RingFootprint: title.add "Ring area"
+        of SectorFootprint: title.add "Directional cone"
+        of LineFootprint, CapsuleFootprint: title.add "Directional path"
+        of CrossFootprint: title.add "Cross area"
+      detail =
+        if aimError != NoActionError: aimError.actionErrorMessage()
+        else: "Left or right-click to cast. Esc to cancel."
+    sk.lobbyPanel(at, vec2(width, 100))
+    sk.drawLabel(
+      title, at + vec2(12, 6), vec2(width - 24, 52),
+      sk.theme.defaultTextColor, "H1", CenterAlign
+    )
+    sk.drawLabel(
+      detail, at + vec2(12, 58), vec2(width - 24, 32),
+      if aimError == NoActionError: rgbx(175, 212, 224, 255)
+      else: rgbx(255, 130, 130, 255), "Default", CenterAlign
+    )
+
   proc cameraView(): Mat4 =
-    ## Updates the camera eye and returns its view matrix.
-    cameraEye = rtsCameraEye(cameraTarget, cameraDistance)
+    ## Updates the camera eye and enforces the human player's zoom limit.
+    if playerMode():
+      cameraDistance = clamp(cameraDistance, 5.0'f, DefaultCameraDistance)
+    cameraEye = rtsCameraEye(
+      cameraTarget,
+      cameraDistance,
+      zoomPitch(cameraDistance)
+    )
     lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
 
   ## Frame
@@ -2086,6 +2302,7 @@ proc runGraphics*(
       transport.durationTicks = run.durationTicks()
       transport.sync(int32(run.world.tick), recorded, run.finished())
       if network != nil:
+        connection.stats.tickRate = int(TickRate)
         connection.pump()
         if quitToMenu:
           if network.client.snapshot.room.len == 0:
@@ -2103,11 +2320,13 @@ proc runGraphics*(
           network.flushSubmissions()
           var packet: RoomMessage
           let started = epochTime()
-          while not network.finished and network.client.takeTick(packet):
-            advanceRenderedSimulation(packet)
-            networkElapsed = 0
-            if epochTime() - started > 0.012:
-              break
+          while not network.finished and
+            connection.takeTick(packet, int(TickRate)):
+              advanceRenderedSimulation(packet)
+              inc connection.stats.playedTicks
+              networkElapsed = 0
+              if epochTime() - started > 0.012:
+                break
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
@@ -2141,6 +2360,10 @@ proc runGraphics*(
                    else: not network.finished and
                      network.client.snapshot.phase == rooms.Playing
       if network != nil:
+        if connection.stats.smoothPlayback and connection.playback.started:
+          networkElapsed = connection.playback.elapsed(
+            networkTime(), int(TickRate)
+          ).float32
         renderAlpha = clamp(networkElapsed / SimulationStep, 0.0'f, 1.0'f)
         animationAlpha = if active: renderAlpha else: 0
       elif active:
@@ -2153,9 +2376,9 @@ proc runGraphics*(
       else:
         renderAlpha = 1
         animationAlpha = 0
+      clickMarks.advanceClickMarks(dt)
       if active:
         particles.advanceParticles(dt)
-        clickMarks.advanceClickMarks(dt)
         for god in gods.mitems:
           god.animTime += dt
           if run.world.gameOver and
@@ -2183,9 +2406,13 @@ proc runGraphics*(
         barCameraRight = normalize(cross(cameraForward, vec3(0, 1, 0)))
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
+      updatePlayerSpells()
+      previewGroundClick(viewProjection)
       updateWorldSelection(viewProjection)
-      updatePlayerSpells(viewProjection)
+      updateAim(viewProjection)
       updatePlayerOrder(viewProjection)
+      if armedAbility < 0:
+        aimVisible = false
 
       profileBlock "drawWorld":
         # The clock changes palettes while the light stays fixed for
@@ -2400,8 +2627,37 @@ proc runGraphics*(
           spellEffects.drawSpells(
             run.world, viewProjection, animationAlpha, viewMode
           )
+          if aimVisible and aimSpell.ability.abilitySpec.casting == AreaCast:
+            spellEffects.drawAim(
+              aimSpell, viewProjection, aimError == NoActionError
+            )
           clickMarks.drawClickMarks(viewProjection)
         worldShapes.clear()
+        if aimVisible:
+          let
+            spec = aimSpell.ability.abilitySpec(aimSpell.level)
+            color =
+              if aimError == NoActionError: rgbx(90, 230, 255, 255)
+              else: rgbx(255, 80, 80, 255)
+            origin = renderPoint(aimSpell.origin)
+            destination = renderPoint(aimSpell.position)
+          drawAimRing(
+            origin, spec.range.float32 / WorldScale.float32,
+            rgbx(130, 180, 200, 170)
+          )
+          if spec.casting != AreaCast or not spec.fromCaster:
+            var track: array[17, Vec3]
+            for i in 0 .. track.high:
+              track[i] = mix(
+                origin,
+                destination,
+                i.float32 / track.high.float32
+              )
+              track[i].y = groundHeight(track[i].x, track[i].z) +
+                groundOffset(track[i].x, track[i].z) + 0.16'f
+            worldShapes.addPolyline(track, color, 0.06'f)
+          if spec.casting != AreaCast:
+            drawAimRing(destination, 0.3'f, color)
         for hero in run.world.heroes:
           if hero.portalEnds <= run.world.tick or hero.hp <= 0:
             continue
@@ -2420,8 +2676,15 @@ proc runGraphics*(
             worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.06'f)
         if playerMode() and armedItem >= 0:
           let hero = run.world.heroById(playerHeroId())
+          if hero.inventory[armedItem] != PortalScroll:
+            drawAimRing(
+              renderPoint(hero.position),
+              PotionTargetRangeTiles.float32,
+              rgbx(120, 221, 145, 255)
+            )
           for tower in run.world.buildings:
-            if tower.kind != TowerBuilding or tower.hp <= 0 or
+            if hero.inventory[armedItem] != PortalScroll or
+              tower.kind != TowerBuilding or tower.hp <= 0 or
               tower.team != hero.team:
                 continue
             var ring: array[65, Vec3]
@@ -2479,9 +2742,15 @@ proc runGraphics*(
           if matchMenu == HiddenMatchMenu:
             sk.beginUi(window, window.size)
           elif matchMenu == MatchSettings:
-            menuOrigin = sk.beginSettings(window)
+            menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
           else:
-            menuOrigin = sk.beginMenu(window, "Gods of the Arena", "Match menu")
+            let panel = sk.beginOverlay(window, vec2(480, 500))
+            sk.lobbyPanel(panel, vec2(480, 500))
+            menuOrigin = panel + vec2(32)
+            sk.drawLabel(
+              "Game Menu", menuOrigin, vec2(416, 40),
+              sk.theme.defaultTextColor, "H1", CenterAlign
+            )
           if matchMenu == HiddenMatchMenu:
             drawUi(
               sk,
@@ -2494,8 +2763,10 @@ proc runGraphics*(
               selectedIds,
               followSelection,
               actionCam,
-              focusPlayerHero
+              focusPlayerHero,
+              if connection != nil: connection.stats else: nil
             )
+          drawAimBanner()
           let width = window.size.x.float32 / sk.uiScale
           if matchMenu == HiddenMatchMenu and (network == nil or
             network.client.snapshot.phase in {rooms.Ended, Desynced}):
@@ -2536,11 +2807,13 @@ proc runGraphics*(
             let origin = menuOrigin
             try:
               if quitToMenu:
-                sk.menuLabel("Leaving match...", origin)
+                sk.menuLabel("Leaving match...", origin + vec2(0, 64), 416)
                 sk.menuLabel("Waiting for the server to confirm.",
-                  origin + vec2(0, 46), color = MenuMuted)
+                  origin + vec2(0, 100), 416, sk.theme.disabledTextColor)
               elif matchMenu == MatchSettings:
-                if sk.settingsPanel(window, preferences, "Polyworld GotA", origin):
+                if sk.settingsPanel(
+                  window, preferences, "Polyworld GotA", origin
+                ):
                   matchMenu = PauseMenu
               else:
                 let
@@ -2553,14 +2826,16 @@ proc runGraphics*(
                   for seat in network.client.snapshot.seats:
                     if seat.owner == network.client.participant:
                       controller = true
-                sk.menuLabel(
+                sk.drawLabel(
                   if paused: "Match paused" else: "Match running",
-                  origin, color = MenuAccent)
-                if sk.menuButton(window, "Return to game", origin + vec2(0, 46), 340):
+                  origin + vec2(0, 44), vec2(416, 28),
+                  sk.theme.defaultTextColor, "Default", CenterAlign)
+                if sk.lobbyButton("Return to game", origin + vec2(0, 88), 416):
                   matchMenu = HiddenMatchMenu
-                if sk.menuButton(window,
+                if sk.lobbyButton(
                   if paused: "Resume match" else: "Pause match",
-                  origin + vec2(0, 96), 340, controller and activeMatch):
+                  origin + vec2(0, 144), 416,
+                  enabled = controller and activeMatch):
                     if network == nil:
                       transport.togglePlay()
                     else:
@@ -2568,10 +2843,10 @@ proc runGraphics*(
                         kind: PauseMatch, match: network.client.match,
                         flag: not paused
                       ))
-                if sk.menuButton(window, "Settings", origin + vec2(0, 146), 340):
+                if sk.lobbyButton("Settings", origin + vec2(0, 200), 416):
                   matchMenu = MatchSettings
-                if sk.menuButton(window, "Quit to main menu",
-                  origin + vec2(0, 196), 340):
+                if sk.lobbyButton("Quit to main menu",
+                  origin + vec2(0, 256), 416):
                     quitToMenu = true
                     if network == nil:
                       leaveMatch = true
@@ -2581,21 +2856,21 @@ proc runGraphics*(
                       network.client.send(RoomMessage(kind: LeaveRoom))
                       leaveRequested = true
                 if network != nil:
-                  sk.menuLabel(network.client.status,
-                    origin + vec2(0, 260), 1040, MenuMuted)
                   sk.menuLabel(
                     if controller and activeMatch:
-                      "Quitting ends this match for everyone. Pausing keeps everyone connected."
+                      "Quitting ends the match for everyone."
                     else:
-                      "Spectators can leave, but cannot pause the match.",
-                    origin + vec2(0, 310), 1040, MenuMuted)
+                      "Only players can pause the match.",
+                    origin + vec2(0, 320), 416, sk.theme.disabledTextColor)
+                  sk.menuLabel(network.client.status,
+                    origin + vec2(0, 352), 416, sk.theme.disabledTextColor)
                 else:
-                  sk.menuLabel("Opening this menu does not pause. Use Pause match.",
-                    origin + vec2(0, 260), 1040, MenuMuted)
+                  sk.menuLabel("Use Pause match to stop the game.",
+                    origin + vec2(0, 320), 416, sk.theme.disabledTextColor)
             except CatchableError as error:
               saveError = error.msg
             if saveError.len > 0:
-              sk.menuLabel(saveError, origin + vec2(0, 390), 1040, MenuAccent)
+              sk.menuLabel(saveError, origin + vec2(0, 400), 416, MenuAccent)
           sk.endUi()
           if matchMenu == HiddenMatchMenu:
             drawStatsOverlay(sk, window)
@@ -2622,6 +2897,7 @@ proc runGraphics*(
     pollEvents()
     waitForDisplay()
 
+  window.cursor = Cursor(kind: ArrowCursor)
   window.onFrame = nil
   window.onButtonPress = nil
   clearPlayerCommands()

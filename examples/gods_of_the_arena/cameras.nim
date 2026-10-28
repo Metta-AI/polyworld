@@ -1,6 +1,12 @@
 import
-  polyworld/directors,
+  vmath,
+  polyworld/[directors, rtscameras],
   sim
+
+proc zoomPitch*(distance: float32): float32 =
+  ## Lowers the close-up viewing angle smoothly from 53 to 35 degrees.
+  let close = rtsEaseT((8.0'f - distance) / 3.0'f)
+  mix(RtsCameraPitch, 0.6108652'f, close)
 
 proc prioritizeHeroes*(world: World, subjects: var seq[Subject]): bool =
   ## Prefers the visible hero nearest the enemy god; reports living heroes.

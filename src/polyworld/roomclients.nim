@@ -21,6 +21,8 @@ type
     pending: seq[PendingCommand]
     sequence: uint64
     received: uint64
+    timing*: PacketTiming
+    receiptPending*: bool
     lastHash, finalHash: RoomMessage
 
 proc send*(client: RoomClient, message: RoomMessage) =
@@ -31,13 +33,19 @@ proc send*(client: RoomClient, message: RoomMessage) =
     client.finalHash = message
   if client.outgoing.len >= 1024:
     reject("Client outgoing queue exhausted")
-  client.outgoing.add message.encode()
+  var packet = message
+  packet.timing.echo = client.timing.server
+  packet.timing.received = client.received
+  client.outgoing.add packet.encode()
+  client.receiptPending = false
 
 proc opened*(client: RoomClient) =
   ## Identifies this connection without persisting the private reconnect token.
   client.connected = true
   client.welcomed = false
   client.received = 0
+  client.timing = PacketTiming()
+  client.receiptPending = false
   client.outgoing.setLen(0)
   client.send(RoomMessage(
     kind: Hello, identity: client.identity, name: client.name, token: client.token
@@ -94,7 +102,8 @@ proc accept*(client: RoomClient, bytes: string) =
     if message.delivery != client.received + 1:
       reject("Relay delivery sequence is not consecutive")
     client.received = message.delivery
-    client.send(RoomMessage(kind: Received, sequence: message.delivery))
+    client.receiptPending = true
+  client.timing = message.timing
   case message.kind
   of Welcome:
     if client.participant != 0 and client.participant != message.participant:
@@ -142,6 +151,11 @@ proc accept*(client: RoomClient, bytes: string) =
     if message.match != client.match or message.tick == 0:
       reject("Tick packet belongs to an unexpected match")
     client.serverTick = max(client.serverTick, message.tick)
+    for command in message.commands:
+      if command.participant == client.participant:
+        for i in countdown(client.pending.high, 0):
+          if client.pending[i].message.sequence == command.sequence:
+            client.pending.delete(i)
     if message.tick <= client.applied:
       return
     for packet in client.packets:
@@ -150,6 +164,8 @@ proc accept*(client: RoomClient, bytes: string) =
         var repeated = message
         original.delivery = 0
         repeated.delivery = 0
+        original.timing = PacketTiming()
+        repeated.timing = PacketTiming()
         if original != repeated:
           reject("Immutable tick packet changed")
         return

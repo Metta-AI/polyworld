@@ -10,14 +10,18 @@ weights or private VM memory. GotA is the first client integration.
 Install the repository's locked Nim dependencies, then run from the checkout:
 
 ```sh
-nim r tools/gameserver.nim
-nim r examples/gods_of_the_arena/gota.nim
+nim r tools/gameserver.nim --port 9911
+nim r examples/gods_of_the_arena/gota.nim --server ws://127.0.0.1:9911/ws
 ```
 
-The relay listens on `ws://127.0.0.1:8090/ws`. `BIND` and `PORT` change the
-listening address and port. `GET /healthz` is a health check. Native and browser
+The relay defaults to `ws://127.0.0.1:8090/ws`. `BIND` and `PORT` change the
+listening address and port; `--port` overrides `PORT`. `GET /healthz` is a
+health check. Native and browser
 clients use Windy's WebSocket API. The server uses Mummy and one explicit room
 event loop. Mummy's workers pass bounded events into that loop.
+
+`--server` opens Multiplayer and connects automatically. Choose human and bot
+seats in the lobby. Without `--server`, GotA opens the main menu as usual.
 
 A normal graphical launch opens Single player, Multiplayer and Settings.
 Native builds also offer Exit to OS. Single player defaults to one human and
@@ -96,7 +100,7 @@ Normal game replays record executed action packets using the existing exact
 replay format. Playback does not need the relay, bot source, weights or VM
 memory. Use Save replay after a multiplayer match to save it natively or
 download it in the browser. There are no historical replay compatibility
-branches. The outer protocol is version 2 and the GotA command protocol is version 1;
+branches. The outer protocol is version 3 and the GotA command protocol is version 1;
 gameplay rules and replay
 format remain unchanged by this transport addition.
 
@@ -163,6 +167,29 @@ client. Its `GOTA_ROOM`, `GOTA_SEAT_START`, `GOTA_SEAT_COUNT`, `GOTA_NAME` and
 
 ## Validation of this implementation
 
+The server echoes timestamped lifecycle events to stdout: connections,
+identification and reconnects, room membership and settings, match starts,
+pauses, resume requests, completion and stops. Rejected requests, timeouts,
+and outgoing buffer limits include their reason. Names are escaped to keep
+each event on one line. Reconnect tokens, invite codes and game payloads
+are omitted, as are routine ticks, commands and successful hash checks.
+
+GotA's F1 Network tab uses the normal Silky controls. Its scrolling graphs
+show received/sent KB and packets per second, server-measured RTT, and the
+absolute change between successive RTT samples. The ticks-per-second chart
+counts simulation ticks actually executed per elapsed second, with a gray
+line at the normal tick rate. Stalls lower it; catch-up can raise it above
+the normal rate. RTT and jitter are averaged
+over each second and the readouts update once per second. Counts include the
+binary room envelope, but exclude WebSocket, TCP and TLS framing.
+
+The delay controls add constant lag plus random jitter to each direction,
+while preserving packet order. Reset clears the settings; already queued
+packets finish their scheduled delay. RTT includes that delay and client
+turnaround. Timestamps and echoes travel in ordinary packets, without ping
+messages or comparisons between client and server clocks. State hashes
+remain mandatory even when simulated lag makes the match wait.
+
 The complete headless suite and CI suite pass, including deterministic replay
 checks. The native graphical, headless, Coworld check and WASM builds pass.
 A real native/WASM match with five privately owned bots on each client ended
@@ -184,3 +211,10 @@ replay download played headlessly with all 90 actions and matching hashes.
 The Docker
 and reverse-proxy files are hosting examples; a public TLS deployment has
 not been performed here.
+
+“Smooth network playback” in F1 → Network is enabled by default. Steady
+packets play immediately. Bursts play at 90% of the normal tick interval,
+shortening further as the queue grows (down to 20%) so playback catches up.
+There is no fixed startup delay. Control messages and RTT receipts remain
+immediate. History catch-up bypasses pacing; tick order, gameplay, and
+mandatory hash checks are unchanged.

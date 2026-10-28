@@ -44,6 +44,7 @@ import
   test_llm_hosts,
   test_rooms,
   test_roomclients,
+  test_networks,
   test_gota_multiplayer
 
 echo "CI tests passed"

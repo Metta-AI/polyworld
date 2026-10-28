@@ -1,6 +1,6 @@
 import
   vmath,
-  polyworld/directors,
+  polyworld/[directors, rtscameras],
   ../examples/gods_of_the_arena/[cameras, sim]
 
 proc subjects(world: World, hidden = 0'i32): seq[Subject] =
@@ -35,6 +35,27 @@ proc subjects(world: World, hidden = 0'i32): seq[Subject] =
 proc step(director: var Director, dt = 0.0'f) =
   ## Advances camera time without overview panels or a running game.
   director.advance(dt, true, false, true, false, 40)
+
+echo "Testing close zoom lowers the camera without changing its distance"
+block:
+  doAssert zoomPitch(14) == RtsCameraPitch
+  doAssert zoomPitch(8) == RtsCameraPitch
+  doAssert zoomPitch(5) < zoomPitch(6.5)
+  doAssert zoomPitch(6.5) < zoomPitch(8)
+  let
+    target = vec3(0, 1, 0)
+    eye = rtsCameraEye(target, 5, zoomPitch(5))
+    original = rtsCameraEye(target, 5)
+  doAssert abs((eye - target).length - 5) < 0.001
+  doAssert eye.y < original.y and eye.z > original.z
+  let ground = pickGroundPoint(
+    vec2(400, 300),
+    vec2(800, 600),
+    perspective(45.0'f, 800.0'f / 600, 0.1'f, 100.0'f) *
+      lookAt(eye, target, vec3(0, 1, 0)),
+    target.y
+  )
+  doAssert (ground - target).length < 0.001
 
 echo "Testing idle GotA shots prefer heroes nearest the enemy god"
 block:

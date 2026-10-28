@@ -17,6 +17,7 @@ type
   SpellRenderer* = object
     renderer: FxRenderer
     areas: seq[AreaMesh]
+    preview: AreaMesh
     meshes: array[Ability, SpellMesh]
     glow: SpellMesh
     trail: SpellMesh
@@ -524,10 +525,44 @@ proc drawSpells*(
           color, seconds, fade * 0.6
         )
 
+proc drawAim*(
+  effects: var SpellRenderer,
+  spell: SpellCast,
+  viewProjection: Mat4,
+  valid: bool
+) =
+  ## Draws the actual spell footprint before the player confirms the cast.
+  let spec = spell.ability.abilitySpec(spell.level)
+  var preview = spell
+  preview.started = 0
+  var ground = spec.area.footprintSettings()
+  let angle = arctan2(spell.direction.x.float32, spell.direction.z.float32)
+  var offset = vec3(0.0'f)
+  if spec.area.shape == CapsuleFootprint:
+    offset.z = ground.width / 2
+  elif spec.area.shape == CrossFootprint:
+    offset.z = -ground.length / 2
+  if not effects.preview.matches(preview) or effects.preview.mesh.indices.len == 0:
+    effects.preview = areaMesh(
+      ground,
+      preview,
+      translate(spell.position.spellPoint()) * rotateY(angle) * translate(offset),
+      spec.area.shape == CrossFootprint
+    )
+  ground.startColor =
+    if valid: vec4(0.25, 0.9, 1.0, 0.4)
+    else: vec4(1.0, 0.2, 0.2, 0.4)
+  ground.endColor = ground.startColor
+  effects.renderer.uploadFxMesh(effects.preview.mesh)
+  effects.renderer.drawFxMesh(
+    ground, viewProjection, mat4(), 0, 0.5, sizeScale = 1
+  )
+
 proc closeSpellRenderer*(effects: var SpellRenderer) =
   ## Releases the spell mesh renderer alongside the other scene effects.
   effects.renderer.closeFxRenderer()
   effects.areas.setLen(0)
+  effects.preview = AreaMesh()
   effects.meshes = default(typeof(effects.meshes))
   effects.glow = default(SpellMesh)
   effects.trail = default(SpellMesh)

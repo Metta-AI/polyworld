@@ -365,7 +365,7 @@ doAssert not pausedRoom.paused
 
 # Boolean values and old outer versions cannot silently change pause meaning.
 var badPause = RoomMessage(kind: PauseMatch, flag: true).encode()
-badPause[24] = char(2)
+badPause[RoomHeaderBytes] = char(2)
 var rejectedPause = false
 try:
   discard decode(badPause)

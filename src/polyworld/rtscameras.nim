@@ -33,28 +33,33 @@ type
     elapsed*: float32
     duration*: float32
 
-proc rtsCameraEye*(target: Vec3, distance: float32): Vec3 =
+proc rtsCameraEye*(
+    target: Vec3,
+    distance: float32,
+    pitch = RtsCameraPitch
+): Vec3 =
   ## Returns the locked north-facing RTS camera position.
   target + vec3(
-    sin(RtsCameraYaw) * cos(RtsCameraPitch),
-    sin(RtsCameraPitch),
-    cos(RtsCameraYaw) * cos(RtsCameraPitch)
+    sin(RtsCameraYaw) * cos(pitch),
+    sin(pitch),
+    cos(RtsCameraYaw) * cos(pitch)
   ) * distance
 
 proc rtsFollowFrame*(
     subject: Vec3,
     distance: float32,
-    liftAmount = RtsFollowLift
+    liftAmount = RtsFollowLift,
+    pitch = RtsCameraPitch
 ): Vec3 =
   ## Returns the look-at that places `subject` above the optical center.
   let
     halfVerticalFov = RtsFieldOfView * PI.float32 / 360.0'f32
-    cameraHeight = distance * sin(RtsCameraPitch)
-    cameraForward = distance * cos(RtsCameraPitch)
+    cameraHeight = distance * sin(pitch)
+    cameraForward = distance * cos(pitch)
     farOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch - halfVerticalFov)
+      cameraHeight / tan(pitch - halfVerticalFov)
     nearOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch + halfVerticalFov)
+      cameraHeight / tan(pitch + halfVerticalFov)
     lift = (nearOffset - farOffset) * liftAmount
   subject + vec3(
     sin(RtsCameraYaw) * lift,
@@ -85,17 +90,18 @@ proc minimapViewport*(
     aspect: float32,
     origin,
     size: Vec2,
-    worldHalfSize: float32
+    worldHalfSize: float32,
+    pitch = RtsCameraPitch
 ): MinimapViewRect =
   ## Approximates the camera's ground footprint in minimap pixels.
   let
     halfVerticalFov = RtsFieldOfView * PI.float32 / 360.0'f32
-    cameraHeight = distance * sin(RtsCameraPitch)
-    cameraForward = distance * cos(RtsCameraPitch)
+    cameraHeight = distance * sin(pitch)
+    cameraForward = distance * cos(pitch)
     farOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch - halfVerticalFov)
+      cameraHeight / tan(pitch - halfVerticalFov)
     nearOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch + halfVerticalFov)
+      cameraHeight / tan(pitch + halfVerticalFov)
     halfHorizontalFov = arctan(tan(halfVerticalFov) * aspect)
     halfWidth = max(distance * tan(halfHorizontalFov), 1.0'f32)
     minimum = vec2(

@@ -1,4 +1,4 @@
-## Accepted ground-click marks drawn with the shared fx mesh cylinder.
+## Local ground-click feedback drawn with the shared fx mesh cylinder.
 
 import
   std/math,
@@ -58,7 +58,7 @@ proc clickMarkSettings*(): FxSettings =
   result.startColor = vec4(1.0, 0.86, 0.32, 0.9)
   result.endColor = vec4(1.0, 0.55, 0.12, 0.0)
   result.edgeColor = vec4(1.0, 0.92, 0.55, 1.0)
-  result.fadeIn = 0.08
+  result.fadeIn = 0
   result.fadeOut = 0.45
 
 proc initClickMarks*(): ClickMarkSystem =

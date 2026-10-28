@@ -181,6 +181,7 @@ type
     spellsReady*: bool
     potionCooldownEnds*: array[RecoveryKind, int32]
     recoveryItems*: array[RecoveryKind, Item]
+    recoverySources*: array[RecoveryKind, int32]
     recoveryStarted*, recoveryApplied*: array[RecoveryKind, int32]
     portalEnds*, portalCooldownEnds*, portalTowerId*: int32
     portalDestination*: WorldPoint
@@ -465,7 +466,7 @@ proc floorWorldTile(value: int32, team: Team): int =
   floorWorldTile(value) - int(team == BlueTeam and value mod WorldScale == 0)
 
 proc fixedSurfaceHeight(position: WorldPoint, team = RedTeam): int32
-proc fixedSurfaceHeightNear(
+proc fixedSurfaceHeightNear*(
     position: WorldPoint,
     referenceY: int32,
     team = RedTeam
@@ -503,6 +504,8 @@ const
   FootmanBodyRadius = 0.22'fx
   HeroBodyRadius = 0.28'fx
   BodyTurnRate = 0.35'fx
+  HeroTurnRate = 1.1'fx
+    ## A full 180-degree movement turn finishes within three ticks (125 ms).
   FootmanSightRadius* = 5 * WorldScale
   FootmanTowerSightRadius = 7 * WorldScale
   FootmanMeleeRange* = 54_000'i32
@@ -1061,6 +1064,7 @@ proc applyDamage[T: Hero | Footman](
         let item = target.recoveryItems[kind]
         if item != NoItem:
           target.recoveryItems[kind] = NoItem
+          target.recoverySources[kind] = 0
           target.recoveryStarted[kind] = 0
           target.recoveryApplied[kind] = 0
           when defined(replayEvents):
@@ -1490,7 +1494,7 @@ proc fixedSurfaceHeight(position: WorldPoint, team: Team): int32 =
       result = height
       found = true
 
-proc fixedSurfaceHeightNear(
+proc fixedSurfaceHeightNear*(
     position: WorldPoint,
     referenceY: int32,
     team: Team
@@ -1853,7 +1857,7 @@ proc tryMove(hero: Hero, direction: WorldPoint,
     hero.body,
     toPlanar(direction),
     worldToTiles(hero.heroMoveSpeed, WorldScale),
-    BodyTurnRate,
+    HeroTurnRate,
     tilesWalkable
   )
   applyBody(hero)
@@ -3841,6 +3845,7 @@ proc respawn(world: World, hero: Hero) =
   hero.portalTowerId = 0
   hero.controls = default(typeof(hero.controls))
   hero.recoveryItems = default(typeof(hero.recoveryItems))
+  hero.recoverySources = default(typeof(hero.recoverySources))
   hero.recoveryStarted = default(typeof(hero.recoveryStarted))
   hero.recoveryApplied = default(typeof(hero.recoveryApplied))
   hero.navLayer = bindNavLayer(hero.spawnPosition, hero.team)
@@ -4038,6 +4043,7 @@ proc recoverPotion(world: World, hero: Hero, kind: RecoveryKind) =
   if item == NoItem:
     return
   let
+    source = hero.recoverySources[kind]
     spec = item.itemSpec
     elapsed = clamp(world.tick - hero.recoveryStarted[kind],
       0'i32, spec.recoveryTicks)
@@ -4047,16 +4053,17 @@ proc recoverPotion(world: World, hero: Hero, kind: RecoveryKind) =
   hero.recoveryApplied[kind] = earned
   if amount > 0:
     if kind == HealthRecovery:
-      world.healHero(hero, amount, hero.id, ItemEffect, item.ord.int32)
+      world.healHero(hero, amount, source, ItemEffect, item.ord.int32)
     else:
-      world.restoreMana(hero, amount, hero.id, ItemEffect, item.ord.int32)
+      world.restoreMana(hero, amount, source, ItemEffect, item.ord.int32)
   if elapsed == spec.recoveryTicks:
     hero.recoveryItems[kind] = NoItem
+    hero.recoverySources[kind] = 0
     hero.recoveryStarted[kind] = 0
     hero.recoveryApplied[kind] = 0
     when defined(replayEvents):
       world.emit GameEvent(
-        kind: RecoveryCompleted, actor: world.eventEntity(hero.id),
+        kind: RecoveryCompleted, actor: world.eventEntity(source),
         target: world.eventEntity(hero.id), cause: ItemEffect,
         detail: item.ord.int32, related: -1
       )
@@ -4310,11 +4317,15 @@ proc canHitTarget(
     else: position
   within(hero.position, aim, range) and world.visible(hero.team, position)
 
-proc applyUseItem*(world: World, heroId, slotId: int32): bool =
-  ## Spends one consumable for a heal, mana restore, or poison strike.
+proc applyUseItem*(
+    world: World,
+    heroId, slotId: int32,
+    targetId = 0'i32
+): bool =
+  ## Uses a potion on self or a nearby ally, or performs a poison strike.
   if world.phase == Drafting:
     return world.finishAction(
-      heroId, ActionUseItem, slotId, slotId, 0, ActionDrafting
+      heroId, ActionUseItem, slotId, slotId, targetId, ActionDrafting
     )
   let
     index = heroIndex(world, heroId)
@@ -4325,7 +4336,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionUseItem,
       slotId,
       slotId,
-      0,
+      targetId,
       ActionNotAlive
     )
   let error = world.heroActionError(world.heroes[index])
@@ -4335,7 +4346,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionUseItem,
       slotId,
       slotId,
-      0,
+      targetId,
       error
     )
   if slot < 0 or slot >= InventorySlots:
@@ -4344,7 +4355,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionUseItem,
       slotId,
       slotId,
-      0,
+      targetId,
       ActionInvalidSlot
     )
   let item = world.heroes[index].inventory[slot]
@@ -4354,13 +4365,13 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionUseItem,
       slotId,
       slotId,
-      0,
+      targetId,
       ActionEmptySlot
     )
   let spec = item.itemSpec
   if item == PortalScroll:
     return world.finishAction(
-      heroId, ActionUseItem, slotId, slotId, 0, ActionInvalidPoint
+      heroId, ActionUseItem, slotId, slotId, targetId, ActionInvalidPoint
     )
   if spec.kind != Consumable:
     return world.finishAction(
@@ -4368,57 +4379,76 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionUseItem,
       slotId,
       slotId,
-      0,
+      targetId,
       ActionNotConsumable
     )
   let hero = world.heroes[index]
   if hero.consumableCooldown(item, world.tick) > 0:
     return world.finishAction(
-      heroId, ActionUseItem, slotId, slotId, 0, ActionCooldown
+      heroId, ActionUseItem, slotId, slotId, targetId, ActionCooldown
+    )
+  var recipient = hero
+  if targetId != 0 and (spec.heal > 0 or spec.restore > 0):
+    recipient = world.heroById(targetId)
+    if recipient.id == 0 or recipient.hp <= 0 or recipient.state == Dying or
+      recipient.team != hero.team or
+      (recipient.id != hero.id and
+        not world.visible(hero.team, recipient.position)):
+        return world.finishAction(
+          heroId, ActionUseItem, slotId, slotId, targetId, ActionTargetUnavailable
+        )
+    if not within(hero.position, recipient.position,
+      PotionTargetRangeTiles * WorldScale):
+        return world.finishAction(
+          heroId, ActionUseItem, slotId, slotId, targetId, ActionOutOfRange
+        )
+  elif targetId != 0 and targetId != heroId:
+    return world.finishAction(
+      heroId, ActionUseItem, slotId, slotId, targetId, ActionTargetUnavailable
     )
   if spec.heal > 0:
-    if world.heroes[index].hp >= world.heroes[index].maxHp:
+    if recipient.hp >= recipient.maxHp:
       return world.finishAction(
         heroId,
         ActionUseItem,
         slotId,
         slotId,
-        0,
+        targetId,
         ActionFullHealth
       )
     if spec.recoveryTicks == 0:
-      world.healHero(hero, spec.heal, heroId, ItemEffect, item.ord.int32)
+      world.healHero(recipient, spec.heal, heroId, ItemEffect, item.ord.int32)
   elif spec.restore > 0:
-    if world.heroes[index].mana >= world.heroes[index].maxMana:
+    if recipient.mana >= recipient.maxMana:
       return world.finishAction(
         heroId,
         ActionUseItem,
         slotId,
         slotId,
-        0,
+        targetId,
         ActionFullMana
       )
     if spec.recoveryTicks == 0:
-      world.restoreMana(hero, spec.restore, heroId, ItemEffect, item.ord.int32)
+      world.restoreMana(recipient, spec.restore, heroId, ItemEffect, item.ord.int32)
   elif spec.strike > 0:
-    let targetId = world.heroes[index].attackObjectId
-    if targetId == 0:
+    let attackTargetId = world.heroes[index].attackObjectId
+    if attackTargetId == 0:
       return world.finishAction(
         heroId,
         ActionUseItem,
         slotId,
         slotId,
-        0,
+        targetId,
         ActionTargetUnavailable
       )
     var
-      targetFootman = footmanIndex(world, targetId)
-      targetHero = heroIndex(world, targetId)
-      targetBuilding = buildingIndex(world, targetId)
+      targetFootman = footmanIndex(world, attackTargetId)
+      targetHero = heroIndex(world, attackTargetId)
+      targetBuilding = buildingIndex(world, attackTargetId)
       fortIndex = -1
     if targetFootman < 0 and targetHero < 0 and targetBuilding < 0:
       for i, fort in world.forts:
-        if fort.id == targetId:
+        if fort.id == attackTargetId:
           fortIndex = i
           break
     if targetFootman < 0 and targetHero < 0 and
@@ -4428,7 +4458,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
         ActionUseItem,
         slotId,
         slotId,
-        0,
+        targetId,
         ActionTargetUnavailable
       )
     if not world.canHitTarget(
@@ -4444,7 +4474,7 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
         ActionUseItem,
         slotId,
         slotId,
-        0,
+        targetId,
         ActionTargetUnavailable
       )
     applyHeroHit(
@@ -4464,25 +4494,26 @@ proc applyUseItem*(world: World, heroId, slotId: int32): bool =
       ActionUseItem,
       slotId,
       slotId,
-      0,
+      targetId,
       ActionNotConsumable
     )
   if spec.heal > 0 or spec.restore > 0:
     let kind = if spec.heal > 0: HealthRecovery else: ManaRecovery
-    world.recoverPotion(hero, kind)
+    world.recoverPotion(recipient, kind)
     hero.potionCooldownEnds[kind] = world.tick + spec.cooldownTicks
     if spec.recoveryTicks > 0:
-      hero.recoveryItems[kind] = item
-      hero.recoveryStarted[kind] = world.tick
-      hero.recoveryApplied[kind] = 0
+      recipient.recoveryItems[kind] = item
+      recipient.recoverySources[kind] = heroId
+      recipient.recoveryStarted[kind] = world.tick
+      recipient.recoveryApplied[kind] = 0
       when defined(replayEvents):
         world.emit GameEvent(
           kind: RecoveryStarted, actor: world.eventEntity(heroId),
-          target: world.eventEntity(heroId), cause: ItemEffect,
+          target: world.eventEntity(recipient.id), cause: ItemEffect,
           detail: item.ord.int32, related: -1
         )
   world.consumeItem(hero, slot)
-  world.finishAction(heroId, ActionUseItem, slotId, slotId, 0, NoActionError)
+  world.finishAction(heroId, ActionUseItem, slotId, slotId, targetId, NoActionError)
 
 proc applyUseItemAt*(
     world: World,
@@ -4759,34 +4790,18 @@ proc advanceSpells(world: World) =
       inc write
   world.casts.setLen(write)
 
-proc castAbility(
-    world: World,
-    hero: Hero,
-    slot: HeroAbilitySlot,
-    targetId: int32,
-    aim: WorldPoint
+proc aimAbility*(
+  world: World,
+  hero: Hero,
+  slot: HeroAbilitySlot,
+  targetId: int32,
+  aim: WorldPoint,
+  spell: var SpellCast
 ): ActionError =
-  ## Releases an object or ground spell after atomically checking its costs.
-  let error = world.heroActionError(hero)
-  if error != NoActionError:
-    return error
-  if hero.controls[SilenceControl].ends > world.tick:
-    return ActionSilenced
-  if hero.abilityLevels[slot] == 0:
-    return ActionAbilityLocked
-  if world.casts.len >= 512:
-    return ActionSpellLimit
-  if not hero.spellsReady:
-    hero.initHeroCharges()
+  ## Resolves the same targeting geometry for the cursor preview and casting.
   let
     ability = heroAbility(hero.class, slot)
     spec = ability.abilitySpec(hero.abilityLevels[slot])
-  if hero.cooldowns[slot] > 0:
-    return ActionCooldown
-  if hero.charges[slot] <= 0:
-    return ActionNoCharges
-  if hero.mana < spec.manaCost:
-    return ActionInsufficientMana
   var
     point = aim
     selected = targetId
@@ -4820,7 +4835,7 @@ proc castAbility(
     )
   if direction.x == 0 and direction.z == 0:
     direction.z = WorldScale
-  var spell = SpellCast(
+  spell = SpellCast(
     ability: ability, level: hero.abilityLevels[slot],
     heroId: hero.id, targetId: selected,
     origin: hero.position, position: point,
@@ -4840,10 +4855,46 @@ proc castAbility(
       distanceSquared(spell.origin, point)) + spec.projectileSpeed - 1) div
       max(spec.projectileSpeed, 1)))
   spell.ends = spell.impact + 12
+  NoActionError
+
+proc castAbility(
+    world: World,
+    hero: Hero,
+    slot: HeroAbilitySlot,
+    targetId: int32,
+    aim: WorldPoint
+): ActionError =
+  ## Releases an object or ground spell after atomically checking its costs.
+  let error = world.heroActionError(hero)
+  if error != NoActionError:
+    return error
+  if hero.controls[SilenceControl].ends > world.tick:
+    return ActionSilenced
+  if hero.abilityLevels[slot] == 0:
+    return ActionAbilityLocked
+  if world.casts.len >= 512:
+    return ActionSpellLimit
+  if not hero.spellsReady:
+    hero.initHeroCharges()
+  let
+    ability = heroAbility(hero.class, slot)
+    spec = ability.abilitySpec(hero.abilityLevels[slot])
+  if hero.cooldowns[slot] > 0:
+    return ActionCooldown
+  if hero.charges[slot] <= 0:
+    return ActionNoCharges
+  if hero.mana < spec.manaCost:
+    return ActionInsufficientMana
+  var spell: SpellCast
+  let aimError = world.aimAbility(hero, slot, targetId, aim, spell)
+  if aimError != NoActionError:
+    return aimError
   when defined(replayEvents):
     world.emit GameEvent(
       kind: SpellReleased, actor: world.eventEntity(hero.id),
-      target: world.eventEntity(selected), cause: AbilityEffect,
+      target: world.eventEntity(
+        if spec.casting == SelfCast: hero.id else: targetId
+      ), cause: AbilityEffect,
       detail: ability.ord.int32, slot: slot.ord.int32, related: -1
     )
     let beforeMana = hero.mana
@@ -4972,7 +5023,7 @@ proc applyReplayAction*(world: World, action: ReplayAction): bool {.discardable.
   of ActionBuyback:
     applyBuyback(world, action.heroId)
   of ActionUseItem:
-    applyUseItem(world, action.heroId, action.first)
+    applyUseItem(world, action.heroId, action.first, action.second)
   of ActionUseItemAt:
     applyUseItemAt(world, action.heroId, action.slot,
       action.first, action.second, action.offset)
@@ -5520,6 +5571,7 @@ proc stateHash*(game: Game): uint64 =
     for kind in RecoveryKind:
       hash.addHashy(hero.potionCooldownEnds[kind])
       hash.addHashy(hero.recoveryItems[kind].ord)
+      hash.addHashy(hero.recoverySources[kind])
       hash.addHashy(hero.recoveryStarted[kind])
       hash.addHashy(hero.recoveryApplied[kind])
     hash.addHashy(hero.portalEnds)

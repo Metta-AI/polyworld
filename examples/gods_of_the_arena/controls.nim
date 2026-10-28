@@ -38,6 +38,9 @@ var
   armedAbility* = -1'i32
   armedItem* = -1'i32
   shopOpen* = false
+  itemTapTime = -1.0
+  itemTapHero = 0'i32
+  itemTapSlot = -1'i32
 
 proc queueDraft*(heroId, classId: int32) =
   ## Queues a hero choice for validation on the next draft decision.
@@ -79,12 +82,13 @@ proc queueBuyItem*(heroId, itemId: int32) =
     first: itemId
   )
 
-proc queueUseItem*(heroId, slot: int32) =
-  ## Queues one inventory use for the human hero.
+proc queueUseItem*(heroId, slot: int32, targetId = 0'i32) =
+  ## Queues inventory use on self or an explicitly selected allied hero.
   pending.add PlayerCommand(
     kind: CommandUse,
     heroId: heroId,
-    first: slot
+    first: slot,
+    second: targetId
   )
 
 proc queueBuyback*(heroId: int32) =
@@ -104,14 +108,31 @@ proc queueUseItemAt*(heroId, slot, mapX, mapY: int32) =
     first: mapX, second: mapY
   )
 
-proc activatePlayerItem*(world: World, heroId, slot: int32) =
-  ## Arms portal aiming or immediately uses an ordinary consumable.
+proc activatePlayerItem*(
+    world: World,
+    heroId, slot: int32,
+    tapTime = -1.0
+) =
+  ## Arms item targeting; a second quick hotkey press uses a potion on self.
   let hero = world.heroById(heroId)
   if hero.id == 0 or slot < 0 or slot >= InventorySlots:
     return
+  let
+    item = hero.inventory[slot]
+    spec = item.itemSpec
+    potion = spec.heal > 0 or spec.restore > 0
+    doubleTap = potion and armedItem == slot and itemTapHero == heroId and
+      itemTapSlot == slot and tapTime >= itemTapTime and itemTapTime >= 0 and
+      tapTime - itemTapTime <= 0.35
+  itemTapTime = tapTime
+  itemTapHero = heroId
+  itemTapSlot = slot
   armedAbility = -1
   armedItem = -1
-  if hero.inventory[slot] == PortalScroll:
+  if doubleTap:
+    queueUseItem(heroId, slot, heroId)
+    itemTapTime = -1
+  elif item == PortalScroll or potion:
     armedItem = slot
   else:
     queueUseItem(heroId, slot)
@@ -131,9 +152,9 @@ proc queueLevelAbility*(heroId, slot: int32) =
 
 proc activatePlayerAbility*(
     world: World,
-    heroId, slotId, selectedId, aimX, aimY: int32
+    heroId, slotId: int32
 ): bool =
-  ## Casts immediate actions or the current target, otherwise arms map aiming.
+  ## Casts self abilities immediately and arms all aimed abilities.
   let hero = world.heroById(heroId)
   if hero.id == 0 or hero.hp <= 0 or hero.state == Dying or
     slotId < 0 or slotId > HeroAbilitySlot.high.ord:
@@ -146,28 +167,6 @@ proc activatePlayerAbility*(
     return true
   if spec.casting == SelfCast:
     queueCastTarget(heroId, slotId, heroId)
-    return true
-  var
-    mapX = aimX
-    mapY = aimY
-  for id in [selectedId, hero.attackObjectId]:
-    if id == 0 or id == heroId:
-      continue
-    var target: WorldObject
-    if not world.spellTarget(id, target) or not target.alive or
-      not world.visible(hero.team, target.position):
-        continue
-    if not spec.canTarget(target.faction == hero.team.ord.int32):
-      continue
-    if spec.casting == MeleeCast and
-      not within(hero.position, target.position, spec.range):
-        mapX = mapCoordinate(target.position.x)
-        mapY = mapCoordinate(target.position.z)
-        break
-    queueCastTarget(heroId, slotId, id)
-    return true
-  if spec.casting == MeleeCast:
-    queueCastPoint(heroId, slotId, mapX, mapY)
     return true
   armedAbility = slotId
 
@@ -189,6 +188,9 @@ proc clearPlayerCommands*() =
   armedAbility = -1
   armedItem = -1
   shopOpen = false
+  itemTapTime = -1
+  itemTapHero = 0
+  itemTapSlot = -1
   purchaseReceipt = PurchaseReceipt()
 
 proc flushPlayerCommands*(game: Game) =

@@ -215,7 +215,6 @@ Compose file, guide, baseline player and replay viewer build hook) is in
 [`coworld/integration.md`](../../coworld/integration.md).
 
 ```sh
-export POLYWORLD_DEPS="$PWD/../../tmp/coworld/deps"   # pinned dependencies
 (cd ../.. && nim r coworld/tools/sync_dependencies.nim)
 nim c -d:coworld -o:../../tmp/coworld/awm src/awm.nim  # the Coworld server
 (cd ../.. && nim r coworld/tools/test_runtime.nim awm)  # its contract tests

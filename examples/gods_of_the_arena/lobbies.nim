@@ -2,7 +2,7 @@ import
   std/[math, strutils],
   chroma, pixie, silky, vmath, windy,
   polyworld/[assets, chrome, menus],
-  presets, generation/[maps, tiles]
+  homes, presets, generation/[maps, tiles]
 
 const
   LobbyCanvas = vec2(1514, 970)
@@ -60,6 +60,27 @@ proc lobbyIcon*(
 ) =
   ## Draws a shared neutral icon with an optional team tint.
   sk.drawSprite(name, at, vec2(size), tint)
+
+proc lobbyTitle*(sk: Silky, title, icon: string, center: Vec2) =
+  ## Centers the icon and measured title together on a shared baseline.
+  let
+    width = sk.getTextSize("LobbyTitle", title).x
+    left = center.x - (width + 80) / 2
+  sk.drawSprite("home-shade", center - vec2(470, 170), vec2(940, 340))
+  sk.lobbyIcon(icon, vec2(left, center.y - 30), 60)
+  sk.drawLabel(
+    title,
+    vec2(left + 80, center.y - 30),
+    vec2(width + 1, 60),
+    rgbx(240, 237, 225, 255),
+    "LobbyTitle"
+  )
+
+proc beginLobbySettings*(sk: Silky, window: Window): Vec2 =
+  ## Places the matching settings heading above the standard Silky panel.
+  result = sk.beginSettings(window, 100)
+  sk.drawHomeBackground(window)
+  sk.lobbyTitle("SETTINGS", "settings", result + vec2(360, -74))
 
 proc lobbyPanel*(sk: Silky, at, size: Vec2, frame = false) =
   ## Reuses the existing theme's window and inset frame patches.
@@ -144,7 +165,7 @@ proc lobbyNumber*[T: SomeNumber](
 
 proc beginLobby*(
     sk: Silky, window: Window, ui: var LobbyUi,
-    title, subtitle: string, multiplayer = false
+    title: string, multiplayer = false
 ): LobbyLayout =
   ## Fits landscape layouts and stacks panels with scrolling in tall windows.
   result.compact = window.size.x.float32 / window.size.y.float32 < 1.3
@@ -160,14 +181,8 @@ proc beginLobby*(
   ui.scroll = clamp(ui.scroll + window.scrollDelta.y * ScrollSpeed.float32,
     0.0'f, max(0.0'f, canvas.y - view.y))
   result.origin = vec2((view.x - canvas.x) / 2, -ui.scroll)
-  sk.clearScreen(rgbx(0, 0, 0, 255))
-  let center = result.origin + vec2(canvas.x / 2, 0)
-  sk.lobbyIcon("battle", center + vec2(-270, 32), 70)
-  sk.lobbyLabel("GODS OF THE ARENA", center + vec2(-180, 4), 600,
-    "LobbyBold")
-  sk.lobbyLabel(title, center + vec2(-180, 45), 700, "LobbyTitle")
-  sk.lobbyLabel(subtitle, center + vec2(-180, 96), 700,
-    tint = LobbyMuted)
+  sk.drawHomeBackground(window)
+  sk.lobbyTitle(title, "battle", result.origin + vec2(canvas.x / 2, 72))
   let top = if multiplayer: 238.0'f else: 150.0'f
   result.left = result.origin + vec2(32, top)
   result.leftWidth = if result.compact: 936 else: 930

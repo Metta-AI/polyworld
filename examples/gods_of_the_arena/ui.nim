@@ -4,8 +4,8 @@ import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels, profiles],
-  assets, content, sim, game, controls, layouts, shops, maps, events, drafts
+    stackpanels, profiles, networks],
+  assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -84,11 +84,11 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   )
 
 proc currentLayout*(window: Window): GameUiLayout =
-  ## Returns the nine-region HUD layout in Silky layout space.
+  ## Reserves timeline space only when the transport controls are visible.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
       gameUiScale(window),
-    TransportHeight
+    if run.networked: 0.0'f else: TransportHeight
   )
 
 var
@@ -586,6 +586,39 @@ proc minimapPosition(position: Vec3, panel: GameUiPanel): Vec2 =
     )
   area.origin + vec2(x * area.size.x, y * area.size.y)
 
+proc minimapFogAlpha(team, index: int): uint8 =
+  ## Dims hidden terrain while keeping the map readable beneath the fog.
+  if run.world.teamVisible[team][index] != 0:
+    0
+  elif run.world.teamExplored[team][index] != 0:
+    145
+  else:
+    179
+
+proc drawMinimapFog(sk: Silky, area: GameUiPanel, viewMode: int32) =
+  ## Covers hidden terrain with merged row spans using the team's LOS mask.
+  if viewMode == 0:
+    return
+  let
+    team = int(viewMode - 1)
+    tiles = mapTiles()
+    tileSize = area.size / tiles.float32
+  for y in 0 ..< tiles:
+    var x = 0
+    while x < tiles:
+      let alpha = minimapFogAlpha(team, y * tiles + x)
+      var finish = x + 1
+      while finish < tiles and
+        minimapFogAlpha(team, y * tiles + finish) == alpha:
+          inc finish
+      if alpha > 0:
+        sk.drawRect(
+          area.origin + vec2(x.float32, y.float32) * tileSize,
+          vec2((finish - x).float32, 1) * tileSize,
+          rgbx(0, 0, 0, alpha)
+        )
+      x = finish
+
 proc drawMinimapIcon(
     sk: Silky,
     name: string,
@@ -673,7 +706,8 @@ proc drawMinimapCamera(
       aspect,
       area.origin,
       area.size,
-      mapHalfSize()
+      mapHalfSize(),
+      zoomPitch(cameraDistance)
     ),
     rgbx(255, 242, 187, 255)
   )
@@ -722,7 +756,8 @@ proc drawHeroPortrait(
     selectedIds: var seq[int32],
     followSelection: var bool,
     actionCam: var ActionCam,
-    focusPlayerHero: var bool
+    focusPlayerHero: var bool,
+    networkStats: NetworkStats = nil
 ) =
   ## Draws one top-bar portrait on the hero plate.
   let
@@ -848,7 +883,8 @@ proc drawUi*(
     selectedIds: var seq[int32],
     followSelection: var bool,
     actionCam: var ActionCam,
-    focusPlayerHero: var bool
+    focusPlayerHero: var bool,
+    networkStats: NetworkStats = nil
 ) {.measure.} =
   ## Draws every Silky HUD panel for the current frame.
   if run.world.phase == Drafting:
@@ -988,6 +1024,7 @@ proc drawUi*(
     rgbx(91, 119, 128, 255)
   )
   sk.pushClipRect(rect(mapArea.origin, mapArea.size))
+  sk.drawMinimapFog(mapArea, viewMode)
   for tower in run.world.buildings:
     if tower.hp > 0 and
         visibleInView(viewMode, tower.team, tower.position):
@@ -1018,12 +1055,13 @@ proc drawUi*(
         isPicked(footman.id, selectedIds)
       )
   for hero in run.world.heroes:
-    if visibleInView(viewMode, hero.team, hero.position):
-      sk.drawMinimapHero(
-        hero,
-        minimapPosition(renderPoint(hero.position), minimapPanel),
-        isPicked(hero.id, selectedIds)
-      )
+    if hero.state != Dying and hero.hp > 0 and
+      visibleInView(viewMode, hero.team, hero.position):
+        sk.drawMinimapHero(
+          hero,
+          minimapPosition(renderPoint(hero.position), minimapPanel),
+          isPicked(hero.id, selectedIds)
+        )
   sk.popClipRect()
   sk.drawMinimapCamera(
     window,
@@ -1127,10 +1165,10 @@ proc drawUi*(
                 window.buttonDown[KeyRightShift]:
                   queueLevelAbility(selection.id, slot.ord.int32)
                   armedAbility = -1
-              elif selection.abilityLevels[slot] > 0:
-                armedAbility = slot.ord.int32
               else:
-                queueCastTarget(selection.id, slot.ord.int32, selection.id)
+                discard activatePlayerAbility(
+                  run.world, selection.id, slot.ord.int32
+                )
             if armedAbility == slot.ord.int32:
               let color = rgbx(255, 223, 133, 255)
               sk.drawRect(well.origin, vec2(well.size.x, 3), color)
@@ -1405,7 +1443,10 @@ proc drawUi*(
       )
   hudScratch.setLen(0)
   if playerHero and armedItem >= 0:
-    hudScratch.add "RIGHT-CLICK MAP"
+    if run.world.heroById(playerHeroId).inventory[armedItem] == PortalScroll:
+      hudScratch.add "CLICK MAP"
+    else:
+      hudScratch.add "CLICK SELF OR ALLY"
   elif inventoryHero.id != 0 and inventoryHero.channelTicks > 0:
     hudScratch.add "TELEPORTING "
     hudScratch.addHudInt(cooldownSeconds(inventoryHero.channelTicks).int)
@@ -1474,7 +1515,7 @@ proc drawUi*(
       hudScratch.add "Dying"
     else:
       hudScratch.add "Marching"
-  sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch)
+  sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch, networkStats)
   statsState.syncDirector(actionCam, statsTable, window.tabHeld)
 
 proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =

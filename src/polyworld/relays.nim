@@ -1,5 +1,5 @@
 import
-  std/[strutils, sysrand],
+  std/[strutils, sysrand, times],
   rooms
 
 const
@@ -15,7 +15,7 @@ const
 
 type
   Delivery = object
-    id: uint64
+    id, stamp: uint64
     bytes: int
   Checkpoint = object
     present: bool
@@ -40,6 +40,7 @@ type
     delivered, received: uint64
     unacknowledged, inputBytes: int
     lastSeen, inputEpoch: float64
+    timing: PacketTiming
   RelayRoom* = ref object
     id*, name*: string
     identity*: GameIdentity
@@ -64,10 +65,12 @@ type
     bytes*: string
     close*: bool
   Relay* = ref object
+    logEvents*: bool
     guests*: seq[Guest]
     rooms*: seq[RelayRoom]
     outgoing*: seq[Outgoing]
     nextId: uint32
+    now: float64
 
 proc secret(): string =
   ## Creates an unguessable guest or invite token from operating-system entropy.
@@ -101,6 +104,34 @@ proc controls(room: RelayRoom, id: uint32): bool =
     if seat.owner == id:
       return true
 
+proc logEvent*(
+    relay: Relay, event: string, connection = 0,
+    room: RelayRoom = nil, detail = ""
+) =
+  ## Echoes lifecycle events without tokens, invite codes or game payloads.
+  if not relay.logEvents:
+    return
+  var
+    line = getTime().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & " " & event
+    activeRoom = room
+  if connection > 0:
+    line.add " connection=" & $connection
+    let guest = relay.connectionGuest(connection)
+    if guest != nil:
+      line.add " player=" & $guest.id & " name=" & guest.name.escape &
+        " game=" & guest.identity.game.escape &
+        " gameplay=" & $guest.identity.gameplay &
+        " protocol=" & $guest.identity.protocol
+      if activeRoom == nil:
+        activeRoom = relay.room(guest.room)
+  if activeRoom != nil:
+    line.add " room=" & activeRoom.name.escape &
+      " owner=" & $activeRoom.owner & " match=" & $activeRoom.match &
+      " tick=" & $activeRoom.tick
+  if detail.len > 0:
+    line.add " detail=" & detail.escape
+  echo line
+
 proc send(relay: Relay, guest: Guest, message: RoomMessage) =
   ## Bounds transport credit until the peer acknowledges receiving bytes.
   if guest == nil or guest.connection == 0:
@@ -108,12 +139,17 @@ proc send(relay: Relay, guest: Guest, message: RoomMessage) =
   var packet = message
   inc guest.delivered
   packet.delivery = guest.delivered
+  packet.timing = guest.timing
+  packet.timing.server = uint64(max(0.0, relay.now) * 1_000_000)
   let bytes = packet.encode()
   if guest.unacknowledged + bytes.len > MaxUnacknowledgedBytes:
+    relay.logEvent("connection.backpressure", guest.connection,
+      detail = "Unacknowledged outgoing byte limit exceeded")
     relay.outgoing.add Outgoing(connection: guest.connection, close: true)
     guest.connection = 0
     return
-  guest.deliveries.add Delivery(id: packet.delivery, bytes: bytes.len)
+  guest.deliveries.add Delivery(id: packet.delivery, stamp: packet.timing.server,
+    bytes: bytes.len)
   guest.unacknowledged += bytes.len
   relay.outgoing.add Outgoing(connection: guest.connection, bytes: bytes)
 
@@ -155,6 +191,7 @@ proc stop(relay: Relay, room: RelayRoom, detail: string) =
     return
   room.phase = Desynced
   room.detail = detail
+  relay.logEvent("match.stopped", room = room, detail = detail)
   relay.status(room)
 
 proc retainedBytes(relay: Relay): int =
@@ -175,6 +212,7 @@ proc disconnect*(relay: Relay, connection: int) =
   let guest = relay.connectionGuest(connection)
   if guest == nil:
     return
+  relay.logEvent("player.disconnected", connection)
   guest.connection = 0
   guest.deliveries.setLen(0)
   guest.unacknowledged = 0
@@ -218,9 +256,14 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
     )
     relay.guests.add guest
   guest.connection = connection
+  relay.logEvent(
+    if message.token.len > 0: "player.reconnected" else: "player.identified",
+    connection
+  )
   guest.lastSeen = now
   guest.inputEpoch = now
   guest.inputBytes = 0
+  guest.timing = PacketTiming()
   guest.delivered = 0
   guest.received = 0
   guest.deliveries.setLen(0)
@@ -271,6 +314,8 @@ proc catchup(relay: Relay, guest: Guest, room: RelayRoom, tick: uint32) =
 
 proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
   ## Removes lobby membership and frees its seats without transferring bots.
+  relay.logEvent("room.left", guest.connection, room,
+    "player=" & $guest.id)
   guest.room = ""
   guest.receipts.setLen(0)
   if room.phase == Lobby:
@@ -293,6 +338,7 @@ proc receive*(
     relay: Relay, connection: int, message: RoomMessage, now: float64
 ) =
   ## Handles one event in the sole owner thread of the relay state.
+  relay.now = now
   if message.delivery != 0:
     reject("Clients cannot assign delivery identifiers")
   if message.kind == Hello:
@@ -308,8 +354,29 @@ proc receive*(
   guest.inputBytes += message.encode.len
   if guest.inputBytes > MaxInputBytesPerSecond:
     reject("Incoming traffic limit exceeded")
+  if message.timing.received > guest.received:
+    var found = false
+    for delivery in guest.deliveries:
+      if delivery.id == message.timing.received:
+        if delivery.stamp != message.timing.echo:
+          reject("Timestamp echo does not match its delivery")
+        let
+          stamp = uint64(max(0.0, now) * 1_000_000)
+          elapsed = stamp - min(stamp, delivery.stamp)
+          rtt = uint32(min(elapsed, uint64(uint32.high)))
+        guest.timing.jitter =
+          if guest.timing.measuredAt == 0: 0'u32
+          else: uint32(abs(int64(rtt) - int64(guest.timing.rtt)))
+        guest.timing.rtt = rtt
+        guest.timing.measuredAt = stamp
+        found = true
+        break
+    if not found:
+      reject("Unknown timestamp delivery")
+    guest.acknowledge(message.timing.received)
   if message.kind == Received:
-    guest.acknowledge(message.sequence)
+    if message.sequence > 0:
+      guest.acknowledge(message.sequence)
     return
   if message.kind == Keepalive:
     relay.send(guest, RoomMessage(kind: Keepalive))
@@ -343,6 +410,9 @@ proc receive*(
     )
     guest.room = room.id
     relay.rooms.add room
+    relay.logEvent("room.created", connection, room,
+      "seats=" & $message.number & " tickRate=" & $message.tickRate &
+      " public=" & $message.flag)
     relay.changed(room)
     return
   if message.kind == JoinRoom:
@@ -356,6 +426,7 @@ proc receive*(
     guest.room = room.id
     guest.ready = false
     room.participants.add guest.id
+    relay.logEvent("room.joined", connection, room)
     if room.phase == Lobby:
       relay.changed(room)
     else:
@@ -389,6 +460,7 @@ proc receive*(
     room.payload = message.payload
     room.public = message.flag
     room.tickRate = message.tickRate
+    relay.logEvent("room.configured", connection, room)
     relay.changed(room)
   of ClaimSeat, ReleaseSeat:
     if room.phase != Lobby or message.seat >= uint32(room.seats.len):
@@ -454,6 +526,8 @@ proc receive*(
       revision: room.revision, hash: initialHash
     ))
     relay.status(room)
+    relay.logEvent("match.started", connection, room,
+      "seats=" & $room.seats.len & " initialHash=" & $initialHash)
   of SubmitCommand:
     if room.phase notin {Playing, Waiting} or
       message.seat >= uint32(room.seats.len) or
@@ -492,10 +566,7 @@ proc receive*(
       sequence: message.sequence, payload: message.payload
     )
     room.pendingBytes += message.payload.len * 2 + 64
-    relay.send(guest, RoomMessage(
-      kind: CommandAck, match: room.match,
-      sequence: message.sequence, tick: tick
-    ))
+    # The next authoritative tick acknowledges new commands in its payload.
   of AppliedTick:
     if message.tick < guest.applied or message.tick > room.tick:
       reject("Invalid simulated tick acknowledgement")
@@ -554,6 +625,11 @@ proc receive*(
   of PauseMatch:
     if room.phase notin {Playing, Waiting} or not room.controls(guest.id):
       reject("Only a controlling participant can pause an active match")
+    if room.paused != message.flag:
+      relay.logEvent(
+        if message.flag: "match.paused" else: "match.resume-requested",
+        connection, room
+      )
     room.paused = message.flag
     room.pausedBy = guest.name
     room.phase = Waiting
@@ -571,6 +647,7 @@ proc receive*(
     if guest.id != room.owner or room.phase notin {Ended, Desynced}:
       reject("Only the owner can reopen a completed room")
     room.phase = Lobby
+    relay.logEvent("room.reopened", connection, room)
     room.paused = false
     room.pausedBy = ""
     for seat in room.seats.mitems:
@@ -589,9 +666,11 @@ proc receive*(
 
 proc advance*(relay: Relay, now: float64) =
   ## Emits immutable ticks only while controllers and hash barriers agree.
+  relay.now = now
   for guest in relay.guests:
     if guest.connection != 0 and now - guest.lastSeen > 15:
       let connection = guest.connection
+      relay.logEvent("connection.timeout", connection)
       relay.outgoing.add Outgoing(connection: connection, close: true)
       relay.disconnect(connection)
   for room in relay.rooms:
@@ -638,6 +717,8 @@ proc advance*(relay: Relay, now: float64) =
     if allFinished:
       room.phase = Ended
       room.detail = "Match completed at tick " & $finishedTick
+      relay.logEvent("match.ended", room = room,
+        detail = "finalTick=" & $finishedTick & " finalHash=" & $finishedHash)
       relay.status(room)
       continue
     if reason.len == 0 and room.paused:
@@ -678,6 +759,7 @@ proc advance*(relay: Relay, now: float64) =
     room.deadline = now + 1.0 / float64(room.tickRate)
   for i in countdown(relay.rooms.high, 0):
     if relay.rooms[i].participants.len == 0:
+      relay.logEvent("room.closed", room = relay.rooms[i])
       relay.rooms.delete(i)
   for i in countdown(relay.guests.high, 0):
     let guest = relay.guests[i]
@@ -690,6 +772,7 @@ proc process*(relay: Relay, connection: int, bytes: string, now: float64) =
   try:
     relay.receive(connection, decode(bytes), now)
   except RoomsError as error:
+    relay.logEvent("request.rejected", connection, detail = error.msg)
     let guest = relay.connectionGuest(connection)
     if guest != nil:
       relay.send(guest, RoomMessage(kind: Failure, detail: error.msg))

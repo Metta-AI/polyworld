@@ -107,6 +107,7 @@ import
   test_worldtexts,
   test_rooms,
   test_roomclients,
+  test_networks,
   test_gota_multiplayer
 
 echo "All tests passed"

@@ -15,7 +15,6 @@ case "$root/" in
     exit 1 ;;
 esac
 
-export POLYWORLD_DEPS="${POLYWORLD_DEPS:-$root/tmp/coworld/deps}"
 export POLYWORLD_ART="${POLYWORLD_ART:-$(dirname "$root")/polyworld_art}"
 (cd "$root" && nim r --hints:off coworld/tools/sync_dependencies.nim)
 expected="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["revision"])' \

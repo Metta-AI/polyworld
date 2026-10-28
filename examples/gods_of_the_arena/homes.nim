@@ -58,6 +58,15 @@ proc addHomeAssets*(builder: AtlasBuilder) =
     if not builder.addImage("home-" & name, picture):
       raise newException(MenusError, "The UI atlas is too small for menu art")
 
+proc drawHomeBackground*(sk: Silky, window: Window) =
+  ## Fills any menu viewport with the same centered arena background.
+  let
+    size = window.size.vec2 / sk.uiScale
+    backdrop = HomeSize * max(size.x / HomeSize.x, size.y / HomeSize.y)
+  sk.clearScreen(rgbx(12, 18, 23, 255))
+  sk.drawSprite("home-background", (size - backdrop) * 0.5'f, backdrop)
+  sk.drawRect(vec2(0), size, rgbx(8, 12, 22, 35))
+
 proc drawHome*(sk: Silky, window: Window, focus: var int): HomeAction =
   ## Draws the centered arena menu with pointer and keyboard navigation.
   sk.uiScale = max(0.1'f, min(
@@ -69,11 +78,8 @@ proc drawHome*(sk: Silky, window: Window, focus: var int): HomeAction =
   let
     size = window.size.vec2 / sk.uiScale
     origin = (size - HomeSize) * 0.5'f
-    backdrop = HomeSize * max(size.x / HomeSize.x, size.y / HomeSize.y)
     count = when defined(emscripten): 3 else: 4
-  sk.clearScreen(rgbx(12, 18, 23, 255))
-  sk.drawSprite("home-background", (size - backdrop) * 0.5'f, backdrop)
-  sk.drawRect(vec2(0), size, rgbx(8, 12, 22, 35))
+  sk.drawHomeBackground(window)
   sk.drawSprite("home-shade", origin + vec2(386, 95), vec2(900, 850))
   sk.drawSprite("home-logo", origin + vec2(536, 30), vec2(600, 400))
   sk.drawLabel("Polyworld", origin + vec2(536, 437), vec2(600, 36),

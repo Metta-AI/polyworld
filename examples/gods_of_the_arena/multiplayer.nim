@@ -25,6 +25,27 @@ proc gotaIdentity*(): GameIdentity =
     protocol: GotaNetworkProtocol
   )
 
+proc humanSeatFor*(snapshot: RoomMessage, participant: uint32): int =
+  ## Finds a participant's human seat and rejects duplicate assignments.
+  result = -1
+  for i, seat in snapshot.seats:
+    if seat.owner == participant and participant != 0 and seat.name == "Human":
+      if result >= 0:
+        reject("Each participant can control only one human slot")
+      result = i
+
+proc claimHumanSeat*(client: RoomClient, seat: int, previous = -1) =
+  ## Moves the local human, including a claim still awaiting acknowledgement.
+  if seat < 0 or seat >= client.snapshot.seats.len or
+    client.snapshot.seats[seat].owner notin [0'u32, client.participant]:
+      reject("Cannot take another participant's slot")
+  for i, current in client.snapshot.seats:
+    if i != seat and (i == previous or
+      (current.owner == client.participant and current.name == "Human")):
+        if current.owner in [0'u32, client.participant]:
+          client.send(RoomMessage(kind: ReleaseSeat, seat: uint32(i)))
+  client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), name: "Human"))
+
 proc encodeSubmission*(submission: GameSubmission): string =
   ## Encodes game-owned bytes that the relay never interprets.
   let action = submission.action
@@ -78,6 +99,9 @@ proc prepareNetworkMatch*(
   if snapshot.tickRate != uint32(TickRate) or
     snapshot.seats.len != HeroClassCount:
       reject("GotA requires ten seats and 24 ticks per second")
+  for seat in snapshot.seats:
+    if seat.owner != 0 and seat.name == "Human":
+      discard snapshot.humanSeatFor(seat.owner)
   var config = parseConfig(snapshot.payload)
   config.playerSlot = 0
   config.players.setLen(HeroClassCount)

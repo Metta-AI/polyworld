@@ -214,19 +214,34 @@ proc beginMenu*(sk: Silky, window: Window, title, subtitle: string): Vec2 =
   sk.menuLabel(subtitle, result + vec2(0, 42), width = 1040, color = MenuMuted)
   result.y += 92
 
-proc beginSettings*(sk: Silky, window: Window): Vec2 =
+proc beginSettings*(
+    sk: Silky, window: Window, headerHeight = 0.0'f
+): Vec2 =
   ## Centers the shared settings panel at a readable scale.
   sk.uiScale = max(0.1'f, min(
     window.size.x.float32 / 800,
-    window.size.y.float32 / 540
+    window.size.y.float32 / (540 + headerHeight)
   ))
   sk.beginUi(window, window.size)
   sk.clearScreen(rgbx(0, 0, 0, 255))
   result = (window.size.vec2 / sk.uiScale - vec2(720, 440)) * 0.5'f
+  result.y += headerHeight / 2
+
+proc beginOverlay*(sk: Silky, window: Window, size: Vec2): Vec2 =
+  ## Centers a modal over the rendered game without clearing its framebuffer.
+  sk.uiScale = max(0.1'f, min(
+    window.size.x.float32 / 1000,
+    window.size.y.float32 / 800
+  ))
+  sk.beginUi(window, window.size)
+  sk.textStyle = "Default"
+  let view = window.size.vec2 / sk.uiScale
+  sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
+  result = (view - size) * 0.5'f
 
 proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
-    app: string, origin: Vec2
+    app: string, origin: Vec2, title = "Settings"
 ): bool =
   ## Edits preferences with the existing Silky theme and widgets.
   let previous = preferences
@@ -236,8 +251,9 @@ proc settingsPanel*(
     origin - vec2(24),
     vec2(768, 488)
   )
-  sk.drawLabel("Settings", origin, vec2(720, 40),
-    sk.theme.defaultTextColor, "H1")
+  if title.len > 0:
+    sk.drawLabel(title, origin, vec2(720, 40),
+      sk.theme.defaultTextColor, "H1")
   sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),
     sk.theme.defaultTextColor)
   sk.menuInput(window, "displayName", preferences.name,

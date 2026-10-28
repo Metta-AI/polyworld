@@ -129,7 +129,9 @@ proc runFrontend*() =
         error = client.error
     if launchNetwork:
       run = prepared.game
-      options.playerSlot = int32(multiplayerHuman + 1)
+      options.playerSlot = int32(
+        connection.client.snapshot.humanSeatFor(connection.client.participant) + 1
+      )
       options.replayPath = ""
       options.recordPath = ""
       options.pauseOnStart = false
@@ -178,13 +180,11 @@ proc runFrontend*() =
       let origin =
         if page == SettingsMenu:
           sk.textStyle = "Default"
-          sk.beginSettings(window)
+          sk.beginLobbySettings(window)
         else:
           layout = sk.beginLobby(
             window, lobbyUi,
             if page == MultiplayerMenu: "MULTIPLAYER" else: "BATTLE SETUP",
-            if page == MultiplayerMenu: "Create a room or join a battle."
-            else: "Assign players. Configure your match.",
             page == MultiplayerMenu
           )
           layout.origin
@@ -506,21 +506,21 @@ proc runFrontend*() =
                 chosenPolicy = selected
                 lobbyUi.selectedBot = selected.name
               if online:
-                if choice.human and multiplayerHuman >= 0 and
-                  multiplayerHuman != selectedSeat:
-                    client.send(RoomMessage(kind: ReleaseSeat,
-                      seat: uint32(multiplayerHuman)))
-                    networkPolicies[multiplayerHuman] = LocalPolicy()
-                if multiplayerHuman == selectedSeat:
-                  multiplayerHuman = -1
-                networkPolicies[selectedSeat] = selected
                 if choice.human:
+                  client.claimHumanSeat(selectedSeat, multiplayerHuman)
+                  for i, seat in snapshot.seats:
+                    if i == multiplayerHuman or
+                      (seat.owner == client.participant and seat.name == "Human"):
+                        networkPolicies[i] = LocalPolicy()
                   multiplayerHuman = selectedSeat
-                client.send(RoomMessage(
-                  kind: if choice.clear: ReleaseSeat else: ClaimSeat,
-                  seat: uint32(selectedSeat),
-                  name: if choice.human: "Human" else: selected.name
-                ))
+                else:
+                  if multiplayerHuman == selectedSeat:
+                    multiplayerHuman = -1
+                  client.send(RoomMessage(
+                    kind: if choice.clear: ReleaseSeat else: ClaimSeat,
+                    seat: uint32(selectedSeat), name: selected.name
+                  ))
+                networkPolicies[selectedSeat] = selected
               else:
                 if choice.human:
                   if humanSeat >= 0 and humanSeat != selectedSeat:
@@ -569,7 +569,7 @@ proc runFrontend*() =
               lobbyUi.selectedSeat = -1
             sk.popLayer()
         of SettingsMenu:
-          if sk.settingsPanel(window, preferences, AppName, origin):
+          if sk.settingsPanel(window, preferences, AppName, origin, ""):
             page = HomeMenu
       except CatchableError as problem:
         error = problem.msg

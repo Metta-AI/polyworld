@@ -18,15 +18,18 @@ separate Metta checkout so an existing development checkout stays intact.
 
 ```sh
 nim r coworld/tools/sync_dependencies.nim
-export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
 coworld build --project coworld/gota --version 2026.9.9.3
 coworld build --project coworld/lvd --version 2026.9.9.3
 coworld build --project coworld/cta --version 2026.9.9.3
 coworld build --project coworld/awm --version VERSION
 ```
 
-`nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
-revisions plus optional Mummy. Run
+Local builds use sibling dependency checkouts, such as `/Users/me/p/zippy`.
+`nimby.lock` and `coworld/dependencies.lock` pin the same revisions.
+The sync tool reuses checkouts at those revisions and preserves local branches
+and edits. Updates require clean checkouts and fast-forward merges. Set
+`POLYWORLD_DEPS` explicitly to use a separate cache of detached pinned checkouts,
+as the container build does. Run
 `nim r coworld/tools/sync_dependencies.nim --latest` to resolve upstream HEADs and
 update both locks. Ordinary builds never update revisions implicitly.
 The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_ART`

@@ -2,7 +2,7 @@ import
   std/[os, tempfiles],
   bassy,
   polyworld/[cli, pathing, tapes],
-  ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
+  ../examples/gods_of_the_arena/[bots, content, controls, maps, replays, sim]
 
 proc quietGame(team = RedTeam, size = defaultConfig().mapSize): Game =
   ## Creates a real map with one living hero and no nearby combat.
@@ -189,6 +189,98 @@ block:
   let hp = target.hp
   game.step(TickRate)
   doAssert target.hp == hp
+
+echo "Testing targeted potions validate allies and spend the owner's stack"
+for item in [HealthPotion, VitalityElixir, ManaPotion, ManaElixir]:
+  let
+    game = quietGame()
+    world = game.world
+    hero = world.heroes[0]
+    ally = world.heroes[1]
+    spec = item.itemSpec
+    kind = if spec.heal > 0: HealthRecovery else: ManaRecovery
+  hero.enter(OutsideBase)
+  hero.inventory[0] = item
+  hero.itemCounts[0] = 4
+  ally.place(hero.position)
+  ally.maxHp = 1000
+  ally.maxMana = 1000
+  ally.hp = 100
+  ally.mana = 0
+  doAssert not world.applyUseItem(hero.id, 0, ally.id)
+  ally.state = Marching
+  for cell in world.teamVisible[hero.team.ord].mitems:
+    cell = 0
+  doAssert not world.applyUseItem(hero.id, 0, ally.id)
+  for cell in world.teamVisible[hero.team.ord].mitems:
+    cell = 255
+  ally.team = BlueTeam
+  doAssert not world.applyUseItem(hero.id, 0, ally.id)
+  ally.team = hero.team
+  ally.position.x += PotionTargetRangeTiles * WorldScale + 1
+  doAssert not world.applyUseItem(hero.id, 0, ally.id)
+  doAssert hero.lastActionError == ActionOutOfRange
+  doAssert hero.itemCounts[0] == 4
+  dec ally.position.x
+  let
+    saved = world.clone()
+    action = ReplayAction(
+      kind: ActionUseItem, heroId: hero.id, first: 0, second: ally.id
+    )
+  doAssert world.applyReplayAction(action)
+  let expected = game.stateHash()
+  doAssert hero.itemCounts[0] == 3
+  doAssert hero.itemCooldown(0, world.tick) == PotionCooldownTicks
+  doAssert ally.potionCooldownEnds[kind] == 0
+  if spec.recoveryTicks > 0:
+    doAssert ally.recoverySources[kind] == hero.id
+    game.step(TickRate)
+    doAssert ally.hp == 100 + spec.heal div 10
+    doAssert ally.mana == spec.restore div 10 + TickRate div 6
+    when defined(replayEvents):
+      var found = false
+      for event in world.events:
+        if event.kind in {Healing, ManaChanged} and event.cause == ItemEffect:
+          doAssert event.actor.id == hero.id and event.target.id == ally.id
+          found = true
+      doAssert found
+  else:
+    doAssert ally.hp == 100 + spec.heal
+    doAssert ally.mana == spec.restore
+  world.restore(saved)
+  doAssert world.applyReplayAction(action)
+  doAssert game.stateHash() == expected
+
+echo "Testing item hotkeys arm, double-tap self-cast, and preserve targeting"
+block:
+  let
+    game = quietGame()
+    hero = game.world.heroes[0]
+  hero.inventory[0] = HealthPotion
+  hero.itemCounts[0] = 4
+  game.networked = true
+  clearPlayerCommands()
+  activatePlayerItem(game.world, hero.id, 0, 10.0)
+  game.flushPlayerCommands()
+  doAssert armedItem == 0 and game.submissions.len == 0
+  activatePlayerItem(game.world, hero.id, 0, 10.2)
+  game.flushPlayerCommands()
+  doAssert armedItem == -1 and game.submissions.len == 1
+  doAssert game.submissions[0].action.second == hero.id
+  doAssert hero.itemCounts[0] == 4
+  game.submissions.setLen(0)
+  activatePlayerItem(game.world, hero.id, 0, 12.0)
+  activatePlayerItem(game.world, hero.id, 0, 13.0)
+  game.flushPlayerCommands()
+  doAssert armedItem == 0 and game.submissions.len == 0
+  queueUseItem(hero.id, 0, game.world.heroes[1].id)
+  game.flushPlayerCommands()
+  doAssert game.submissions[0].action.second == game.world.heroes[1].id
+  let recorder = initReplayRecorder(game.currentSetup(1), game.map.preset)
+  recorder.recordUseItem(0, hero.id, 0, game.world.heroes[1].id)
+  let decoded = decodeReplay(recorder.data.encodeReplay())
+  doAssert decoded.actions[0].second == game.world.heroes[1].id
+  clearPlayerCommands()
 
 echo "Testing BASIC inventory queries and exact replay regeneration"
 block:

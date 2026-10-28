@@ -3,7 +3,7 @@
 import
   std/[math, strutils, times, unicode],
   chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, profiles, quadterrain, rtscameras
+  gameuis, inputs, profiles, quadterrain, rtscameras, networks
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -38,6 +38,7 @@ const
   FpsLimitMax* = 240
   FpsAvgTau = 1.0'f32
   FpsAvgPeriod = 0.5
+  FpsSamples = 60
   FpsLabelSize = vec2(40, 22)
   FpsNowSize = vec2(70, 22)
   FpsAvgSize = vec2(168, 22)
@@ -53,12 +54,16 @@ type
 var
   hudScratch*: string
   debugMenuOpen* = false
+  debugNetwork = false
   interpolateVisuals* = true
   showPaths* = false
   showTiles* = false
   framePaceHz* = 60
   fpsLastTime = 0.0
   fpsLabelTime = 0.0
+  fpsHistory: array[FpsSamples, float32]
+  fpsCursor, fpsCount, fpsFrames: int
+  fpsSampleTime = 0.0
   fpsHasAvg = false
   fpsAvgValue = 0.0'f32
   fpsVarValue = 0.0'f32
@@ -810,7 +815,40 @@ proc noteFps() =
       if fpsLabelTime == 0.0 or now - fpsLabelTime >= FpsAvgPeriod:
         writeFpsStats()
         fpsLabelTime = now
+  if fpsLastTime > 0:
+    inc fpsFrames
+  if fpsSampleTime == 0:
+    fpsSampleTime = now
+  let elapsed = now - fpsSampleTime
+  if elapsed >= 1:
+    fpsHistory[fpsCursor] = fpsFrames.float32 / elapsed.float32
+    fpsCursor = (fpsCursor + 1) mod FpsSamples
+    fpsCount = min(fpsCount + 1, FpsSamples)
+    fpsFrames = 0
+    fpsSampleTime = now
   fpsLastTime = now
+
+proc fpsChart(sk: Silky, window: Window) =
+  ## Draws actual frames per second with the current FPS limit as a guide.
+  var maximum = max(1, framePaceHz).float32
+  for value in fpsHistory:
+    maximum = max(maximum, value)
+  group "fpsChart":
+    box 420, 42
+    rectangle "chartBackground":
+      box 0, 0, 420, 42
+      tint sk.theme.menuPopupHoverColor
+    for i in 0 ..< fpsCount:
+      let
+        index = (fpsCursor - fpsCount + i + FpsSamples) mod FpsSamples
+        x = float32(FpsSamples - fpsCount + i) * 7
+        height = 40 * fpsHistory[index] / maximum
+      rectangle "fpsBar" & $i:
+        box x, 42 - height, 6, height
+        tint rgbx(96, 184, 244, 255)
+    rectangle "fpsLimitLine":
+      box 0, 42 - 40 * framePaceHz.float32 / maximum, 420, 1
+      tint rgbx(190, 190, 190, 180)
 
 proc mouseOverDebugMenu*(mouse: Vec2): bool =
   ## Returns whether the pointer is over the F1 debug window.
@@ -824,9 +862,96 @@ proc mouseOverDebugMenu*(mouse: Vec2): bool =
     mouse.y >= state.pos.y and
     mouse.y <= state.pos.y + state.size.y
 
+proc networkChart(sk: Silky, window: Window, stats: NetworkStats, chart: int) =
+  ## Draws a bounded 60-second history using Silky layout and rectangles.
+  var maximum = max(1.0'f, if chart == 4: stats.tickRate.float32 else: 0)
+  for sample in stats.samples:
+    let value = case chart
+      of 0: max(sample.sentKb, sample.receivedKb)
+      of 1: max(sample.sentPackets, sample.receivedPackets)
+      of 2: sample.rttMs
+      of 3: sample.jitterMs
+      else: sample.ticksPerSecond
+    maximum = max(maximum, value)
+  group "networkChart" & $chart:
+    box 420, 42
+    rectangle "chartBackground":
+      box 0, 0, 420, 42
+      tint sk.theme.menuPopupHoverColor
+    for i in 0 ..< stats.count:
+      let
+        index = (stats.cursor - stats.count + i + NetworkSamples) mod NetworkSamples
+        sample = stats.samples[index]
+        first = case chart
+          of 0: sample.receivedKb
+          of 1: sample.receivedPackets
+          of 2: sample.rttMs
+          of 3: sample.jitterMs
+          else: sample.ticksPerSecond
+        second = if chart == 0: sample.sentKb else: sample.sentPackets
+        x = float32(NetworkSamples - stats.count + i) * 7
+        height = 40 * first / maximum
+      rectangle "received" & $i:
+        box x, 42 - height, (if chart < 2: 3 else: 6), height
+        tint rgbx(96, 184, 244, 255)
+      if chart < 2:
+        let height = 40 * second / maximum
+        rectangle "sent" & $i:
+          box x + 3, 42 - height, 3, height
+          tint rgbx(138, 208, 104, 255)
+    if chart == 4 and stats.tickRate > 0:
+      rectangle "normalTickRate":
+        box 0, 42 - 40 * stats.tickRate.float32 / maximum, 420, 1
+        tint rgbx(190, 190, 190, 180)
+
+proc networkPanel(sk: Silky, window: Window, stats: NetworkStats) =
+  ## Exposes transport rates and delay controls through standard Silky widgets.
+  if stats == nil:
+    text "offlineNetwork":
+      characters "No multiplayer connection in this match."
+    return
+  text "networkState":
+    characters (if stats.active: "Connected" else: "Disconnected") &
+      " | Last 60 seconds"
+  text "networkLegend":
+    characters "Blue: received | Green: sent"
+  let sample = stats.current
+  for chart, caption in [
+    "Traffic: " & sample.receivedKb.formatFloat(ffDecimal, 1) &
+      " KB/s in / " & sample.sentKb.formatFloat(ffDecimal, 1) & " KB/s out",
+    "Packets/s: " & sample.receivedPackets.formatFloat(ffDecimal, 1) &
+      " in / " & sample.sentPackets.formatFloat(ffDecimal, 1) & " out",
+    "RTT (1s avg): " & sample.rttMs.formatFloat(ffDecimal, 1) & " ms",
+    "Jitter (1s avg): " & sample.jitterMs.formatFloat(ffDecimal, 1) & " ms",
+    "Ticks/s: " & sample.ticksPerSecond.formatFloat(ffDecimal, 1) &
+      " played / " & $stats.tickRate & " normal (gray)"
+  ]:
+    text "networkCaption" & $chart:
+      characters caption
+    sk.networkChart(window, stats, chart)
+  text "networkMeasurement":
+    characters (if stats.measuredAt == 0: "Waiting for a server RTT sample."
+      elif stats.age > 5: "RTT stale: no recent echoed packet."
+      else: "Server-clock RTT, including client turnaround.")
+  checkBox "Smooth network playback", stats.smoothPlayback
+  text "networkSmoothing":
+    characters "Spaces bursts out; speeds up to catch up."
+  text "networkLag":
+    characters "Simulated lag per direction (ms)"
+  scrubber "networkLagMs", stats.lagMs, 0, 2000, $stats.lagMs
+  text "networkJitter":
+    characters "Extra random delay per direction (0 to N ms)"
+  scrubber "networkJitterMs", stats.jitterMs, 0, 1000, $stats.jitterMs
+  text "networkOrdering":
+    characters "Ordered delivery. No packets dropped or reordered."
+  button "Reset simulated delay":
+    stats.lagMs = 0
+    stats.jitterMs = 0
+
 proc drawDebugMenu*(
     sk: Silky, window: Window,
-    creepWaypoints: ptr bool = nil, waypointStatus = ""
+    creepWaypoints: ptr bool = nil, waypointStatus = "",
+    network: NetworkStats = nil
 ) =
   ## Draws the shared F1 debug window when it is open.
   noteFps()
@@ -838,69 +963,81 @@ proc drawDebugMenu*(
       DebugWindowTitle,
       debugMenuOpen,
       DebugWindowOrigin,
-      DebugWindowSize + vec2(0, if creepWaypoints == nil: 0 else: 62)
+      vec2(500, min(860.0'f, window.size.y.float32 / sk.uiScale - 64))
     ):
-      group "fpsRow":
-        box(
-          FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x + FpsStdSize.x,
-          FpsLabelSize.y
+      group "debugTabs":
+        box 440, 32
+        layout LeftToRight
+        itemSpacing 20
+        radioButton "Rendering", debugNetwork, false
+        radioButton "Network", debugNetwork, true
+      if debugNetwork:
+        sk.networkPanel(window, network)
+      else:
+        group "fpsRow":
+          box(
+            FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x + FpsStdSize.x,
+            FpsLabelSize.y
+          )
+          text "fpsCaption":
+            box 0, 0, FpsLabelSize.x, FpsLabelSize.y
+            characters "FPS:"
+            textAlign LeftAlign, MiddleAlign
+          text "fpsNow":
+            box FpsLabelSize.x, 0, FpsNowSize.x, FpsNowSize.y
+            font "Mono"
+            characters fpsNowText
+            textAlign RightAlign, MiddleAlign
+          text "fpsAvg":
+            box(
+              FpsLabelSize.x + FpsNowSize.x,
+              0,
+              FpsAvgSize.x,
+              FpsAvgSize.y
+            )
+            font "Mono"
+            characters fpsAvgText
+            textAlign RightAlign, MiddleAlign
+          text "fpsStd":
+            box(
+              FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x,
+              0,
+              FpsStdSize.x,
+              FpsStdSize.y
+            )
+            font "Mono"
+            characters fpsStdText
+            textAlign RightAlign, MiddleAlign
+        text "fpsHistoryCaption":
+          characters "FPS history (1s averages) | Gray: FPS limit"
+        sk.fpsChart(window)
+        text "fpsLimitCaption":
+          characters "FPS limit"
+        scrubber(
+          "fpsLimit",
+          framePaceHz,
+          FpsLimitMin,
+          FpsLimitMax,
+          $framePaceHz
         )
-        text "fpsCaption":
-          box 0, 0, FpsLabelSize.x, FpsLabelSize.y
-          characters "FPS:"
-          textAlign LeftAlign, MiddleAlign
-        text "fpsNow":
-          box FpsLabelSize.x, 0, FpsNowSize.x, FpsNowSize.y
-          font "Mono"
-          characters fpsNowText
-          textAlign RightAlign, MiddleAlign
-        text "fpsAvg":
-          box(
-            FpsLabelSize.x + FpsNowSize.x,
-            0,
-            FpsAvgSize.x,
-            FpsAvgSize.y
-          )
-          font "Mono"
-          characters fpsAvgText
-          textAlign RightAlign, MiddleAlign
-        text "fpsStd":
-          box(
-            FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x,
-            0,
-            FpsStdSize.x,
-            FpsStdSize.y
-          )
-          font "Mono"
-          characters fpsStdText
-          textAlign RightAlign, MiddleAlign
-      text "fpsLimitCaption":
-        characters "FPS limit"
-      scrubber(
-        "fpsLimit",
-        framePaceHz,
-        FpsLimitMin,
-        FpsLimitMax,
-        $framePaceHz
-      )
-      text "terrainScaleCaption":
-        characters "Terrain texture scale"
-      scrubber(
-        "terrainTextureScale",
-        terrainTextureScale,
-        0.01'f,
-        1.0'f,
-        terrainTextureScale.formatFloat(ffDecimal, 3)
-      )
-      text "terrainScaleHint":
-        characters "Lower values make larger texture patterns."
-      checkBox "Interpolation", interpolateVisuals
-      checkBox "Show paths", showPaths
-      checkBox "Show tiles", showTiles
-      if creepWaypoints != nil:
-        checkBox "Creep waypoints", creepWaypoints[]
-        text "creepWaypointStatus":
-          characters waypointStatus
+        text "terrainScaleCaption":
+          characters "Terrain texture scale"
+        scrubber(
+          "terrainTextureScale",
+          terrainTextureScale,
+          0.01'f,
+          1.0'f,
+          terrainTextureScale.formatFloat(ffDecimal, 3)
+        )
+        text "terrainScaleHint":
+          characters "Lower values make larger texture patterns."
+        checkBox "Interpolation", interpolateVisuals
+        checkBox "Show paths", showPaths
+        checkBox "Show tiles", showTiles
+        if creepWaypoints != nil:
+          checkBox "Creep waypoints", creepWaypoints[]
+          text "creepWaypointStatus":
+            characters waypointStatus
   finally:
     sk.endDsl()
 

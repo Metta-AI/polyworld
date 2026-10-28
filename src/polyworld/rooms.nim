@@ -1,7 +1,8 @@
 import std/[strutils]
 
 const
-  RoomProtocolVersion* = 2'u32
+  RoomProtocolVersion* = 3'u32
+  RoomHeaderBytes* = 64
   MaxWireBytes* = 256 * 1024
   MaxPayloadBytes* = 64 * 1024
   MaxCommandBytes* = 4096
@@ -37,7 +38,11 @@ type
     id*, name*: string
     phase*: RoomPhase
     occupied*, seats*: uint32
+  PacketTiming* = object
+    server*, echo*, received*, measuredAt*: uint64
+    rtt*, jitter*: uint32
   RoomMessage* = object
+    timing*: PacketTiming
     kind*: MessageKind
     delivery*: uint64
     identity*: GameIdentity
@@ -135,6 +140,12 @@ proc encode*(message: RoomMessage): string =
   result.put32(uint32(message.kind))
   result.put64(message.delivery)
   result.put32(message.match)
+  result.put64(message.timing.server)
+  result.put64(message.timing.echo)
+  result.put64(message.timing.received)
+  result.put64(message.timing.measuredAt)
+  result.put32(message.timing.rtt)
+  result.put32(message.timing.jitter)
   case message.kind
   of Hello:
     result.putIdentity(message.identity)
@@ -236,7 +247,7 @@ proc readPhase(reader: var PacketReader): RoomPhase =
 
 proc decode*(bytes: string): RoomMessage =
   ## Rejects malformed envelopes before interpreting their payloads.
-  if bytes.len > MaxWireBytes or bytes.len < 24 or bytes[0 .. 3] != "PWRM":
+  if bytes.len > MaxWireBytes or bytes.len < RoomHeaderBytes or bytes[0 .. 3] != "PWRM":
     reject("Invalid switchboard packet")
   var reader = PacketReader(data: bytes, cursor: 4)
   if reader.get32() != RoomProtocolVersion:
@@ -247,6 +258,12 @@ proc decode*(bytes: string): RoomMessage =
   result.kind = MessageKind(kind)
   result.delivery = reader.get64()
   result.match = reader.get32()
+  result.timing.server = reader.get64()
+  result.timing.echo = reader.get64()
+  result.timing.received = reader.get64()
+  result.timing.measuredAt = reader.get64()
+  result.timing.rtt = reader.get32()
+  result.timing.jitter = reader.get32()
   case result.kind
   of Hello:
     result.identity = reader.getIdentity()

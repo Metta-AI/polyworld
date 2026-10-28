@@ -1,7 +1,7 @@
 import
   std/os,
   jsony,
-  polyworld/[rooms, relays, roomclients, tapes, mailboxes],
+  polyworld/[rooms, relays, roomclients, tapes, mailboxes, networks],
   ../examples/gods_of_the_arena/[bots, content, maps, multiplayer, replays, sim]
 
 var
@@ -9,6 +9,7 @@ var
   clients: seq[RoomClient]
   sessions: seq[NetworkMatch]
   now = 0.0
+  playbacks: array[16, TickPlayback]
 
 proc exchange() =
   ## Pumps synthetic sockets through the real binary client and relay code.
@@ -46,11 +47,17 @@ proc addClient(): RoomClient =
 
 proc advanceClients() =
   ## Applies every available packet and compares every participating simulation.
-  for session in sessions:
+  for i, session in sessions:
     if not session.client.connected or session.finished:
       continue
     var packet: RoomMessage
-    while session.client.takeTick(packet):
+    while playbacks[i].takeTick(
+      session.client,
+      packet,
+      now,
+      24,
+      i == 0
+    ):
       session.applyPacket(packet)
       if session.finished:
         break
@@ -77,6 +84,35 @@ let roomId = first.snapshot.room
 second.send(RoomMessage(kind: JoinRoom, room: roomId))
 third.send(RoomMessage(kind: JoinRoom, room: roomId))
 exchange()
+echo "Testing one human slot per participant with multiple bot slots"
+first.claimHumanSeat(0)
+second.claimHumanSeat(1)
+first.send(RoomMessage(kind: ClaimSeat, seat: 9, name: "Base bot"))
+exchange()
+first.claimHumanSeat(3, 0)
+first.claimHumanSeat(6, 3)
+exchange()
+doAssert first.snapshot.humanSeatFor(first.participant) == 6
+doAssert first.snapshot.humanSeatFor(second.participant) == 1
+doAssert first.snapshot.seats[0].owner == 0
+doAssert first.snapshot.seats[3].owner == 0
+doAssert first.snapshot.seats[9].owner == first.participant
+try:
+  first.claimHumanSeat(1, 6)
+  doAssert false, "Another participant's human slot must remain theirs"
+except RoomsError:
+  discard
+doAssert first.outgoing.len == 0
+first.send(RoomMessage(kind: ClaimSeat, seat: 3, name: "Human"))
+exchange()
+try:
+  discard prepareNetworkMatch(first, [])
+  doAssert false, "Duplicate human slots must fail setup validation"
+except RoomsError:
+  discard
+first.claimHumanSeat(6)
+exchange()
+doAssert first.snapshot.seats[3].owner == 0
 for seat in 0 ..< 10:
   clients[seat mod 3].send(RoomMessage(
     kind: ClaimSeat, seat: uint32(seat), name: "Seat " & $seat
