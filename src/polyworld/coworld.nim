@@ -349,8 +349,14 @@ proc completedSignal(signal: cint) {.noconv.} =
   ## Exits successfully when the runner terminates a completed episode.
   exitnow(QuitSuccess)
 
-proc finishCoworld*(results: CoworldResults, totalXp: seq[int] = @[]) =
+proc finishCoworld*(
+  results: CoworldResults,
+  totalXp: seq[int] = @[],
+  scoreDivisor: int = 1
+) =
   ## Finalizes private outputs before publishing the successful result marker.
+  if scoreDivisor <= 0:
+    raise newException(CoworldError, "Score divisor must be positive")
   if results.scores.len != logs.len or not fileExists(replayPath):
     raise newException(CoworldError, "Incomplete Coworld results or replay")
   if totalXp.len > 0 and totalXp.len != logs.len:
@@ -366,6 +372,14 @@ proc finishCoworld*(results: CoworldResults, totalXp: seq[int] = @[]) =
   except IOError as error:
     raise newException(CoworldError, "Cannot flush game logs: " & error.msg)
   var bytes = results.toJson()
+  if scoreDivisor != 1:
+    var scores: seq[float64]
+    for score in results.scores:
+      scores.add score.float64 / scoreDivisor.float64
+    bytes = bytes.replace(
+      "\"scores\":" & results.scores.toJson(),
+      "\"scores\":" & scores.toJson()
+    )
   if totalXp.len > 0:
     bytes.setLen(bytes.len - 1)
     bytes.add ",\"total_xp\":" & totalXp.toJson() & "}"
