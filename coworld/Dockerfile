@@ -9,8 +9,8 @@ ENV PATH=/opt/nim-2.2.10/bin:$PATH
 WORKDIR /src/polyworld
 COPY coworld/dependencies.lock coworld/dependencies.lock
 COPY coworld/tools/sync_dependencies.nim coworld/tools/tooling.nim coworld/tools/
+ENV POLYWORLD_DEPS=/src/deps
 RUN nim r --hints:off coworld/tools/sync_dependencies.nim
-ENV POLYWORLD_DEPS=/src/polyworld/tmp/coworld/deps
 COPY config.nims config.nims
 COPY src src
 COPY examples examples

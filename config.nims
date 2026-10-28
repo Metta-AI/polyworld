@@ -1,26 +1,22 @@
 import std/[os, strutils]
 
 --path:"src"
-let dependencyRoot = getEnv("POLYWORLD_DEPS")
-if dependencyRoot.len > 0:
-  for line in readFile(currentSourcePath().parentDir / "coworld/dependencies.lock").splitLines():
-    let fields = line.splitWhitespace()
-    if fields.len == 0:
-      continue
-    let name = fields[0]
-    let directory = dependencyRoot / name
-    switch("path", if dirExists(directory / "src"): directory / "src" else: directory)
-else:
-  switch("path", getEnv("BASSY_PATH", "../bassy/src"))
-  switch("path", getEnv("SILKY_PATH", "../silky/src"))
-  --path:"../shady/src"
-  --path:"../noisy/src"
-  --path:"../windy/src"
-  --path:"../gltf/src"
-  --path:"../vmath/src"
-  --path:"../spacy/src"
-  switch("path", getEnv("PATHY_PATH", "../pathy/src"))
-  --path:"../mummy/src"
+let
+  projectRoot = currentSourcePath().parentDir
+  dependencyRoot = getEnv("POLYWORLD_DEPS", projectRoot.parentDir)
+for line in readFile(projectRoot / "coworld/dependencies.lock").splitLines():
+  let fields = line.splitWhitespace()
+  if fields.len == 0:
+    continue
+  let
+    name = fields[0]
+    directory = dependencyRoot / name
+    source =
+      if dirExists(directory / "src"):
+        directory / "src"
+      else:
+        directory
+  switch("path", getEnv(name.toUpperAscii() & "_PATH", source))
 
 --define:nimTypeNames
 --define:flatty64

@@ -1,6 +1,6 @@
 import
   std/[json, os, osproc, posix, sequtils, sets, strutils, tables],
-  tournaments, reports, runners, softmax, sites, collections,
+  tournaments, reports, runners, softmax, sites, collections, credentials,
   ../scores
 
 const
@@ -627,16 +627,45 @@ block:
   validateResume(run, arguments)
   doAssert parseArguments(@["--run", "fixture", "--no-site"])["no_site"].getBool
 block:
-  let credentials = %*{"tokens": {"server": "user"}, "player_sessions": {
-    "server": {"active": "p", "cache": {"p": {"token": "player",
-      "expires_at": "2999-01-01T00:00:00.123456+00:00"}}}}}
-  doAssert tokenFromCredentials(credentials, "server") == "user"
-  credentials["tokens"].delete("server")
-  doAssert tokenFromCredentials(credentials, "server") == "player"
-  credentials["tokens"]["server"] = %"user"
-  credentials["player_sessions"]["server"]["cache"]["p"]["expires_at"] =
+  const Server = "http://localhost:8090/api"
+  let credentials = parseCredentials("""
+# The CLI writes block mappings, not arbitrary YAML.
+player_sessions:
+  http://localhost:8090/api:
+    active: 'p'
+    cache:
+      p:
+        expires_at: '2999-01-01T00:00:00.123456+00:00'
+        token: player
+tokens:
+  'http://localhost:8090/api': "user"
+  https://other.example/api: other
+""")
+  doAssert tokenFromCredentials(credentials, Server) == "user"
+  credentials["tokens"].delete(Server)
+  doAssert tokenFromCredentials(credentials, Server) == "player"
+  credentials["tokens"][Server] = %"user"
+  credentials["player_sessions"][Server]["cache"]["p"]["expires_at"] =
     %"2000-01-01T00:00:00+00:00"
-  doAssert tokenFromCredentials(credentials, "server") == "user"
+  doAssert tokenFromCredentials(credentials, Server) == "user"
+  credentials["tokens"].delete(Server)
+  var rejected = false
+  try:
+    discard tokenFromCredentials(credentials, Server)
+  except TournamentError:
+    rejected = true
+  doAssert rejected
+  doAssert parseCredentials("tokens: {}\nplayer_sessions: {}") ==
+    %*{"tokens": {}, "player_sessions": {}}
+for text in ["tokens:\n    server: token", "tokens: *alias",
+    "tokens:\n  server: |\n    token", "tokens: {}\ntokens: {}",
+    "tokens:\n  server: \"unfinished"]:
+  var rejected = false
+  try:
+    discard parseCredentials(text)
+  except TournamentError:
+    rejected = true
+  doAssert rejected
 for options in [@["--run", "../escape"], @["--run", "x", "--games", "0"],
     @["--run", "x", "--format", "unknown"], @["--run", "x", "--top", "101"],
     @["--run", "x", "--site", "site", "--no-site"]]:

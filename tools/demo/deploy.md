@@ -7,7 +7,6 @@ https://softmaxdash-nginx.tail0f4a29.ts.net/polyworld/demo/
 Build ordinary WASM clients, without `-d:replayViewer`, before packaging:
 
 ```sh
-export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
 nim r tools/gen_replays.nim
 nim c -d:emscripten examples/gods_of_the_arena/gota.nim
 nim c -d:emscripten examples/light_vs_dark/lvd.nim

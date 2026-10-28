@@ -83,8 +83,8 @@ nimby sync polyworld/nimby.lock
 cd polyworld
 ```
 
-The install step includes dependencies such as `yaml` that are declared in the
-Nimble file; the sync step then applies the repository's dependency lock file.
+The install step includes dependencies declared in the Nimble file. The sync
+step then applies the repository's dependency lock file.
 Run both steps from `gota-workspace`, not from inside the `polyworld` checkout.
 Assets now live in `polyworld_art`, not the older `polyworld_data` repository.
 For assets stored elsewhere, set `POLYWORLD_ART` to that checkout's absolute path.
@@ -103,8 +103,11 @@ softmax status
 Complete the browser login with the account that will run the tournament.
 The [Softmax CLI](https://github.com/Metta-AI/metta/tree/main/packages/softmax-cli)
 stores credentials in `~/.softmax/credentials.yaml`. The Nim runner reads that
-file directly; it does not invoke Python or the CLI to run games. Each operator
-should log in themselves rather than copy someone else's credential file.
+file directly using a small parser for the CLI-generated format: two-space
+indented mappings and single-line values, with optional quotes. General YAML
+features such as aliases and multiline values are unsupported. It does not
+invoke Python or the CLI to run games. Each operator should log in themselves
+rather than copy someone else's credential file.
 
 ## 4. Build and check
 
@@ -386,7 +389,7 @@ Softmax. Test output is under `tmp/gota/tournament-tests/`.
 | --- | --- |
 | Git reports repository not found or permission denied | Sign in to GitHub with repository access, or clone with your configured SSH key. |
 | `nim`, `nimby`, or `softmax` is not found | Restore the PATH entries from setup and check the tool installation. |
-| A Nim module such as `yaml/tojson` is missing | From the workspace parent, rerun both the Nimby install and sync commands, then rebuild. |
+| A Nim dependency is missing | From the workspace parent, rerun both the Nimby install and sync commands, then rebuild. |
 | Report assets are missing or look like Git LFS pointers | Run `git -C ../polyworld_art lfs pull` and check `POLYWORLD_ART`. |
 | Softmax login is missing or API access fails | Run `softmax login` and `softmax status`; verify the API server and your account's league/request permissions. |
 | The hosted release must emit `total_xp` | The league-selected release lacks required per-seat XP. Have its maintainer supply a compatible release before running. |

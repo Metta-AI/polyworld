@@ -1,7 +1,7 @@
 import
   std/[algorithm, json, os, strutils, tables, times, uri],
-  curly, jsony, yaml/tojson,
-  tournaments
+  curly, jsony,
+  credentials, tournaments
 
 type
   Softmax* = object
@@ -40,14 +40,13 @@ proc connect*(server: string): Softmax =
   ## Opens Nim HTTP transport using the existing Softmax credentials file.
   let path = getHomeDir() / ".softmax/credentials.yaml"
   require(fileExists(path), "Authenticate with softmax login first")
-  var documents: seq[JsonNode]
+  var saved: string
   try:
-    documents = loadToJson(readFile(path))
-  except CatchableError:
-    raise newException(TournamentError, "Cannot parse Softmax credentials")
-  require(documents.len == 1, "Expected one Softmax credentials document")
+    saved = readFile(path)
+  except IOError:
+    raise newException(TournamentError, "Cannot read Softmax credentials")
   result.server = server.strip(leading = false, chars = {'/'})
-  result.token = tokenFromCredentials(documents[0], result.server)
+  result.token = tokenFromCredentials(parseCredentials(saved), result.server)
   result.http = newCurly()
 
 proc close*(client: Softmax) =

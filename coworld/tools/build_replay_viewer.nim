@@ -30,8 +30,6 @@ proc main() =
     root = expandFilename(Root)
   require(resolved != root and not root.isRelativeTo(resolved),
     "Replay bundle output must not contain the repository: " & output)
-  putEnv("POLYWORLD_DEPS",
-    absolutePath(getEnv("POLYWORLD_DEPS", Root / "tmp/coworld/deps")))
   putEnv("POLYWORLD_ART",
     absolutePath(getEnv("POLYWORLD_ART", Root.parentDir / "polyworld_art")))
   syncDependencies()
