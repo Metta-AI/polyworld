@@ -1,0 +1,127 @@
+{
+  "date": "2026-10-28",
+  "version": "2026.10.28.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "code_commit": "f97bd761fc3b8a48d9612471a9e10541f7f481bd",
+  "assets_commit": "7049a83d3ca6958c3a0c203fc318f008c64e225a",
+  "coworld_id": "cow_17a55c37-535d-450c-9708-861c241b2d45",
+  "canonical": true,
+  "gameplay_version": 72,
+  "changes": [
+    "Merge GotA multiplayer, menus, network telemetry and player controls into main.",
+    "Use faster hero turning, targeted consumables, minimap fog and living-hero markers.",
+    "Ship the new menu artwork and loading logo in the web bundle.",
+    "Update pinned dependencies and remove NimYAML from the tournament credentials parser."
+  ],
+  "validation": {
+    "local_ci_and_full_suite": "passed",
+    "native_and_wasm_builds": "passed",
+    "fresh_recordings_byte_identical": true,
+    "local_certification_steps_passed": 10,
+    "hosted_certification": {
+      "coworld_id": "cow_17a55c37-535d-450c-9708-861c241b2d45",
+      "state": "certified",
+      "certified": true,
+      "contract_version": "main-2e6893bac8c2",
+      "certification_job_id": "88ad045a-3236-4d72-8e7b-bfa2b5ceb91c",
+      "failed_step": null,
+      "failure": null,
+      "transcript_summary": [
+        {
+          "id": "matriculate",
+          "status": "pass"
+        },
+        {
+          "id": "source-resolves",
+          "status": "pass"
+        },
+        {
+          "id": "images-reachable",
+          "status": "pass"
+        },
+        {
+          "id": "fixture-conforms",
+          "status": "pass"
+        },
+        {
+          "id": "smoke-episode",
+          "status": "pass"
+        },
+        {
+          "id": "results-conform",
+          "status": "pass"
+        },
+        {
+          "id": "replay-present",
+          "status": "pass"
+        },
+        {
+          "id": "replay-loadable",
+          "status": "pass"
+        },
+        {
+          "id": "players-run",
+          "status": "pass"
+        },
+        {
+          "id": "supporting-roles",
+          "status": "pass"
+        }
+      ],
+      "completed_at": "2026-10-28T17:57:43.730553Z"
+    },
+    "hosted_smoke_matches_passed": 5,
+    "github_ci": "https://github.com/Metta-AI/polyworld/actions/runs/40739612293",
+    "github_ci_platforms_passed": [
+      "Linux",
+      "macOS",
+      "Windows"
+    ]
+  },
+  "verification_round": {
+    "round_id": "round_65517208-e47e-4963-b456-2ee93693ea04",
+    "round_number": 2251,
+    "status": "completed",
+    "completed_matches": 24,
+    "all_matches_use_new_release": true,
+    "five_distinct_policies_per_team": true,
+    "league_settings_preserved": true,
+    "draft_mode": "team",
+    "ranking": "openskill",
+    "episode_request_id": "ereq_6c7881c8-9a72-4291-ae27-cd9a62ed8868",
+    "episode_id": "2f7b9598-1d1d-4fb4-9a5c-ec80b56c82bf",
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=2f7b9598-1d1d-4fb4-9a5c-ec80b56c82bf"
+  },
+  "replay_verification": {
+    "ticks": 24256,
+    "actions": 76760,
+    "native_mismatches": 0,
+    "wasm_completed": true,
+    "wasm_replay_errors": 0,
+    "sha256": "6b5c4ddd99835c24157defe15ceeecdb2f2f3b0447c10e2226b1e78083c956c4"
+  },
+  "web_bundle": {
+    "index.html": {
+      "bytes": 5185,
+      "sha256": "b2f88b9c45ba0b704854baf2bb416ebdc55291e042d4e8ec953d035b478192ac"
+    },
+    "gota.js": {
+      "bytes": 357309,
+      "sha256": "94fe8bc468869cdd3bf2e1187b4051b64d878b55f0a151d8a0424bcc33f3bf63"
+    },
+    "gota.wasm": {
+      "bytes": 6719221,
+      "sha256": "3090afca29dd1dda0e88aee67a577653b98ec0792672da88791b9fcf04af28fe"
+    },
+    "gota.data": {
+      "bytes": 36581638,
+      "sha256": "0848d2ce68de2f6a2707c42666768d8e8514d78c0de9888147813326868c2240"
+    },
+    "loading-logo.png": {
+      "bytes": 117062,
+      "sha256": "77f67493b682daea39a06ca3542e8671a28e14625c5fd9dac7130046be9cb80a"
+    }
+  },
+  "web_html_note": "Softmax adds its standard replay URL bootstrap. The remainder of the HTML matches the build.",
+  "gameserver_hosting": "This release publishes the Coworld game and replay player. Public WebSocket relay hosting remains separate."
+}
