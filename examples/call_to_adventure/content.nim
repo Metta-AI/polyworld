@@ -104,7 +104,9 @@ type
     IronFlail, InfernoAegis, WingedBoot, BlazingBlade,
     IceWall, LightningStorm, ManaCrystal, ArcaneMeteor,
     VoidBlade, ShadowComet, GaleSlash, ThornRing,
-    FirePhoenix, NatureTalisman, CosmicFlare
+    FirePhoenix, NatureTalisman, CosmicFlare,
+    HexBolt
+      ## The monster casters' bolt. No hero has it, so it has no icon.
 
 const
   AbilityCount* = int(Ability.high) + 1
@@ -142,7 +144,8 @@ const
     "thorn_ring",
     "fire_phoenix",
     "nature_talisman",
-    "cosmic_flare"
+    "cosmic_flare",
+    ""
   ]
 
 type
@@ -215,7 +218,9 @@ const Abilities*: array[Ability, AbilitySpec] = [
   AbilitySpec(windupTicks: 10, recoverTicks: 8, cooldownTicks: 240,
     manaCost: 16, rangeTiles: 4),
   AbilitySpec(windupTicks: 12, recoverTicks: 10, cooldownTicks: 180,
-    manaCost: 20, rangeTiles: 6, damage: 24, spread: 8)
+    manaCost: 20, rangeTiles: 6, damage: 24, spread: 8),
+  AbilitySpec(windupTicks: 12, recoverTicks: 10, cooldownTicks: 36,
+    rangeTiles: 6, damage: 22, spread: 8)
 ]
 
 type
@@ -342,6 +347,14 @@ const
     [VenomDagger, VerdantArrow, ShadowCloak, GaleSlash],
     [SolarHammer, HealingBloom, AngelicEmblem, SunOrb]
   ]
+  ClassAttacks*: array[HeroClass, seq[Ability]] = [
+    @[MoltenFist, FirebrandSword],
+    @[MeteorStrike, FirebrandSword],
+    @[VerdantArrow, VenomDagger, FirebrandSword],
+    @[SolarHammer]
+  ]
+    ## The attacks each class picks from, best first. The last is free and
+    ## never cools down, so a hero always has something to swing.
   UsableLoot*: array[17, LootKind] = [
     HealingPotionLoot, ManaPotionLoot, BattleHornLoot, WingedBootLoot,
     IronFlailLoot, InfernoAegisLoot, BlazingBladeLoot,
@@ -417,6 +430,14 @@ type
     id*: int32
     class*: HeroClass
 
+const
+  ArenaMapVersion* = 2'u16
+    ## Marks the debug arena, so its setup never matches a dungeon's.
+  ArenaAftermathTicks* = TickRate * 3
+    ## How long an arena fight keeps running after one side falls, long
+    ## enough for the last death to play out.
+
+type
   Setup* = object
     ## Immutable for the whole run, and byte-identical to the replay's setup
     ## record, so `newWorld(setup)` is total and needs nothing else.
@@ -457,6 +478,7 @@ type World* = ref object
   respawnTicks*: int32
   killed*: int32
   collected*: int32
+  arenaDecided*: int32                     ## tick an arena fight was won, 0 before
   outcome*: Outcome
   nextActorId*: int32
   nextItemId*: int32
@@ -475,6 +497,10 @@ proc tileIndex*(tile: TileRef): int32 =
 proc `==`*(a, b: TileRef): bool =
   a.level == b.level and a.x == b.x and a.z == b.z
 
+template isArena*(world: World): bool =
+  ## True for the debug arena rather than a dungeon expedition.
+  world.setup.mapVersion == ArenaMapVersion
+
 template moving*(actor: Actor): bool =
   ## True while a string-pulled path still has a waypoint to walk.
   actor.path.len > 0 and actor.pathIndex < int32(actor.path.len)
@@ -486,6 +512,10 @@ template alive*(actor: Actor): bool =
 template busy*(actor: Actor): bool =
   ## True while an ability is winding up or recovering.
   actor.action != NoAbility
+
+template planted*(actor: Actor): bool =
+  ## True for a hero with no route to walk, who stays put when bumped.
+  actor.kind == HeroActor and not actor.moving
 
 template heroClass*(actor: Actor): HeroClass =
   ## Reads a hero's class without copying the actor.
@@ -502,6 +532,10 @@ proc monsterRank*(species: Species): MonsterRank =
 proc monsterFamily*(species: Species): MonsterFamily =
   ## Returns the faction that supplies the monster's skin color.
   MonsterFamily(species.ord div 4)
+
+proc familySpecies*(family: MonsterFamily, rank: MonsterRank): Species =
+  ## The one species of a family at a rank.
+  Species(family.ord * 4 + rank.ord)
 
 proc encumbrance*(actor: Actor, capacity: int32): int32 =
   ## Zero to three, used to index `EncumbranceScale`.

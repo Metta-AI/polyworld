@@ -48,12 +48,26 @@ type
 const
   AggroTiles* = 9'i32
   HeroAggroTiles* = 11'i32
-  MonstersPerLevel* = [0, 5, 5, 6, 6, 7]
-  RespawnIntervalTicks* = 360'i32
-    ## A fresh monster every 15 seconds while the party returns.
+  MonstersPerLevel* = [0, 8, 8, 9, 9, 10]
+  PackMin = 2'i32
+  PackMax = 4'i32
+    ## Monsters spawn in packs of this many, standing together in one room.
+  PackSpreadTiles = 2'i32
+    ## How far a pack member stands from the spot the pack gathers on.
+  RespawnIntervalTicks* = 720'i32
+    ## A fresh pack every 30 seconds while the party returns.
+  KiteTiles = 3'i32
+    ## A caster backs off from front-line heroes closer than this.
   LootPickupRange* = 1'i32
   MaxMonsters* = 90
-  ActorBodyRadius = 0.22'fx
+  ArenaLightRadius = 14'i32
+    ## Lights the whole arena room, walls included, from anywhere inside it,
+    ## for heroes and monsters alike.
+  ArenaRanks = 4'i32
+    ## Monsters per arena column, every other row and clear of both walls.
+  ArenaMonsterLimit* = 24
+    ## Six arena columns, leaving a gap before the heroes' column.
+  ActorBodyRadius = 0.33'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx
 
@@ -68,6 +82,7 @@ var
   pathSlot: int32
   pathGoalTile: TileRef
   pathTiles: seq[PathTile]
+  pathThroughMonsters: bool
   ctaWalkLayer: int
   ctaWalkDestLayer: int
 
@@ -275,6 +290,10 @@ proc rebuildVision*(world: World) {.measure.} =
   copyVisionKeys(visionSkipKeys, visionSkipNow)
   visionSkipWorld = cast[pointer](world)
 
+proc monsterSight(world: World, monster: Actor): int32 =
+  ## How far a monster sees: its species' sight, or the whole lit arena room.
+  if world.isArena: ArenaLightRadius else: SpeciesSight[monster.species]
+
 proc actorCanSee*(world: World, slot, targetSlot: int32): bool =
   ## Returns whether one hero or monster has unobstructed sight of another.
   if slot < 0 or targetSlot < 0 or
@@ -301,7 +320,7 @@ proc actorCanSee*(world: World, slot, targetSlot: int32): bool =
       int32(observer.home.z),
       int32(target.home.x),
       int32(target.home.z),
-      SpeciesSight[observer.species],
+      world.monsterSight(observer),
       12
     )
   else:
@@ -314,7 +333,7 @@ proc actorCanSee*(world: World, slot, targetSlot: int32): bool =
       int32(observer.home.z),
       int32(target.home.x),
       int32(target.home.z),
-      SpeciesSight[observer.species],
+      world.monsterSight(observer),
       12
     )
 
@@ -458,6 +477,8 @@ proc lightRadius*(world: World, slot: int32): int32 =
   let actor = world.actors[slot]
   if actor.kind != HeroActor:
     return 0
+  if world.isArena:
+    return ArenaLightRadius
   ClassLightRadius[actor.heroClass]
 
 ## Chat
@@ -629,6 +650,15 @@ proc facingToward*(fromTile, toTile: TileRef): Facing =
   elif toTile.z > fromTile.z: South
   else: North
 
+proc faceActor(world: World, slot, targetSlot: int32) =
+  ## Turns a standing body to face another, so a shot from range leaves
+  ## toward its target rather than wherever the shooter last walked.
+  let offset =
+    world.actors[targetSlot].body.pos - world.actors[slot].body.pos
+  if offset != FixedVec2Zero:
+    world.actors[slot].body.facing = angle(offset)
+  world.actors[slot].facing = facingFromAngle(world.actors[slot].body.facing)
+
 proc clearPath*(world: World, slot: int32) =
   world.actors[slot].path.setLen(0)
   world.actors[slot].pathIndex = 0
@@ -646,13 +676,26 @@ proc ctaPathWalkable(layer, x, z: int): bool {.nimcall.} =
   if tile == pathGoalTile:
     return true
   let holder = pathWorld.claimant(tile)
-  holder < 0 or holder == pathSlot
+  holder < 0 or holder == pathSlot or
+    (pathThroughMonsters and pathWorld.actors[holder].kind == MonsterActor)
+
+proc tileRef(tile: PathTile): TileRef =
+  TileRef(level: int8(tile.layer), x: uint8(tile.x), z: uint8(tile.z))
 
 proc setPath*(world: World, slot: int32, goal: TileRef,
-    offset = FixedVec2Zero): bool =
+    offset = FixedVec2Zero, recenter = false): bool =
   ## Asks the engine for a route around other occupants and stores it as
   ## tiles to walk. The path crosses layers wherever a ramp does.
+  ##
+  ## A fresh route first steps to the middle of the tile the actor stands
+  ## on. A walker that re-plans the same route, or one still short of an
+  ## unreachable goal that it asks for again every decision, carries on from
+  ## where it is instead: walking back each time pins it inside its tile.
+  ## `recenter` keeps the first step anyway, for a body wedged off-center.
   let actor = world.actors[slot]
+  let
+    walking = not recenter and actor.moving
+    previousEnd = if walking: actor.path[^1].tile else: actor.home
   if actor.home == goal:
     world.clearPath(slot)
     if offset != FixedVec2Zero:
@@ -661,7 +704,7 @@ proc setPath*(world: World, slot: int32, goal: TileRef,
   pathWorld = world
   pathSlot = slot
   pathGoalTile = goal
-  discard fillTilePath(PathQuery(
+  let query = PathQuery(
     startLayer: int(actor.home.level),
     startX: int(actor.home.x),
     startZ: int(actor.home.z),
@@ -670,7 +713,15 @@ proc setPath*(world: World, slot: int32, goal: TileRef,
     finishZ: int(goal.z),
     walkable: ctaPathWalkable,
     partial: true
-  ), pathTiles)
+  )
+  discard fillTilePath(query, pathTiles)
+  if actor.kind == HeroActor and pathTiles.len > 0 and
+      pathTiles[^1].tileRef != goal:
+    # A pack standing in a corridor walls it off, and the nearest tile short
+    # of it can be on another floor entirely. Walk up and fight through.
+    pathThroughMonsters = true
+    discard fillTilePath(query, pathTiles)
+    pathThroughMonsters = false
   if pathTiles.len < 2:
     world.clearPath(slot)
     return false
@@ -678,15 +729,19 @@ proc setPath*(world: World, slot: int32, goal: TileRef,
   if pulled.len == 0:
     world.clearPath(slot)
     return false
-  let steps = min(pulled.len, MaximumPathTiles)
+  let
+    finish = pulled[^1].tileRef
+    first =
+      if walking and pulled.len > 1 and pulled[0].tileRef == actor.home and
+          (finish == previousEnd or finish != goal):
+        1
+      else:
+        0
+    steps = min(pulled.len - first, MaximumPathTiles)
   actor.path.setLen(steps)
   var previous = actor.home
   for i in 0 ..< steps:
-    let tile = TileRef(
-      level: int8(pulled[i].layer),
-      x: uint8(pulled[i].x),
-      z: uint8(pulled[i].z)
-    )
+    let tile = pulled[first + i].tileRef
     actor.path[i] = PathStep(
       tile: tile,
       direction: facingToward(previous, tile)
@@ -704,6 +759,58 @@ proc pathGoal*(world: World, slot: int32): TileRef =
     return actor.home
   actor.path[^1].tile
 
+proc headingFor*(world: World, slot: int32, tile: TileRef): bool =
+  ## True while the actor still walks a route that ends on this tile.
+  let actor = world.actors[slot]
+  actor.moving and actor.path[^1].tile == tile
+
+proc routeTiles*(world: World, slot: int32, goal: TileRef): int32 =
+  ## Tiles a hero walks to reach a goal, through monsters if it must, with a
+  ## grid's width added when even that route stops short.
+  let actor = world.actors[slot]
+  pathWorld = world
+  pathSlot = slot
+  pathGoalTile = goal
+  pathThroughMonsters = true
+  discard fillTilePath(PathQuery(
+    startLayer: int(actor.home.level),
+    startX: int(actor.home.x),
+    startZ: int(actor.home.z),
+    finishLayer: int(goal.level),
+    finishX: int(goal.x),
+    finishZ: int(goal.z),
+    walkable: ctaPathWalkable,
+    partial: true
+  ), pathTiles)
+  pathThroughMonsters = false
+  if pathTiles.len == 0:
+    return int32(GridTiles * 4)
+  result = int32(pathTiles.len)
+  if pathTiles[^1].tileRef != goal:
+    result += int32(GridTiles)
+
+proc crowdedOut(world: World, slot: int32): bool =
+  ## True while an actor still heads for the middle of its own tile and
+  ## another body already stands nearer it. Bodies are too wide for three
+  ## to share one center, so all but the nearest walk on from where they are.
+  let actor = world.actors[slot]
+  if actor.pathIndex != 0 or actor.path.len < 2:
+    return false
+  let step = actor.path[0]
+  if step.offset != FixedVec2Zero or step.tile != actor.home:
+    return false
+  let
+    center = planarCenter(step.tile)
+    distance = length(center - actor.body.pos)
+  for other in 0 ..< world.actors.len:
+    if other == slot:
+      continue
+    let mate = world.actors[other]
+    if not mate.alive or mate.home.level != actor.home.level:
+      continue
+    if length(center - mate.body.pos) < distance:
+      return true
+
 proc followPath*(world: World, slot: int32): bool =
   ## Steers toward the next pulled waypoint. Returns false once finished.
   if world.actors[slot].pathIndex >= int32(world.actors[slot].path.len):
@@ -720,7 +827,8 @@ proc followPath*(world: World, slot: int32): bool =
         fixed(1, 1000)
       else:
         PathArrive
-  if length(dest - world.actors[slot].body.pos) <= radius:
+  if length(dest - world.actors[slot].body.pos) <= radius or
+      world.crowdedOut(slot):
     world.actors[slot].home = waypoint
     inc world.actors[slot].pathIndex
     world.actors[slot].stuckTicks = 0
@@ -736,7 +844,10 @@ proc followPath*(world: World, slot: int32): bool =
     ctaTilesWalkable
   )
   world.applyActorBody(slot)
-  if world.actors[slot].body.pos == before:
+  # A hair's slide along a wall corner is no progress either: two bodies
+  # side by side can creep that way forever without ever standing still.
+  if length(world.actors[slot].body.pos - before) * 4 <
+      world.actors[slot].moveSpeed:
     inc world.actors[slot].stuckTicks
     if world.actors[slot].stuckTicks >= SidestepAfterStuckTicks:
       world.clearPath(slot)
@@ -746,7 +857,7 @@ proc followPath*(world: World, slot: int32): bool =
         goal = world.pathGoal(slot)
         offset = world.actors[slot].path[^1].offset
         stuck = world.actors[slot].stuckTicks
-      if not world.setPath(slot, goal, offset):
+      if not world.setPath(slot, goal, offset, recenter = true):
         world.clearPath(slot)
         return false
       world.actors[slot].stuckTicks = stuck
@@ -830,13 +941,15 @@ proc adjacent*(a, b: TileRef): bool =
 
 proc inMelee*(a, b: TileRef): bool =
   ## Melee reaches the eight surrounding tiles, so a hero pinned diagonally
-  ## in a doorway can still fight.
+  ## in a doorway can still fight. It also reaches the actor's own tile:
+  ## bodies are smaller than a tile, so two of them can share one, and a
+  ## pair that could not swing there would stand together forever.
   if a.level != b.level:
     return false
   let
     dx = abs(int32(a.x) - int32(b.x))
     dz = abs(int32(a.z) - int32(b.z))
-  dx <= 1 and dz <= 1 and dx + dz > 0
+  dx <= 1 and dz <= 1
 
 proc hashWorld*(world: World): uint64 =
   ## Hashes all authoritative world fields, including statistics.
@@ -859,7 +972,36 @@ proc levelSpecies*(level: int, rng: var Rng): Species =
       elif roll < 70: RaiderRank
       elif roll < 90: CasterRank
       else: ChampionRank
-  Species(FloorFamilies[level].ord * 4 + rank.ord)
+  familySpecies(FloorFamilies[level], rank)
+
+proc packSpecies(level, size: int32, rng: var Rng): seq[Species] =
+  ## Rolls each member's rank on its own, then keeps the pack a fighting
+  ## unit: one champion at most, and someone up front for its casters to
+  ## stand behind.
+  let family = FloorFamilies[level]
+  var champion = false
+  for _ in 0 ..< size:
+    var species = levelSpecies(level, rng)
+    if species.monsterRank == ChampionRank:
+      if champion:
+        species = familySpecies(family, RaiderRank)
+      champion = true
+    result.add species
+  for species in result:
+    if species.monsterRank != CasterRank:
+      return
+  result[0] = familySpecies(family, RuntRank)
+
+proc packSizes(count: int32, rng: var Rng): seq[int32] =
+  ## Splits a floor's monsters into packs, folding any leftover too small
+  ## to be a pack into the last one so nobody waits alone.
+  var left = count
+  while left > 0:
+    var size = min(rng.between(PackMin, PackMax), left)
+    if left - size < PackMin:
+      size = left
+    result.add size
+    left -= size
 
 proc freeTileIn(
     game: Game, level: int, room: Room, rng: var Rng
@@ -875,25 +1017,15 @@ proc freeTileIn(
       return (true, tile)
   (false, TileRef())
 
-proc spawnMonster*(game: Game, level: int, rng: var Rng): bool =
-  ## Places one monster in a random room of a level.
-  if game.world.actors.len - PartySize >= MaxMonsters:
-    return false
-  let rooms = game.dungeon.rooms[level]
-  if rooms.len == 0:
-    return false
-  let room = rooms[rng.below(int32(rooms.len))]
-  let (found, tile) = game.freeTileIn(level, room, rng)
-  if not found:
-    return false
-  let species = levelSpecies(level, rng)
+proc monsterActor(species: Species, tile: TileRef): Actor =
+  ## A fresh monster of one species, standing guard on a tile.
   # Deeper monsters are tougher, which is what makes the climb back out worse
   # than the way down. Widen to int32 before multiplying champion health.
   let
-    toughness = 100'i32 + int32(level) * 10
+    toughness = 100'i32 + int32(tile.level) * 10
     hp = int16(
       min(int32(SpeciesHp[species]) * toughness div 100, 30_000))
-  discard game.world.addActor(Actor(
+  Actor(
     kind: MonsterActor,
     class: uint8(species),
     home: tile,
@@ -903,15 +1035,73 @@ proc spawnMonster*(game: Game, level: int, rng: var Rng): bool =
     hp: hp,
     maxHp: hp,
     state: GuardingState
-  ))
-  true
+  )
+
+proc spawnPack*(
+    game: Game, level: int, room: Room, size: int32, rng: var Rng
+): int32 =
+  ## Stands a pack together around one spot in a room, close enough that
+  ## the whole pack wakes and fights as one. Returns how many it placed.
+  let (found, center) = game.freeTileIn(level, room, rng)
+  if not found:
+    return 0
+  let
+    left = max(room.x, int32(center.x) - PackSpreadTiles)
+    top = max(room.z, int32(center.z) - PackSpreadTiles)
+    huddle = Room(
+      x: left,
+      z: top,
+      width:
+        min(room.x + room.width, int32(center.x) + PackSpreadTiles + 1) - left,
+      depth:
+        min(room.z + room.depth, int32(center.z) + PackSpreadTiles + 1) - top)
+  for species in packSpecies(int32(level), size, rng):
+    if game.world.actors.len - PartySize >= MaxMonsters:
+      break
+    var (placed, tile) = game.freeTileIn(level, huddle, rng)
+    if not placed:
+      (placed, tile) = game.freeTileIn(level, room, rng)
+    if not placed:
+      continue
+    discard game.world.addActor(monsterActor(species, tile))
+    inc result
 
 proc populateDungeon*(game: Game) =
+  ## Splits each floor's monsters into packs and gives each pack its own
+  ## room, wrapping round only when a floor has more packs than rooms.
   var rng = game.world.rng
   for level in 1 ..< LevelCount:
-    for _ in 0 ..< MonstersPerLevel[level]:
-      discard game.spawnMonster(level, rng)
+    let rooms = game.dungeon.rooms[level]
+    if rooms.len == 0:
+      continue
+    var order = newSeq[int32](rooms.len)
+    for index in 0 ..< rooms.len:
+      order[index] = int32(index)
+    for index in countdown(rooms.high, 1):
+      swap(order[index], order[rng.below(int32(index + 1))])
+    for index, size in packSizes(int32(MonstersPerLevel[level]), rng):
+      let room = rooms[order[index mod rooms.len]]
+      discard game.spawnPack(level, room, size, rng)
   game.world.rng = rng
+
+proc placeHero(game: Game, slot: int32, tile: TileRef) =
+  ## Stands the hero of one party slot, whose class is its slot, on a tile.
+  let class = HeroClass(slot)
+  game.world.actors[slot] = Actor(
+    id: 100 + slot,
+    kind: HeroActor,
+    class: uint8(class),
+    home: tile,
+    next: tile,
+    baseSpeed: ClassSpeeds[class],
+    speed: ClassSpeeds[class],
+    hp: ClassHp[class],
+    maxHp: ClassHp[class],
+    mana: ClassMana[class],
+    maxMana: ClassMana[class]
+  )
+  game.world.claim(tile, slot)
+  game.world.actors[slot].bindActorBody()
 
 proc spawnParty*(game: Game) =
   ## Puts the four heroes on and around the entrance tile.
@@ -933,22 +1123,7 @@ proc spawnParty*(game: Game) =
             int(tile.level), int(tile.x), int(tile.z)) or
             game.world.claimed(tile):
           continue
-        let class = HeroClass(placed)
-        game.world.actors[placed] = Actor(
-          id: int32(100 + placed),
-          kind: HeroActor,
-          class: uint8(class),
-          home: tile,
-          next: tile,
-          baseSpeed: ClassSpeeds[class],
-          speed: ClassSpeeds[class],
-          hp: ClassHp[class],
-          maxHp: ClassHp[class],
-          mana: ClassMana[class],
-          maxMana: ClassMana[class]
-        )
-        game.world.claim(tile, int32(placed))
-        game.world.actors[placed].bindActorBody()
+        game.placeHero(int32(placed), tile)
         inc placed
   doAssert placed == PartySize, "the entrance has no room for the party"
   game.world.nextActorId = int32(100 + PartySize)
@@ -966,6 +1141,28 @@ proc sampleMetrics*(game: Game, force = false) =
     game.metrics.set(slot, BankedMetric, game.world.bankedGold[slot])
   game.history.capture(game.metrics, game.world.tick, force)
 
+proc newSetup(
+    seed: int32,
+    maximumTicks: int32,
+    dungeon: Dungeon,
+    mapVersion = 1'u16
+): Setup =
+  ## Describes one run on a generated map, with the party in slot order.
+  result = Setup(
+    seed: seed,
+    mapVersion: mapVersion,
+    tickRate: uint16(TickRate),
+    gridTiles: uint16(GridTiles),
+    levels: uint8(LevelCount),
+    decisionTicks: uint16(DecisionTicks),
+    hashIntervalTicks: uint16(HashIntervalTicks),
+    maximumTicks: uint32(maximumTicks)
+  )
+  for slot in 0 ..< PartySize:
+    result.party[slot] = PartyMember(
+      id: int32(100 + slot), class: HeroClass(slot))
+  result.mapHash = dungeon.hash
+
 proc newGame*(
     seed: int32,
     maximumTicks = DefaultMaximumTicks
@@ -976,23 +1173,44 @@ proc newGame*(
   result.dungeon.verifyDungeon()
   doAssert result.dungeon.descentPath(),
     "generated a dungeon the party cannot finish"
-  var setup = Setup(
-    seed: seed,
-    mapVersion: 1,
-    tickRate: uint16(TickRate),
-    gridTiles: uint16(GridTiles),
-    levels: uint8(LevelCount),
-    decisionTicks: uint16(DecisionTicks),
-    hashIntervalTicks: uint16(HashIntervalTicks),
-    maximumTicks: uint32(maximumTicks)
-  )
-  for slot in 0 ..< PartySize:
-    setup.party[slot] = PartyMember(
-      id: int32(100 + slot), class: HeroClass(slot))
-  setup.mapHash = result.dungeon.hash
-  result.world = newWorld(setup)
+  result.world = newWorld(newSetup(seed, maximumTicks, result.dungeon))
   result.spawnParty()
   result.populateDungeon()
+  result.world.rebuildVision()
+
+  result.sampleMetrics(true)
+
+proc newArenaGame*(
+    seed: int32,
+    maximumTicks: int32,
+    heroes: openArray[HeroClass],
+    monsters: openArray[Species]
+): Game =
+  ## Builds the debug arena fight: the heroes in a column near the east wall
+  ## and up to ArenaMonsterLimit monsters in staggered columns from the west
+  ## wall. Each hero
+  ## keeps its own party slot and bot; the slots of absent classes stay
+  ## empty.
+  result = Game(metrics: newMetrics(PartySize, TickRate))
+  result.dungeon = generateArena(seed)
+  result.world = newWorld(
+    newSetup(seed, maximumTicks, result.dungeon, ArenaMapVersion))
+  result.world.actors.setLen(PartySize)
+  for slot in 0 ..< PartySize:
+    result.world.actors[slot] = Actor()
+  let room = result.dungeon.rooms[ArenaLevel][0]
+  var spot = result.dungeon.entrance
+  for index, class in heroes:
+    spot.z = uint8(int(result.dungeon.entrance.z) - heroes.len + 1 + 2 * index)
+    result.placeHero(int32(class.ord), spot)
+  result.world.nextActorId = int32(100 + PartySize)
+  doAssert monsters.len <= ArenaMonsterLimit
+  for index, species in monsters:
+    let column = int32(index) div ArenaRanks
+    spot.x = uint8(room.x + 1 + column)
+    spot.z = uint8(
+      room.z + 1 + 2 * (int32(index) mod ArenaRanks) + column mod 2)
+    discard result.world.addActor(monsterActor(species, spot))
   result.world.rebuildVision()
 
   result.sampleMetrics(true)
@@ -1074,22 +1292,39 @@ proc partyAnchor*(game: Game): int32 =
 
 proc nearestMonsterHome*(game: Game, slot: int32): TileRef =
   ## Closest living monster on this hero's floor, even through fog of war.
+  ## A hero already walking to one turns to another only when it is nearer
+  ## by route as well: the way to a monster can first lead away from it and
+  ## toward another, and straight distance alone would turn the hero around
+  ## at every step between the two.
   let actor = game.world.actors[slot]
   result = actor.home
-  var bestDistance = int32(GridTiles * 2)
+  var
+    bestDistance = int32(GridTiles * 2)
+    headed = actor.home
+    walkingToOne = false
   for other in 0 ..< game.world.actors.len:
     let target = game.world.actors[other]
     if not target.alive or target.kind != MonsterActor:
       continue
     if target.home.level != actor.home.level:
       continue
+    if game.world.headingFor(slot, target.home):
+      headed = target.home
+      walkingToOne = true
     let distance = tileDistance(actor.home, target.home)
     if distance >= 0 and distance < bestDistance:
       bestDistance = distance
       result = target.home
+  if walkingToOne and result != headed and
+      game.world.routeTiles(slot, headed) <=
+        game.world.routeTiles(slot, result):
+    result = headed
 
 proc nearestLoot*(game: Game, slot: int32): int32 =
   ## Index of the closest unclaimed treasure on this hero's level, or -1.
+  ## Treasure the hero is already walking to still counts out of sight: a
+  ## corner can hide it from the next tile on the way, and dropping it there
+  ## sends the hero back to where it shows again, forever.
   result = -1
   let actor = game.world.actors[slot]
   var bestDistance = 30'i32
@@ -1098,7 +1333,8 @@ proc nearestLoot*(game: Game, slot: int32): int32 =
       continue
     if item.tile.level != actor.home.level:
       continue
-    if not game.world.visible(slot, item.tile):
+    if not game.world.visible(slot, item.tile) and
+        not game.world.headingFor(slot, item.tile):
       continue
     if item.kind.lootUsesSlot and actor.freeInventorySlot() < 0:
       continue
@@ -1117,6 +1353,42 @@ proc beginAbility(game: Game, slot: int32, ability: Ability, target: int32) =
   game.world.actors[slot].action = ability
   game.world.actors[slot].actionTicks = 0
   game.world.actors[slot].target = target
+
+proc chooseAttack(game: Game, slot, targetSlot: int32): Ability =
+  ## Picks a hero's attack on a target: the best ready one that already
+  ## reaches it, otherwise the longest-reaching one the hero can pay for,
+  ## which it then closes to, or waits on while it cools down.
+  let
+    actor = game.world.actors[slot]
+    distance = tileDistance(actor.home, game.world.actors[targetSlot].home)
+    attacks = ClassAttacks[actor.heroClass]
+  result = attacks[^1]
+  for ability in attacks:
+    let spec = Abilities[ability]
+    if actor.mana < spec.manaCost:
+      continue
+    if actor.cooldowns[int(ability)] == 0 and
+        distance <= int32(spec.rangeTiles):
+      return ability
+    if spec.rangeTiles > Abilities[result].rangeTiles:
+      result = ability
+
+proc attackWith(game: Game, slot, targetSlot: int32, ability: Ability): bool =
+  ## Closes to the attack's range, holds there while it cools down, and
+  ## starts it, paying its mana, once it is ready. Returns false only when
+  ## the hero has no way to step closer.
+  let
+    actor = game.world.actors[slot]
+    target = game.world.actors[targetSlot]
+    spec = Abilities[ability]
+  if tileDistance(actor.home, target.home) > int32(spec.rangeTiles):
+    return game.world.stepToward(slot, target.home)
+  game.world.clearPath(slot)
+  game.world.faceActor(slot, targetSlot)
+  if actor.cooldowns[int(ability)] == 0:
+    game.world.actors[slot].mana -= spec.manaCost
+    game.beginAbility(slot, ability, target.id)
+  true
 
 proc extraLootKind(level: int, species: Species, rng: var Rng): LootKind =
   ## Picks one extra drop. Deeper floors and champions roll richer treasure.
@@ -1364,26 +1636,7 @@ proc decideHero(game: Game, slot: int32) =
   # across the floor while the dungeon refills behind them is how a run turns
   # into a treadmill they can never step off.
   if enemy >= 0:
-    let target = game.world.actors[enemy]
-    if inMelee(actor.home, target.home):
-      game.world.clearPath(slot)
-      game.world.actors[slot].facing = facingToward(actor.home, target.home)
-      let ability =
-        if actor.heroClass == FighterClass and
-            actor.cooldowns[int(MoltenFist)] == 0: MoltenFist
-        elif actor.heroClass == WizardClass and
-            actor.cooldowns[int(MeteorStrike)] == 0 and actor.mana >= 12:
-          MeteorStrike
-        elif actor.heroClass == RogueClass and
-            actor.cooldowns[int(VenomDagger)] == 0: VenomDagger
-        elif actor.heroClass == ClericClass:
-          SolarHammer
-        else: FirebrandSword
-      if ability == MeteorStrike:
-        game.world.actors[slot].mana -= 12
-      game.beginAbility(slot, ability, target.id)
-      return
-    discard game.world.stepToward(slot, target.home)
+    discard game.attackWith(slot, enemy, game.chooseAttack(slot, enemy))
     return
 
   # Nothing hostile nearby: pick up anything lying around.
@@ -1471,28 +1724,7 @@ proc applyHeroAction*(
       return false
     if not game.world.actorCanSee(slot, targetSlot):
       return false
-    if not inMelee(actor.home, target.home):
-      return game.world.stepToward(slot, target.home)
-    game.world.clearPath(slot)
-    game.world.actors[slot].facing = facingToward(actor.home, target.home)
-    let ability =
-      if actor.heroClass == FighterClass and
-          actor.cooldowns[int(MoltenFist)] == 0:
-        MoltenFist
-      elif actor.heroClass == WizardClass and
-          actor.cooldowns[int(MeteorStrike)] == 0 and actor.mana >= 12:
-        MeteorStrike
-      elif actor.heroClass == RogueClass and
-          actor.cooldowns[int(VenomDagger)] == 0:
-        VenomDagger
-      elif actor.heroClass == ClericClass:
-        SolarHammer
-      else:
-        FirebrandSword
-    if ability == MeteorStrike:
-      game.world.actors[slot].mana -= 12
-    game.beginAbility(slot, ability, target.id)
-    true
+    game.attackWith(slot, targetSlot, game.chooseAttack(slot, targetSlot))
   of ActionPickupTarget:
     let itemIndex = game.world.itemIndex(action.first)
     if itemIndex < 0 or game.world.items[itemIndex].carrier != 0:
@@ -1500,7 +1732,8 @@ proc applyHeroAction*(
     let item = game.world.items[itemIndex]
     if item.tile.level != actor.home.level:
       return false
-    if not game.world.visible(slot, item.tile):
+    if not game.world.visible(slot, item.tile) and
+        not game.world.headingFor(slot, item.tile):
       return false
     if item.kind.lootUsesSlot:
       if actor.freeInventorySlot() < 0:
@@ -1585,16 +1818,97 @@ proc applyHeroAction*(
 
 ## Monster behaviour
 
+template frontLine(hero: Actor): bool =
+  ## True for a hero whose best attack is a melee swing.
+  Abilities[ClassAttacks[hero.heroClass][0]].rangeTiles <= 1
+
+proc kiteAway(game: Game, slot: int32): bool =
+  ## Walks a caster out of reach of the front-line heroes it can see closer
+  ## than KiteTiles. Of the free tiles two steps round it, it takes the one
+  ## that leaves the nearest of them farthest away, capped at KiteTiles, so
+  ## it backs off only as far as it must. Returns false when no tile there
+  ## is safer than where it stands.
+  let actor = game.world.actors[slot]
+  var threats: seq[TileRef]
+  for hero in 0'i32 ..< PartySize:
+    let other = game.world.actors[hero]
+    if not other.alive or not other.frontLine:
+      continue
+    let distance = tileDistance(actor.home, other.home)
+    if distance >= 0 and distance < KiteTiles and
+        game.world.actorCanSee(slot, hero):
+      threats.add other.home
+  if threats.len == 0:
+    return false
+  proc safety(tile: TileRef): int32 =
+    result = KiteTiles
+    for threat in threats:
+      result = min(result, tileDistance(tile, threat))
+  var
+    best = actor.home
+    bestSafety = safety(actor.home)
+    bestStep = 0'i32
+  for dz in -2'i32 .. 2:
+    for dx in -2'i32 .. 2:
+      let
+        x = int32(actor.home.x) + dx
+        z = int32(actor.home.z) + dz
+      if x < 0 or z < 0 or x >= GridTiles or z >= GridTiles:
+        continue
+      let tile = TileRef(level: actor.home.level, x: uint8(x), z: uint8(z))
+      if not tile.walkable or game.world.claimed(tile):
+        continue
+      let
+        tileSafety = safety(tile)
+        step = max(abs(dx), abs(dz))
+      if tileSafety > bestSafety or
+          (tileSafety == bestSafety and best != actor.home and
+            step < bestStep):
+        best = tile
+        bestSafety = tileSafety
+        bestStep = step
+  if best == actor.home:
+    return false
+  game.world.stepToward(slot, best)
+
+proc decideCaster(game: Game, slot, prey: int32) =
+  ## Casters fight from range. A ready bolt goes at the nearest hero in
+  ## reach; while it recharges, the caster backs away from front-line
+  ## heroes, holds where it stands if its target is still in reach, and
+  ## otherwise closes only until it is.
+  let
+    actor = game.world.actors[slot]
+    target = game.world.actors[prey]
+    reach = int32(Abilities[HexBolt].rangeTiles)
+    inReach = tileDistance(actor.home, target.home) <= reach
+  if inReach and actor.cooldowns[int(HexBolt)] == 0:
+    actor.state = FightingState
+    game.world.clearPath(slot)
+    game.world.faceActor(slot, prey)
+    game.beginAbility(slot, HexBolt, target.id)
+  elif game.kiteAway(slot):
+    actor.state = KitingState
+  elif inReach:
+    actor.state = FightingState
+    game.world.clearPath(slot)
+    game.world.faceActor(slot, prey)
+  else:
+    actor.state = ChasingState
+    discard game.world.stepToward(slot, target.home)
+
 proc decideMonster(game: Game, slot: int32) =
   let actor = game.world.actors[slot]
   if actor.busy:
     return
   let
-    sight = SpeciesSight[actor.species]
+    sight = game.world.monsterSight(actor)
     prey = game.nearestEnemy(slot, sight)
   if prey < 0:
     actor.state = GuardingState
     game.world.clearPath(slot)
+    return
+  if actor.species.monsterRank == CasterRank:
+    game.decideCaster(slot, prey)
     return
   let target = game.world.actors[prey]
   if inMelee(actor.home, target.home):
@@ -1608,6 +1922,20 @@ proc decideMonster(game: Game, slot: int32) =
 
 
 ## The tick
+
+proc settleArena(game: Game) =
+  ## Ends an arena fight a moment after one side falls, so the last blow
+  ## stays on screen before the match stops or loops back.
+  if game.world.arenaDecided == 0:
+    if game.world.partyAlive() > 0 and game.monstersOn(ArenaLevel) > 0:
+      return
+    game.world.arenaDecided = game.world.tick
+    game.log.add(
+      if game.world.partyAlive() > 0: "the heroes win the fight"
+      else: "the heroes lose the fight")
+  if game.world.tick - game.world.arenaDecided >= ArenaAftermathTicks:
+    game.world.phase =
+      if game.world.partyAlive() > 0: EscapedPhase else: WipedPhase
 
 proc tickWorld*(
     game: Game,
@@ -1659,10 +1987,14 @@ proc tickWorld*(
           continue
         ctaWalkLayer = int(game.world.actors[i].home.level)
         ctaWalkDestLayer = ctaWalkLayer
+        # A hero standing still or swinging holds its ground; whoever walks
+        # into it takes the whole push and slides around it.
         separatePair(
           game.world.actors[i].body,
           game.world.actors[j].body,
-          ctaTilesWalkable
+          ctaTilesWalkable,
+          game.world.actors[i].planted,
+          game.world.actors[j].planted
         )
     for slot in 0 ..< game.world.actors.len:
       if game.world.actors[slot].alive:
@@ -1735,14 +2067,22 @@ proc tickWorld*(
       # first floor forever with the exit in sight.
       if level > 1:
         var rng = game.world.rng
-        let target = rng.between(1, level - 1)
-        if game.spawnMonster(int(target), rng):
-          game.log.add "something stirs on " & Themes[target].name &
-            " behind the party"
+        let
+          target = rng.between(1, level - 1)
+          rooms = game.dungeon.rooms[target]
+        if rooms.len > 0:
+          let
+            room = rooms[rng.below(int32(rooms.len))]
+            size = rng.between(PackMin, PackMax)
+          if game.spawnPack(int(target), room, size, rng) > 0:
+            game.log.add "a pack stirs on " & Themes[target].name &
+              " behind the party"
         game.world.rng = rng
 
   # Endings.
-  if game.world.partyAlive() == 0:
+  if game.world.isArena:
+    game.settleArena()
+  elif game.world.partyAlive() == 0:
     game.world.phase = WipedPhase
     game.log.add "the party is lost"
   elif game.world.phase == ReturningPhase:

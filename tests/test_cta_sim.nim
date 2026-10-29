@@ -707,3 +707,37 @@ block:
   game.world.actors[0].hp = 0
   game.sampleMetrics()
   doAssert game.metrics.read(0, 0).values[GoldMetric] == 0
+
+echo "Testing heroes keep walking to treasure a corner hides"
+block:
+  ## A corner can hide a pile from the next tile on the way to it. A hero
+  ## already walking there must keep it as its target, or it turns back to
+  ## where the pile shows again and paces between the two tiles forever.
+  let game = newGame(2026, 240)
+  let hero = game.world.actors[0]
+  var tile = hero.home
+  for dx in 3'i32 .. 6'i32:
+    let candidate = TileRef(
+      level: hero.home.level,
+      x: uint8(int32(hero.home.x) + dx),
+      z: hero.home.z
+    )
+    if candidate.walkable and not game.world.claimed(candidate):
+      tile = candidate
+      break
+  doAssert tile != hero.home, "no open tile beside the party"
+  let id = game.world.nextItemId
+  game.world.items.add Item(id: id, kind: GoldPile, tile: tile, value: 10)
+  inc game.world.nextItemId
+  clearBits(game.world.visible[0])
+  doAssert game.nearestLoot(0) < 0, "unseen treasure must stay unknown"
+  doAssert game.world.setPath(0, tile)
+  let index = game.nearestLoot(0)
+  doAssert index >= 0 and game.world.items[index].id == id,
+    "the hero dropped the pile it is walking to"
+  doAssert game.applyHeroAction(0, ReplayAction(
+    heroId: hero.id,
+    kind: ActionPickupTarget,
+    first: id
+  ))
+  doAssert game.world.pathGoal(0) == tile

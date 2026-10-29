@@ -659,7 +659,9 @@ proc drawUi*(
     "Small"
   )
   let questTitle =
-    if run.world.phase == ReturningPhase:
+    if run.world.isArena:
+      "Win the Fight"
+    elif run.world.phase == ReturningPhase:
       "Escape the Dungeon"
     elif shownLevel >= LevelCount - 1:
       "Clear the Vault"

@@ -178,6 +178,175 @@ block:
   computeWalkable()
   world.finishPath(slot, goal, 150)
 
+echo "Testing CTA partial routes re-pathed every decision still advance"
+block:
+  ## A goal ringed by other actors has no way in, so every decision asks
+  ## again for the same partial route. Re-pathing must not send the walker
+  ## back to the middle of the tile it is leaving, or it never leaves.
+  layers = @[flatFloor(16, 3)]
+  computeWalkable()
+  let
+    world = newWorld(Setup(seed: 1988))
+    slot = world.walker(TileRef(level: 0, x: 1, z: 1), ClassSpeeds[RogueClass])
+    goal = TileRef(level: 0, x: 14, z: 1)
+  for ring in [
+    TileRef(level: 0, x: 13, z: 1),
+    TileRef(level: 0, x: 15, z: 1),
+    TileRef(level: 0, x: 14, z: 0),
+    TileRef(level: 0, x: 14, z: 2)
+  ]:
+    doAssert world.walker(ring, 0) >= 0
+  for tick in 0 ..< 600:
+    discard world.stepToward(slot, goal)
+    discard world.advancePath(slot)
+  doAssert tileDistance(world.actors[slot].home, goal) <= 2,
+    "the walker stalled short of the ring: " & $world.actors[slot].body.pos
+
+echo "Testing CTA heroes crowded onto one tile all walk off it"
+block:
+  ## Bodies are too wide for three to stand within arrival range of one
+  ## tile's middle. Fresh routes from a shared tile must not leave them all
+  ## steering for that middle forever while separation holds them apart.
+  layers = @[flatFloor(16, 9)]
+  computeWalkable()
+  proc onFloor(pos: FixedVec2): bool {.nimcall.} =
+    let (x, z) = cell(pos)
+    x >= 0 and x < 16 and z >= 0 and z < 9
+  let
+    world = newWorld(Setup(seed: 1988))
+    shared = TileRef(level: 0, x: 8, z: 4)
+    crowd = [
+      (FighterClass, fixedVec2(8.918'fx, 4.293'fx), 5.34'fx),
+      (FighterClass, fixedVec2(8.001'fx, 4.384'fx), 5.742'fx),
+      (FighterClass, fixedVec2(8.146'fx, 4.218'fx), 5.784'fx),
+      (WizardClass, fixedVec2(8.448'fx, 4.767'fx), 0.456'fx)
+    ]
+  var slots: seq[int32]
+  for i, (class, spot, facing) in crowd:
+    let slot = world.walker(
+      TileRef(level: 0, x: 8, z: uint8(i + 1)),
+      ClassSpeeds[class]
+    )
+    world.actors[slot].kind = HeroActor
+    world.actors[slot].home = shared
+    world.actors[slot].body.pos = spot
+    world.actors[slot].body.facing = facing
+    slots.add slot
+  world.rebuildClaims()
+  for i, slot in slots:
+    doAssert world.setPath(slot, TileRef(level: 0, x: 1, z: uint8(i + 2)))
+  for tick in 0 ..< 600:
+    for slot in slots:
+      discard world.advancePath(slot)
+    for i in 0 ..< slots.len:
+      for j in i + 1 ..< slots.len:
+        separatePair(
+          world.actors[slots[i]].body,
+          world.actors[slots[j]].body,
+          onFloor,
+          world.actors[slots[i]].planted,
+          world.actors[slots[j]].planted
+        )
+  for i, slot in slots:
+    doAssert world.actors[slot].home ==
+      TileRef(level: 0, x: 1, z: uint8(i + 2)),
+      "a crowded hero never left the shared tile: " &
+        $world.actors[slot].body.pos
+
+echo "Testing CTA heroes route through a pack that walls off a corridor"
+block:
+  ## Pathing steers around occupied tiles, so monsters filling a corridor
+  ## cut it. A hero must still head through them to the far side rather
+  ## than settle for the nearest tile short, which can be on another floor.
+  layers = @[flatFloor(16, 1)]
+  computeWalkable()
+  let
+    world = newWorld(Setup(seed: 1988))
+    hero = world.walker(TileRef(level: 0, x: 1, z: 0), ClassSpeeds[RogueClass])
+    monster = world.walker(TileRef(level: 0, x: 8, z: 0), 0)
+    goal = TileRef(level: 0, x: 14, z: 0)
+  world.actors[monster].kind = MonsterActor
+  doAssert world.setPath(hero, goal)
+  doAssert world.pathGoal(hero) == goal,
+    "the route stopped short of the pack: " & $world.pathGoal(hero)
+  world.actors[monster].kind = HeroActor
+  doAssert world.setPath(hero, goal)
+  doAssert world.pathGoal(hero).x < 8, "a hero must not route through allies"
+
+echo "Testing CTA bodies wedged on a wall corner find a way around"
+block:
+  ## Two bodies side by side can each be shoved back across the line their
+  ## steering takes, then creep a hair along a wall corner every tick. That
+  ## is no progress, so it must count as stuck and earn a fresh route.
+  let floor = flatFloor(12, 4)
+  floor.tiles[1 * 12 + 5].flags = 0
+  layers = @[floor]
+  computeWalkable()
+  proc onFloor(pos: FixedVec2): bool {.nimcall.} =
+    let (x, z) = cell(pos)
+    x >= 0 and x < 12 and z >= 0 and z < 4 and
+      TileRef(level: 0, x: uint8(x), z: uint8(z)).walkable
+  let
+    world = newWorld(Setup(seed: 1988))
+    goal = TileRef(level: 0, x: 0, z: 1)
+    shared = TileRef(level: 0, x: 6, z: 1)
+  var slots: seq[int32]
+  for i, z in [1.21'fx, 1.87'fx]:
+    let slot = world.walker(
+      TileRef(level: 0, x: 9, z: uint8(i + 1)),
+      ClassSpeeds[RogueClass]
+    )
+    world.actors[slot].kind = HeroActor
+    world.actors[slot].home = shared
+    world.actors[slot].body.pos = fixedVec2(6'fx, z)
+    world.actors[slot].body.facing = FixedPi
+    world.actors[slot].path = @[PathStep(tile: goal, direction: West)]
+    slots.add slot
+  world.rebuildClaims()
+  for tick in 0 ..< 900:
+    for slot in slots:
+      discard world.advancePath(slot)
+    separatePair(
+      world.actors[slots[0]].body,
+      world.actors[slots[1]].body,
+      onFloor,
+      world.actors[slots[0]].planted,
+      world.actors[slots[1]].planted
+    )
+  for slot in slots:
+    doAssert world.actors[slot].home.x <= 1,
+      "a wedged body never got around the corner: " &
+        $world.actors[slot].body.pos
+
+echo "Testing CTA heroes judge a nearer monster by its route"
+block:
+  ## A monster just across a wall is nearer in a straight line than one down
+  ## an open row, yet farther to walk. A hero already on its way to the open
+  ## one must not turn back for it, though it does for one nearer by route.
+  let floor = flatFloor(16, 9)
+  for z in 0 ..< 8:
+    floor.tiles[z * 16 + 8].flags = 0
+  layers = @[floor]
+  computeWalkable()
+  let
+    world = newWorld(Setup(seed: 1988))
+    game = Game(world: world)
+    hero = world.walker(TileRef(level: 0, x: 6, z: 1), ClassSpeeds[RogueClass])
+    open = TileRef(level: 0, x: 2, z: 1)
+    walled = TileRef(level: 0, x: 9, z: 1)
+  world.actors[hero].kind = HeroActor
+  for tile in [open, walled]:
+    let monster = world.walker(tile, 0)
+    world.actors[monster].kind = MonsterActor
+  doAssert game.nearestMonsterHome(hero) == walled
+  doAssert world.setPath(hero, open)
+  doAssert game.nearestMonsterHome(hero) == open,
+    "the hero turned back for a monster behind a wall"
+  let near = world.walker(TileRef(level: 0, x: 4, z: 1), 0)
+  world.actors[near].kind = MonsterActor
+  doAssert game.nearestMonsterHome(hero) == TileRef(level: 0, x: 4, z: 1),
+    "a monster nearer by route must win the hero over"
+
 echo "CTA navigation tests passed"
 
 echo "Testing CTA fractional destinations in the same cell and across routes"

@@ -8,10 +8,12 @@ const
   LogoPath* = DataRoot & "/themes/cta/cta_logo.png"
   RosterPath* = ChargenLibrary & "/cta.json"
   HeroTargetHeight* = 1.7'f
+  DeathClip* = "Death01"
+    ## Played once when anyone falls, then held while the body lies there.
   CharacterClips* = [
     "Idle_Loop", "Jog_Fwd_Loop", "Sword_Idle", "Sword_Attack",
     "Pistol_Idle_Loop", "Pistol_Shoot",
-    "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot"
+    "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot", DeathClip
   ]
   CtaTerrainTiles* = [
     "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-flagstone-1",
@@ -32,11 +34,17 @@ const
     HeroPortraitRoot & "ranger.profile.png",
     HeroPortraitRoot & "druid_warden.profile.png"
   ]
+  BowShotClip* = "Bow_Shoot"
+  StaffCastClip* = "Staff_Cast"
+  AuthoredClips* = [BowShotClip, StaffCastClip]
+    ## Not in the library: the renderer poses these on the hero's own rig.
   MeleeClips = ["Sword_Idle", "Jog_Fwd_Loop", "Sword_Attack"]
   RangedClips = ["Pistol_Idle_Loop", "Jog_Fwd_Loop", "Pistol_Shoot"]
+  BowClips = ["Pistol_Idle_Loop", "Jog_Fwd_Loop", BowShotClip]
   MagicClips = [
     "Spell_Simple_Idle_Loop", "Jog_Fwd_Loop", "Spell_Simple_Shoot"
   ]
+  StaffClips = ["Spell_Simple_Idle_Loop", "Jog_Fwd_Loop", StaffCastClip]
 
 type
   MobPreset* = object
@@ -70,8 +78,9 @@ proc heroClips*(class: HeroClass): array[3, string] =
   ## Matches idle, movement and attack clips to the hero's equipped weapon.
   case class
   of FighterClass: MeleeClips
-  of RogueClass: RangedClips
-  of WizardClass, ClericClass: MagicClips
+  of RogueClass: BowClips
+  of WizardClass: StaffClips
+  of ClericClass: MagicClips
 
 proc speciesClips*(species: Species): array[3, string] =
   ## Matches each monster's existing weapon to its animation style.

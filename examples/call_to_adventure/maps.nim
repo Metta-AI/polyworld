@@ -691,11 +691,8 @@ proc decorateLevel(dungeon: Dungeon, level: int) =
 
 proc terrainHash*(): uint64
 
-proc generateDungeon(seed: int32): Dungeon {.measure.} =
-  ## Builds all six levels, joins them with ramps, and asserts the result is
-  ## actually traversable before anyone tries to walk it.
-  var rng = initRng(seed)
-
+proc clearLevels() =
+  ## Starts every level as an empty slab with nothing locked against carving.
   for level in 0 ..< LevelCount:
     levelLayers[level] = QuadLayer(
       originX: 0,
@@ -705,10 +702,14 @@ proc generateDungeon(seed: int32): Dungeon {.measure.} =
       slab: true,
       tiles: newSeq[Tile](GridTiles * GridTiles)
     )
-
-  for level in 0 ..< LevelCount:
     openShaft[level] = newSeq[bool](GridTiles * GridTiles)
     rampLocked[level] = newSeq[bool](GridTiles * GridTiles)
+
+proc generateDungeon(seed: int32): Dungeon {.measure.} =
+  ## Builds all six levels, joins them with ramps, and asserts the result is
+  ## actually traversable before anyone tries to walk it.
+  var rng = initRng(seed)
+  clearLevels()
 
   var roomLinks: array[LevelCount, seq[(int32, int32)]]
   result.generateLevel(rng, 0, 0, 0, roomLinks[0])
@@ -1015,3 +1016,34 @@ proc generateMap*(seed: int32): MapData =
   doAssert false,
     "seed " & $seed & ": no walkable dungeon in " & $DungeonAttempts &
       " attempts"
+
+## Debug arena
+
+const
+  ArenaLevel* = 1
+    ## The arena room sits on the Old Halls floor, home of the Dustling.
+  ArenaSize* = 10'i32
+
+proc generateArena*(seed: int32): MapData =
+  ## Builds the debug arena: one walled square room in the middle of
+  ## an otherwise empty stack. There are no ramps, so nobody leaves it. The
+  ## entrance is the heroes' spot near the east wall, the vault the centre.
+  clearLevels()
+  layers = @[]
+  for level in 0 ..< LevelCount:
+    layers.add levelLayers[level]
+  let
+    corner = int32(GridTiles div 2) - ArenaSize div 2
+    room = Room(
+      x: corner, z: corner, width: ArenaSize, depth: ArenaSize, kind: RectRoom
+    )
+    (cx, cz) = room.center
+  result.rooms[ArenaLevel] = @[room]
+  carveRoom(ArenaLevel, room, levelBase(ArenaLevel), Themes[ArenaLevel].floorKind)
+  buildApron(ArenaLevel, levelBase(ArenaLevel), Themes[ArenaLevel])
+  computeWalkable()
+  result.entrance = TileRef(
+    level: int8(ArenaLevel), x: uint8(room.x + room.width - 2), z: uint8(cz))
+  result.vault = TileRef(level: int8(ArenaLevel), x: uint8(cx), z: uint8(cz))
+  result.seed = seed
+  result.hash = terrainHash()
