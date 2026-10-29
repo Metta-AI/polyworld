@@ -300,7 +300,7 @@ let mage = [
     name: "Overwork", energyCost: 3,
     class: some(Mage), kind: Trinket,
     rules: rules(
-      lasts(3), extraEnergy(2),
+      lasts(3), extraEnergy(3),
       on(eachTurn(You), extraEnergy(2), draw(1)),
       on(destroyed(self()), summon(1, "Burnout"))
     )
@@ -309,7 +309,6 @@ let mage = [
     name: "Burnout", energyCost: 0,
     class: some(Mage), kind: Trinket,
     rules: rules(
-      lasts(3),
       on(eachEndOfTurn(You), damage(2, You, vfx = ExplosionVfx), toss(1))
     )
   ),

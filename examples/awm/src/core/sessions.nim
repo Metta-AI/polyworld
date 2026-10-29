@@ -6,7 +6,7 @@ export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 19
+  SnapshotSchemaVersion* = 20
 
 type
   SessionOptions* = object
@@ -535,6 +535,8 @@ proc gameToJson*(game: GameState): JsonNode =
       entry["playedId"] = %pending.playedId
     if pending.departed.isSome:
       entry["departed"] = minionToJson(pending.departed.get)
+    if pending.lasts:
+      entry["lasts"] = %true
     pendingTriggers.add entry
   result = %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
@@ -655,10 +657,15 @@ proc gameFromJson*(node: JsonNode): GameState =
         playedId: if entry.hasKey("playedId"):
           entry["playedId"].integer("played card", 1) else: 0,
         departed: if entry.hasKey("departed"):
-          some(minionFromJson(entry["departed"])) else: none(MinionState))
+          some(minionFromJson(entry["departed"])) else: none(MinionState),
+        lasts: entry.hasKey("lasts") and entry["lasts"].getBool(false))
       # A destroyed card's trigger reads it as it left; any other's source
-      # is in play, under the trigger's owner.
-      if pending.departed.isSome:
+      # is in play, under the trigger's owner. A Lasts count is neither: its
+      # card may have gone or changed hands by the time it comes.
+      if pending.lasts:
+        if pending.onPlay or pending.departed.isSome:
+          raise newException(ValueError, "Invalid snapshot pending trigger")
+      elif pending.departed.isSome:
         let gone = pending.departed.get
         if gone.id != pending.sourceId or pending.onPlay or
             result.minionLocation(gone.id).found or

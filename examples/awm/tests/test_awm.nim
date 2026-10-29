@@ -2800,7 +2800,7 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
       "- A friendly minion gains Hidden 1.\n" &
       "- Give a friendly minion +1/-1.\n- Give a friendly minion -1/+1."
     check baseCardNamed("Overwork").ruleText() == "Lasts 3.\n" &
-      "Gain 2 energy.\n" &
+      "Gain 3 energy.\n" &
       "On each of your turns, gain 2 energy and draw 1 card.\n" &
       "When this card is destroyed, summon a Burnout."
     check Card(kind: Spell, rules: rules(gain(on(eachTurn(You), draw(1)),
@@ -3323,19 +3323,18 @@ suite "AWM Lasts":
     check Card(kind: Spell, rules: rules(gain(lasts(1),
       target({kind: {Minion}})))).ruleText() == "A minion gains Lasts 1."
 
-  test "a lasting card leaves as its owner's Nth turn from now starts":
+  test "a lasting card leaves as its controller's Nth turn ends":
     var game = newGame(Archer, Warrior, 3311)
     let me = game.leads(Archer)
     game.players[me].hand = @[tent]
     check game.playCard(0)
     check game.players[me].board[0].lastsTurns == 2
-    game.finishTurn()  # the opponent's turn counts nothing
-    check game.players[me].board[0].lastsTurns == 2
-    game.finishTurn()  # its owner's next turn: one to go
+    game.finishTurn()  # the turn it was played in: one to go
     check game.players[me].board.len == 1
     check game.players[me].board[0].lastsTurns == 1
-    game.finishTurn()
-    game.finishTurn()  # its owner's second turn from now: gone
+    game.finishTurn()  # the opponent's turn counts nothing
+    check game.players[me].board[0].lastsTurns == 1
+    game.finishTurn()  # its controller's second turn: gone as it ends
     check game.players[me].board.len == 0
     check game.players[me].discardPile[^1].name == "Tent"
     var died = false
@@ -3344,18 +3343,47 @@ suite "AWM Lasts":
         died = true
     check died
 
-  test "it leaves before that turn's triggers":
-    let lantern = Card(name: "Lantern", energyCost: 0, kind: Trinket,
-      rules: rules(lasts(1), on(eachTurn(You), draw(1))))
-    var game = newGame(Archer, Warrior, 3313)
-    let me = game.leads(Archer)
-    game.players[me].hand = @[lantern]
-    check game.playCard(0)
+  test "it counts in its place among the card's rules":
+    # Written before Lasts, an end-of-turn rule still happens on the last
+    # turn; written after it, the card is gone first.
+    let
+      ember = Card(name: "Ember", energyCost: 0, kind: Trinket,
+        rules: rules(on(eachEndOfTurn(You), damage(1, You)), lasts(1)))
+      ash = Card(name: "Ash", energyCost: 0, kind: Trinket,
+        rules: rules(lasts(1), on(eachEndOfTurn(You), damage(1, You))))
+    for (card, bitten) in [(ember, true), (ash, false)]:
+      var game = newGame(Archer, Warrior, 3313)
+      let me = game.leads(Archer)
+      game.players[me].hand = @[card]
+      check game.playCard(0)
+      game.finishTurn()
+      check game.players[me].board.len == 0
+      check game.players[me].discardPile[^1].name == card.name
+      check game.players[me].life == StartingLife - bitten.int
+
+  test "only its controller's turns count: given away, it starts over":
+    # Given away during its owner's turn, it counts as the new controller's
+    # turns end, and still goes to its owner's discard pile.
+    var game = newGame(Archer, Warrior, 3317)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: tent,
+      enteredTurn: game.turnNumber, lastsTurns: 2)]
+    game.nextMinionId = 2
+    game.players[me].hand = @[Card(name: "Handover", energyCost: 0,
+      kind: Spell, rules: rules(gainControl(target({kind: {Hero}}),
+        target({kind: {Trinket}, owner: You}))))]
+    check game.playCard(0, @[heroChoice(enemy), creatureChoice(me, 1)])
+    game.finishTurn()  # the giver's turn counts nothing now
+    check game.players[enemy].board[0].lastsTurns == 2
     game.finishTurn()
-    let before = game.players[me].hand.len
-    game.finishTurn()  # its owner's turn: only the turn's own draw
-    check game.players[me].board.len == 0
-    check game.players[me].hand.len == before + 1
+    check game.players[enemy].board[0].lastsTurns == 1
+    game.finishTurn()
+    check game.players[enemy].board[0].lastsTurns == 1
+    game.finishTurn()
+    check game.players[enemy].board.len == 0
+    check game.players[me].discardPile[^1].name == "Tent"
 
   test "gaining Lasts starts a count, and losing it stops one":
     var game = newGame(Archer, Warrior, 3315)
@@ -3374,9 +3402,11 @@ suite "AWM Lasts":
     check game.players[me].board[0].lastsTurns == 1
     check game.playCard(0, creatureChoice(me, 2))
     check game.players[me].board[1].lastsTurns == 0
+    # The Bear runs out as this turn ends; the Tent no longer counts.
+    game.finishTurn()
+    check game.players[me].board.len == 1
     for turn in 0 ..< 4:
       game.finishTurn()
-    # The Bear ran out on its owner's next turn; the Tent no longer counts.
     check game.players[me].board.len == 1
     check game.players[me].board[0].card.name == "Tent"
 
@@ -3663,17 +3693,17 @@ suite "AWM Overwork and Burnout":
 
   test "Overwork and Burnout read as rules text":
     check baseCardNamed("Overwork").ruleText() == "Lasts 3.\n" &
-      "Gain 2 energy.\n" &
+      "Gain 3 energy.\n" &
       "On each of your turns, gain 2 energy and draw 1 card.\n" &
       "When this card is destroyed, summon a Burnout."
-    check baseCardNamed("Burnout").ruleText() == "Lasts 3.\n" &
+    check baseCardNamed("Burnout").ruleText() ==
       "At the end of each of your turns, deal 2 damage to yourself and " &
       "discard 1 card."
 
-  test "Overwork pays 2 energy and a card on two more turns, then burns out":
+  test "Overwork pays 3 energy, then 2 and a card on two more turns, then burns out":
     var (game, me, enemy) = overworkGame(5001)
     check game.playCard(0)
-    check game.players[me].energy == 6 - 3 + 2
+    check game.players[me].energy == 6 - 3 + 3
     for _ in 1 .. 2:
       let hand = game.players[me].hand.len
       game.finishTurn()
@@ -3681,17 +3711,18 @@ suite "AWM Overwork and Burnout":
       check game.players[me].energy == game.players[me].totalEnergy + 2
       check game.players[me].hand.len == hand + 2
       check game.players[me].board.names == @["Overwork"]
-    # Its third turn: it runs out before that turn's triggers, and Burnout
-    # takes its place.
+    # Its third turn ends: it runs out, and Burnout takes its place. Burnout
+    # arrived as that turn ended, so it bites from the next one.
     let life = game.players[me].life
     game.finishTurn()
-    game.finishTurn()
-    check game.players[me].energy == game.players[me].totalEnergy
+    check game.currentPlayer == enemy
     check game.players[me].board.names == @["Burnout"]
     check game.players[me].discardPile[^1].name == "Overwork"
     check game.players[me].life == life
-    # Burnout bites as each of its turns ends, the one it arrived on too.
-    # The turn passes once the discard is chosen.
+    game.finishTurn()
+    check game.players[me].energy == game.players[me].totalEnergy
+    # Burnout bites as each of its turns ends, and doesn't run out. The
+    # turn passes once the discard is chosen.
     for bites in 1 .. 3:
       game.finishTurn()
       check game.currentPlayer == me
@@ -3701,13 +3732,35 @@ suite "AWM Overwork and Burnout":
       check game.resolvePendingToss(@[0])
       check game.players[me].hand.len == hand - 1
       check game.currentPlayer == enemy
+      check game.players[me].board.names == @["Burnout"]
       game.finishTurn()
-    # Lasts runs out as its fourth turn starts: that turn ends quietly.
-    check game.players[me].board.len == 0
+
+  test "a gifted Burnout bites its new controller as each of their turns ends":
+    var game = newGame(Mage, Warrior, 5005)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCardNamed("Burnout"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    game.players[me].hand = @[baseCardNamed("Gift")]
+    game.players[me].energy = 20
+    check game.playCard(0, @[heroChoice(enemy), creatureChoice(me, 1)])
+    let
+      life = game.players[me].life
+      enemyLife = game.players[enemy].life
+    # The giver's turn ends quietly: Burnout is no longer theirs.
     game.finishTurn()
-    check not game.waitingToss
     check game.currentPlayer == enemy
-    check game.players[me].life == life - 6
+    for bites in 1 .. 3:
+      game.finishTurn()
+      check game.players[enemy].life == enemyLife - 2 * bites
+      check game.waitingToss and game.pendingToss.player == enemy
+      check game.resolvePendingToss(@[0])
+      check game.currentPlayer == me
+      check game.players[enemy].board.names == @["Burnout"]
+      game.finishTurn()
+    check game.players[me].life == life
 
   test "destroyed early, Overwork still leaves Burnout to its owner":
     var (game, me, enemy) = overworkGame(5003)

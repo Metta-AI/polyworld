@@ -82,7 +82,7 @@ particular permanent, including duplicates of the same card.
 | `boardHasKeyword(p, i, k)` | Current keyword state, including gained and removed keywords |
 | `boardRules$(p, i)` | Its rules now, as text: printed and gained, less the lost ones |
 | `boardStolenFrom(p, i)` | Whose card it is while another player controls it; -1 otherwise |
-| `boardHiddenTurns(p, i)`, `boardLastsTurns(p, i)` | How many more of its owner's turns it stays Hidden or in play; Hidden -1 is for good, 0 is neither |
+| `boardHiddenTurns(p, i)`, `boardLastsTurns(p, i)` | How many more of its controller's turns it stays Hidden (counted as they start) or in play (as they end); Hidden -1 is for good, 0 is neither |
 | `cardName$(id$)`, `cardRules$(id$)` | Printed name and the same rules text humans see |
 | `cardKind(id$)`, `cardClass(id$)`, `cardCost(id$)` | Printed kind, class (-1 for neutral), and energy cost |
 | `cardPower(id$)`, `cardToughness(id$)`, `cardHasKeyword(id$, k)` | Printed stats and keywords before buffs, gains, or losses |
@@ -176,7 +176,9 @@ copies on its own. Ready minions (keyword 1) can attack the turn they enter
 play, so the minion and its copy can both attack at once. A copy is summoned
 as its original is, buffs included, so its on-play rules run again: a copied
 Sharpshooter's shot waits as a trigger for you to aim (`triggerTargets`). Post
-lasts 3: it leaves play by itself as your third turn from now starts.
+lasts 2: it leaves play by itself as your next turn ends. Lasts counts only
+its controller's turns: a lasting card you give away counts the new
+controller's.
 
 The Mage precon holds four copies of `Summon Primordial`, an eight-energy spell.
 Choose a hero, return all cards on that hero's board to their hand, then

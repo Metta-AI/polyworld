@@ -1974,10 +1974,12 @@ proc hidden*(): Rule =
   HiddenRule(turns: Always)
 
 proc lasts*(turns: int): Rule =
-  ## `lasts(2)`: the card leaves play for its owner's discard pile as its
-  ## owner's second turn from now starts, before that turn's triggers. The
-  ## count runs down as its owner's turns begin, as Hidden's does.
-  doAssert turns > 0, "lasts: count the owner's turns"
+  ## `lasts(2)`: the card leaves play for its owner's discard pile as the
+  ## second of its controller's turns ends, counting the one it was played
+  ## in. Only its controller's turns count, each as it ends, in Lasts'
+  ## place among the card's rules: an end-of-turn trigger written before
+  ## it still fires on its last turn.
+  doAssert turns > 0, "lasts: count the controller's turns"
   LastsRule(turns: turns)
 
 proc repeat*(what: RuleValue[Rules]): Rule =
@@ -2191,8 +2193,8 @@ proc eachTurn*(player: RuleValue[Owner]): Trigger =
 proc eachEndOfTurn*(player: RuleValue[Owner]): Trigger =
   ## `on(eachEndOfTurn(You), ...)`: fires as every one of that player's
   ## turns ends while the card is in play, the turn it entered too. (Lasts
-  ## counts at turn starts: a card that runs out is gone before that turn
-  ## ends.)
+  ## counts as turns end too, in rule order: written after the trigger, it
+  ## lets the trigger fire on the card's last turn.)
   Trigger(kind: EachTurnEnd, player: player.triggerOwner("eachEndOfTurn"))
 
 proc nextTurn*(player: RuleValue[Owner]): Trigger =
@@ -2683,8 +2685,8 @@ proc hiddenTurns*(card: Card): int =
   card.rules.hiddenTurns()
 
 proc lastsTurns*(rules: Rules): int =
-  ## How many of its owner's turns a card with these rules stays in play:
-  ## 0 when it doesn't run out.
+  ## How many of its controller's turns a card with these rules stays in
+  ## play for: 0 when it doesn't run out.
   for rule in rules:
     if rule of LastsRule:
       return LastsRule(rule).turns

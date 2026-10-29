@@ -314,10 +314,16 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   Spells and other card effects still reach it, it attacks as usual, and
   attacking doesn't reveal it. Its owner sees it normally; everyone else
   sees it in shadow.
-- A lasting card (Post) leaves play by itself: `lasts(3)` sends it to its
-  owner's discard pile as their third turn from now starts, before that
-  turn's triggers, counting down exactly as `hidden(3)` does. Gained, a
-  count starts (a longer one already running stands); lost, it stops.
+- A lasting card (Post, Overwork) leaves play by itself: `lasts(3)` sends
+  it to its owner's discard pile as the third of its controller's turns
+  ends, counting the one it was played in. Only its controller's turns
+  count: a Post you Gift counts down as the new controller's turns end.
+  Each count comes at Lasts' place among the card's rules, so an
+  end-of-turn trigger written before `lasts(...)` still fires on the
+  card's last turn. A card that enters as a turn ends starts counting at
+  its controller's next one.
+  Gained, a count starts (a longer one already running stands); lost, it
+  stops.
 - A Ready minion can attack the turn it enters play, played or summoned.
   Gaining Ready (`gain(ready(), ...)`) lets it attack that turn if it
   hasn't yet; losing it the turn it entered takes that attack back.
@@ -336,10 +342,10 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   turns, for as long as the card is in play; `on(nextTurn(...))` fires
   once.
 - `on(eachEndOfTurn(...))` fires as every one of that player's turns ends
-  while the card is in play, the turn it entered too. Lasts counts at turn
-  starts, so a card that runs out is gone before that turn ends. A choice
-  it asks for (Burnout's discard) holds the turn until it's made; making
-  it ends the turn.
+  while the card is in play, the turn it entered too. Lasts counts as the
+  turn ends too, in rule order. A choice it asks for (Burnout's discard)
+  holds the turn, and a Lasts count after it, until it's made; making it
+  ends the turn.
 - `on(played(You, {kind: {Minion}, class: {Archer}, energyCost:
   atMost(3)}), ...)` fires each time that player plays a matching card
   from hand, once the card has resolved. `getPlayed()` is that card:
@@ -382,7 +388,7 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Archer | Assassin | 3 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
 | Archer | Reload | 3 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
 | Archer | Wildfire | 4 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
-| Archer | Post | 4 | 1 | Trinket | — | Lasts 3; when you play an Archer minion that costs 3 or less, it gains Ready, summon a copy of it (buffs and all) |
+| Archer | Post | 4 | 1 | Trinket | — | Lasts 2; when you play an Archer minion that costs 3 or less, it gains Ready, summon a copy of it (buffs and all) |
 | Archer | Gift | — | 3 | Spell | — | A hero gains control of a friendly minion or trinket (in no precon) |
 | Warrior | Bear | 4 | 2 | Minion | 3/2 | — |
 | Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
@@ -406,5 +412,5 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
 | Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
 | Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
-| Mage | Overwork | 4 | 3 | Trinket | — | Lasts 3; gain 2 extra energy now, and at the start of each of your turns gain 2 extra energy and draw 1 card; when destroyed, summon a Burnout |
-| Mage | Burnout | — | 0 | Trinket | — | Lasts 3; at the end of each of your turns, deal 2 damage to yourself and discard 1 card (only summoned, by Overwork) |
+| Mage | Overwork | 4 | 3 | Trinket | — | Lasts 3; gain 3 extra energy now, and at the start of each of your turns gain 2 extra energy and draw 1 card; when destroyed, summon a Burnout |
+| Mage | Burnout | — | 0 | Trinket | — | At the end of each of your turns, deal 2 damage to yourself and discard 1 card (only summoned, by Overwork) |

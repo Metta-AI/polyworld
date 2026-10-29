@@ -31,8 +31,8 @@ type
       ## It can't be attacked: for this many more of its owner's turns, or
       ## for as long as it is in play when it is `Always`. 0 is in the open.
     lastsTurns*: int
-      ## It leaves play as its owner's turn starts after this many more of
-      ## them have begun (`lasts(n)`). 0 when it doesn't run out.
+      ## It leaves play as the last of this many more of its controller's
+      ## turns ends (`lasts(n)`). 0 when it doesn't run out.
     stolenFrom*: Option[int]
       ## Whose card it is, when someone else (`owner`) controls it now. It
       ## goes back to that player's hand or discard pile.
@@ -86,6 +86,9 @@ type
     departed*: Option[MinionState]
       ## The card whose trigger fired as it was destroyed: it is no longer
       ## in play, so its trigger is read from it as it left.
+    lasts*: bool
+      ## Not a trigger: the card's Lasts counting down as its controller's
+      ## turn ends, in its place among the card's rules.
 
   PendingToss* = object
     ## A discard waiting for its player to choose cards from hand. Whatever
@@ -384,27 +387,12 @@ proc beginTurn*(game: var GameState) =
       game.players[playerIndex].drewFromEmpty = true
       game.checkWinCondition()
   if game.gameOver or game.dead(playerIndex): return
-  var expired: seq[int]
   for minion in game.players[playerIndex].board.mitems:
     minion.canAttack = true
     minion.hasAttacked = false
     # A hidden minion comes into the open as its owner's turns pass.
     if minion.hiddenTurns > 0:
       dec minion.hiddenTurns
-    # A lasting card runs out the same way, and leaves before triggers.
-    if minion.lastsTurns > 0:
-      dec minion.lastsTurns
-      if minion.lastsTurns == 0:
-        expired.add minion.id
-  if expired.len > 0:
-    inc game.visualBeat
-    for id in expired:
-      var slot = -1
-      for index, minion in game.players[playerIndex].board:
-        if minion.id == id:
-          slot = index
-      if slot >= 0:
-        game.destroyMinion(playerIndex, slot)
   game.resolveTriggers()
 
 proc newGame*(
@@ -919,7 +907,10 @@ proc applyEffects(game: var GameState, effects: openArray[Effect]) {.gcsafe.} =
 proc triggerSource(game: GameState,
     pending: PendingTrigger): tuple[found: bool, card: Card, rules: Rules] =
   ## A trigger its card has lost since it fired doesn't resolve. A summoned
-  ## card's on-play rules are its printed ones it hasn't lost.
+  ## card's on-play rules are its printed ones it hasn't lost. A Lasts
+  ## count has no rules.
+  if pending.lasts:
+    return
   let location = game.minionLocation(pending.sourceId)
   if location.found:
     let minion = game.players[location.player].board[location.index]
@@ -1025,6 +1016,20 @@ proc triggerEvent(game: GameState, kind: GameEventKind,
   result.text = game.triggerText(pending)
   result.targets = game.eventTargets(picks)
 
+proc countDownLasts(game: var GameState, minionId: int) =
+  ## A lasting card's count runs down as its controller's turn ends; at 0
+  ## it leaves play for its owner's discard pile.
+  let location = game.minionLocation(minionId)
+  if not location.found or location.player != game.currentPlayer:
+    return
+  template minion: untyped = game.players[location.player].board[location.index]
+  if minion.lastsTurns <= 0:
+    return
+  dec minion.lastsTurns
+  if minion.lastsTurns == 0:
+    inc game.visualBeat
+    game.destroyMinion(location.player, location.index)
+
 proc advanceTriggers(game: var GameState) =
   ## Resolves queued triggers in order until one needs its owner to choose
   ## a target (and has something legal to choose), or the queue is empty.
@@ -1035,6 +1040,10 @@ proc advanceTriggers(game: var GameState) =
       game.pendingTriggers.setLen(0)
       return
     let pending = game.pendingTriggers[0]
+    if pending.lasts:
+      game.pendingTriggers.delete(0)
+      game.countDownLasts(pending.sourceId)
+      continue
     let source = game.triggerSource(pending)
     if not source.found:
       game.pendingTriggers.delete(0)
@@ -1139,12 +1148,26 @@ proc resolvePendingToss*(game: var GameState, handIndices: seq[int]): bool =
 proc resolveTriggers(game: var GameState, ending = false) {.gcsafe.} =
   ## Queues the triggers of cards in play that fire as the current player's
   ## turn starts (or, `ending`, ends), the current player's cards first,
-  ## then resolves the queue in order.
+  ## then resolves the queue in order. As the turn ends, the current
+  ## player's lasting cards count down too, each in its Lasts' place among
+  ## its rules: an end-of-turn trigger written first fires before it.
   for offset in 0 ..< game.playerCount:
     let owner = (game.currentPlayer + offset) mod game.playerCount
     for slot in 0 ..< game.players[owner].board.len:
       let permanent = game.players[owner].board[slot]
-      for index, trigger in permanent.heldRules.triggers():
+      var
+        counting = ending and owner == game.currentPlayer and
+          permanent.lastsTurns > 0
+        index = -1
+      for rule in permanent.heldRules:
+        if counting and rule of LastsRule and not permanent.lost(rule):
+          game.pendingTriggers.add PendingTrigger(owner: owner,
+            sourceId: permanent.id, attacker: Canceled, lasts: true)
+          counting = false
+        if not (rule of OnRule):
+          continue
+        inc index
+        let trigger = OnRule(rule)
         if index.uint8 in permanent.firedTurnTriggers or
             permanent.lost(trigger):
           continue
@@ -1161,6 +1184,10 @@ proc resolveTriggers(game: var GameState, ending = false) {.gcsafe.} =
             game.players[owner].board[slot].firedTurnTriggers.incl index.uint8
           game.pendingTriggers.add PendingTrigger(owner: owner,
             sourceId: permanent.id, trigger: index, attacker: Canceled)
+      # A count with no Lasts rule held to place it comes last.
+      if counting:
+        game.pendingTriggers.add PendingTrigger(owner: owner,
+          sourceId: permanent.id, attacker: Canceled, lasts: true)
   game.advanceTriggers()
 
 proc playMinion*(

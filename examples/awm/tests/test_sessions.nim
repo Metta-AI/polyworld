@@ -616,6 +616,7 @@ suite "lasting cards and played triggers in snapshots":
     check not encoded["players"][me]["board"][0].hasKey("lastsTurns")
     check not encoded["pendingTriggers"][0].hasKey("played")
     check not encoded["pendingTriggers"][0].hasKey("playedId")
+    check not encoded["pendingTriggers"][0].hasKey("lasts")
 
   test "a destroyed card's waiting trigger and extra energy survive":
     var game = newGame(Mage, Warrior, 1129)
@@ -644,18 +645,29 @@ suite "lasting cards and played triggers in snapshots":
     let me = game.currentPlayer
     game.players[me].board = @[MinionState(id: 1, owner: me,
       card: baseCard("burnout-0"), enteredTurn: game.turnNumber,
-      lastsTurns: 3)]
+      lastsTurns: 1)]
     game.nextMinionId = 2
     check not gameToJson(game).hasKey("turnEnding")
     game.finishTurn()
     check game.waitingToss and game.turnEnding
+    # Burnout holds no Lasts rule to place its count, so its last count
+    # comes after its bite and waits behind the discard.
+    check game.pendingTriggers.len == 1 and game.pendingTriggers[0].lasts
     let encoded = gameToJson(game)
     var decoded = gameFromJson(encoded)
     check decoded.turnEnding
+    check decoded.pendingTriggers.len == 1 and decoded.pendingTriggers[0].lasts
     check gameToJson(decoded) == encoded
     check decoded.resolvePendingToss(@[0])
+    check decoded.players[me].board.len == 0
+    check decoded.players[me].discardPile[^1] == baseCard("burnout-0")
     check decoded.currentPlayer != me
     check not gameToJson(decoded).hasKey("turnEnding")
+    # A count is no summoned card's on-play rules.
+    var mixed = gameToJson(game)
+    mixed["pendingTriggers"][0]["onPlay"] = %true
+    expect ValueError:
+      discard gameFromJson(mixed)
     # A turn ends at once unless something waits.
     var stuck = gameToJson(decoded)
     stuck["turnEnding"] = %true

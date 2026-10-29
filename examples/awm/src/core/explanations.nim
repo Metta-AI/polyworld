@@ -31,8 +31,9 @@ const
       "Can't be attacked. Hidden(N) Lasts N turns of the owner." &
       "Plain Hidden lasts while it stays in play.",
     LastsMechanic:
-      "Leaves play by itself. Lasts N goes to the discard pile as its " &
-      "owner's Nth turn from now starts, counting down like Hidden(N).",
+      "Leaves play by itself. Lasts N counts down as each of its " &
+      "controller's turns ends and goes to the discard pile at 0. Rules " &
+      "written before it still happen on its last turn.",
     SummonMechanic:
       "Puts the named card into play. Summoned minions can " &
       "attack from their owner's next turn.",

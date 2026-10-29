@@ -110,6 +110,10 @@ proc triggerStepChoices(step: int): seq[Choice] =
     return @[]
   activeGame[].triggerChoices(newSeq[Choice](step))
 
+proc triggerWaits(): bool =
+  ## A trigger heads the queue: not a Lasts count behind a waiting discard.
+  activeGame[].waitingTrigger and not activeGame[].pendingTriggers[0].lasts
+
 proc waitingTriggerShown(): tuple[card: Card, rules: Rules] =
   ## The waiting trigger as its card prints it: its whole `on(...)` rule,
   ## or a summoned card's on-play rules it hasn't lost.
@@ -860,7 +864,7 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   discard result.addFunction("boardHiddenTurns", 2, boardHiddenTurnsProc, 3)
 
   let boardLastsTurnsProc: HostProc = proc(args: openArray[int32]): int32 =
-    ## Returns how many more of its owner's turns start before a visible
+    ## Returns how many more of its controller's turns end before a visible
     ## board card leaves play by itself; 0 when it doesn't run out.
     let
       player = args[0].int
@@ -1289,20 +1293,20 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     ## Returns whose effect the waiting trigger is, the player it resolves
     ## for; -1 if none.
     result = -1
-    if activeGame[].waitingTrigger:
+    if triggerWaits():
       result = activeGame[].pendingTriggers[0].owner.int32
   discard result.addFunction("triggerOwner", 0, triggerEffectOwnerProc, 3)
 
   let triggerSourceIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the waiting trigger's card's stable ID in play, as boardId.
-    if activeGame[].waitingTrigger:
+    if triggerWaits():
       result = activeGame[].pendingTriggers[0].sourceId.int32
   discard result.addFunction("triggerSourceId", 0, triggerSourceIdProc, 3)
 
   let triggerOnPlayProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns 1 when the waiting rules are a summoned card's on-play rules,
     ## 0 for an `on(...)` trigger.
-    if activeGame[].waitingTrigger:
+    if triggerWaits():
       result = activeGame[].pendingTriggers[0].onPlay.int32
   discard result.addFunction("triggerOnPlay", 0, triggerOnPlayProc, 3)
 
@@ -1310,7 +1314,7 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     ## Returns the attacker's owner when an attack fired the trigger; -1
     ## otherwise.
     result = -1
-    if activeGame[].waitingTrigger and
+    if triggerWaits() and
         activeGame[].pendingTriggers[0].attacker.kind == CreatureChoice:
       result = activeGame[].pendingTriggers[0].attacker.owner.int32
   discard result.addFunction("triggerAttackerOwner", 0,
@@ -1319,7 +1323,7 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   let triggerAttackerIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the attacker's stable minion ID when an attack fired the
     ## trigger; 0 otherwise.
-    if activeGame[].waitingTrigger and
+    if triggerWaits() and
         activeGame[].pendingTriggers[0].attacker.kind == CreatureChoice:
       result = activeGame[].pendingTriggers[0].attacker.creatureId.int32
   discard result.addFunction("triggerAttackerId", 0, triggerAttackerIdProc, 3)
@@ -1328,14 +1332,14 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     ## Returns the card whose play fired the trigger as a string identity;
     ## "" otherwise.
     var name: string
-    if activeGame[].waitingTrigger:
+    if triggerWaits():
       name = activeGame[].pendingTriggers[0].played.name
     activeVm.runtime.putString(name)
   discard result.addFunction("triggerPlayed$", 0, triggerPlayedProc, 8)
 
   let triggerPlayedIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns that played card's stable ID in play; 0 for a spell or none.
-    if activeGame[].waitingTrigger:
+    if triggerWaits():
       result = activeGame[].pendingTriggers[0].playedId.int32
   discard result.addFunction("triggerPlayedId", 0, triggerPlayedIdProc, 3)
 
