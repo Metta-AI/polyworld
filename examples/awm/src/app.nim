@@ -51,7 +51,7 @@ proc defaultBotSources*(appDir: string): seq[string] =
     if fileExists(path):
       result.add readFile(path)
 
-proc polyworldRoot(): string =
+proc polyworldRoot*(): string =
   var candidates: seq[string]
   let configured = getEnv("POLYWORLD_REPO")
   if configured.len > 0:
@@ -91,6 +91,21 @@ proc lightLikeCourtyard*(scene: CharacterScene, cameraSide: float32) =
   context.environmentMapStrength = 0.25
   context.exposure = 0.9
 
+proc buildUiAtlas*(cardAssets: string): AtlasBuilder =
+  ## The UI atlas: every card face part, the HUD's images and its fonts.
+  ## Raises when they outgrow it. Call initCardAssets first.
+  result = newHudAtlas(5632)
+  result.addFaceAssets()
+  result.addAwmHudAssets(cardAssets)
+  when PostPanelControls:
+    # Silky's widget images, for the screen-effects tuning window.
+    const EditorTheme = DataRoot & "/themes/editor/"
+    result.addDir(EditorTheme, EditorTheme)
+  result.addFont(cardAssets / "fonts/Grenze-SemiBold.ttf", "H1", 60.0)
+  result.addFont(DefaultFontPath, "Default", 34.5)
+  result.addFont(DefaultFontPath, "Hud", 28.5)
+  result.addFont(DefaultFontPath, "Small", 22.5)
+
 proc initApp*(sessionOptions: SessionOptions): App =
   ## Opens the window and loads everything the modes draw with.
   when defined(emscripten):
@@ -113,19 +128,8 @@ proc initApp*(sessionOptions: SessionOptions): App =
   let
     cardAssets = artworkRoot() / "cards"
     atlasPath = appDir / "awm.atlas.png"
-    atlasBuilder = newHudAtlas(5632)
   initCardAssets(cardAssets)
-  atlasBuilder.addBaseCardImages()
-  atlasBuilder.addAwmHudAssets(cardAssets)
-  when PostPanelControls:
-    # Silky's widget images, for the screen-effects tuning window.
-    const EditorTheme = DataRoot & "/themes/editor/"
-    atlasBuilder.addDir(EditorTheme, EditorTheme)
-  atlasBuilder.addFont(cardAssets / "fonts/Grenze-SemiBold.ttf", "H1", 60.0)
-  atlasBuilder.addFont(DefaultFontPath, "Default", 34.5)
-  atlasBuilder.addFont(DefaultFontPath, "Hud", 28.5)
-  atlasBuilder.addFont(DefaultFontPath, "Small", 22.5)
-  atlasBuilder.write(atlasPath)
+  buildUiAtlas(cardAssets).write(atlasPath)
 
   var window: Window
   var sk: Silky

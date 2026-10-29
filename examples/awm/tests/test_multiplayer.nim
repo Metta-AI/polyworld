@@ -729,7 +729,14 @@ suite "Bots in a multiplayer match":
         attacks += done.attacks
         inc turns
       check match.game.gameOver
-      check not match.game.dead(match.game.winner)
+      # The winner is the last one standing, unless the last ones fell at
+      # once (Wildfire hits every hero), when the current player wins.
+      var standing = 0
+      for seat in 0 ..< match.game.playerCount:
+        if not match.game.dead(seat):
+          inc standing
+      check (standing == 1 and not match.game.dead(match.game.winner)) or
+        (standing == 0 and match.game.winner == match.game.currentPlayer)
       check plays > 20
       check attacks > 5
 
@@ -799,7 +806,7 @@ suite "An opponent, each opponent, and turn triggers":
       "When an opponent's hero is attacked, draw 1 card."
     check Card(name: "Watch", kind: Trinket, rules: rules(
       on(nextTurn(AnyOpponent), draw(1)))).ruleText() ==
-      "At the start of an opponent's next turn, draw 1 card."
+      "On an opponent's next turn, draw 1 card."
 
   test "an opponent draws: only the one picked":
     var match = turnOf(0)

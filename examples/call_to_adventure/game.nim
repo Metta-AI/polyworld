@@ -38,8 +38,110 @@ proc usage() =
   echo "  --windowSize WxH        Graphical window, such as 800x400."
   echo "  --vsync:off             Unlock the frame rate (default on)."
   echo "  --verbose               Print periodic headless summaries."
+  echo "  --arena                 Debug fight in one 10x10 room."
+  echo "  --hero:CLASS[,CLASS]    Arena party: wizard (the mage), rogue (the"
+  echo "                          archer), fighter, cleric; default mage,fighter."
+  echo "  --monster:NAME[,NAME]   Arena monsters, cycled: dustling (default)..."
+  echo "  --monsters:N            Arena monster count, 1 to 24 (default 10)."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
+
+type ArenaOptions* = object
+  ## The debug fight that replaces the dungeon when enabled.
+  enabled*: bool
+  heroes*: seq[HeroClass]
+  species*: seq[Species]
+  count*: int
+
+var arenaOptions* = ArenaOptions(
+  heroes: @[WizardClass, FighterClass],
+  species: @[DustlingSpecies],
+  count: 10
+)
+
+proc squashed(name: string): string =
+  ## Lowercases a name and drops spaces, dashes and underscores.
+  for ch in name:
+    if ch.isAlphaNumeric:
+      result.add ch.toLowerAscii
+
+proc heroName*(class: HeroClass): string =
+  ## A class's plain name, such as Fighter.
+  ($class)[0 ..< ($class).len - "Class".len]
+
+proc parseArenaHero(name: string): HeroClass =
+  ## Reads a hero class by its plain name, in any case. The rogue, who
+  ## carries the bow, also answers to archer and ranger, and the wizard to
+  ## mage and arcanist.
+  if name.squashed in ["archer", "ranger"]:
+    return RogueClass
+  if name.squashed in ["mage", "arcanist"]:
+    return WizardClass
+  for class in HeroClass:
+    if class.heroName.squashed == name.squashed:
+      return class
+  fail("unknown --hero " & name & "; use mage, archer, fighter or cleric")
+
+proc parseArenaMonster(name: string): Species =
+  ## Reads a species by its display name, ignoring case, spaces and dashes.
+  for species in Species:
+    if SpeciesNames[species].squashed == name.squashed:
+      return species
+  var names: seq[string]
+  for species in Species:
+    names.add SpeciesNames[species].toLowerAscii.replace(' ', '_')
+  fail("unknown --monster " & name & "; use one of " & names.join(", "))
+
+proc parseArenaHeroes(names: string): seq[HeroClass] =
+  ## Reads a comma-separated party, each class at most once.
+  for name in names.split(','):
+    let class = parseArenaHero(name)
+    if class in result:
+      fail("--hero names the " & class.heroName & " twice")
+    result.add class
+
+proc parseArenaCount(value: string): int =
+  ## Reads how many monsters the arena spawns.
+  try:
+    result = parseInt(value)
+  except ValueError:
+    fail("--monsters takes a count; pick species with --monster:" & value)
+  if result notin 1 .. ArenaMonsterLimit:
+    fail("--monsters takes 1 to " & $ArenaMonsterLimit)
+
+proc arenaMonsters*(): seq[Species] =
+  ## The arena's monsters, cycling through the chosen species.
+  for index in 0 ..< arenaOptions.count:
+    result.add arenaOptions.species[index mod arenaOptions.species.len]
+
+proc takeArenaFlag(
+    arguments: seq[string],
+    index: var int,
+    argument: string
+): bool =
+  ## Handles the debug arena flags. Picking heroes or monsters implies it.
+  if argument == "--arena":
+    arenaOptions.enabled = true
+    return true
+  for flag in ["--hero", "--monsters", "--monster"]:
+    var value = ""
+    if argument == flag:
+      value = arguments.argumentValue(index, argument)
+    elif argument.startsWith(flag & ":") or argument.startsWith(flag & "="):
+      value = argument[flag.len + 1 .. ^1]
+    else:
+      continue
+    arenaOptions.enabled = true
+    case flag
+    of "--hero":
+      arenaOptions.heroes = parseArenaHeroes(value)
+    of "--monsters":
+      arenaOptions.count = parseArenaCount(value)
+    else:
+      arenaOptions.species = @[]
+      for name in value.split(','):
+        arenaOptions.species.add parseArenaMonster(name)
+    return true
 
 proc parseGameOptions(): GameOptions =
   ## Parses runtime game, bot, replay, and renderer configuration.
@@ -55,6 +157,8 @@ proc parseGameOptions(): GameOptions =
     let argument = arguments[index]
     if result.takeCommonFlag(arguments, index, argument):
       discard
+    elif takeArenaFlag(arguments, index, argument):
+      discard
     else:
       case argument
       of "--verbose":
@@ -69,6 +173,9 @@ proc parseGameOptions(): GameOptions =
     PartySize,
     "a live expedition requires exactly four bots"
   )
+  if arenaOptions.enabled and
+      (result.recordPath.len > 0 or result.replayPath.len > 0):
+    fail("--arena is a debug fight and cannot record or replay")
 
 var
   options*: GameOptions
@@ -157,15 +264,54 @@ proc summarize*(game: Game) =
       echo &"  slot {slot}: dead"
   echo "  party alive ", alive
 
+proc arenaMatchup(): string =
+  ## Names the two sides of the debug fight, such as
+  ## "Wizard, Fighter vs 10 Dustling".
+  var heroes: seq[string]
+  for class in arenaOptions.heroes:
+    heroes.add class.heroName
+  var counts: array[Species, int]
+  for species in arenaMonsters():
+    inc counts[species]
+  var monsters: seq[string]
+  for species in arenaOptions.species:
+    if counts[species] > 0:
+      monsters.add $counts[species] & " " & SpeciesNames[species]
+      counts[species] = 0
+  heroes.join(", ") & " vs " & monsters.join(", ")
+
+proc summarizeArena(game: Game) =
+  ## Prints who won the debug fight, how long it took, and who is left.
+  echo ""
+  if game.world.arenaDecided == 0:
+    echo &"result: no winner after {game.world.tick} ticks"
+  else:
+    let
+      ticks = game.world.arenaDecided
+      seconds = ticks.float64 / TickRate.float64
+      winners = if game.world.partyAlive() > 0: "heroes" else: "monsters"
+    echo &"result: the {winners} won in {seconds:.2f} s ({ticks} ticks)"
+  var heroes: seq[string]
+  for class in arenaOptions.heroes:
+    let actor = game.world.actors[class.ord]
+    heroes.add class.heroName & " " & (
+      if actor.alive: &"{actor.hp}/{actor.maxHp} hp" else: "dead")
+  echo "heroes: ", heroes.join(", ")
+  echo &"monsters: {game.monstersOn(ArenaLevel)} of {arenaOptions.count} left"
+
 proc runHeadless*() =
   ## Runs fixed simulation ticks with optional pacing and request barriers.
   echo "Call to Adventure, seed ", run.world.setup.seed
-  echo "dungeon: ", LevelCount, " levels, ", run.dungeon.ramps.len, " ramps"
-  var monsters = 0
-  for level in 0 ..< LevelCount:
-    monsters += run.monstersOn(level)
-  echo "monsters: ", monsters
-  echo "party enters at ", run.dungeon.entrance
+  if run.world.isArena:
+    echo "arena: ", arenaMatchup(), " in a ", ArenaSize, "x", ArenaSize,
+      " room"
+  else:
+    echo "dungeon: ", LevelCount, " levels, ", run.dungeon.ramps.len, " ramps"
+    var monsters = 0
+    for level in 0 ..< LevelCount:
+      monsters += run.monstersOn(level)
+    echo "monsters: ", monsters
+    echo "party enters at ", run.dungeon.entrance
 
   startGameProfile()
   defer:
@@ -195,14 +341,17 @@ proc runHeadless*() =
   let
     elapsed = max(epochTime() - started, 0.000001)
     simulated = run.world.tick.float64 / TickRate.float64
-  run.summarize()
-  case run.world.phase
-  of EscapedPhase:
-    echo "result: the party escaped with ", run.world.banked, " gold"
-  of WipedPhase:
-    echo "result: the party was wiped out on level ", run.world.deepest
+  if run.world.isArena:
+    run.summarizeArena()
   else:
-    echo "result: ran out of time on level ", run.partyLevel()
+    run.summarize()
+    case run.world.phase
+    of EscapedPhase:
+      echo "result: the party escaped with ", run.world.banked, " gold"
+    of WipedPhase:
+      echo "result: the party was wiped out on level ", run.world.deepest
+    else:
+      echo "result: ran out of time on level ", run.partyLevel()
   echo &"simulated: {simulated:.2f} s in {elapsed:.4f} s " &
     &"({simulated / elapsed:.1f}x real time)"
   echo &"hash: {run.stateHash().toHex(16)}"
@@ -254,7 +403,16 @@ if options.replayPath.len > 0:
     )
 else:
   profileBlock "map":
-    run = newGame(options.seed, options.maximumTicks)
+    run =
+      if arenaOptions.enabled:
+        newArenaGame(
+          options.seed,
+          options.maximumTicks,
+          arenaOptions.heroes,
+          arenaMonsters()
+        )
+      else:
+        newGame(options.seed, options.maximumTicks)
   loadBots(run, options.botGroups, options.playerSlot)
   run.recorder = initReplayRecorder(run.world.setup)
   run.recorder.data.config =

@@ -1,19 +1,48 @@
-## Card surfaces share the UI atlas so the same face is used in the world and
-## in the reading view. Source art, frames, icons and fonts stay independent.
+## Card surfaces: silky draws each face, from source images and fonts in the
+## UI atlas (silkyfaces.nim), into a texture of its own the first time that
+## face is needed. The table draws a card as one quad on its face's texture;
+## the HUD shows the same texture. Card backs and badges come from the atlas.
 
-import std/[options, tables]
-import chroma, opengl, pixie, shady, silky, vmath
-import ../core/core, ../baseset, ../ui/cardfaces
-export cardfaces.KeywordLine, cardfaces.changed
+import std/tables
+import chroma, opengl, pixie, shady, silky, silky/drawers/ogl, vmath
+import ../core/core, ../ui/[cardfaces, silkyfaces]
+export silkyfaces.FaceState, silkyfaces.addFaceAssets
 
-type CardRenderer* = object
-  program, vertexArray, vertexBuffer: GLuint
-  vertices: seq[float32]
+type
+  CardRenderer* = object
+    program, vertexArray, vertexBuffer: GLuint
+    vertices: seq[float32]
+    batches: seq[Batch]
+
+  Batch = object
+    ## Consecutive vertices drawn from one texture.
+    texture: GLuint
+    size: Vec2  ## The texture's size, in texels.
+    first, count: int
+
+  FaceTexture = object
+    texture: GLuint
+    lastFrame: int
+
+  HudFace = object
+    texture: GLuint
+    origin, size: Vec2
+    tint: ColorRGBX
+
+const
+  CardBackKey* = "card/back"
+  FloatsPerVertex = 9
+  FaceTextureBudget = 64
+    ## Face textures kept between frames (about 2.7 MB each with mipmaps).
+    ## A frame that shows more keeps them all.
 
 var
   cardViewProjection: Uniform[Mat4]
   cardAtlasSize: Uniform[Vec2]
   cardAtlasSampler: Uniform[Sampler2D]
+  hudViewportSize: Uniform[Vec2]
+  hudTint: Uniform[Vec4]
+  hudSampler: Uniform[Sampler2D]
 
 proc cardVertex(position: Vec3, uv: Vec2, tint: Vec4,
     gl_Position: var Vec4, fragmentUv: var Vec2, fragmentTint: var Vec4) =
@@ -28,6 +57,16 @@ proc cardFragment(fragmentUv: Vec2, fragmentTint: Vec4,
     discardFragment()
   outputColor = vec4(mix(surface.rgb * fragmentTint.rgb,
     vec3(1.0, 0.025, 0.045) * surface.a, fragmentTint.w * 0.88'f32), surface.a)
+
+proc hudVertex(position: Vec2, uv: Vec2, gl_Position: var Vec4,
+    fragmentUv: var Vec2) =
+  ## A HUD face's corner, in framebuffer pixels from the top left.
+  gl_Position = vec4(position.x / hudViewportSize.x * 2 - 1,
+    1 - position.y / hudViewportSize.y * 2, 0, 1)
+  fragmentUv = uv
+
+proc hudFragment(fragmentUv: Vec2, outputColor: var Vec4) =
+  outputColor = texture(hudSampler, fragmentUv) * hudTint
 
 proc compileStage(kind: GLenum, source: string): GLuint =
   result = glCreateShader(kind)
@@ -44,177 +83,194 @@ proc compileStage(kind: GLenum, source: string): GLuint =
     glGetShaderInfoLog(result, length, nil, log.cstring)
     raise newException(CatchableError, "Card shader failed: " & log)
 
-proc initCardRenderer*(): CardRenderer =
-  const target = when defined(emscripten): glsl3WebGL else: glsl4Desktop
+proc linkProgram(vertexSource, fragmentSource: string): GLuint =
   let
-    vertex = compileStage(GL_VERTEX_SHADER,
-      toShader(cardVertex, target, shaderVertex))
-    fragment = compileStage(GL_FRAGMENT_SHADER,
-      toShader(cardFragment, target, shaderFragment))
-  result.program = glCreateProgram()
-  glAttachShader(result.program, vertex)
-  glAttachShader(result.program, fragment)
-  glLinkProgram(result.program)
+    vertex = compileStage(GL_VERTEX_SHADER, vertexSource)
+    fragment = compileStage(GL_FRAGMENT_SHADER, fragmentSource)
+  result = glCreateProgram()
+  glAttachShader(result, vertex)
+  glAttachShader(result, fragment)
+  glLinkProgram(result)
   glDeleteShader(vertex)
   glDeleteShader(fragment)
   var status: GLint
-  glGetProgramiv(result.program, GL_LINK_STATUS, status.addr)
+  glGetProgramiv(result, GL_LINK_STATUS, status.addr)
   if status == 0:
     var length: GLint
-    glGetProgramiv(result.program, GL_INFO_LOG_LENGTH, length.addr)
+    glGetProgramiv(result, GL_INFO_LOG_LENGTH, length.addr)
     var log = newString(length)
-    glGetProgramInfoLog(result.program, length, nil, log.cstring)
+    glGetProgramInfoLog(result, length, nil, log.cstring)
     raise newException(CatchableError, "Card shader link failed: " & log)
+
+proc bindAttributes(program: GLuint,
+    attributes: openArray[(string, int)]) =
+  ## Float attributes, packed one after another in each vertex.
+  var stride = 0
+  for (_, count) in attributes:
+    stride += count
+  var offset = 0
+  for (name, count) in attributes:
+    let location = glGetAttribLocation(program, name.cstring)
+    doAssert location >= 0
+    glEnableVertexAttribArray(location.GLuint)
+    glVertexAttribPointer(location.GLuint, count.GLint, cGL_FLOAT, GL_FALSE,
+      (stride * sizeof(float32)).GLsizei,
+      cast[pointer](offset * sizeof(float32)))
+    offset += count
+
+const ShaderTarget = when defined(emscripten): glsl3WebGL else: glsl4Desktop
+
+proc initCardRenderer*(): CardRenderer =
+  result.program = linkProgram(
+    toShader(cardVertex, ShaderTarget, shaderVertex),
+    toShader(cardFragment, ShaderTarget, shaderFragment))
   glGenVertexArrays(1, result.vertexArray.addr)
   glBindVertexArray(result.vertexArray)
   glGenBuffers(1, result.vertexBuffer.addr)
   glBindBuffer(GL_ARRAY_BUFFER, result.vertexBuffer)
-  for attribute in [
-    (name: "position", count: 3, offset: 0),
-    (name: "uv", count: 2, offset: 3 * sizeof(float32)),
-    (name: "tint", count: 4, offset: 5 * sizeof(float32))
-  ]:
-    let location = glGetAttribLocation(result.program, attribute.name.cstring)
-    doAssert location >= 0
-    glEnableVertexAttribArray(location.GLuint)
-    glVertexAttribPointer(location.GLuint, attribute.count.GLint, cGL_FLOAT,
-      GL_FALSE, (9 * sizeof(float32)).GLsizei, cast[pointer](attribute.offset))
+  result.program.bindAttributes([("position", 3), ("uv", 2), ("tint", 4)])
   glBindVertexArray(0)
 
-proc cardImageKey*(card: Card): string =
-  # Include every visible value, so rule/stat changes cannot reuse stale faces.
-  result = "card/" & $card.kind & "/" & $card.class & "/" & card.name &
-    "/" & $card.energyCost & "/" & card.ruleText()
-  if card.kind == Minion:
-    result.add "/" & $card.power & "/" & $card.toughness
+var
+  faceTextures: Table[FaceState, FaceTexture]
+  faceFramebuffer: GLuint
+  frame = 0
+  hudFaces: seq[HudFace]
+  hudProgram, hudVertexArray, hudVertexBuffer: GLuint
 
-const
-  SurchargeKeyPrefix = "surcharge/"
-  CardBackKey* = "card/back"
-  MaxBakedStat* = 40  ## Larger live stats show as this value.
+proc newFaceTexture(): GLuint =
+  glGenTextures(1, result.addr)
+  glBindTexture(GL_TEXTURE_2D, result)
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, CardFaceWidth.GLsizei,
+    CardFaceHeight.GLsizei, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+    GL_LINEAR_MIPMAP_LINEAR.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  glGenerateMipmap(GL_TEXTURE_2D)
 
-proc surchargeImageKey*(cost, extra: int): string =
-  SurchargeKeyPrefix & $cost & "/" & $extra
+proc renderFace(sk: Silky, state: FaceState, texture: GLuint) =
+  ## Silky draws the face into `texture`, between the quads it has queued
+  ## for the HUD, which are set aside meanwhile. Needs silky's UI frame.
+  var
+    framebuffer: GLint
+    viewport: array[4, GLint]
+    clearColor: array[4, GLfloat]
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, framebuffer.addr)
+  glGetIntegerv(GL_VIEWPORT, viewport[0].addr)
+  glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor[0].addr)
+  let blend = glIsEnabled(GL_BLEND)
+  var queued: typeof(sk.drawer.layers)
+  swap(queued, sk.drawer.layers)
+  let layer = sk.drawer.currentLayer
+  sk.drawer.currentLayer = 0
+  sk.pushRawClipRect(rect(0, 0, CardFaceWidth.float32,
+    CardFaceHeight.float32))
+  sk.paintFace(state, vec2(0, 0))
+  sk.popClipRect()
+  if faceFramebuffer == 0:
+    glGenFramebuffers(1, faceFramebuffer.addr)
+  glBindFramebuffer(GL_FRAMEBUFFER, faceFramebuffer)
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+    texture, 0)
+  glViewport(0, 0, CardFaceWidth.GLsizei, CardFaceHeight.GLsizei)
+  glClearColor(0, 0, 0, 0)
+  glClear(GL_COLOR_BUFFER_BIT)
+  let vertices = sk.drawer.layers[0]
+  if vertices.len > 0:
+    sk.drawer.endFrame(sk.image, vec2(CardFaceWidth.float32,
+      CardFaceHeight.float32), vertices[0].unsafeAddr, vertices.len)
+  glBindTexture(GL_TEXTURE_2D, texture)
+  glGenerateMipmap(GL_TEXTURE_2D)
+  swap(queued, sk.drawer.layers)
+  sk.drawer.currentLayer = layer
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer.GLuint)
+  glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+  glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3])
+  if blend: glEnable(GL_BLEND) else: glDisable(GL_BLEND)
 
-proc statImageKey*(value: int, ink: StatInk, slot: StatSlot): string =
-  "stat/" & $slot & "/" & $ink & "/" & $clamp(value, 0, MaxBakedStat)
-
-proc keywordLineKey*(line: KeywordLine): string =
-  "keywords/" & $line.added & "/" & $line.lost
-
-iterator keywordLines(): KeywordLine =
-  ## Every changed type line: each keyword gained, lost, or as printed.
-  var count = 1
-  for _ in Keyword:
-    count *= 3
-  for code in 1 ..< count:
-    var
-      line: KeywordLine
-      rest = code
-    for keyword in Keyword:
-      case rest mod 3
-      of 1: line.added.incl keyword
-      of 2: line.lost.incl keyword
-      else: discard
-      rest = rest div 3
-    yield line
-
-proc addBaseCardImages*(builder: AtlasBuilder) =
-  ## Bakes every face and stat number play can show, so the live atlas never
-  ## grows mid-game: silky's live builder can pack a new image over an
-  ## existing one (a damaged minion replaced the card back).
-  proc add(builder: AtlasBuilder, key: string, image: Image) =
-    if not builder.addImage(key, image):
-      raise newException(IOError, "Card images do not fit the UI atlas")
-  for card in baseCards:
-    builder.add(card.cardImageKey(), card.renderCardFace())
-    # A card that offers a choice shows each branch on a face of its own,
-    # wherever that choice sits among its rules.
-    for option in card.everyOption():
-      let branch = card.optionCard(option)
-      builder.add(branch.cardImageKey(), branch.renderCardFace())
-  # Pack the large back before small overlays fragment the remaining space.
-  builder.add(CardBackKey, renderCardBack())
-  for slot in StatSlot:
-    for ink in StatInk:
-      for value in 0 .. MaxBakedStat:
-        builder.add(statImageKey(value, ink, slot),
-          renderStat(value, ink, slot))
-  for line in keywordLines():
-    builder.add(keywordLineKey(line), renderKeywordLine(line))
-  # Every surcharge a hero can pay, beside every cost it can sit next to.
-  for cost in 0 .. MaxBakedCost:
-    for extra in 1 .. OffClassCost:
-      builder.add(surchargeImageKey(cost, extra), renderCostPair(cost, extra))
-
-proc bakedCardImage*(sk: Silky, card: Card): string =
-  ## Never packs at runtime (see addBaseCardImages). A face that was not baked
-  ## falls back to the card back.
-  result = card.cardImageKey()
-  if result notin sk.atlas.entries:
-    result = CardBackKey
-
-iterator overlayImages(card: Card, power, toughness: int,
-    keywords: KeywordLine, extraCost = 0): (Rect, string) =
-  ## Each live overlay's atlas image and where it goes on the face, in
-  ## pixels: both stats, the type line when keywords changed, and the
-  ## surcharge a hero pays for a card of another class.
-  if card.kind == Minion:
-    for (slot, value, printed) in [(PowerSlot, power, card.power),
-        (ToughnessSlot, toughness, card.toughness)]:
-      let box = slot.box()
-      yield (Rect(x: box.x - StatMargin, y: box.y - StatMargin,
-        w: box.w + StatMargin * 2, h: box.h + StatMargin * 2),
-        statImageKey(value, statInk(value, printed), slot))
-    if keywords.changed:
-      yield (TypeLine, keywordLineKey(keywords))
-  if extraCost > 0:
-    yield (CostPairBox, surchargeImageKey(card.energyCost, extraCost))
+proc faceTexture(sk: Silky, state: FaceState): GLuint =
+  ## The face's texture, drawn the first time it is needed. Past the budget,
+  ## the texture least recently shown is drawn over.
+  if state in faceTextures:
+    faceTextures[state].lastFrame = frame
+    return faceTextures[state].texture
+  var
+    oldest = frame
+    stale: FaceState
+    found = false
+  if faceTextures.len >= FaceTextureBudget:
+    for key, face in faceTextures:
+      if face.lastFrame < oldest:
+        oldest = face.lastFrame
+        stale = key
+        found = true
+  if found:
+    result = faceTextures[stale].texture
+    faceTextures.del stale
+  else:
+    result = newFaceTexture()
+  sk.renderFace(state, result)
+  faceTextures[state] = FaceTexture(texture: result, lastFrame: frame)
 
 proc clear*(renderer: var CardRenderer) =
+  ## Starts a frame's cards.
   renderer.vertices.setLen(0)
+  renderer.batches.setLen(0)
+  inc frame
 
-proc addSurface*(renderer: var CardRenderer, sk: Silky,
-    corners: array[4, Vec3], imageKey: string, brightness = 1.0'f32,
-    damageFlash = 0.0'f32, tint = vec3(1, 1, 1)) =
-  ## Corners are top-left, bottom-left, bottom-right, top-right in card space.
-  ## `tint` colours the image, for sprites that aren't card faces.
-  let
-    entry = sk.atlas.entries[imageKey]
-    left = entry.x.float32 + 0.5'f32
-    top = entry.y.float32 + 0.5'f32
-    right = (entry.x + entry.width).float32 - 0.5'f32
-    bottom = (entry.y + entry.height).float32 - 0.5'f32
-    uvs = [vec2(left, top), vec2(left, bottom),
-      vec2(right, bottom), vec2(right, top)]
+proc quadCount*(renderer: CardRenderer): int =
+  ## Quads queued this frame, for the benchmark.
+  renderer.vertices.len div (6 * FloatsPerVertex)
+
+proc addQuad(renderer: var CardRenderer, corners: array[4, Vec3],
+    uvs: array[4, Vec2], brightness, damageFlash: float32, tint: Vec3,
+    texture: GLuint, size: Vec2) =
+  let first = renderer.vertices.len div FloatsPerVertex
+  if renderer.batches.len > 0 and renderer.batches[^1].texture == texture:
+    renderer.batches[^1].count += 6
+  else:
+    renderer.batches.add Batch(texture: texture, size: size, first: first,
+      count: 6)
   for i in [0, 1, 2, 0, 2, 3]:
     let p = corners[i]
     renderer.vertices.add [p.x, p.y, p.z, uvs[i].x, uvs[i].y,
       brightness * tint.x, brightness * tint.y, brightness * tint.z,
       damageFlash]
 
-proc addMinionOverlays*(renderer: var CardRenderer, sk: Silky,
-    corners: array[4, Vec3], card: Card, power, toughness: int,
-    keywords = KeywordLine(), brightness = 1.0'f32, damageFlash = 0.0'f32,
-    extraCost = 0) =
-  ## Draws live power, toughness, changed keywords and an off-class surcharge
-  ## over a printed face with these corners, lifted just off it so they win
-  ## the depth test. Only minions have stats; any card may have a surcharge.
-  if card.kind != Minion and extraCost <= 0:
-    return
+proc addSurface*(renderer: var CardRenderer, sk: Silky,
+    corners: array[4, Vec3], imageKey: string, brightness = 1.0'f32,
+    damageFlash = 0.0'f32, tint = vec3(1, 1, 1)) =
+  ## One atlas image over these corners: top-left, bottom-left,
+  ## bottom-right, top-right in card space. `tint` colours the image, for
+  ## sprites that aren't card faces.
   let
-    across = corners[3] - corners[0]
-    down = corners[1] - corners[0]
-    lift = normalize(cross(down, across)) * 0.003'f32
-  proc at(x, y: float32): Vec3 =
-    corners[0] + across * (x / CardFaceWidth.float32) +
-      down * (y / CardFaceHeight.float32) + lift
-  for (area, key) in overlayImages(card, power, toughness, keywords,
-      extraCost):
-    if key notin sk.atlas.entries: continue
-    renderer.addSurface(sk, [at(area.x, area.y), at(area.x, area.y + area.h),
-      at(area.x + area.w, area.y + area.h), at(area.x + area.w, area.y)],
-      key, brightness, damageFlash)
+    entry = sk.atlas.entries[imageKey]
+    left = entry.x.float32 + 0.5'f32
+    top = entry.y.float32 + 0.5'f32
+    right = (entry.x + entry.width).float32 - 0.5'f32
+    bottom = (entry.y + entry.height).float32 - 0.5'f32
+    atlasSize = sk.atlasImageSize()
+  renderer.addQuad(corners, [vec2(left, top), vec2(left, bottom),
+    vec2(right, bottom), vec2(right, top)], brightness, damageFlash, tint,
+    sk.atlasTextureId(), vec2(atlasSize.x.float32, atlasSize.y.float32))
+
+proc addFace*(renderer: var CardRenderer, sk: Silky,
+    corners: array[4, Vec3], state: FaceState, brightness = 1.0'f32,
+    damageFlash = 0.0'f32) =
+  ## A card face over these corners (as addSurface), on its own texture,
+  ## half a texel in at its edges. Silky drew the face's top at the
+  ## texture's last row.
+  const
+    left = 0.5'f32
+    right = CardFaceWidth.float32 - 0.5'f32
+    top = CardFaceHeight.float32 - 0.5'f32
+    bottom = 0.5'f32
+  renderer.addQuad(corners, [vec2(left, top), vec2(left, bottom),
+    vec2(right, bottom), vec2(right, top)], brightness, damageFlash,
+    vec3(1, 1, 1), sk.faceTexture(state),
+    vec2(CardFaceWidth.float32, CardFaceHeight.float32))
 
 proc draw*(renderer: var CardRenderer, sk: Silky, viewProjection: Mat4) =
   if renderer.vertices.len == 0: return
@@ -228,32 +284,74 @@ proc draw*(renderer: var CardRenderer, sk: Silky, viewProjection: Mat4) =
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
   glUseProgram(renderer.program)
   glActiveTexture(GL_TEXTURE0)
-  glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
   cardViewProjection = viewProjection
   glUniformMatrix4fv(glGetUniformLocation(renderer.program, "cardViewProjection"),
     1, GL_FALSE, cast[ptr float32](cardViewProjection.addr))
-  let atlasSize = sk.atlasImageSize()
-  glUniform2f(glGetUniformLocation(renderer.program, "cardAtlasSize"),
-    atlasSize.x.float32, atlasSize.y.float32)
   glUniform1i(glGetUniformLocation(renderer.program, "cardAtlasSampler"), 0)
+  let sizeLocation = glGetUniformLocation(renderer.program, "cardAtlasSize")
   glBindVertexArray(renderer.vertexArray)
-  glDrawArrays(GL_TRIANGLES, 0, (renderer.vertices.len div 9).GLsizei)
+  for batch in renderer.batches:
+    glBindTexture(GL_TEXTURE_2D, batch.texture)
+    glUniform2f(sizeLocation, batch.size.x, batch.size.y)
+    glDrawArrays(GL_TRIANGLES, batch.first.GLint, batch.count.GLsizei)
   glBindVertexArray(0)
 
-proc drawCardImage*(sk: Silky, imageKey: string, origin, size: Vec2,
+proc drawFace*(sk: Silky, state: FaceState, origin, size: Vec2,
     tint = rgbx(255, 255, 255, 255)) =
-  let entry = sk.atlas.entries[imageKey]
-  sk.drawQuad(origin, size, vec2(entry.x.float32, entry.y.float32),
-    vec2(entry.width.float32, entry.height.float32), tint)
+  ## A card face in the HUD: the face's texture, drawn over the HUD once
+  ## silky has drawn it (`drawHudFaces`).
+  hudFaces.add HudFace(texture: sk.faceTexture(state), origin: origin,
+    size: size, tint: tint)
 
-proc drawMinionOverlays*(sk: Silky, card: Card, power, toughness: int,
-    keywords: KeywordLine, origin, size: Vec2, extraCost = 0) =
-  ## The 2D counterpart of addMinionOverlays, over a face at origin/size.
-  if card.kind != Minion and extraCost <= 0:
+proc drawFlatFace*(sk: Silky, card: Card, origin, size: Vec2,
+    tint = rgbx(255, 255, 255, 255)) =
+  ## A printed face, for the choose screen.
+  sk.drawFace(FaceState(card: card, power: -1, toughness: -1), origin, size,
+    tint)
+
+proc drawHudFaces*(sk: Silky) =
+  ## Draws the faces the HUD asked for this frame, over what silky drew.
+  ## Call after `endUi`.
+  if hudFaces.len == 0:
     return
-  let scaleFactor = size / vec2(CardFaceWidth.float32, CardFaceHeight.float32)
-  for (area, key) in overlayImages(card, power, toughness, keywords,
-      extraCost):
-    if key notin sk.atlas.entries: continue
-    sk.drawCardImage(key, origin + vec2(area.x, area.y) * scaleFactor,
-      vec2(area.w, area.h) * scaleFactor)
+  if hudProgram == 0:
+    hudProgram = linkProgram(
+      toShader(hudVertex, ShaderTarget, shaderVertex),
+      toShader(hudFragment, ShaderTarget, shaderFragment))
+    glGenVertexArrays(1, hudVertexArray.addr)
+    glBindVertexArray(hudVertexArray)
+    glGenBuffers(1, hudVertexBuffer.addr)
+    glBindBuffer(GL_ARRAY_BUFFER, hudVertexBuffer)
+    hudProgram.bindAttributes([("position", 2), ("uv", 2)])
+    glBindVertexArray(0)
+  let scale = sk.uiScale
+  glViewport(0, 0, sk.framebufferSize.x, sk.framebufferSize.y)
+  glDisable(GL_DEPTH_TEST)
+  glEnable(GL_BLEND)
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+  glUseProgram(hudProgram)
+  glUniform2f(glGetUniformLocation(hudProgram, "hudViewportSize"),
+    sk.framebufferSize.x.float32, sk.framebufferSize.y.float32)
+  glUniform1i(glGetUniformLocation(hudProgram, "hudSampler"), 0)
+  let tintLocation = glGetUniformLocation(hudProgram, "hudTint")
+  glActiveTexture(GL_TEXTURE0)
+  glBindVertexArray(hudVertexArray)
+  glBindBuffer(GL_ARRAY_BUFFER, hudVertexBuffer)
+  for face in hudFaces:
+    let
+      a = face.origin * scale
+      b = (face.origin + face.size) * scale
+      # Silky drew the face's top at the texture's last row.
+      vertices = [a.x, a.y, 0'f32, 1, a.x, b.y, 0, 0, b.x, b.y, 1, 0,
+        a.x, a.y, 0, 1, b.x, b.y, 1, 0, b.x, a.y, 1, 1]
+    glBufferData(GL_ARRAY_BUFFER, vertices.len * sizeof(float32),
+      vertices[0].unsafeAddr, GL_STREAM_DRAW)
+    glUniform4f(tintLocation, face.tint.r.float32 / 255,
+      face.tint.g.float32 / 255, face.tint.b.float32 / 255,
+      face.tint.a.float32 / 255)
+    glBindTexture(GL_TEXTURE_2D, face.texture)
+    glDrawArrays(GL_TRIANGLES, 0, 6)
+  glBindVertexArray(0)
+  glUseProgram(0)
+  glDisable(GL_BLEND)
+  hudFaces.setLen(0)

@@ -1,6 +1,8 @@
-## Composes card faces from independently editable illustration, frame, icon,
-## and font assets. The rendered image is only a presentation cache: game data
-## and the source artwork stay separate.
+## Card faces from independently editable illustration, frame, icon and font
+## assets: the face's layout, its inks, and the images silky draws faces from
+## (silkyfaces.nim). `renderCardFace` composes a whole face on the CPU with
+## pixie: what tools draw previews with, and the reference silky's text
+## sizes are fitted from.
 
 import std/[os, options, strutils, tables]
 import pixie
@@ -14,41 +16,54 @@ const
   ArtY = 113
   ArtWidth = 546
   ArtHeight = 417
-  # Minion stat number boxes in face pixels. Board minions draw their live
-  # stats over the printed ones, so faces needn't be baked for every value.
+  ArtRect* = Rect(x: ArtX, y: ArtY, w: ArtWidth, h: ArtHeight)
+  # Minion stat number boxes in face pixels: a minion in play shows its
+  # live stats here, in place of the printed ones.
   PowerBox* = Rect(x: 85, y: 757, w: 54, h: 61)
   ToughnessBox* = Rect(x: 503, y: 757, w: 54, h: 61)
-  StatMargin* = 10'f32  ## Room around a stat box for glyph overhang.
-  # The type line ("MINION"), restated over a live minion whose keywords
-  # changed.
+  # The type line ("MINION").
   TypeLine* = Rect(x: 109, y: 532, w: 382, h: 32)
-  # The cost crystal, top right. A card of another class shows its
-  # surcharge outside it, which moves the cost one slot to the left; both
-  # crystals are then redrawn together over the printed one.
+  # The cost crystal, top right, with what the card costs right now.
   CrystalSize* = 120'f32
-  CrystalGap* = 6'f32
   CostBox* = Rect(x: CardFaceWidth.float32 - 26 - CrystalSize, y: 15,
     w: CrystalSize, h: CrystalSize)
-  CostPairBox* = Rect(x: CostBox.x - CrystalSize - CrystalGap, y: CostBox.y,
-    w: CrystalSize * 2 + CrystalGap, h: CrystalSize)
-  MaxBakedCost* = 12  ## The highest printed cost a surcharge is drawn with.
-  # The gem inside a crystal, where its number is centred.
+  # The gem inside the crystal, where its number is centred.
   CrystalGem* = Rect(x: 14, y: 13, w: CrystalSize - 28, h: 94)
+  # Text boxes, in face pixels. The name stops well short of the crystal.
+  NameBox* = Rect(x: 42, y: 21, w: CostBox.x - CrystalSize - 56, h: 90)
+  RulesBox* = Rect(x: 65, y: 605, w: 470, h: 113)
+  ClassBox* = Rect(x: 171, y: 762, w: 258, h: 24)
+  PowerIconAt* = vec2(29, 745)
+  ToughnessIconAt* = vec2(447, 745)
+  # Where the spell mark at the foot of a spell or trinket is drawn (the
+  # 30 px icon at (285, 791), with a pixel round it for its filtered edge),
+  # and the ornament an empty rules box shows instead of text.
+  ArcaneMarkBox* = Rect(x: 284, y: 790, w: 32, h: 32)
+  FlourishBox* = Rect(x: 248, y: 646, w: 104, h: 24)
 
 type
-  StatSlot* = enum
-    PowerSlot
-    ToughnessSlot
+  TextStyle* = object
+    ## How a block of face text is set: its starting size, the size it may
+    ## shrink to so it fits its box, ink, weight, alignment and wrapping.
+    size*, minimumSize*: float32
+    ink*: string
+    semibold*: bool
+    alignment*: HorizontalAlignment
+    wrap*: bool
 
-  StatInk* = enum
-    ## A live stat compared with the printed one.
-    PrintedStat
-    LoweredStat
-    RaisedStat
+  Buff* = enum
+    ## A live value against the printed one, for whoever holds the card.
+    Unbuffed
+    Buffed  ## Better: more power or toughness, a lower cost.
+    Debuffed  ## Worse: less power or toughness, a higher cost.
+
+  TextRun* = object
+    ## A stretch of face text in an ink of its own, struck through or not.
+    text*: string
+    ink*: string
+    struck*: bool
 
 var
-  statBackdrop: Image  ## A minion frame with stat icons and no numbers.
-  headerBackdrop: Image  ## A frame with no cost crystal, to redraw over.
   assetsRoot: string
   assetImages: Table[string, Image]
   titleTypeface, rulesTypeface: Typeface
@@ -81,26 +96,73 @@ proc cardFont(size: float32, ink: string, semibold = false): Font =
   result.lineHeight = size * 1.08
   result.paint.color = parseHtmlColor(ink)
 
+proc textStyle*(size: float32, ink: string, semibold = false,
+    alignment = CenterAlign, minimumSize = 28'f32, wrap = false): TextStyle =
+  TextStyle(size: size, minimumSize: minimumSize, ink: ink,
+    semibold: semibold, alignment: alignment, wrap: wrap)
+
+proc fitText(runs: openArray[TextRun], width, height: float32,
+    style: TextStyle): tuple[arrangement: Arrangement, shift: Vec2] =
+  ## Fit long names and multi-line rule text to a fixed safe area, every run
+  ## shrinking together. Actual ink bounds provide optical vertical
+  ## centering independent of font ascenders. `shift` places the
+  ## arrangement from the box's top left.
+  var
+    size = style.size
+    arrangement: Arrangement
+  while true:
+    var spans: seq[Span]
+    for run in runs:
+      let font = cardFont(size, run.ink, style.semibold)
+      font.strikethrough = run.struck
+      spans.add newSpan(run.text, font)
+    arrangement = typeset(spans, vec2(width, 0), style.alignment,
+      wrap = style.wrap)
+    let bounds = arrangement.computeBounds()
+    if (bounds.w <= width and bounds.h <= height) or
+        size <= style.minimumSize:
+      break
+    size -= 1
+  let bounds = arrangement.computeBounds()
+  (arrangement, vec2(0, (height - bounds.h) / 2 - bounds.y))
+
+proc drawText(image: Image, runs: openArray[TextRun], box: Rect,
+    style: TextStyle) =
+  if runs.len == 0:
+    return
+  let fitted = fitText(runs, box.w, box.h, style)
+  image.fillText(fitted.arrangement,
+    translate(vec2(box.x, box.y) + fitted.shift))
+
+proc drawText(image: Image, value: string, box: Rect, style: TextStyle) =
+  if value.len == 0:
+    return
+  image.drawText([TextRun(text: value, ink: style.ink)], box, style)
+
 proc drawText(
     image: Image, value: string, x, y, width, height, size: float32,
     ink: string, semibold = false, alignment = CenterAlign,
     minimumSize = 28'f32, wrap = false
 ) =
-  ## Fit long names and multi-line rule text to a fixed safe area. Actual ink
-  ## bounds provide optical vertical centering independent of font ascenders.
-  if value.len == 0:
-    return
-  var font = cardFont(size, ink, semibold)
-  var arrangement: Arrangement
-  while true:
-    arrangement = font.typeset(value, vec2(width, 0), alignment, wrap = wrap)
-    let bounds = arrangement.computeBounds()
-    if (bounds.w <= width and bounds.h <= height) or font.size <= minimumSize:
-      break
-    font.size -= 1
-    font.lineHeight = font.size * 1.08
-  let bounds = arrangement.computeBounds()
-  image.fillText(arrangement, translate(vec2(x, y + (height - bounds.h) / 2 - bounds.y)))
+  image.drawText(value, Rect(x: x, y: y, w: width, h: height),
+    textStyle(size, ink, semibold, alignment, minimumSize, wrap))
+
+proc fitFaceText*(runs: openArray[TextRun], box: Rect,
+    style: TextStyle): tuple[arrangement: Arrangement, at: Vec2, ink: Rect] =
+  ## Text laid out in its box as `drawText` lays it out: the arrangement,
+  ## where it is filled on the face, and the whole-pixel area its ink can
+  ## touch (anti-aliasing stays within a pixel of the ink; two leave room).
+  ensureAssets()
+  let fitted = fitText(runs, box.w, box.h, style)
+  result.arrangement = fitted.arrangement
+  result.at = vec2(box.x, box.y) + fitted.shift
+  let
+    ink = fitted.arrangement.computeBounds(translate(result.at))
+    left = max(0'f32, floor(ink.x) - 2)
+    top = max(0'f32, floor(ink.y) - 2)
+    right = min(CardFaceWidth.float32, ceil(ink.x + ink.w) + 2)
+    bottom = min(CardFaceHeight.float32, ceil(ink.y + ink.h) + 2)
+  result.ink = Rect(x: left, y: top, w: right - left, h: bottom - top)
 
 proc cardArt(relativePath: string): Image =
   ## A card's illustration, scaled once to the window it is drawn into and
@@ -124,113 +186,112 @@ proc cardArt(relativePath: string): Image =
     assetImages[key] = crop
   assetImages[key]
 
+proc cardArtImage*(card: Card): Image =
+  ## The card's illustration, cropped to the face's art window.
+  ensureAssets()
+  cardArt("art/" & card.name.toLowerAscii().replace(" ", "-") & ".png")
+
 proc drawArt(image: Image, card: Card) =
-  let relativePath = "art/" & card.name.toLowerAscii().replace(" ", "-") & ".png"
-  image.draw(cardArt(relativePath), translate(vec2(ArtX, ArtY)))
+  image.draw(card.cardArtImage(), translate(vec2(ArtX, ArtY)))
 
-proc statInk*(value, printed: int): StatInk =
-  if value < printed: LoweredStat
-  elif value > printed: RaisedStat
-  else: PrintedStat
-
-proc color(ink: StatInk): string =
-  case ink
-  of PrintedStat: "#fff0c9"
-  of LoweredStat: "#ff9d87"
-  of RaisedStat: "#a8f08c"
-
-proc drawStat(image: Image, value: int, ink: StatInk, box: Rect) =
-  image.drawText($value, box.x, box.y, box.w, box.h, 68, ink.color, true)
-
-proc box*(slot: StatSlot): Rect =
-  case slot
-  of PowerSlot: PowerBox
-  of ToughnessSlot: ToughnessBox
-
-proc renderStat*(value: int, ink: StatInk, slot: StatSlot): Image =
-  ## One stat number in its box plus `StatMargin`, on an opaque patch of the
-  ## minion frame: drawn over a printed face, it hides the printed number.
+proc frameImage*(kind: CardKind): Image =
+  ## The face frame: the minion frame, or the spell frame spells and
+  ## trinkets share.
   ensureAssets()
-  if statBackdrop.isNil:
-    statBackdrop = newImage(CardFaceWidth, CardFaceHeight)
-    statBackdrop.draw(assetImage("frames/creature.svg"))
-    statBackdrop.draw(assetImage("icons/power.svg"), translate(vec2(29, 745)))
-    statBackdrop.draw(assetImage("icons/toughness.svg"),
-      translate(vec2(447, 745)))
-  let box = slot.box()
-  result = statBackdrop.subImage(int(box.x - StatMargin),
-    int(box.y - StatMargin), int(box.w + StatMargin * 2),
-    int(box.h + StatMargin * 2))
-  result.drawStat(value, ink,
-    Rect(x: StatMargin, y: StatMargin, w: box.w, h: box.h))
+  assetImage(if kind == Minion: "frames/creature.svg" else: "frames/spell.svg")
 
-type
-  KeywordLine* = object
-    ## How a live minion's keywords differ from its printed ones.
-    added*, lost*: set[Keyword]
-
-proc changed*(line: KeywordLine): bool =
-  line.added.len > 0 or line.lost.len > 0
-
-proc renderKeywordLine*(line: KeywordLine): Image =
-  ## The minion type line with the keywords it gained and lost ("MINION ·
-  ## RANGED", "MINION · LOST RANGED"), cut from the frame so it covers the
-  ## printed line exactly. Green for gains, red once anything is lost.
+proc energyIcon*(): Image =
   ensureAssets()
-  result = assetImage("frames/creature.svg").subImage(int(TypeLine.x),
-    int(TypeLine.y), int(TypeLine.w), int(TypeLine.h))
-  proc names(keywords: set[Keyword]): string =
-    var parts: seq[string]
-    for keyword in keywords:
-      parts.add ($keyword).toUpperAscii()
-    parts.join(", ")
-  var text = "MINION"
-  if line.added.len > 0:
-    text.add " · " & line.added.names
-  if line.lost.len > 0:
-    text.add " · LOST " & line.lost.names
-  result.drawText(text, 0, 0, TypeLine.w, TypeLine.h, 31,
-    (if line.lost.len > 0: LoweredStat else: RaisedStat).color, true,
-    minimumSize = 18)
+  assetImage("icons/energy.svg")
 
-proc renderSurcharge(extra: int): Image =
-  ## The off-class surcharge: a purple crystal reading "+2".
+proc powerIcon*(): Image =
   ensureAssets()
-  result = newImage(int(CrystalSize), int(CrystalSize))
-  let crystal = assetImage("icons/energy.svg")
-  var purple = newImage(crystal.width, crystal.height)
-  purple.draw(crystal)
-  for pixel in purple.data.mitems:
-    # The gem turns violet; the gold rim, where red leads, stays as it is.
-    if pixel.b.int >= pixel.r.int:
-      let shade = (pixel.r.int + pixel.g.int + pixel.b.int) div 3
-      pixel.r = uint8(min(255, shade * 115 div 100))
-      pixel.g = uint8(shade * 45 div 100)
-      pixel.b = uint8(min(255, shade * 150 div 100))
-  result.draw(purple)
-  # Three quarters of the printed cost's size: "+2" is two glyphs wide
-  # and has to sit inside the same gem.
-  result.drawText("+" & $extra, CrystalGem.x, CrystalGem.y, CrystalGem.w,
-    CrystalGem.h, 56, "#f3e6ff", true, minimumSize = 30)
+  assetImage("icons/power.svg")
 
-proc renderCostPair*(cost, extra: int): Image =
-  ## What a hero of another class sees in place of the printed cost: the
-  ## cost moved one slot left, with the surcharge outside it. Drawn on a
-  ## patch of the frame, so it covers the printed crystal underneath.
+proc toughnessIcon*(): Image =
   ensureAssets()
-  if headerBackdrop.isNil:
-    headerBackdrop = newImage(CardFaceWidth, CardFaceHeight)
-    headerBackdrop.draw(assetImage("frames/creature.svg"))
-  result = headerBackdrop.subImage(int(CostPairBox.x), int(CostPairBox.y),
-    int(CostPairBox.w), int(CostPairBox.h))
-  result.draw(assetImage("icons/energy.svg"))
-  result.drawText($cost, CrystalGem.x, CrystalGem.y, CrystalGem.w,
-    CrystalGem.h, 75, "#fff4d5", true)
-  result.draw(renderSurcharge(extra),
-    translate(vec2(CrystalSize + CrystalGap, 0)))
+  assetImage("icons/toughness.svg")
+
+proc drawArcaneMark*(image: Image, at = vec2(0, 0)) =
+  ## The spell mark at the foot of a spell or trinket, onto an image whose
+  ## top left is `at` on the face: the 80 px arcane icon scaled by 0.375 at
+  ## (285, 791), exactly as the face draws it.
+  ensureAssets()
+  image.draw(assetImage("icons/arcane.svg"),
+    translate(vec2(285, 791) - at) * scale(vec2(0.375)))
+
+proc drawFlourish*(image: Image, at = vec2(0, 0)) =
+  ## The ornament of an empty rules box, two rules and a diamond, onto an
+  ## image whose top left is `at` on the face.
+  let
+    color = parseHtmlColor("#a39169")
+    lines = newPath()
+    diamond = newPath()
+  lines.moveTo(252, 659)
+  lines.lineTo(284, 659)
+  lines.moveTo(316, 659)
+  lines.lineTo(348, 659)
+  image.strokePath(lines, color, translate(-at), strokeWidth = 1.5)
+  diamond.moveTo(300, 650)
+  diamond.lineTo(305, 659)
+  diamond.lineTo(300, 668)
+  diamond.lineTo(295, 659)
+  diamond.closePath()
+  image.fillPath(diamond, color, translate(-at))
+
+const
+  CostInk* = "#fff4d5"
+  StatInk* = "#fff0c9"
+  BuffedInk* = "#a8f08c"
+  DebuffedInk* = "#ff9d87"
+  RulesInk* = "#26251e"
+  GainedRuleInk* = "#18772f"
+    ## A rule a card in play gained, on the parchment of its rules box.
+  LostRuleInk* = "#ad2a1f"
+    ## A rule it lost, struck through.
+
+proc statBuff*(value, printed: int): Buff =
+  ## A live power or toughness: more is better.
+  if value > printed: Buffed
+  elif value < printed: Debuffed
+  else: Unbuffed
+
+proc costBuff*(value, printed: int): Buff =
+  ## A live cost: less is better.
+  statBuff(printed, value)
+
+proc ink*(buff: Buff, unbuffed: string): string =
+  ## A live value's colour: `unbuffed` while it is the printed one.
+  case buff
+  of Unbuffed: unbuffed
+  of Buffed: BuffedInk
+  of Debuffed: DebuffedInk
+
+proc ruleRuns*(card: Card, lines: openArray[RuleLine]): seq[TextRun] =
+  ## The rules box of a card in play whose rules changed, a line per rule:
+  ## kept ones as printed, gained ones in green, lost ones in red and
+  ## struck through.
+  for line in lines:
+    let text = line.rule.text(card)
+    if text.len == 0:
+      continue
+    if result.len > 0:
+      result.add TextRun(text: "\n", ink: RulesInk)
+    result.add case line.change
+      of KeptRule: TextRun(text: text, ink: RulesInk)
+      of GainedRule: TextRun(text: text, ink: GainedRuleInk)
+      of LostRule: TextRun(text: text, ink: LostRuleInk, struck: true)
+
+proc drawStat(image: Image, value: int, buff: Buff, box: Rect) =
+  image.drawText($value, box.x, box.y, box.w, box.h, 68, buff.ink(StatInk),
+    true)
 
 proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
-    showStats = true): Image =
+    showStats = true, rules: openArray[RuleLine] = [], extraCost = 0): Image =
+  ## The face composed on the CPU, in one image: the reference live faces
+  ## are tested against. A card in play shows its live stats, and `rules`
+  ## when they changed (`ruleLines`); `extraCost` is what its holder pays on
+  ## top of the printed cost, which the crystal shows added in.
   ensureAssets()
   result = newImage(CardFaceWidth, CardFaceHeight)
   result.drawArt(card)
@@ -238,21 +299,24 @@ proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
     "frames/creature.svg" else: "frames/spell.svg"))
   result.draw(assetImage("icons/energy.svg"),
     translate(vec2(CostBox.x, CostBox.y)))
-  result.drawText($card.energyCost, CostBox.x + CrystalGem.x,
+  let cost = card.energyCost + extraCost
+  result.drawText($cost, CostBox.x + CrystalGem.x,
     CostBox.y + CrystalGem.y, CrystalGem.w, CrystalGem.h, 75,
-    "#fff4d5", true)
-  # The name stops short of both crystal slots: a card of another class
-  # shows a second one, which moves the cost left over this space. Its box
-  # is the header panel itself, so the name sits in the middle of it.
-  result.drawText(card.name, 42, 21, CostPairBox.x - 42 - 8, 90, 60,
+    costBuff(cost, card.energyCost).ink(CostInk), true)
+  result.drawText(card.name, NameBox.x, NameBox.y, NameBox.w, NameBox.h, 60,
     "#f7e6be", true, LeftAlign, minimumSize = 30)
   result.drawText(($card.kind).toUpperAscii(),
     109, 532, 382, 32, 31, "#e1c792", true)
 
-  let rules = card.ruleText()
-  if rules.len > 0:
-    result.drawText(rules, 65, 605, 470, 113, 43, "#26251e",
-      minimumSize = 28, wrap = true)
+  let
+    printed = card.ruleText()
+    runs =
+      if rules.len > 0: card.ruleRuns(rules)
+      elif printed.len > 0: @[TextRun(text: printed, ink: RulesInk)]
+      else: @[]
+  if runs.len > 0:
+    result.drawText(runs, RulesBox, textStyle(43, RulesInk, minimumSize = 28,
+      wrap = true))
   else:
     # Empty rules have no invented gameplay text.
     let flourish = newPath()
@@ -277,8 +341,8 @@ proc renderCardFace*(card: Card, currentPower = -1, currentToughness = -1,
         power = if currentPower >= 0: currentPower else: card.power
         toughness =
           if currentToughness >= 0: currentToughness else: card.toughness
-      result.drawStat(power, statInk(power, card.power), PowerBox)
-      result.drawStat(toughness, statInk(toughness, card.toughness),
+      result.drawStat(power, statBuff(power, card.power), PowerBox)
+      result.drawStat(toughness, statBuff(toughness, card.toughness),
         ToughnessBox)
     if card.class.isSome:
       result.drawText(card.class.get.className.toUpperAscii(),

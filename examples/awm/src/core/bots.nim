@@ -4,7 +4,7 @@
 import
   std/[options, random],
   bassy, polyworld/[policyhosts, mailboxes],
-  sim, replays
+  sim, replays, ruletree
 export bassy
 
 type
@@ -44,6 +44,10 @@ type
     action*: ReplayAction  ## The action explicitly selected this decision.
     playedHand*: int  ## The hand card the last decision played, or -1.
     playedChoices*: seq[Choice]  ## Its targets, one per step, in order.
+    tree: RuleTree  ## The rules tree the script selected last.
+    logMatch: int  ## The match its place in the event log belongs to.
+    logSeen: int  ## The first event it hasn't read yet.
+    logFrom, logTo: int  ## The events this decision reads.
 
 const
   DataSlotNames: array[BotDataSlot, string] = [
@@ -57,6 +61,13 @@ const
     "selectingClass", "selfClass", "enemyClass"
   ]
 
+const
+  EventNames: array[GameEventKind, string] = [
+    "turn", "play", "attack", "trigger", "choice", "discard", "damage",
+    "death", "summon", "bounce", "gainControl", "stats", "gain", "lose", "draw",
+    "defeat"]
+  HandTarget = 5  ## A log target's kind for a card taken from a hand.
+
 var
   activeGame: ptr GameState
   activePlayer: int32
@@ -64,6 +75,8 @@ var
   activeVm: BotVm
   inboxes*: seq[Mailbox]
     ## One inbox per seat, replaced when bots are loaded for a match.
+  eventLog: seq[GameEvent]  ## Everything that happened this match, in order.
+  logMatch: int  ## Counts matches, so a script's place in an old log resets.
 
 proc cardChoices(handIndex: int, picked: seq[Choice] = @[]): seq[Choice] =
   ## Previews a permanent's placement so scripts can target it like humans.
@@ -97,6 +110,91 @@ proc triggerStepChoices(step: int): seq[Choice] =
     return @[]
   activeGame[].triggerChoices(newSeq[Choice](step))
 
+proc triggerWaits(): bool =
+  ## A trigger heads the queue: not a Lasts count behind a waiting discard.
+  activeGame[].waitingTrigger and not activeGame[].pendingTriggers[0].lasts
+
+proc waitingTriggerShown(): tuple[card: Card, rules: Rules] =
+  ## The waiting trigger as its card prints it: its whole `on(...)` rule,
+  ## or a summoned card's on-play rules it hasn't lost.
+  let waiting = activeGame[].waitingTriggerRules()
+  if waiting.card.name.len == 0:
+    return
+  result.card = waiting.card
+  let pending = activeGame[].pendingTriggers[0]
+  if pending.onPlay:
+    for rule in waiting.rules:
+      if not (rule of OnRule):
+        result.rules.add rule
+  else:
+    let location = activeGame[].minionLocation(pending.sourceId)
+    let minion = activeGame[].players[location.player].board[location.index]
+    result.rules = @[Rule(minion.heldRules.triggers()[pending.trigger])]
+
+proc selectTree(tree: RuleTree): int32 =
+  ## Keeps a rules tree for the node queries; returns its node count.
+  activeVm.tree = tree
+  tree.len.int32
+
+proc pickedCard(handIndex: int): Card =
+  ## The card whose rules `pickedRules` reads, for their text.
+  if handIndex == -1:
+    activeGame[].waitingTriggerRules().card
+  elif handIndex in 0 ..< activeGame[].players[activePlayer].hand.len:
+    activeGame[].players[activePlayer].hand[handIndex]
+  else:
+    Card()
+
+proc collectEvents*(game: var GameState) =
+  ## Adds what happened since the last call to every script's event log.
+  for event in game.takeEvents():
+    var event = event
+    if event.cause.len == 0 and event.causeId != 0:
+      # An attacker gone by the time its trigger resolved: its attack
+      # names it.
+      for earlier in countdown(eventLog.high, 0):
+        if eventLog[earlier].kind == AttackEvent and
+            eventLog[earlier].cardId == event.causeId:
+          event.cause = eventLog[earlier].card
+          break
+    eventLog.add event
+
+type
+  LogReader* = object
+    ## A place in the match's event log for a reader that isn't a script,
+    ## like the app's terminal.
+    match, seen: int
+
+proc readNew*(reader: var LogReader, game: var GameState): seq[GameEvent] =
+  ## Everything that happened since the reader's last call, oldest first.
+  collectEvents(game)
+  if reader.match != logMatch:
+    reader = LogReader(match: logMatch)
+  result = eventLog[min(reader.seen, eventLog.len) .. ^1]
+  reader.seen = eventLog.len
+
+proc loggedEvent(e: int): ptr GameEvent =
+  ## This decision's event `e`; nil if there's none.
+  let at = activeVm.logFrom + e
+  if e >= 0 and at < activeVm.logTo and at < eventLog.len:
+    result = addr eventLog[at]
+
+proc loggedTarget(e, t: int): ptr EventTarget =
+  ## Target `t` of this decision's event `e`; nil if there's none.
+  let event = loggedEvent(e)
+  if event != nil and t in 0 ..< event.targets.len:
+    result = addr event.targets[t]
+
+proc targetKind(target: EventTarget): int =
+  if target.fromHand: HandTarget else: target.choice.kind.ord
+
+proc targetId(target: EventTarget): int =
+  ## A minion's id, or an option's branch.
+  case target.choice.kind
+  of CreatureChoice: target.choice.creatureId
+  of OptionChoice: target.choice.option
+  else: 0
+
 proc sendChat*(sender, target: int, text: openArray[char]): int32 =
   ## Routes global broadcasts (-2) and direct messages (a seat) between
   ## players. AWM has no teams. Returns the inboxes that took a copy.
@@ -123,6 +221,7 @@ proc submitAction(action: ReplayAction): int32 =
     activePlayer.int != activeGame[].actingPlayer():
       return 0
   var trial = activeGame[].copyGameState()
+  trial.recordEvents = false
   if not trial.applyAction(action):
     return 0
   activeVm.action = action
@@ -725,6 +824,198 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     result = activeVm.runtime.putString(name)
   discard result.addFunction("boardName$", 2, boardNameProc, 8)
 
+  let boardRulesProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the rules a visible board card has now, as text: printed and
+    ## gained, less the lost ones.
+    let
+      player = args[0].asInt.int
+      i = args[1].asInt.int
+    var text: string
+    if player in 0 ..< activeGame[].playerCount:
+      let board = activeGame[].players[player].board
+      if i in 0 ..< board.len:
+        text = board[i].card.optionCard(board[i].liveRules).ruleText()
+    result = activeVm.runtime.putString(text)
+  discard result.addFunction("boardRules$", 2, boardRulesProc, 20)
+
+  let boardStolenFromProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns whose card a visible board card is, when another player
+    ## controls it now; -1 otherwise.
+    result = -1
+    let
+      player = args[0].int
+      i = args[1].int
+    if player in 0 ..< activeGame[].playerCount:
+      let board = activeGame[].players[player].board
+      if i in 0 ..< board.len and board[i].stolenFrom.isSome:
+        result = board[i].stolenFrom.get.int32
+  discard result.addFunction("boardStolenFrom", 2, boardStolenFromProc, 3)
+
+  let boardHiddenTurnsProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns how many more of its owner's turns a visible board card can't
+    ## be attacked: 0 in the open, -1 for as long as it stays in play.
+    let
+      player = args[0].int
+      i = args[1].int
+    if player in 0 ..< activeGame[].playerCount:
+      let board = activeGame[].players[player].board
+      if i in 0 ..< board.len:
+        result = board[i].hiddenTurns.int32
+  discard result.addFunction("boardHiddenTurns", 2, boardHiddenTurnsProc, 3)
+
+  let boardLastsTurnsProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns how many more of its controller's turns end before a visible
+    ## board card leaves play by itself; 0 when it doesn't run out.
+    let
+      player = args[0].int
+      i = args[1].int
+    if player in 0 ..< activeGame[].playerCount:
+      let board = activeGame[].players[player].board
+      if i in 0 ..< board.len:
+        result = board[i].lastsTurns.int32
+  discard result.addFunction("boardLastsTurns", 2, boardLastsTurnsProc, 3)
+
+  # The rules tree: select a card's rules, then read its nodes by index.
+  # The event log: what happened since this script's last decision.
+  template eventNumber(name: string, missing: int, read: untyped) =
+    discard result.addFunction(name, 1,
+      HostProc(proc(args: openArray[int32]): int32 =
+        let event {.inject.} = loggedEvent(args[0].int)
+        if event == nil: missing.int32 else: read.int32), 3)
+
+  template eventText(name: string, read: untyped) =
+    discard result.addFunction(name, 1,
+      NumericHostProc(proc(args: openArray[Value]): Value =
+        let event {.inject.} = loggedEvent(args[0].asInt.int)
+        activeVm.runtime.putString(if event == nil: "" else: read)), 8)
+
+  template targetNumber(name: string, missing: int, read: untyped) =
+    discard result.addFunction(name, 2,
+      HostProc(proc(args: openArray[int32]): int32 =
+        let target {.inject.} = loggedTarget(args[0].int, args[1].int)
+        if target == nil: missing.int32 else: read.int32), 3)
+
+  let logCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns how many events happened since your last decision.
+    max(0, activeVm.logTo - activeVm.logFrom).int32
+  discard result.addFunction("logCount", 0, logCountProc, 3)
+
+  eventText("logKind$", EventNames[event.kind])
+  eventNumber("logTurn", 0, event.turn)
+  eventNumber("logPlayer", -1, event.player)
+  eventText("logCard$", event.card)
+  eventNumber("logCardId", 0, event.cardId)
+  eventNumber("logOwner", -1, event.owner)
+  eventText("logCause$", event.cause)
+  eventNumber("logCauseId", 0, event.causeId)
+  eventNumber("logCauseOwner", -1, event.causeOwner)
+  eventNumber("logAmount", 0, event.amount)
+  eventNumber("logAmount2", 0, event.amount2)
+  eventText("logText$", event.text)
+  eventNumber("logTargetCount", 0, event.targets.len)
+  targetNumber("logTargetKind", 0, target[].targetKind)
+  targetNumber("logTargetOwner", -1, target.choice.owner)
+  targetNumber("logTargetId", 0, target[].targetId)
+
+  let logTargetCardProc: NumericHostProc =
+      proc(args: openArray[Value]): Value =
+    ## Returns the card a logged target names, or a discarded card.
+    let target = loggedTarget(args[0].asInt.int, args[1].asInt.int)
+    activeVm.runtime.putString(if target == nil: "" else: target.card)
+  discard result.addFunction("logTargetCard$", 2, logTargetCardProc, 8)
+
+  let rulesOfCardProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Selects the printed rules of a string card identity.
+    let card = visibleCard(activeVm.runtime.getString(args[0]))
+    var tree: RuleTree
+    if card.name.len > 0:
+      tree = card.rules.ruleNodes(card)
+    toValue(selectTree(tree))
+  discard result.addFunction("rulesOfCard", 1, rulesOfCardProc, 20)
+
+  let rulesOfBoardProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Selects the rules a visible board card has now: printed and gained,
+    ## less the lost ones.
+    let
+      player = args[0].int
+      i = args[1].int
+    var tree: RuleTree
+    if player in 0 ..< activeGame[].playerCount:
+      let board = activeGame[].players[player].board
+      if i in 0 ..< board.len:
+        tree = board[i].liveRules.ruleNodes(board[i].card)
+    selectTree(tree)
+  discard result.addFunction("rulesOfBoard", 2, rulesOfBoardProc, 20)
+
+  let rulesOfTriggerProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Selects the waiting trigger's rules: its whole `on(...)` rule, or a
+    ## summoned card's on-play rules.
+    let shown = waitingTriggerShown()
+    selectTree(shown.rules.ruleNodes(shown.card))
+  discard result.addFunction("rulesOfTrigger", 0, rulesOfTriggerProc, 20)
+
+  let nodeCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns how many nodes the selected rules tree has.
+    activeVm.tree.len.int32
+  discard result.addFunction("nodeCount", 0, nodeCountProc, 3)
+
+  let nodeKindProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the DSL call that builds a node: "damage", "lasts", "fixed".
+    let n = args[0].asInt.int
+    activeVm.runtime.putString(
+      if n in 0 ..< activeVm.tree.len: activeVm.tree[n].kind else: "")
+  discard result.addFunction("nodeKind$", 1, nodeKindProc, 8)
+
+  let nodeRoleProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns which part of its parent a node is: "amount", "turns".
+    let n = args[0].asInt.int
+    activeVm.runtime.putString(
+      if n in 0 ..< activeVm.tree.len: activeVm.tree[n].role else: "")
+  discard result.addFunction("nodeRole$", 1, nodeRoleProc, 8)
+
+  let nodeTextProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns a node's words: printed rule text, a name, a set's members.
+    let n = args[0].asInt.int
+    activeVm.runtime.putString(
+      if n in 0 ..< activeVm.tree.len: activeVm.tree[n].text else: "")
+  discard result.addFunction("nodeText$", 1, nodeTextProc, 20)
+
+  let nodeParentProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns a node's parent index; -1 for one of the card's own rules.
+    result = -1
+    if args[0].int in 0 ..< activeVm.tree.len:
+      result = activeVm.tree[args[0]].parent.int32
+  discard result.addFunction("nodeParent", 1, nodeParentProc, 3)
+
+  let nodeValueProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns a node's number: a fixed value, an enum's ordinal, -1 for a
+    ## count that never runs down.
+    if args[0].int in 0 ..< activeVm.tree.len:
+      result = activeVm.tree[args[0]].value.int32
+  discard result.addFunction("nodeValue", 1, nodeValueProc, 3)
+
+  let nodeChildProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the first child of a node in that role; -1 if none.
+    let
+      n = args[0].asInt.int
+      role = activeVm.runtime.getString(args[1])
+    for child in n + 1 ..< activeVm.tree.len:
+      if activeVm.tree[child].parent == n and activeVm.tree[child].role == role:
+        return toValue(child)
+    toValue(-1)
+  discard result.addFunction("nodeChild", 2, nodeChildProc, 8)
+
+  let nodeFindProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the first node of that kind after index `after`; -1 if none.
+    let
+      kind = activeVm.runtime.getString(args[0])
+      after = args[1].asInt.int
+    for n in max(after + 1, 0) ..< activeVm.tree.len:
+      if activeVm.tree[n].kind == kind:
+        return toValue(n)
+    toValue(-1)
+  discard result.addFunction("nodeFind", 2, nodeFindProc, 8)
+
   let attackCountProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the attacker's currently legal target count.
     activeGame[].attackTargets(args[0].int).len.int32
@@ -908,6 +1199,22 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     toValue(options[option].damageToSelf())
   discard result.addFunction("optionSelfDamage", 4, optionCostProc, 8)
 
+  let optionRulesProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## The words of an offered option, as the table's card for it reads.
+    let
+      handIndex = args[0].asInt.int
+      count = args[2].asInt.int
+      option = args[3].asInt.int
+      picked = pickedChoices(handIndex, args[1], count)
+    var text: string
+    if picked.ok:
+      let options = pickedRules(handIndex).options(picked.picks,
+        activeGame[].boardCards())
+      if option in 0 ..< options.len:
+        text = pickedCard(handIndex).optionCard(options[option]).ruleText()
+    activeVm.runtime.putString(text)
+  discard result.addFunction("optionRules$", 4, optionRulesProc, 20)
+
   let nextKindProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Returns a target kind after the explicit prefix of earlier picks.
     let
@@ -969,6 +1276,73 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
       result = 1
   discard result.addFunction("triggerHelpsTarget", 1, triggerHelpsProc, 3)
 
+  # What the waiting trigger is: whose, from which card, fired by what.
+  let triggerCardProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the waiting trigger's card as a string identity; "" if none.
+    activeVm.runtime.putString(activeGame[].waitingTriggerRules().card.name)
+  discard result.addFunction("triggerCard$", 0, triggerCardProc, 8)
+
+  let triggerRulesProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the waiting trigger's words: its whole `on(...)` sentence, or
+    ## a summoned card's on-play rules.
+    let shown = waitingTriggerShown()
+    activeVm.runtime.putString(shown.card.optionCard(shown.rules).ruleText())
+  discard result.addFunction("triggerRules$", 0, triggerRulesProc, 20)
+
+  let triggerEffectOwnerProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns whose effect the waiting trigger is, the player it resolves
+    ## for; -1 if none.
+    result = -1
+    if triggerWaits():
+      result = activeGame[].pendingTriggers[0].owner.int32
+  discard result.addFunction("triggerOwner", 0, triggerEffectOwnerProc, 3)
+
+  let triggerSourceIdProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the waiting trigger's card's stable ID in play, as boardId.
+    if triggerWaits():
+      result = activeGame[].pendingTriggers[0].sourceId.int32
+  discard result.addFunction("triggerSourceId", 0, triggerSourceIdProc, 3)
+
+  let triggerOnPlayProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns 1 when the waiting rules are a summoned card's on-play rules,
+    ## 0 for an `on(...)` trigger.
+    if triggerWaits():
+      result = activeGame[].pendingTriggers[0].onPlay.int32
+  discard result.addFunction("triggerOnPlay", 0, triggerOnPlayProc, 3)
+
+  let triggerAttackerOwnerProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the attacker's owner when an attack fired the trigger; -1
+    ## otherwise.
+    result = -1
+    if triggerWaits() and
+        activeGame[].pendingTriggers[0].attacker.kind == CreatureChoice:
+      result = activeGame[].pendingTriggers[0].attacker.owner.int32
+  discard result.addFunction("triggerAttackerOwner", 0,
+    triggerAttackerOwnerProc, 3)
+
+  let triggerAttackerIdProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the attacker's stable minion ID when an attack fired the
+    ## trigger; 0 otherwise.
+    if triggerWaits() and
+        activeGame[].pendingTriggers[0].attacker.kind == CreatureChoice:
+      result = activeGame[].pendingTriggers[0].attacker.creatureId.int32
+  discard result.addFunction("triggerAttackerId", 0, triggerAttackerIdProc, 3)
+
+  let triggerPlayedProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the card whose play fired the trigger as a string identity;
+    ## "" otherwise.
+    var name: string
+    if triggerWaits():
+      name = activeGame[].pendingTriggers[0].played.name
+    activeVm.runtime.putString(name)
+  discard result.addFunction("triggerPlayed$", 0, triggerPlayedProc, 8)
+
+  let triggerPlayedIdProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns that played card's stable ID in play; 0 for a spell or none.
+    if triggerWaits():
+      result = activeGame[].pendingTriggers[0].playedId.int32
+  discard result.addFunction("triggerPlayedId", 0, triggerPlayedIdProc, 3)
+
   let resolveTriggerProc: NumericHostProc =
       proc(args: openArray[Value]): Value =
     ## Selects the waiting trigger's targets from a BASIC index array.
@@ -986,6 +1360,30 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
     toValue(submitAction(ReplayAction(kind: ActionResolveTrigger,
       choices: picks.toReplay)))
   discard result.addFunction("resolveTrigger", 1, resolveTriggerProc, 100)
+
+  # What the waiting discard is: whose, from which card.
+  let tossCardProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the card asking for the discard as a string identity; "" if
+    ## none.
+    activeVm.runtime.putString(activeGame[].pendingToss.source)
+  discard result.addFunction("tossCard$", 0, tossCardProc, 8)
+
+  let tossRulesProc: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Returns the asking rule's words, as the human prompt shows them.
+    activeVm.runtime.putString(activeGame[].pendingToss.text)
+  discard result.addFunction("tossRules$", 0, tossRulesProc, 20)
+
+  let tossOwnerProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns whose effect the discard is; -1 if none.
+    result = -1
+    if activeGame[].waitingToss:
+      result = activeGame[].pendingToss.sourcePlayer.int32
+  discard result.addFunction("tossOwner", 0, tossOwnerProc, 3)
+
+  let tossSourceIdProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns the asking card's stable ID in play; 0 for a spell or none.
+    activeGame[].pendingToss.sourceId.int32
+  discard result.addFunction("tossSourceId", 0, tossSourceIdProc, 3)
 
   let discardCardsProc: NumericHostProc =
       proc(args: openArray[Value]): Value =
@@ -1008,7 +1406,9 @@ proc botSchema*(): Host =
   buildBotHost(0)
 
 proc resetInboxes*(seats: int) =
-  ## Fresh, empty mailboxes for a match with `seats` players.
+  ## Fresh, empty mailboxes and event log for a match with `seats` players.
+  eventLog.setLen(0)
+  inc logMatch
   inboxes.setLen(0)
   for _ in 0 ..< seats:
     inboxes.add newMailbox()
@@ -1073,6 +1473,13 @@ proc runDecision*(vm: BotVm, game: var GameState,
   activeVm = vm
   vm.playedHand = -1
   vm.playedChoices.setLen(0)
+  # This decision reads everything since the script's last one.
+  collectEvents(game)
+  if vm.logMatch != logMatch:
+    vm.logMatch = logMatch
+    vm.logSeen = 0
+  vm.logFrom = min(vm.logSeen, eventLog.len)
+  vm.logTo = eventLog.len
 
   vm.lastError.setLen(0)
   try:
@@ -1106,6 +1513,7 @@ proc runDecision*(vm: BotVm, game: var GameState,
     vm.action = ReplayAction()
     return BotFailed
   finally:
+    vm.logSeen = vm.logTo
     activeGame = nil
     activeVm = nil
   if vm.action.kind == 0:
@@ -1145,6 +1553,12 @@ proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64): Seat =
   vm.deck.setLen(0)
   vm.deckProblems.setLen(0)
   vm.action = ReplayAction()
+  # Nothing of this match has happened yet: a reused script reads on from
+  # here, never an earlier match's events.
+  vm.logMatch = logMatch
+  vm.logSeen = eventLog.len
+  vm.logFrom = 0
+  vm.logTo = 0
   activeGame = addr setup
   activePlayer = vm.player.int32
   activeEnemy = ((vm.player + 1) mod seats).int32

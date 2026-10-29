@@ -14,6 +14,10 @@ const
   CardPlaneY* = BoardSurfaceY + CardHeight * 0.5'f32
   PileCardY* = PadSurfaceY + CardHeight * 0.5'f32
   StackStep* = 0.03'f32      ## Height between cards in a pile.
+  RowOverlapLift* = 0.012'f32
+    ## Height between neighbouring cards of a board row crowded enough to
+    ## overlap, so each covers the one before it whole instead of fighting
+    ## it for depth, at any seat.
   # The art's opaque silhouette: 590 x 840 of 600 x 850, 31 px corners.
   CardBodyWidth* = CardWidth * 590.0'f32 / 600.0'f32
   CardBodyDepth* = CardDepth * 840.0'f32 / 850.0'f32
@@ -65,6 +69,9 @@ type
       ## drawn only once the flight has landed.
     hidden*: bool
     trackingTarget*: Choice
+    fromDeck*: bool
+      ## A draw: until it sets off it sits on its deck's top card, where it
+      ## must stay hidden.
 
   SolidRenderer* = object
     program: GLuint
@@ -447,13 +454,15 @@ proc addCard*(
     currentPower = -1,
     currentToughness = -1,
     damageFlash = 0.0'f32,
-    keywordLine = KeywordLine(),
+    ruleLines: seq[RuleLine] = @[],
     veiled = false,
     extraCost = 0
 ) =
   ## A minion on the battlefield passes its live stats (currentToughness
-  ## >= 0); they are drawn over a stat-less face. A `veiled` minion is
-  ## hidden from the player looking at it, and sits in shadow.
+  ## >= 0), and any card in play its changed rules (`ruleLines`), which its
+  ## face shows in place of the printed ones. A card in hand passes the
+  ## surcharge its holder pays. A `veiled` minion is hidden from the player
+  ## looking at it, and sits in shadow.
   var raised = pose.position
   if targetable:
     raised.y += 0.08'f32
@@ -487,11 +496,7 @@ proc addCard*(
       vec3(halfWidth, surfaceY, halfDepth),
       vec3(halfWidth, surfaceY, -halfDepth)
     ]
-    liveStats = not hidden and card.name.len > 0 and
-      (extraCost > 0 or (card.kind == Minion and currentToughness >= 0))
-    imageKey =
-      if hidden or card.name.len == 0: CardBackKey
-      else: sk.bakedCardImage(card)
+    live = card.kind == Minion and currentToughness >= 0
     brightness =
       if veiled: 0.4'f32
       elif hidden or enabled: 1.0'f32
@@ -499,16 +504,13 @@ proc addCard*(
   var corners: array[4, Vec3]
   for i in 0 ..< corners.len:
     corners[i] = raised + pose.transformCardVector(local[i])
-  faces.addSurface(sk, corners, imageKey, brightness, damageFlash)
-  if liveStats:
-    # Only a minion has printed stats to fall back on; a spell or trinket
-    # draws the surcharge alone.
-    let printedPower =
-      if currentPower >= 0: currentPower
-      elif card.kind == Minion: card.power
-      else: 0
-    faces.addMinionOverlays(sk, corners, card, printedPower,
-      currentToughness, keywordLine, brightness, damageFlash, extraCost)
+  if hidden or card.name.len == 0:
+    faces.addSurface(sk, corners, CardBackKey, brightness, damageFlash)
+  else:
+    faces.addFace(sk, corners, FaceState(card: card,
+      power: if live: currentPower else: -1,
+      toughness: if live: currentToughness else: -1,
+      rules: ruleLines, extraCost: extraCost), brightness, damageFlash)
 
 
 proc addCardStack*(
@@ -521,11 +523,14 @@ proc addCardStack*(
     hidden = true,
     card = Card()
 ) =
-  for i in 0 ..< min(count, 7):
+  let shown = min(count, 7)
+  for i in 0 ..< shown:
     var cardPose = pose
     cardPose.position.y += i.float32 * StackStep
+    # Only the top card's face can be seen; the ones under it are backs.
     renderer.addCard(
-      faces, sk, cardPose, heroClass, hidden, true, false, card = card
+      faces, sk, cardPose, heroClass, hidden or i < shown - 1, true, false,
+      card = card
     )
 
 proc fanPoses*(count: int, center: Vec3, pitch, facing, yaw,
@@ -686,22 +691,31 @@ proc newDrawAnimation*(card: Card, heroClass: HeroClass,
     hidden: bool): CardAnimation =
   ## A card drawn from the top of a deck into its hand slot, which stays
   ## empty until the card lands. Every game mode draws with this.
-  newCardAnimation(card, heroClass, deckTop, handPose,
+  result = newCardAnimation(card, heroClass, deckTop, handPose,
     arcHeight = 1.0'f32,
     suppressHandOwner = owner,
     suppressHandIndex = handIndex,
     hidden = hidden,
     duration = DrawMoveDuration
   )
+  result.fromDeck = true
 
 proc addFlyingCards*(renderer: var SolidRenderer, faces: var CardRenderer,
     sk: Silky, animations: openArray[CardAnimation]) =
   for animation in animations:
+    var pose = animation.animationPose()
+    if not animation.fromDeck and animation.elapsed < 0:
+      # A flight waiting in its board slot (a bounce, while its bubble
+      # forms) lies in its row, which closes up over it: it sits a hair
+      # under the plane, so the cards sliding in cover it.
+      pose.position.y -= 0.006'f32
     renderer.addCard(
       faces, sk,
-      animation.animationPose(),
+      pose,
       animation.heroClass,
-      animation.hidden,
+      # A draw yet to set off lies exactly on its deck's top card. Face
+      # down it looks just like that card, whichever of the two wins.
+      animation.hidden or (animation.fromDeck and animation.elapsed <= 0),
       true,
       false,
       card = animation.card

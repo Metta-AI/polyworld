@@ -226,6 +226,17 @@ and an optional `classes` array (one of `archer`, `warrior`, `mage` per seat,
 each playing its precon; otherwise every script picks its class and deck). One tick is one game action. The winner
 scores 1, everyone else 0; a draw or a timeout scores 0 for all.
 
+### For bot creators: `steal` is now `gainControl`
+
+Control's rule was renamed from `steal` to `gainControl`. A script that
+matches it by name must now look for `"gainControl"`, both as a rule-tree
+node (`nodeKind$`, `nodeFind`) and as a log event (`logKind$`). Target
+intent 7 keeps its number; it now reads as gaining control.
+
+`boardStolenFrom(p, i)` keeps its name and meaning: whose card it is while
+another player controls it, -1 otherwise. Scripts that call it need no
+change.
+
 ### Headless matches and replays
 
 ```sh
@@ -273,9 +284,8 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   minion until the start of its owner's next turn (a longer hiding stands),
   and a gained trigger fires from then on. A gained on-play rule never runs.
   Losing `hidden()` ends any hiding. Gaining a rule back undoes its loss.
-  Gained and lost keywords show on the card's type line (green "MINION ·
-  RANGED", red "MINION · LOST RANGED"); other gained rules don't show on
-  the face yet.
+  The card's rules box shows the change: its printed rules in order, lost
+  ones in red and struck through, then the gained ones in green.
 - Summoned minions enter at the right of their owner's board. Like played
   minions they attack from their owner's next turn, and their own on-play
   rules run for their owner, who may pick no target. That happens once the
@@ -292,8 +302,8 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   fight is combat without an attack: both minions deal their power at
   once, Ranged applies, and it doesn't use up either minion's attack.
 - A deck may carry cards of another class. An off-class card costs 3 more
-  energy, shown as a purple `+X` beside its printed cost, and the surcharge
-  never takes a card below its printed price. The class cards (Archer,
+  energy, and its crystal shows the total in red; the surcharge never takes
+  a card below its printed price. The class cards (Archer,
   Warrior, Mage) belong to no class, cost nothing, and stay in play as
   trinkets: each one you control takes 1 off the surcharge on cards of the
   class it names, and announces itself with that class's icon beside your
@@ -304,17 +314,55 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
   Spells and other card effects still reach it, it attacks as usual, and
   attacking doesn't reveal it. Its owner sees it normally; everyone else
   sees it in shadow.
-- `steal` (Control) takes a minion for good: it moves to the end of your
-  board with its damage, buffs and gained or lost rules, and attacks from
-  your next turn, like a minion just played. Its triggers fire for you. It
-  is still its owner's card: bounced, it goes to their hand, and slain, to
-  their discard pile. Stolen back by its owner, it is simply theirs again.
+- A lasting card (Post, Overwork) leaves play by itself: `lasts(3)` sends
+  it to its owner's discard pile as the third of its controller's turns
+  ends, counting the one it was played in. Only its controller's turns
+  count: a Post you Gift counts down as the new controller's turns end.
+  Each count comes at Lasts' place among the card's rules, so an
+  end-of-turn trigger written before `lasts(...)` still fires on the
+  card's last turn. A card that enters as a turn ends starts counting at
+  its controller's next one.
+  Gained, a count starts (a longer one already running stands); lost, it
+  stops.
+- A Ready minion can attack the turn it enters play, played or summoned.
+  Gaining Ready (`gain(ready(), ...)`) lets it attack that turn if it
+  hasn't yet; losing it the turn it entered takes that attack back.
+- `gainControl(You, ...)` (Control) takes a minion for good: it moves to the
+  end of your board with its damage, buffs and gained or lost rules, and
+  attacks from your next turn, like a minion just played. Its triggers fire
+  for you. It is still its owner's card: bounced, it goes to their hand, and
+  slain, to their discard pile. Stolen back by its owner, it is simply
+  theirs again. `gainControl(target({kind: {Hero}}), ...)` (Gift) picks the
+  hero first, then hands them the card the same way; picking your own hero
+  leaves it where it is.
 - `repeat` (Reload) runs another card in play's printed rules again. Its
   targets are picked afresh, and anything the rules aim at their own card
   (`self()`) finds nothing and does nothing. Picking no card cancels.
 - `on(eachTurn(...))` fires at the start of every one of that player's
   turns, for as long as the card is in play; `on(nextTurn(...))` fires
   once.
+- `on(eachEndOfTurn(...))` fires as every one of that player's turns ends
+  while the card is in play, the turn it entered too. Lasts counts as the
+  turn ends too, in rule order. A choice it asks for (Burnout's discard)
+  holds the turn, and a Lasts count after it, until it's made; making it
+  ends the turn.
+- `on(played(You, {kind: {Minion}, class: {Archer}, energyCost:
+  atMost(3)}), ...)` fires each time that player plays a matching card
+  from hand, once the card has resolved. `getPlayed()` is that card:
+  rules that act on cards in play (`gain(ready(), getPlayed())`) reach it
+  while it's still in play, and `summon(1, getPlayed())` copies it as it
+  is then, with its damage, buffs and gained or lost rules (so Post's
+  copies are Ready too). Summoned and repeated cards aren't played, so
+  copies are never copied, and a card's own play doesn't fire its
+  triggers. Each Post fires on its own: two of them make two copies. A
+  copy is a summon, so it runs its on-play rules again (Sharpshooter
+  shoots twice) and goes to its owner's hand, printed, if bounced.
+- Filters (`target`, `getCards`, `played`) take numbers too:
+  `energyCost:` (printed, without the off-class surcharge), `power:` and
+  `toughness:` (live in play), each with `eq(n)`, `notEq(n)`, `atMost(n)`,
+  `atLeast(n)` or `between(a, b)`, all inclusive; and `class: {Archer}`
+  (any of the classes listed). Heroes and class cards have no card class,
+  and heroes no numbers, so those filters never pick them.
 - A card that offers a choice (Overcharge) asks for it first: the table
   dims and shows one card per branch, each printing that branch alone.
   Click one to take it, or cancel with the button, a click off the cards,
@@ -335,11 +383,13 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Archer | Sharpshooter | 4 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
 | Archer | Hail of Arrows | 4 | 3 | Spell | — | 1 damage to all enemy minions |
 | Archer | Overcharge | 4 | 3 | Spell | — | Choose: 1 damage to a minion and its owner; or 3 damage to a minion, its owner and yourself |
-| Archer | Explode | 4 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
+| Archer | Explode | 2 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
 | Archer | Ambusher | 4 | 3 | Minion | 2/2 | Hidden 1 |
-| Archer | Assassin | 4 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
-| Archer | Reload | 4 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
+| Archer | Assassin | 3 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
+| Archer | Reload | 3 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
 | Archer | Wildfire | 4 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
+| Archer | Post | 4 | 1 | Trinket | — | Lasts 2; when you play an Archer minion that costs 3 or less, it gains Ready, summon a copy of it (buffs and all) |
+| Archer | Gift | — | 3 | Spell | — | A hero gains control of a friendly minion or trinket (in no precon) |
 | Warrior | Bear | 4 | 2 | Minion | 3/2 | — |
 | Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
 | Warrior | Shields | 4 | 1 | Spell | — | Friendly minions get +0/+1 permanently |
@@ -362,4 +412,5 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
 | Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
 | Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
-| Mage | Overwork | 4 | 4 | Trinket | — | At the start of each of your turns, draw 1 card and deal 3 damage to yourself |
+| Mage | Overwork | 4 | 3 | Trinket | — | Lasts 3; gain 3 extra energy now, and at the start of each of your turns gain 2 extra energy and draw 1 card; when destroyed, summon a Burnout |
+| Mage | Burnout | — | 0 | Trinket | — | At the end of each of your turns, deal 2 damage to yourself and discard 1 card (only summoned, by Overwork) |

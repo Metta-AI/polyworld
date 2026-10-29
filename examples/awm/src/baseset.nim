@@ -103,7 +103,25 @@ let archer = [
         damage(1, game.players, vfx = ExplosionVfx)
       )
     )
-  )
+  ),
+  Card(
+    name: "Post", energyCost: 1,
+    class: some(Archer), kind: Trinket,
+    rules: rules(
+      lasts(2),
+      on(played(You, {kind: {Minion}, class: {Archer}, energyCost: atMost(3)}),
+        gain(ready(), getPlayed()),
+        summon(1, getPlayed())
+      )
+    )
+  ),
+  Card(
+    name: "Gift", energyCost: 3,
+    class: some(Archer), kind: Spell,
+    rules: rules(
+      gainControl(target({kind: {Hero}}), target({kind: {Minion, Trinket}, owner: You}), vfx = PrizeVfx)
+    )
+  ),
 ]
 
 let warrior = [
@@ -244,7 +262,7 @@ let mage = [
     )
   ),
   Card(
-    name: "Primordial", energyCost: 8,
+    name: "Primordial", energyCost: 10,
     class: some(Mage), kind: Minion,
     rules: rules(),
     power: 10, toughness: 10
@@ -271,7 +289,7 @@ let mage = [
       on(eachTurn(You),
         choose(
           gain(ranged(), target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
-          gain(hidden(1), target({kind: {Minion}}), vfx = OozeSplatVfx),
+          gain(hidden(1), target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
           addPowerToughness(1, -1, target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx),
           addPowerToughness(-1, 1, target({kind: {Minion}, owner: You}), vfx = OozeSplatVfx)
         )
@@ -279,20 +297,26 @@ let mage = [
     )
   ),
   Card(
-    name: "Overwork", energyCost: 4,
+    name: "Overwork", energyCost: 3,
     class: some(Mage), kind: Trinket,
     rules: rules(
-      on(eachTurn(You),
-        draw(1),
-        damage(3, You, vfx = ExplosionVfx)
-      )
+      lasts(3), extraEnergy(3),
+      on(eachTurn(You), extraEnergy(2), draw(1)),
+      on(destroyed(self()), summon(1, "Burnout"))
+    )
+  ),
+  Card(
+    name: "Burnout", energyCost: 0,
+    class: some(Mage), kind: Trinket,
+    rules: rules(
+      on(eachEndOfTurn(You), damage(2, You, vfx = ExplosionVfx), toss(1))
     )
   ),
   Card(
     name: "Control", energyCost: 5,
     class: some(Mage), kind: Spell,
     rules: rules(
-      steal(target({kind: {Minion}, owner: AllOpponents}), vfx = BubbleVfx)
+      gainControl(You, target({kind: {Minion}, owner: AllOpponents}), vfx = BubbleVfx)
     )
   ),
   Card(
@@ -312,8 +336,9 @@ const
 
   baseDeckLists*: array[HeroClass, seq[(string, int)]] = [
     Archer: @[("Bolt", 4), ("Sniper", 4), ("Sharpshooter", 4),
-      ("Hail of Arrows", 4), ("Overcharge", 4), ("Explode", 4),
-      ("Ambusher", 4), ("Assassin", 4), ("Reload", 4), ("Wildfire", 4)],
+      ("Hail of Arrows", 4), ("Overcharge", 4), ("Explode", 2),
+      ("Ambusher", 4), ("Assassin", 3), ("Reload", 3), ("Wildfire", 4),
+      ("Post", 4)],
     Warrior: @[("Bear", 4), ("Swords", 4), ("Shields", 4), ("Duel", 4),
       ("Tactician", 4), ("Footsoldier", 4), ("Commander", 4), ("Rally", 4),
       ("Banner", 4), ("Pillage", 4)],

@@ -369,9 +369,10 @@ proc newVfx*(kind: VfxKind, target: Choice, position: Vec3, seed: int): ActiveVf
       of OozeSplatVfx: 1.8'f32
       of ExplosionVfx: 0.95'f32
       of StabVfx: 0.6'f32
+      of PrizeVfx: 1.3'f32
       # Presentation cues the table draws itself, not particle effects.
       of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
-          HeroDeathVfx, LevelUpVfx, StealVfx: 0.0'f32)
+          HeroDeathVfx, LevelUpVfx, GainControlVfx: 0.0'f32)
 
 proc advance*(effects: var seq[ActiveVfx], dt: float32) =
   for effect in effects.mitems:
@@ -701,6 +702,62 @@ proc addStab(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
   renderer.addBillboard(center, 0.22'f32 + (1 - fade) * 0.5'f32, eye,
     vec4(0.9'f32, 0.95'f32, 1.0, fade * fade * 0.45'f32), 4)
 
+proc addPrize(renderer: var VfxRenderer, effect: ActiveVfx, eye: Vec3) =
+  ## A gift changes hands: a gold ribbon ties a cross over the card, a bow
+  ## blooms at the knot, then confetti bursts up and tumbles down.
+  const
+    Tie = 0.3'f32
+    Confetti = 34
+    LoopSteps = 16
+    Colors = [vec3(1.0, 0.8, 0.3), vec3(1.0, 0.36, 0.42),
+      vec3(0.4, 0.78, 1.0), vec3(0.56, 1.0, 0.56), vec3(1.0, 0.96, 0.86)]
+  let
+    age = effect.elapsed
+    life = clamp(age / effect.duration, 0.0'f32, 1.0'f32)
+    fade = clamp((1 - life) / 0.35'f32, 0.0'f32, 1.0'f32)
+    knot = effect.position + vec3(0, 0.3, 0)
+    axes = facing(knot, eye)
+    tied = clamp(age / Tie, 0.0'f32, 1.0'f32)
+    gold = vec4(1.0, 0.8'f32, 0.3'f32, fade * 0.95'f32)
+    across = axes.right * (0.62'f32 * tied)
+    down = axes.up * (0.85'f32 * tied)
+  # The ribbon, drawn out from the knot to the card's edges.
+  renderer.addGlowLine(knot - across, knot + across, eye, 0.035'f32, gold)
+  renderer.addGlowLine(knot - down, knot + down, eye, 0.035'f32, gold)
+  if age < Tie:
+    return
+  let
+    after = age - Tie
+    bloom = clamp(after / 0.18'f32, 0.0'f32, 1.0'f32)
+  # The bow: a loop out to either side of the knot, and a tail below each.
+  for side in [-1.0'f32, 1.0'f32]:
+    let
+      wide = axes.right * (side * 0.21'f32 * bloom)
+      tall = axes.up * (0.12'f32 * bloom)
+      middle = knot + wide + axes.up * (0.05'f32 * bloom)
+    for k in 0 ..< LoopSteps:
+      let
+        a = k.float32 / LoopSteps * 2 * PI.float32
+        b = (k + 1).float32 / LoopSteps * 2 * PI.float32
+      renderer.addGlowLine(middle + wide * cos(a) + tall * sin(a),
+        middle + wide * cos(b) + tall * sin(b), eye, 0.03'f32, gold)
+    renderer.addGlowLine(knot, knot + (axes.right * (side * 0.16'f32) -
+      axes.up * 0.34'f32) * bloom, eye, 0.03'f32, gold)
+  renderer.addBillboard(knot, 0.12'f32, eye,
+    vec4(1.0, 0.95'f32, 0.75'f32, fade), 4)
+  # Confetti on ballistic arcs, each fleck twinkling as it turns.
+  for i in 0 ..< Confetti:
+    let
+      angle = particleNoise(i, 23, effect.seed) * 2 * PI.float32
+      speed = 0.9'f32 + particleNoise(i, 37, effect.seed) * 1.6'f32
+      rise = 2.4'f32 + particleNoise(i, 53, effect.seed) * 2.0'f32
+      fleck = knot + vec3(cos(angle), 0, sin(angle)) * (speed * after) +
+        vec3(0, rise * after - 3.6'f32 * after * after, 0)
+      hue = Colors[i mod Colors.len]
+      twinkle = 0.65'f32 + 0.35'f32 * abs(sin(after * 17 + i.float32))
+    renderer.addBillboard(fleck, 0.07'f32, eye,
+      vec4(hue.x, hue.y, hue.z, fade * twinkle), 4)
+
 proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
     eye: Vec3) =
   for effect in effects:
@@ -718,12 +775,13 @@ proc addEffects*(renderer: var VfxRenderer, effects: openArray[ActiveVfx],
     of OozeSplatVfx: renderer.addOozeSplat(effect, eye)
     of ExplosionVfx: renderer.addExplosion(effect, eye)
     of StabVfx: renderer.addStab(effect, eye)
+    of PrizeVfx: renderer.addPrize(effect, eye)
     of DamageFlashVfx:
       let t = effect.elapsed / effect.duration
       renderer.addBillboard(effect.position, 1.2'f32 + t * 0.8'f32, eye,
         vec4(1, 0.025, 0.05, (1 - t) * 0.38'f32), 4)
     of NoVfx, DeathVfx, DrawVfx, SummonVfx, BounceVfx, TossVfx,
-        HeroDeathVfx, LevelUpVfx, StealVfx: discard
+        HeroDeathVfx, LevelUpVfx, GainControlVfx: discard
 
 proc draw*(renderer: var VfxRenderer, viewProjection: Mat4,
     additive = true, depthTest = true) =

@@ -1,7 +1,7 @@
 ## The multiplayer game mode: three or more seats around the ring, playing
 ## the core's game. Every seat but the human's is played by a bot script.
 import std/math
-import ../core/sim, ../core/bots, ../scene/ring
+import ../core/sim, ../core/bots, ../core/eventtext, ../scene/ring
 export ring
 
 const
@@ -54,7 +54,7 @@ proc newMultiplayerMatch*(seats: openArray[Seat], humanSeat: int,
             problem
   for bot in result.bots:
     bot.ensureSeed(seed)
-  result.game = newGame(selected, seed)
+  result.game = newGame(selected, seed, recordEvents = true)
 
 proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
     seed: int64, botSources: openArray[string] = []): MultiplayerMatch =
@@ -106,8 +106,9 @@ proc turnStatus*(match: MultiplayerMatch,
   else: match.game.playerName(match.current, names) & " is thinking..."
 
 proc endTurn*(match: var MultiplayerMatch): bool =
-  ## The core's turn change: the next seat gains energy, draws, and its
-  ## start-of-turn triggers fire. False when the turn can't end yet.
+  ## The core's turn change: the turn's end-of-turn triggers fire, then the
+  ## next seat gains energy, draws, and its start-of-turn triggers fire.
+  ## False when the turn can't end yet, or its end waits on a choice.
   let before = match.game.turnNumber
   match.game.finishTurn()
   match.game.turnNumber != before
@@ -123,7 +124,8 @@ when not defined(headless):
   when defined(takeScreenshot):
     import std/strutils
   import chroma, opengl, silky, vmath, windy
-  import ../app, ../ui/hud, ../scene/table, ../play, ../scene/cardrenderer,
+  import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
+    ../scene/cardrenderer,
     ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel, ../scene/courtyard,
     ../scene/heroes, ../net/web, ../ui/tuning
   import polyworld/[characters, chrome, viewers]
@@ -152,9 +154,12 @@ when not defined(headless):
         if count == 1: 0.0'f32
         else: min(BoardSpacing, BoardSpread / (count - 1).float32)
       start = -spacing * (count - 1).float32 * 0.5'f32
+      # A crowded row overlaps: each card lies a little over the one before.
+      lift = if spacing < CardWidth: RowOverlapLift else: 0'f32
     for i in 0 ..< count:
       result.add balcony.place(CardPose(position: balcony.boardZone +
-        vec3(start + spacing * i.float32, CardHeight * 0.5'f32, 0)))
+        vec3(start + spacing * i.float32,
+          CardHeight * 0.5'f32 + lift * i.float32, 0)))
 
   proc handPoses(layout: MultiplayerLayout, view: MultiplayerView,
       viewedSeat, seat, count: int): seq[CardPose] =
@@ -223,6 +228,7 @@ when not defined(headless):
       previewTime = 0.0'f32
       hudTime = 0.0'f
       previewLastFrame = epochTime()
+      terminalLog: LogReader  ## Where the terminal's printout of events is.
       seatRng =
         if sessionOptions.seedGiven or defined(takeScreenshot):
           initRand(sessionOptions.seed)
@@ -300,6 +306,7 @@ when not defined(headless):
         tuningTarget("opponent's hand", previewView.farHand),
         tuningTarget("camera", previewView.camera)])
     window.onFrame = proc() =
+      benchBeginFrame()
       var previewDt = frameDelta(previewLastFrame)
       hudTime += previewDt
       if app.replay != nil:
@@ -351,6 +358,8 @@ when not defined(headless):
         if play.presentationIdle(match.game) and not play.attackActive and
             match.skipDeadTurn():
           turnPassed()
+        for event in terminalLog.readNew(match.game):
+          echo event.describe(names)
         orbit.advance(previewDt)
       if not choosingClasses and openingDraw:
         play.addOpeningHands(match.game, table)
@@ -463,6 +472,8 @@ when not defined(headless):
         hoveredBoard = Canceled
       if not choosingClasses:
         template game: untyped = match.game
+        # Answering what the end of your turn asked for ends it.
+        let turnBefore = game.turnNumber
         # The choose screen covers the table: nothing under it is hovered.
         if play.choosing:
           discard
@@ -519,6 +530,8 @@ when not defined(headless):
             play.presentationIdle(game) and not game.gameOver:
           hoveredTarget = play.updateTargeting(game, table, window,
             stageVp, hoverIndex, pick, cancel)
+        if game.turnNumber != turnBefore:
+          turnPassed()
         when defined(takeScreenshot):
           if getEnv("AWM_CAPTURE_NO_HOVER") == "1":
             hoverIndex = -1
@@ -538,8 +551,8 @@ when not defined(headless):
         attackHoverTarget = hoveredWorldTarget(window, stageVp, match.game,
           play, table, attackChoices)
       let inspected =
-        if choosingClasses or play.choosing: (found: false, card: Card(), power: -1,
-          toughness: -1, keywords: KeywordLine())
+        if choosingClasses or play.choosing:
+          InspectedCard(power: -1, toughness: -1)
         else: inspectedCard(window, stageVp, match.game, play, table,
           hoverIndex,
           if play.tossPicking: match.game.pendingToss.player
@@ -556,6 +569,9 @@ when not defined(headless):
       glStencilMask(0xff)
       glClearStencil(0)
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+      # Silky's frame starts here: it draws card faces into their textures as
+      # the cards are built.
+      sk.beginUi(window, window.size)
       solid.clear()
       cardSurfaces.clear()
       vfx.clear()
@@ -565,14 +581,18 @@ when not defined(headless):
       else:
         courtyard.draw(vp, eye, environmentTime, 1, stageYaw = stageYaw)
         courtyard.drawSky(vp, eye, environmentTime)
+        benchStart(CardsBuild)
         addTableCards(solid, cardSurfaces, vfx, sk, play, match.game, table,
           previewTime, match.viewedSeat, hoverIndex, hoveredBoard,
           match.humanTurn, attackChoices, play.selectedAttacker,
           play.lungingMinion(), eye)
         addAttackCard(solid, cardSurfaces, vfx, sk, play, match.game, table,
           previewTime)
+        benchStop(CardsBuild)
         solid.draw(stageVp)
+        benchStart(CardsDraw)
         cardSurfaces.draw(sk, stageVp)
+        benchStop(CardsDraw)
       beginCharacters(scene, window, stageView, projection, stageEye)
       scene.lightLikeCourtyard(1)
       if choosingClasses:
@@ -639,7 +659,7 @@ when not defined(headless):
         glDisable(GL_MULTISAMPLE)
       glActiveTexture(GL_TEXTURE0)
       glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-      sk.beginUi(window, window.size)
+      benchStart(Ui)
       if choosingClasses:
         let picked = classSelection(vp, sessionOptions.human, not uiCapturesMouse)
         if picked.isSome:
@@ -649,8 +669,8 @@ when not defined(headless):
         if inspected.found:
           discard sk.drawCardReading(
             cardReadingColumnRect(window, panelsBottom), inspected.card,
-            inspected.power, inspected.toughness, inspected.keywords,
-            match.game.extraCost(match.viewedSeat, inspected.card))
+            inspected.power, inspected.toughness, inspected.rules,
+            inspected.extraCost)
         else:
           sk.drawPlayerPanelColumn(window, match.seats, match.current,
             match.humanSeat, panelsBottom, hudTime, names)
@@ -735,7 +755,11 @@ when not defined(headless):
         app.replay.drawTransport(sk, window)
       when PostPanelControls:
         drawPostPanel(sk, window, post, courtyard)
+      benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
       sk.endUi()
+      sk.drawHudFaces()
+      benchStop(Ui)
+      benchEndFrame("multiplayer " & $layout.playerCount)
       when defined(takeScreenshot):
         captureScreenshot(window, previewScreenshotFrame,
           max(1, parseInt(getEnv("AWM_CAPTURE_FRAME", "20"))),

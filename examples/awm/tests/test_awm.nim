@@ -46,16 +46,18 @@ suite "AWM base set":
   test "the Archer deck is forty cards of every Archer card":
     let deck = Archer.baseDeck()
     check deck.len == DeckSize
-    var counts: array[10, int]
+    var counts: array[11, int]
     const ids = ["bolt-1", "sniper-2", "sharpshooter-3", "hail-of-arrows-3",
       "overcharge-3", "explode-3", "ambusher-3", "assassin-6", "reload-2",
-      "wildfire-6"]
+      "wildfire-6", "post-1"]
     for card in deck:
       check card.class == some(Archer)
       for index, id in ids:
         if card == baseCard(id):
           inc counts[index]
-    check counts == [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+    # Eleven Archer cards leave four slots of slack: Post takes them from
+    # Explode, Assassin and Reload.
+    check counts == [4, 4, 4, 4, 4, 2, 4, 3, 3, 4, 4]
 
   test "Bolt is a targeted two-damage spell":
     let bolt = Archer.classCard()
@@ -1051,6 +1053,9 @@ suite "AWM Duel and Shields":
     check sniper.card == baseCard("Sniper", 2)
     check game.choiceLabel(creatureChoice(enemy, 2)).endsWith(
       "(2/5, lost Ranged)")
+    # Its face strikes the printed Ranged out.
+    check sniper.ruleLines ==
+      @[RuleLine(rule: sniper.card.rules[0], change: LostRule)]
 
   test "Shields raises every friendly minion's toughness":
     var game = newGame(Warrior, Warrior, 631)
@@ -1471,7 +1476,7 @@ suite "AWM Plan, draws and triggers":
     check not plan.needsChoice()
     check plan.targetCount() == 0
     check plan.ruleText() == "Draw 1 card.\n" &
-      "At the start of your next turn, draw 1 card and destroy this card."
+      "On your next turn, draw 1 card and destroy this card."
     check Mage.classCard() == baseCard("Bouncer", 1)
 
   test "draw and on read naturally":
@@ -1483,7 +1488,7 @@ suite "AWM Plan, draws and triggers":
       "The target's owner draws cards equal to the target's toughness."
     check printed(rules(on(nextTurn(AnyOpponent),
       draw(1), draw(2), destroy(self())))) ==
-      "At the start of an opponent's next turn, " &
+      "On an opponent's next turn, " &
       "draw 1 card, draw 2 cards and destroy this card."
 
   test "Plan draws now, stays in play, and draws again next turn":
@@ -2042,16 +2047,16 @@ suite "AWM class cards and off-class costs":
 
 suite "AWM option faces":
   test "every branch a card offers has a face of its own":
-    # The table shows one card per branch, so each needs its own baked
-    # face. Pillage's choice comes after a target, which is why the faces
-    # are collected from the whole card and not from the pick being made.
+    # The table shows one card per branch, so each needs a face of its own.
+    # Pillage's choice comes after a target, which is why the faces are
+    # collected from the whole card and not from the pick being made.
     let pillage = baseCard("pillage-4")
     check pillage.options().len == 0
     check pillage.everyOption().len == 2
     check baseCard("overcharge-3").everyOption().len == 2
     check baseCard("bolt-1").everyOption().len == 0
-    # A face is baked per printed text, so each branch must read
-    # differently from its card and from the other branches.
+    # Each branch must read differently from its card and from the other
+    # branches, or the choice would offer cards that look the same.
     for card in baseCards:
       var printed = @[card.ruleText()]
       for option in card.everyOption():
@@ -2263,7 +2268,7 @@ suite "AWM eachTurn and Wildfire":
   test "Wildfire burns every minion and every player, each of your turns":
     let wildfire = baseCard("wildfire-6")
     check wildfire.kind == Trinket
-    check wildfire.ruleText() == "At the start of each of your turns, " &
+    check wildfire.ruleText() == "On each of your turns, " &
       "deal 1 damage to all minions and deal 1 damage to each player."
     check not wildfire.needsChoice()
     var game = newGame(Archer, Warrior, 2401)
@@ -2296,7 +2301,7 @@ suite "AWM eachTurn and Wildfire":
 
   test "a next-turn trigger still fires only once":
     check Card(kind: Trinket, rules: rules(on(nextTurn(You), draw(1))))
-      .ruleText() == "At the start of your next turn, draw 1 card."
+      .ruleText() == "On your next turn, draw 1 card."
     var game = newGame(Mage, Warrior, 2403)
     let me = game.leads(Mage)
     game.players[me].board = @[MinionState(id: 1, owner: me,
@@ -2576,7 +2581,7 @@ suite "AWM selections and Primordial":
     check game.players[me].board.len == 2
     check game.players[me].board[0].card == Mage.classCard()
     let primordial = game.players[me].board[1]
-    check primordial.card == baseCard("primordial-8")
+    check primordial.card == baseCard("primordial-10")
     check primordial.power == 10
     check primordial.currentToughness == 10
     check not primordial.canAttack
@@ -2606,7 +2611,7 @@ suite "AWM selections and Primordial":
     check game.players[me].hand ==
       @[Mage.classCard(), baseCard("Plan", 3)]
     check game.players[me].board.len == 1
-    check game.players[me].board[0].card == baseCard("primordial-8")
+    check game.players[me].board[0].card == baseCard("primordial-10")
     check game.players[enemy].board.len == 1
 
   test "canceling the hero pick pays nothing and summons nothing":
@@ -2621,7 +2626,7 @@ suite "AWM selections and Primordial":
     check game.takeVisualEvents().len == 0
 
   test "Primordial itself is a vanilla 10/10 that only Summon Primordial makes":
-    let primordial = baseCard("primordial-8")
+    let primordial = baseCard("primordial-10")
     check primordial.kind == Minion
     check primordial.class == some(Mage)
     check (primordial.power, primordial.toughness) == (10, 10)
@@ -2790,16 +2795,17 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
   test "the new cards read as rules text":
     let chamber = baseCardNamed("Morphosis Chamber")
     check chamber.kind == Trinket and chamber.class == some(Mage)
-    check chamber.ruleText() == "At the start of each of your turns, " &
+    check chamber.ruleText() == "On each of your turns, " &
       "choose:\n- A friendly minion gains Ranged.\n" &
-      "- A minion gains Hidden 1.\n" &
+      "- A friendly minion gains Hidden 1.\n" &
       "- Give a friendly minion +1/-1.\n- Give a friendly minion -1/+1."
-    check baseCardNamed("Overwork").ruleText() ==
-      "At the start of each of your turns, draw 1 card and deal 3 damage " &
-      "to yourself."
+    check baseCardNamed("Overwork").ruleText() == "Lasts 3.\n" &
+      "Gain 3 energy.\n" &
+      "On each of your turns, gain 2 energy and draw 1 card.\n" &
+      "When this card is destroyed, summon a Burnout."
     check Card(kind: Spell, rules: rules(gain(on(eachTurn(You), draw(1)),
       target({kind: {Minion}})))).ruleText() ==
-      "A minion gains \"At the start of each of your turns, draw 1 card.\"."
+      "A minion gains \"On each of your turns, draw 1 card.\"."
     check Card(kind: Spell, rules: rules(lose(hidden(),
       target({kind: {Minion}})))).ruleText() == "A minion loses Hidden."
 
@@ -2822,6 +2828,10 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check bear.lostKeywords == {}
     check bear.card == baseCardNamed("Bear")
     check game.choiceLabel(creatureChoice(me, 2)).endsWith("(3/2, Ranged)")
+    # Its face adds the gained Ranged after its (empty) printed rules.
+    check bear.ruleLines.len == 1
+    check bear.ruleLines[0].change == GainedRule
+    check bear.ruleLines[0].rule.text(bear.card) == "Ranged"
     check game.players[enemy].board[0].addedKeywords == {}
 
   test "a gained Ranged takes no damage back from a minion without it":
@@ -2860,10 +2870,13 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check game.resolvePendingTrigger(@[optionChoice(3), creatureChoice(me, 2)])
     check game.players[me].board[1].power == 2
     check game.players[me].board[1].currentToughness == 3
-    # Hidden 1 may still go on any minion.
+    # Hidden 1 too goes only on a friendly minion.
     game.ownerTurn(me)
-    check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(enemy, 3)])
-    check game.players[enemy].board[0].hiddenTurns == 1
+    check not game.resolvePendingTrigger(
+      @[optionChoice(1), creatureChoice(enemy, 3)])
+    check game.players[enemy].board[0].hiddenTurns == 0
+    check game.resolvePendingTrigger(@[optionChoice(1), creatureChoice(me, 2)])
+    check game.players[me].board[1].hiddenTurns == 1
 
   test "a trigger's choice may be declined, and the rest still resolves":
     var (game, me, enemy) = chamberGame(3108)
@@ -2973,23 +2986,7 @@ suite "AWM gain and lose, Morphosis Chamber and Overwork":
     check game.playCard(0, @[creatureChoice(enemy, 2)])
     check game.levels(enemy, Archer) == 0
 
-  test "Overwork draws and burns its owner each turn":
-    var game = newGame(Mage, Warrior, 3117)
-    let me = game.leads(Mage)
-    game.players[me].board = @[MinionState(id: 1, owner: me,
-      card: baseCardNamed("Overwork"), enteredTurn: game.turnNumber)]
-    game.nextMinionId = 2
-    let hand = game.players[me].hand.len
-    # It asks nothing: its turn draw and its own, then the burn.
-    game.ownerTurn(me)
-    check not game.waitingTrigger
-    check game.players[me].hand.len == hand + 2
-    check game.players[me].life == StartingLife - 3
-    game.ownerTurn(me)
-    check game.players[me].hand.len == hand + 4
-    check game.players[me].life == StartingLife - 6
-
-suite "AWM steal and Control":
+suite "AWM gainControl and Control":
   proc controlGame(seed: int64): (GameState, int, int) =
     ## A Mage with Control in hand, and a wounded, buffed enemy Bear.
     var game = newGame(Mage, Warrior, seed)
@@ -3010,7 +3007,7 @@ suite "AWM steal and Control":
     let control = baseCardNamed("Control")
     check control.kind == Spell and control.energyCost == 5
     check control.ruleText() == "Gain control of an enemy minion."
-    check control.intent(0) == StealIntent
+    check control.intent(0) == GainControlIntent
     var (game, me, enemy) = controlGame(4001)
     check game.availableChoices(0) ==
       @[creatureChoice(enemy, 2), creatureChoice(enemy, 3)]
@@ -3033,7 +3030,7 @@ suite "AWM steal and Control":
     check game.attackTargets(2).len == 0
     var stolen = false
     for event in game.visualEvents:
-      if event.kind == StealVfx:
+      if event.kind == GainControlVfx:
         stolen = true
         check event.target == creatureChoice(me, 2)
         check event.fromPlayer == enemy
@@ -3042,6 +3039,17 @@ suite "AWM steal and Control":
     game.finishTurn()
     game.finishTurn()
     check creatureChoice(enemy, 3) in game.attackTargets(2)
+
+  test "a stolen Ready minion attacks for you at once":
+    var (game, me, enemy) = controlGame(4004)
+    # The Sniper gained Ready, and swung on its owner's last turn.
+    game.players[enemy].board[1].gainedRules = @[Rule(ready())]
+    game.players[enemy].board[1].hasAttacked = true
+    check game.playCard(0, @[creatureChoice(enemy, 3)])
+    check heroChoice(enemy) in game.attackTargets(3)
+    let life = game.players[enemy].life
+    check game.attack(3, heroChoice(enemy))
+    check game.players[enemy].life == life - 2
 
   test "bounced or slain, a stolen minion goes back to its owner":
     var (game, me, enemy) = controlGame(4005)
@@ -3071,7 +3079,8 @@ suite "AWM steal and Control":
     check game.playCard(0, @[creatureChoice(enemy, 2)])
     let grab = Card(name: "Grab", energyCost: 0, kind: Spell,
       class: some(Warrior),
-      rules: rules(steal(target({kind: {Minion}, owner: AllOpponents}))))
+      rules: rules(gainControl(You,
+        target({kind: {Minion}, owner: AllOpponents}))))
     game.finishTurn()
     check game.currentPlayer == enemy
     game.players[enemy].hand = @[grab]
@@ -3095,13 +3104,87 @@ suite "AWM steal and Control":
     game.finishTurn()
     check game.players[me].hand.len == hand + 2
 
+suite "AWM Gift":
+  proc giftGame(seed: int64): (GameState, int, int) =
+    ## An Archer with Gift in hand, a Sniper and a trinket that draws as each
+    ## of its controller's turns ends.
+    var game = newGame(Archer, Warrior, seed)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+      tick = Card(name: "Tick", energyCost: 0, class: some(Archer),
+        kind: Trinket, rules: rules(on(eachEndOfTurn(You), draw(1))))
+    game.players[me].hand = @[baseCardNamed("Gift")]
+    game.players[me].energy = 3
+    game.players[me].board = @[readyMinion(me, 1, baseCardNamed("Sniper")),
+      MinionState(id: 2, owner: me, card: tick, enteredTurn: game.turnNumber)]
+    game.players[enemy].board = @[readyMinion(enemy, 3, baseCardNamed("Bear"))]
+    game.nextMinionId = 4
+    (game, me, enemy)
+
+  test "Gift reads as rules text and asks for a hero, then a card of yours":
+    let gift = baseCardNamed("Gift")
+    check gift.kind == Spell and gift.class == some(Archer)
+    check gift.energyCost == 3
+    check gift.ruleText() ==
+      "A hero gains control of a friendly minion or trinket."
+    check gift.targetCount() == 2
+    check gift.targetPrompt(0).choose == "Choose a hero."
+    var (game, me, enemy) = giftGame(4101)
+    let heroes = game.availableChoices(0)
+    check heroes.len == 2
+    check heroChoice(me) in heroes and heroChoice(enemy) in heroes
+    check game.availableChoices(0, @[heroChoice(enemy)]) ==
+      @[creatureChoice(me, 1), creatureChoice(me, 2)]
+
+  test "the gift joins the picked hero's board, still its giver's card":
+    var (game, me, enemy) = giftGame(4103)
+    check game.playCard(0, @[heroChoice(enemy), creatureChoice(me, 1)])
+    check game.players[me].energy == 0
+    check game.players[me].board.len == 1
+    let sniper = game.players[enemy].board[^1]
+    check sniper.id == 1 and sniper.owner == enemy
+    check sniper.stolenFrom == some(me)
+    var wrapped, moved = false
+    for event in game.visualEvents:
+      if event.kind == PrizeVfx:
+        wrapped = true
+        check event.target == creatureChoice(me, 1)
+      elif event.kind == GainControlVfx:
+        moved = true
+        check event.target == creatureChoice(enemy, 1)
+        check event.fromPlayer == me
+    check wrapped and moved
+
+  test "a gifted trinket's triggers fire for its new controller":
+    var (game, me, enemy) = giftGame(4105)
+    check game.playCard(0, @[heroChoice(enemy), creatureChoice(me, 2)])
+    let hand = game.players[me].hand.len
+    game.finishTurn()
+    check game.players[me].hand.len == hand
+    let enemyHand = game.players[enemy].hand.len
+    game.finishTurn()
+    check game.players[enemy].hand.len == enemyHand + 1
+
+  test "a canceled pick costs nothing, and a gift to yourself changes nothing":
+    var (game, me, enemy) = giftGame(4107)
+    check not game.playCard(0, @[Canceled])
+    check not game.playCard(0, @[heroChoice(enemy), Canceled])
+    check game.players[me].energy == 3
+    check game.players[me].hand.len == 1
+    check game.takeVisualEvents().len == 0
+    # Your own hero is a hero too: the card stays where it is.
+    check game.playCard(0, @[heroChoice(me), creatureChoice(me, 1)])
+    check game.players[me].board.len == 2
+    check game.players[me].board[0].stolenFrom == none(int)
+
 suite "AWM rule explanations":
   test "a card explains the mechanics its rules print, in reading order":
     check baseCardNamed("Spirit").mechanics() ==
       @[HiddenMechanic, RangedMechanic]
     check baseCardNamed("Sharpshooter").mechanics() == @[RangedMechanic]
     check baseCardNamed("Summon Primordial").mechanics() == @[SummonMechanic]
-    check baseCardNamed("Control").mechanics() == @[StealMechanic]
+    check baseCardNamed("Control").mechanics() == @[GainControlMechanic]
     check baseCardNamed("Archer").mechanics() == @[OffClassMechanic]
 
   test "mechanics nested in choices, triggers and gained or lost rules count":
@@ -3112,7 +3195,7 @@ suite "AWM rule explanations":
 
   test "plain verbs explain themselves":
     for name in ["Bolt", "Overcharge", "Hail of Arrows", "Explode", "Swords",
-        "Wildfire", "Study", "Plan", "Overwork", "Bear", "Bouncer", "Bubble",
+        "Wildfire", "Study", "Plan", "Bear", "Bouncer", "Bubble",
         "Reload"]:
       check baseCardNamed(name).mechanics().len == 0
 
@@ -3128,3 +3211,639 @@ suite "AWM rule explanations":
     for mechanic in Mechanic:
       check Explanations[mechanic].len > 0
       check mechanic in printed
+
+suite "rule lines":
+  test "a card in play as printed has none":
+    check MinionState(card: baseCard("Sniper", 2)).ruleLines.len == 0
+
+  test "printed rules come first, kept or lost, then the gained ones":
+    let
+      card = baseCard("Sharpshooter", 3)
+      gained = hidden(1)
+      minion = MinionState(card: card, gainedRules: @[gained],
+        lostRules: @[Rule(ranged())])
+    check minion.ruleLines == @[
+      RuleLine(rule: card.rules[0], change: LostRule),
+      RuleLine(rule: card.rules[1], change: KeptRule),
+      RuleLine(rule: gained, change: GainedRule)]
+
+  test "losing a rule it never had changes nothing":
+    check MinionState(card: baseCard("Bear", 2),
+      lostRules: @[Rule(ranged())]).ruleLines.len == 0
+
+  test "a gained rule lost again leaves the printed rules":
+    let gained = hidden(1)
+    check MinionState(card: baseCard("Bear", 2), gainedRules: @[gained],
+      lostRules: @[gained]).ruleLines.len == 0
+
+suite "AWM number filters":
+  test "number filters read as rules text":
+    check target({kind: {Minion}, energyCost: atMost(3)}).text() ==
+      "a minion that costs 3 or less"
+    check target({kind: {Minion}, energyCost: eq(2)}).text() ==
+      "a minion that costs 2"
+    check target({kind: {Minion}, owner: AllOpponents,
+      energyCost: notEq(2)}).text() == "an enemy minion that doesn't cost 2"
+    check target({kind: {Minion}, power: atLeast(3)}).text() ==
+      "a minion with power 3 or more"
+    check target({kind: {Minion}, toughness: between(2, 4)}).text() ==
+      "a minion with toughness 2 to 4"
+    check target({kind: {Minion}, power: notEq(0)}).text() ==
+      "a minion with power other than 0"
+    check Card(kind: Spell, rules: rules(damage(1, game.board.getCards(
+      {kind: {Minion}, owner: AllOpponents, energyCost: atMost(2)})))
+      ).ruleText() == "Deal 1 damage to all enemy minions that cost 2 or less."
+    check Card(kind: Spell, rules: rules(destroy(target({kind: {Minion},
+      energyCost: atLeast(5), power: atLeast(4)})))).ruleText() ==
+      "Destroy a minion that costs 5 or more and with power 4 or more."
+
+  test "a target offers only the cards that meet its numbers, never a hero":
+    var game = newGame(Archer, Warrior, 3301)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[enemy].board = @[
+      readyMinion(enemy, 1, baseCard("footsoldier-1")),
+      readyMinion(enemy, 2, baseCard("bear-2")),
+      readyMinion(enemy, 3, baseCard("commander-5"))]
+    game.nextMinionId = 4
+    game.players[me].hand = @[Card(name: "Snipe", energyCost: 0, kind: Spell,
+      rules: rules(damage(1, target({kind: {Minion, Hero},
+        energyCost: atMost(2)}))))]
+    check game.availableChoices(0) ==
+      @[creatureChoice(enemy, 1), creatureChoice(enemy, 2)]
+
+  test "power and toughness read a minion's live stats":
+    var game = newGame(Warrior, Archer, 3303)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    var
+      bear = readyMinion(enemy, 1, baseCard("bear-2"))
+      footsoldier = readyMinion(enemy, 2, baseCard("footsoldier-1"))
+    bear.bonusPower = 1  # 4/2 now
+    footsoldier.currentToughness = 1  # hurt: 1/1
+    game.players[enemy].board = @[bear, footsoldier]
+    game.nextMinionId = 3
+    game.players[me].hand = @[
+      Card(name: "Cull", energyCost: 0, kind: Spell, rules: rules(destroy(
+        game.board.getCards({kind: {Minion}, toughness: atMost(1)})))),
+      Card(name: "Fell", energyCost: 0, kind: Spell, rules: rules(destroy(
+        target({kind: {Minion}, power: atLeast(4)}))))]
+    check game.availableChoices(1) == @[creatureChoice(enemy, 1)]
+    check game.playCard(0)
+    check game.players[enemy].board.len == 1
+    check game.players[enemy].board[0].id == 1
+
+  test "every bound is inclusive, and only minions have power or toughness":
+    let context = RuleContext()
+    check @[statFilter(CostStat, between(2, 3))].meets(
+      baseCard("sniper-2"), 2, 1, context)
+    check @[statFilter(CostStat, between(2, 3))].meets(
+      baseCard("sharpshooter-3"), 3, 1, context)
+    check not @[statFilter(CostStat, between(2, 3))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check @[statFilter(CostStat, atMost(1))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check @[statFilter(CostStat, notEq(3))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check not @[statFilter(PowerStat, atLeast(0))].meets(
+      baseCard("bolt-1"), 0, 0, context)
+    check not @[statFilter(ToughnessStat, atMost(9))].meets(
+      baseCard("banner-3"), 0, 0, context)
+
+suite "AWM Lasts":
+  let tent = Card(name: "Tent", energyCost: 0, kind: Trinket,
+    rules: rules(lasts(2)))
+
+  test "lasts prints its count":
+    check tent.ruleText() == "Lasts 2."
+    check tent.lastsTurns() == 2
+    check baseCard("bear-2").lastsTurns() == 0
+    check Card(kind: Spell, rules: rules(gain(lasts(1),
+      target({kind: {Minion}})))).ruleText() == "A minion gains Lasts 1."
+
+  test "a lasting card leaves as its controller's Nth turn ends":
+    var game = newGame(Archer, Warrior, 3311)
+    let me = game.leads(Archer)
+    game.players[me].hand = @[tent]
+    check game.playCard(0)
+    check game.players[me].board[0].lastsTurns == 2
+    game.finishTurn()  # the turn it was played in: one to go
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].lastsTurns == 1
+    game.finishTurn()  # the opponent's turn counts nothing
+    check game.players[me].board[0].lastsTurns == 1
+    game.finishTurn()  # its controller's second turn: gone as it ends
+    check game.players[me].board.len == 0
+    check game.players[me].discardPile[^1].name == "Tent"
+    var died = false
+    for event in game.visualEvents:
+      if event.kind == DeathVfx and event.card.name == "Tent":
+        died = true
+    check died
+
+  test "it counts in its place among the card's rules":
+    # Written before Lasts, an end-of-turn rule still happens on the last
+    # turn; written after it, the card is gone first.
+    let
+      ember = Card(name: "Ember", energyCost: 0, kind: Trinket,
+        rules: rules(on(eachEndOfTurn(You), damage(1, You)), lasts(1)))
+      ash = Card(name: "Ash", energyCost: 0, kind: Trinket,
+        rules: rules(lasts(1), on(eachEndOfTurn(You), damage(1, You))))
+    for (card, bitten) in [(ember, true), (ash, false)]:
+      var game = newGame(Archer, Warrior, 3313)
+      let me = game.leads(Archer)
+      game.players[me].hand = @[card]
+      check game.playCard(0)
+      game.finishTurn()
+      check game.players[me].board.len == 0
+      check game.players[me].discardPile[^1].name == card.name
+      check game.players[me].life == StartingLife - bitten.int
+
+  test "only its controller's turns count: given away, it starts over":
+    # Given away during its owner's turn, it counts as the new controller's
+    # turns end, and still goes to its owner's discard pile.
+    var game = newGame(Archer, Warrior, 3317)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: tent,
+      enteredTurn: game.turnNumber, lastsTurns: 2)]
+    game.nextMinionId = 2
+    game.players[me].hand = @[Card(name: "Handover", energyCost: 0,
+      kind: Spell, rules: rules(gainControl(target({kind: {Hero}}),
+        target({kind: {Trinket}, owner: You}))))]
+    check game.playCard(0, @[heroChoice(enemy), creatureChoice(me, 1)])
+    game.finishTurn()  # the giver's turn counts nothing now
+    check game.players[enemy].board[0].lastsTurns == 2
+    game.finishTurn()
+    check game.players[enemy].board[0].lastsTurns == 1
+    game.finishTurn()
+    check game.players[enemy].board[0].lastsTurns == 1
+    game.finishTurn()
+    check game.players[enemy].board.len == 0
+    check game.players[me].discardPile[^1].name == "Tent"
+
+  test "gaining Lasts starts a count, and losing it stops one":
+    var game = newGame(Archer, Warrior, 3315)
+    let me = game.leads(Archer)
+    game.players[me].board = @[
+      readyMinion(me, 1, baseCard("bear-2")),
+      MinionState(id: 2, owner: me, card: tent, lastsTurns: 2,
+        enteredTurn: game.turnNumber)]
+    game.nextMinionId = 3
+    game.players[me].hand = @[
+      Card(name: "Mark", energyCost: 0, kind: Spell,
+        rules: rules(gain(lasts(1), target({kind: {Minion}})))),
+      Card(name: "Stake", energyCost: 0, kind: Spell,
+        rules: rules(lose(lasts(1), target({kind: {Trinket}}))))]
+    check game.playCard(0, creatureChoice(me, 1))
+    check game.players[me].board[0].lastsTurns == 1
+    check game.playCard(0, creatureChoice(me, 2))
+    check game.players[me].board[1].lastsTurns == 0
+    # The Bear runs out as this turn ends; the Tent no longer counts.
+    game.finishTurn()
+    check game.players[me].board.len == 1
+    for turn in 0 ..< 4:
+      game.finishTurn()
+    check game.players[me].board.len == 1
+    check game.players[me].board[0].card.name == "Tent"
+
+suite "AWM played triggers":
+  # Twin plays like Post, but its numbers are this suite's: tuning Post
+  # moves nothing here.
+  let twin = Card(name: "Twin", energyCost: 1, class: some(Archer),
+    kind: Trinket, rules: rules(
+      lasts(3),
+      on(played(You, {kind: {Minion}, class: {Archer}, energyCost: atMost(3)}),
+        gain(ready(), getPlayed()),
+        summon(1, getPlayed()))))
+
+  proc twinGame(seed: int64): (GameState, int, int) =
+    ## The Archer's turn with Twin in play and energy to spare.
+    var game = newGame(Archer, Warrior, seed)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: twin,
+      enteredTurn: game.turnNumber, lastsTurns: twin.lastsTurns())]
+    game.nextMinionId = 2
+    game.players[me].energy = 20
+    (game, me, enemy)
+
+  test "a trigger that readies and copies cheap Archer minions prints so":
+    check twin.lastsTurns() == 3
+    check twin.ruleText() == "Lasts 3.\n" &
+      "When you play an Archer minion that costs 3 or less, it gains Ready, " &
+      "summon a copy of it."
+    check twin.mechanics() == @[LastsMechanic, ReadyMechanic, SummonMechanic]
+
+  test "trigger parts join with and while all are orders, else with commas":
+    check Card(kind: Trinket, rules: rules(on(eachTurn(You), draw(1),
+      damage(1, You)))).ruleText() ==
+      "On each of your turns, draw 1 card and deal 1 damage " &
+      "to yourself."
+    check Card(kind: Trinket, rules: rules(on(eachTurn(You),
+      gain(ranged(), target({kind: {Minion}})), draw(1)))).ruleText() ==
+      "On each of your turns, a minion gains Ranged, " &
+      "draw 1 card."
+
+  test "a cheap Archer minion enters Ready, with a Ready copy":
+    var (game, me, enemy) = twinGame(3321)
+    game.players[me].hand = @[baseCard("sniper-2")]
+    check game.playCard(0)
+    check game.players[me].board.len == 3
+    check game.players[me].board[1].card.name == "Sniper"
+    check game.players[me].board[2].card.name == "Sniper"
+    check game.players[me].board[1].id != game.players[me].board[2].id
+    check not game.waitingTrigger
+    # Both gained Ready, so both swing the turn they came in.
+    for slot in 1 .. 2:
+      check game.players[me].board[slot].hasKeyword(Ready)
+      check game.attack(game.players[me].board[slot].id, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 4
+
+  test "a card the table plays in two steps fires played triggers too":
+    # The table puts a minion in play first, to aim its rules on the board,
+    # then plays it out (`finishPlay`): how a human plays one.
+    var (game, me, _) = twinGame(3329)
+    game.players[me].hand = @[baseCard("sniper-2")]
+    let id = game.playMinion(0)
+    check id != 0
+    check game.finishPlay(baseCard("sniper-2"), @[NoTarget], id)
+    check game.players[me].board.len == 3
+    check game.players[me].board[2].card.name == "Sniper"
+    check game.players[me].board[1].hasKeyword(Ready)
+
+  test "the copy runs its own on-play rules, aimed afresh":
+    var (game, me, enemy) = twinGame(3323)
+    game.players[me].hand = @[baseCard("sharpshooter-3")]
+    let life = game.players[enemy].life
+    check game.playCard(0, heroChoice(enemy))
+    check game.players[enemy].life == life - 1
+    # Like any summoned card's rule, the copy's shot waits for its owner.
+    check game.waitingTrigger
+    check game.actingPlayer() == me
+    check game.waitingTriggerName() == "Sharpshooter's rule"
+    check game.resolvePendingTrigger(@[heroChoice(enemy)])
+    check game.players[enemy].life == life - 2
+    check game.players[me].board.len == 3
+
+  test "expensive, off-class, spells and opponents' plays make no copy":
+    var (game, me, enemy) = twinGame(3325)
+    game.players[me].hand = @[baseCard("assassin-6"), baseCard("bolt-1"),
+      baseCard("bear-2")]
+    check game.playCard(0)
+    check game.players[me].board.len == 2
+    check not game.players[me].board[1].hasKeyword(Ready)
+    check game.playCard(0, heroChoice(enemy))
+    check game.players[me].board.len == 2
+    # A Warrior Bear costs 2, but Twin only copies Archer cards.
+    check game.playCard(0)
+    check game.players[me].board.len == 3
+    check not game.players[me].board[2].hasKeyword(Ready)
+    game.finishTurn()
+    game.players[enemy].hand = @[baseCard("footsoldier-1")]
+    game.players[enemy].energy = 1
+    check game.playCard(0)
+    check game.players[enemy].board.len == 1
+
+  test "two copiers make two copies, and copies are never copied":
+    var (game, me, _) = twinGame(3327)
+    game.players[me].board.add MinionState(id: 2, owner: me, card: twin,
+      enteredTurn: game.turnNumber, lastsTurns: twin.lastsTurns())
+    game.nextMinionId = 3
+    game.players[me].hand = @[baseCard("ambusher-3")]
+    check game.playCard(0)
+    var ambushers = 0
+    for minion in game.players[me].board:
+      if minion.card.name == "Ambusher":
+        inc ambushers
+        check minion.hiddenTurns == 1
+    check ambushers == 3
+
+  test "a copy enters as its original is: buffs, gained rules and all":
+    # Drill sits before Twin, so its buff lands on the played minion first.
+    let drill = Card(name: "Drill", energyCost: 0, kind: Trinket,
+      rules: rules(on(played(You, {kind: {Minion}}),
+        addPowerToughness(1, 1, getPlayed()))))
+    check drill.ruleText() == "When you play a minion, give it +1/+1."
+    var (game, me, _) = twinGame(3335)
+    game.players[me].board.insert(MinionState(id: 2, owner: me, card: drill,
+      enteredTurn: game.turnNumber), 0)
+    game.nextMinionId = 3
+    game.players[me].hand = @[baseCard("sniper-2")]
+    check game.playCard(0)
+    let
+      original = game.players[me].board[2]
+      copy = game.players[me].board[3]
+    check original.power == 3 and original.currentToughness == 2
+    check copy.card == original.card
+    check copy.power == 3 and copy.currentToughness == 2
+    check copy.hasKeyword(Ready) and copy.canAttack
+    # Drill doesn't buff the copy: a summon isn't played.
+    check copy.bonusPower == 1
+
+  test "a bounced copy goes back to its owner's hand as a card":
+    var (game, me, enemy) = twinGame(3329)
+    game.players[me].hand = @[baseCard("sniper-2")]
+    check game.playCard(0)
+    let copy = game.players[me].board[2].id
+    game.finishTurn()
+    game.players[enemy].hand = @[baseCard("bouncer-1")]
+    game.players[enemy].energy = 9
+    check game.playCard(0, creatureChoice(me, copy))
+    check game.players[me].hand[^1].name == "Sniper"
+
+  test "a card's own play doesn't fire its triggers; later plays do":
+    let echo = Card(name: "Echo", energyCost: 0, kind: Trinket,
+      rules: rules(on(played(You, {}), draw(1))))
+    check echo.ruleText() == "When you play a card, draw 1 card."
+    var game = newGame(Archer, Warrior, 3331)
+    let me = game.leads(Archer)
+    game.players[me].hand = @[echo, Card(name: "Spark", energyCost: 0,
+      kind: Spell, rules: rules(damage(1, You)))]
+    check game.playCard(0)
+    check game.players[me].hand.len == 1
+    check game.playCard(0)  # Spark goes, and Echo draws once it resolves
+    check game.players[me].hand.len == 1
+
+  test "played(AnyOpponent) watches every opponent":
+    let spy = Card(name: "Spy", energyCost: 0, kind: Trinket,
+      rules: rules(on(played(AnyOpponent, {kind: {Spell}}), draw(1))))
+    check spy.ruleText() == "When an opponent plays a spell, draw 1 card."
+    var game = newGame(Archer, Warrior, 3333)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: spy,
+      enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    game.finishTurn()
+    let hand = game.players[me].hand.len
+    game.players[enemy].hand = @[baseCard("swords-2")]
+    game.players[enemy].energy = 2
+    check game.playCard(0)
+    check game.players[me].hand.len == hand + 1
+
+suite "AWM Ready":
+  let raider = Card(name: "Raider", energyCost: 0, kind: Minion,
+    rules: rules(ready()), power: 2, toughness: 1)
+
+  test "Ready prints as a keyword and is explained":
+    check raider.ruleText() == "Ready"
+    check raider.mechanics() == @[ReadyMechanic]
+    check Explanations[ReadyMechanic].len > 0
+
+  test "a Ready minion attacks the turn it is played or summoned":
+    var game = newGame(Archer, Warrior, 3341)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].hand = @[raider, Card(name: "Call", energyCost: 0,
+      kind: Spell, rules: rules(summon(1,
+        RuleValue[Card](kind: FixedValue, fixed: raider))))]
+    check game.playCard(0)
+    check game.playCard(0)
+    for minion in game.players[me].board:
+      check minion.canAttack
+      check game.attack(minion.id, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 4
+
+  test "gaining Ready readies a fresh minion; it doesn't give back an attack":
+    var game = newGame(Warrior, Archer, 3343)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    let rally = Card(name: "Hurry", energyCost: 0, kind: Spell,
+      rules: rules(gain(ready(), target({kind: {Minion}, owner: You}))))
+    game.players[me].hand = @[baseCard("bear-2"), rally, rally]
+    game.players[me].energy = 2
+    check game.playCard(0)
+    let bear = game.players[me].board[0].id
+    check not game.attack(bear, heroChoice(enemy))
+    check game.playCard(0, creatureChoice(me, bear))
+    check game.attack(bear, heroChoice(enemy))
+    check game.playCard(0, creatureChoice(me, bear))
+    check not game.attack(bear, heroChoice(enemy))
+    check game.players[enemy].life == StartingLife - 3
+
+  test "losing Ready the turn it entered takes back that turn's attack":
+    var game = newGame(Archer, Warrior, 3345)
+    let
+      me = game.leads(Archer)
+      enemy = 1 - me
+    game.players[me].hand = @[raider, Card(name: "Slow", energyCost: 0,
+      kind: Spell, rules: rules(lose(ready(), target({kind: {Minion}}))))]
+    check game.playCard(0)
+    let id = game.players[me].board[0].id
+    check game.playCard(0, creatureChoice(me, id))
+    check not game.attack(id, heroChoice(enemy))
+
+suite "AWM class filters":
+  test "a class filter reads as an adjective":
+    check target({kind: {Minion}, class: {Archer}}).text() ==
+      "an Archer minion"
+    check target({kind: {Minion}, owner: You, class: {Warrior}}).text() ==
+      "a friendly Warrior minion"
+    check target({kind: {Minion}, class: {Warrior, Mage},
+      energyCost: atMost(2)}).text() ==
+      "a Warrior or Mage minion that costs 2 or less"
+    check Card(kind: Spell, rules: rules(damage(1, game.board.getCards(
+      {kind: {Minion}, owner: AllOpponents, class: {Archer}})))).ruleText() ==
+      "Deal 1 damage to all enemy Archer minions."
+
+  test "it picks only cards of those classes, never a hero or class card":
+    var game = newGame(Warrior, Archer, 3351)
+    let
+      me = game.leads(Warrior)
+      enemy = 1 - me
+    let classCard = MinionState(id: 3, owner: enemy,
+      card: baseCardNamed("Archer"), enteredTurn: game.turnNumber)
+    game.players[enemy].board = @[
+      readyMinion(enemy, 1, baseCard("sniper-2")),
+      readyMinion(enemy, 2, baseCard("bear-2")), classCard]
+    game.nextMinionId = 4
+    game.players[me].hand = @[
+      Card(name: "Hunt", energyCost: 0, kind: Spell, rules: rules(damage(1,
+        target({kind: {Minion, Hero, Trinket}, class: {Archer}})))),
+      Card(name: "Purge", energyCost: 0, kind: Spell, rules: rules(destroy(
+        game.board.getCards({class: {Archer}}))))]
+    check game.availableChoices(0) == @[creatureChoice(enemy, 1)]
+    check game.playCard(1)
+    check game.players[enemy].board.len == 2
+    check game.players[enemy].board[0].id == 2
+
+suite "AWM Overwork and Burnout":
+  proc overworkGame(seed: int64): (GameState, int, int) =
+    ## The Mage's turn with Overwork in hand and 6 energy.
+    var game = newGame(Mage, Warrior, seed)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].hand = @[baseCardNamed("Overwork")]
+    game.players[me].totalEnergy = 6
+    game.players[me].energy = 6
+    (game, me, enemy)
+
+  proc names(board: seq[MinionState]): seq[string] =
+    for minion in board:
+      result.add minion.card.name
+
+  test "Overwork and Burnout read as rules text":
+    check baseCardNamed("Overwork").ruleText() == "Lasts 3.\n" &
+      "Gain 3 energy.\n" &
+      "On each of your turns, gain 2 energy and draw 1 card.\n" &
+      "When this card is destroyed, summon a Burnout."
+    check baseCardNamed("Burnout").ruleText() ==
+      "At the end of each of your turns, deal 2 damage to yourself and " &
+      "discard 1 card."
+
+  test "Overwork pays 3 energy, then 2 and a card on two more turns, then burns out":
+    var (game, me, enemy) = overworkGame(5001)
+    check game.playCard(0)
+    check game.players[me].energy == 6 - 3 + 3
+    for _ in 1 .. 2:
+      let hand = game.players[me].hand.len
+      game.finishTurn()
+      game.finishTurn()
+      check game.players[me].energy == game.players[me].totalEnergy + 2
+      check game.players[me].hand.len == hand + 2
+      check game.players[me].board.names == @["Overwork"]
+    # Its third turn ends: it runs out, and Burnout takes its place. Burnout
+    # arrived as that turn ended, so it bites from the next one.
+    let life = game.players[me].life
+    game.finishTurn()
+    check game.currentPlayer == enemy
+    check game.players[me].board.names == @["Burnout"]
+    check game.players[me].discardPile[^1].name == "Overwork"
+    check game.players[me].life == life
+    game.finishTurn()
+    check game.players[me].energy == game.players[me].totalEnergy
+    # Burnout bites as each of its turns ends, and doesn't run out. The
+    # turn passes once the discard is chosen.
+    for bites in 1 .. 3:
+      game.finishTurn()
+      check game.currentPlayer == me
+      check game.players[me].life == life - 2 * bites
+      check game.waitingToss and game.pendingToss.source == "Burnout"
+      let hand = game.players[me].hand.len
+      check game.resolvePendingToss(@[0])
+      check game.players[me].hand.len == hand - 1
+      check game.currentPlayer == enemy
+      check game.players[me].board.names == @["Burnout"]
+      game.finishTurn()
+
+  test "a gifted Burnout bites its new controller as each of their turns ends":
+    var game = newGame(Mage, Warrior, 5005)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me,
+      card: baseCardNamed("Burnout"), enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    game.players[me].hand = @[baseCardNamed("Gift")]
+    game.players[me].energy = 20
+    check game.playCard(0, @[heroChoice(enemy), creatureChoice(me, 1)])
+    let
+      life = game.players[me].life
+      enemyLife = game.players[enemy].life
+    # The giver's turn ends quietly: Burnout is no longer theirs.
+    game.finishTurn()
+    check game.currentPlayer == enemy
+    for bites in 1 .. 3:
+      game.finishTurn()
+      check game.players[enemy].life == enemyLife - 2 * bites
+      check game.waitingToss and game.pendingToss.player == enemy
+      check game.resolvePendingToss(@[0])
+      check game.currentPlayer == me
+      check game.players[enemy].board.names == @["Burnout"]
+      game.finishTurn()
+    check game.players[me].life == life
+
+  test "destroyed early, Overwork still leaves Burnout to its owner":
+    var (game, me, enemy) = overworkGame(5003)
+    check game.playCard(0)
+    let overwork = game.players[me].board[0].id
+    game.finishTurn()
+    game.players[enemy].hand = @[baseCardNamed("Pillage")]
+    game.players[enemy].energy = 20
+    check game.playCard(0, @[creatureChoice(me, overwork), optionChoice(0)])
+    check game.players[me].board.names == @["Burnout"]
+    check game.players[enemy].board.names.len == 0
+
+
+suite "AWM eachEndOfTurn":
+  let dusk = Card(name: "Dusk", energyCost: 0, class: some(Mage),
+    kind: Trinket, rules: rules(on(eachEndOfTurn(You), draw(1))))
+
+  test "it prints as the end of a turn":
+    check dusk.ruleText() == "At the end of each of your turns, draw 1 card."
+    check Card(kind: Trinket, rules: rules(on(eachEndOfTurn(AnyOpponent),
+      draw(1)))).ruleText() ==
+      "At the end of each opponent's turn, draw 1 card."
+
+  test "it fires as each of its owner's turns ends, the first one too":
+    var game = newGame(Mage, Warrior, 2405)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].hand = @[dusk]
+    check game.playCard(0)
+    check game.players[me].hand.len == 0
+    # The turn it was played on ends: it draws, then the turn passes.
+    game.finishTurn()
+    check game.currentPlayer == enemy
+    check game.players[me].hand.len == 1
+    # Not as the opponent's turn ends; its owner's starts with the usual
+    # draw alone.
+    game.finishTurn()
+    check game.players[me].hand.len == 2
+    game.finishTurn()
+    check game.players[me].hand.len == 3
+
+  test "a choice it asks for holds the turn, and answering ends it":
+    let flare = Card(name: "Flare", energyCost: 0, class: some(Mage),
+      kind: Trinket, rules: rules(on(eachEndOfTurn(You),
+        damage(1, target({kind: {Hero}})))))
+    var game = newGame(Mage, Warrior, 2407)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].board = @[MinionState(id: 1, owner: me, card: flare,
+      enteredTurn: game.turnNumber)]
+    game.nextMinionId = 2
+    game.finishTurn()
+    check game.waitingTrigger and game.turnEnding
+    check game.currentPlayer == me
+    # Ending it again does nothing: the trigger doesn't fire twice.
+    game.finishTurn()
+    check game.currentPlayer == me
+    check game.pendingTriggers.len == 1
+    check game.resolvePendingTrigger(@[heroChoice(enemy)])
+    check game.players[enemy].life == StartingLife - 1
+    check game.currentPlayer == enemy
+    check not game.turnEnding
+
+  test "a card gone by the time its trigger resolves doesn't fire":
+    # Snuff goes first and destroys Dusk: Dusk's trigger, queued behind
+    # Snuff's, finds no card.
+    let snuff = Card(name: "Snuff", energyCost: 0, class: some(Mage),
+      kind: Trinket, rules: rules(on(eachEndOfTurn(You),
+        destroy(target({kind: {Trinket}, owner: You})))))
+    var game = newGame(Mage, Warrior, 2409)
+    let
+      me = game.leads(Mage)
+      enemy = 1 - me
+    game.players[me].board = @[
+      MinionState(id: 1, owner: me, card: snuff, enteredTurn: game.turnNumber),
+      MinionState(id: 2, owner: me, card: dusk, enteredTurn: game.turnNumber)]
+    game.nextMinionId = 3
+    let hand = game.players[me].hand.len
+    game.finishTurn()
+    check game.pendingTriggers.len == 2
+    check game.resolvePendingTrigger(@[creatureChoice(me, 2)])
+    check game.players[me].board.len == 1
+    check game.players[me].hand.len == hand
+    check game.currentPlayer == enemy

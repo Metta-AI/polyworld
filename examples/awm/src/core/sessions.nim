@@ -6,7 +6,7 @@ export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
-  SnapshotSchemaVersion* = 16
+  SnapshotSchemaVersion* = 20
 
 type
   SessionOptions* = object
@@ -338,9 +338,9 @@ proc effectToJson(effect: Effect): JsonNode =
   of GainRuleEffect:
     result["gainerId"] = %effect.gainerId
     result["gainedRule"] = %effect.gainedRule.ruleId()
-  of StealEffect:
-    result["stolenId"] = %effect.stolenId
-    result["thief"] = %effect.thief
+  of GainControlEffect:
+    result["controlledId"] = %effect.controlledId
+    result["controller"] = %effect.controller
   of FightEffect:
     result["fighterId"] = %effect.fighterId
     result["opponentId"] = %effect.opponentId
@@ -348,6 +348,8 @@ proc effectToJson(effect: Effect): JsonNode =
     result["summonedId"] = %effect.summonedId
     result["summonedOwner"] = %effect.summonedOwner
     result["summonedCard"] = cardToJson(effect.summonedCard)
+    if effect.summonedFrom != 0:
+      result["summonedFrom"] = %effect.summonedFrom
   of DestroyEffect:
     result["destroyedId"] = %effect.destroyedId
   of DrawEffect:
@@ -358,11 +360,18 @@ proc effectToJson(effect: Effect): JsonNode =
     result["tossCount"] = %effect.tossCount
     result["tossSource"] = %effect.tossSource
     result["tossText"] = %effect.tossText
+    if effect.tossSourcePlayer >= 0:
+      result["tossSourcePlayer"] = %effect.tossSourcePlayer
+    if effect.tossSourceId != 0:
+      result["tossSourceId"] = %effect.tossSourceId
   of TargetVfxEffect:
     result["targetVfx"] = %ord(effect.targetVfx)
     result["visualTarget"] = choiceToJson(effect.visualTarget)
     if effect.vfxCard.name.len > 0:
       result["vfxCard"] = cardToJson(effect.vfxCard)
+  of ExtraEnergyEffect:
+    result["energyPlayer"] = %effect.energyPlayer
+    result["energyAmount"] = %effect.energyAmount
 
 proc effectFromJson(node: JsonNode): Effect =
   let kind = parseEnum[EffectKind](node.field("kind").stringValue("effect kind"))
@@ -387,9 +396,9 @@ proc effectFromJson(node: JsonNode): Effect =
     of LoseRuleEffect:
       Effect(kind: kind, loserId: int("loserId", 1),
         lostRule: ruleById(node.field("lostRule").stringValue("lost rule")))
-    of StealEffect:
-      Effect(kind: kind, stolenId: int("stolenId", 1),
-        thief: player("thief"))
+    of GainControlEffect:
+      Effect(kind: kind, controlledId: int("controlledId", 1),
+        controller: player("controller"))
     of GainRuleEffect:
       Effect(kind: kind, gainerId: int("gainerId", 1),
         gainedRule: ruleById(
@@ -400,7 +409,9 @@ proc effectFromJson(node: JsonNode): Effect =
     of SummonEffect:
       Effect(kind: kind, summonedId: int("summonedId", 1),
         summonedOwner: player("summonedOwner"),
-        summonedCard: cardFromJson(node.field("summonedCard")))
+        summonedCard: cardFromJson(node.field("summonedCard")),
+        summonedFrom: if node.hasKey("summonedFrom"):
+          int("summonedFrom", 1) else: 0)
     of DestroyEffect:
       Effect(kind: kind, destroyedId: int("destroyedId", 1))
     of DrawEffect:
@@ -410,33 +421,74 @@ proc effectFromJson(node: JsonNode): Effect =
       Effect(kind: kind, tossPlayer: player("tossPlayer"),
         tossCount: int("tossCount", 0),
         tossSource: node.field("tossSource").stringValue("toss source"),
-        tossText: node.field("tossText").stringValue("toss text"))
+        tossText: node.field("tossText").stringValue("toss text"),
+        tossSourcePlayer: if node.hasKey("tossSourcePlayer"):
+          player("tossSourcePlayer") else: -1,
+        tossSourceId: if node.hasKey("tossSourceId"):
+          int("tossSourceId", 1) else: 0)
     of TargetVfxEffect:
       Effect(kind: kind, targetVfx: VfxKind(node.field("targetVfx").integer(
           "effect VFX", ord(low(VfxKind)), ord(high(VfxKind)))),
         visualTarget: choiceFromJson(node.field("visualTarget")),
         vfxCard: if node.hasKey("vfxCard"): cardFromJson(node["vfxCard"])
           else: Card())
+    of ExtraEnergyEffect:
+      Effect(kind: kind, energyPlayer: player("energyPlayer"),
+        energyAmount: int("energyAmount", 0))
   result.beat = int("beat")
+
+proc minionToJson(minion: MinionState): JsonNode =
+  result = %*{"id": minion.id, "owner": minion.owner,
+    "card": cardToJson(minion.card),
+    "currentToughness": minion.currentToughness,
+    "bonusPower": minion.bonusPower,
+    "gainedRules": rulesToJson(minion.gainedRules),
+    "lostRules": rulesToJson(minion.lostRules),
+    "enteredTurn": minion.enteredTurn,
+    "firedTurnTriggers": firedToJson(minion.firedTurnTriggers),
+    "canAttack": minion.canAttack,
+    "hasAttacked": minion.hasAttacked,
+    "hiddenTurns": minion.hiddenTurns,
+    "stolenFrom": (if minion.stolenFrom.isSome: %minion.stolenFrom.get
+      else: newJNull())}
+  # Only lasting cards carry a count, so other states (and the replay
+  # hashes taken from them) read as before Lasts existed.
+  if minion.lastsTurns != 0:
+    result["lastsTurns"] = %minion.lastsTurns
+
+proc minionFromJson(entry: JsonNode): MinionState =
+  MinionState(
+    id: entry.field("id").integer("minion ID", 1),
+    owner: entry.field("owner").integer("minion owner", 0, PlayerCount - 1),
+    card: cardFromJson(entry.field("card")),
+    currentToughness: entry.field("currentToughness").integer("toughness", 0),
+    enteredTurn: if entry.hasKey("enteredTurn"):
+      entry["enteredTurn"].integer("entered turn", 0) else: 0,
+    firedTurnTriggers: if entry.hasKey("firedTurnTriggers"):
+      firedFromJson(entry["firedTurnTriggers"]) else: {},
+    bonusPower: if entry.hasKey("bonusPower"):
+      entry["bonusPower"].integer("power bonus") else: 0,
+    gainedRules: if entry.hasKey("gainedRules"):
+      rulesFromJson(entry["gainedRules"]) else: @[],
+    lostRules: if entry.hasKey("lostRules"):
+      rulesFromJson(entry["lostRules"]) else: @[],
+    canAttack: if entry.hasKey("canAttack"): entry["canAttack"].getBool(true) else: true,
+    hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false,
+    hiddenTurns: if entry.hasKey("hiddenTurns"):
+      entry["hiddenTurns"].integer("hidden turns", Always) else: 0,
+    lastsTurns: if entry.hasKey("lastsTurns"):
+      entry["lastsTurns"].integer("lasting turns", 0) else: 0,
+    stolenFrom: if entry.hasKey("stolenFrom") and
+        entry["stolenFrom"].kind != JNull:
+      some(entry["stolenFrom"].integer("stolen from", 0, PlayerCount - 1))
+      else: none(int))
 
 proc gameToJson*(game: GameState): JsonNode =
   var players = newJArray()
   for player in game.players:
     var board = newJArray()
     for minion in player.board:
-      board.add %*{"id": minion.id, "owner": minion.owner,
-        "card": cardToJson(minion.card),
-        "currentToughness": minion.currentToughness,
-        "bonusPower": minion.bonusPower,
-        "gainedRules": rulesToJson(minion.gainedRules),
-        "lostRules": rulesToJson(minion.lostRules),
-        "enteredTurn": minion.enteredTurn,
-        "firedTurnTriggers": firedToJson(minion.firedTurnTriggers),
-        "canAttack": minion.canAttack,
-        "hasAttacked": minion.hasAttacked,
-        "hiddenTurns": minion.hiddenTurns,
-        "stolenFrom": (if minion.stolenFrom.isSome: %minion.stolenFrom.get
-          else: newJNull())}
+      board.add minionToJson(minion)
     players.add %*{"heroClass": player.heroClass.classId(),
       "life": player.life, "totalEnergy": player.totalEnergy,
       "energy": player.energy, "deck": cardsToJson(player.deck),
@@ -456,7 +508,7 @@ proc gameToJson*(game: GameState): JsonNode =
       entry["handIndex"] = %event.handIndex
     if event.home.isSome:
       entry["home"] = %event.home.get
-    if event.kind == StealVfx:
+    if event.kind == GainControlVfx:
       entry["card"] = cardToJson(event.card)
       entry["fromPlayer"] = %event.fromPlayer
     visualEvents.add entry
@@ -468,17 +520,32 @@ proc gameToJson*(game: GameState): JsonNode =
     pendingToss = %*{"player": game.pendingToss.player,
       "count": game.pendingToss.count, "source": game.pendingToss.source,
       "text": game.pendingToss.text, "remaining": remaining}
+    if game.pendingToss.sourcePlayer >= 0:
+      pendingToss["sourcePlayer"] = %game.pendingToss.sourcePlayer
+    if game.pendingToss.sourceId != 0:
+      pendingToss["sourceId"] = %game.pendingToss.sourceId
   var pendingTriggers = newJArray()
   for pending in game.pendingTriggers:
-    pendingTriggers.add %*{"owner": pending.owner,
+    var entry = %*{"owner": pending.owner,
       "sourceId": pending.sourceId, "trigger": pending.trigger,
       "attacker": choiceToJson(pending.attacker), "onPlay": pending.onPlay}
-  %*{"players": players, "currentPlayer": game.currentPlayer,
+    if pending.played.name.len > 0:
+      entry["played"] = cardToJson(pending.played)
+    if pending.playedId != 0:
+      entry["playedId"] = %pending.playedId
+    if pending.departed.isSome:
+      entry["departed"] = minionToJson(pending.departed.get)
+    if pending.lasts:
+      entry["lasts"] = %true
+    pendingTriggers.add entry
+  result = %*{"players": players, "currentPlayer": game.currentPlayer,
     "turnNumber": game.turnNumber, "nextMinionId": game.nextMinionId,
     "visualEvents": visualEvents, "visualBeat": game.visualBeat,
     "pendingToss": pendingToss,
     "pendingTriggers": pendingTriggers,
     "gameOver": game.gameOver, "winner": game.winner}
+  if game.turnEnding:
+    result["turnEnding"] = %true
 
 proc gameFromJson*(node: JsonNode): GameState =
   ## Current rules consume no RNG after dealing. Full deck order is preserved,
@@ -505,34 +572,13 @@ proc gameFromJson*(node: JsonNode): GameState =
       discardPile: cardsFromJson(source.field("discardPile")),
       dead: if source.hasKey("dead"): source["dead"].getBool(false)
         else: false)
-    if player.energy > player.totalEnergy:
-      raise newException(ValueError, "Snapshot energy exceeds total energy")
+    # Extra energy lifts energy above the total until the next refill.
+    if player.energy < 0:
+      raise newException(ValueError, "Snapshot energy is negative")
     let board = source.field("board")
     board.requireKind(JArray, "board")
     for entry in board:
-      let minion = MinionState(
-        id: entry.field("id").integer("minion ID", 1),
-        owner: entry.field("owner").integer("minion owner", 0, PlayerCount - 1),
-        card: cardFromJson(entry.field("card")),
-        currentToughness: entry.field("currentToughness").integer("toughness", 0),
-        enteredTurn: if entry.hasKey("enteredTurn"):
-          entry["enteredTurn"].integer("entered turn", 0) else: 0,
-        firedTurnTriggers: if entry.hasKey("firedTurnTriggers"):
-          firedFromJson(entry["firedTurnTriggers"]) else: {},
-        bonusPower: if entry.hasKey("bonusPower"):
-          entry["bonusPower"].integer("power bonus") else: 0,
-        gainedRules: if entry.hasKey("gainedRules"):
-          rulesFromJson(entry["gainedRules"]) else: @[],
-        lostRules: if entry.hasKey("lostRules"):
-          rulesFromJson(entry["lostRules"]) else: @[],
-        canAttack: if entry.hasKey("canAttack"): entry["canAttack"].getBool(true) else: true,
-        hasAttacked: if entry.hasKey("hasAttacked"): entry["hasAttacked"].getBool(false) else: false,
-        hiddenTurns: if entry.hasKey("hiddenTurns"):
-          entry["hiddenTurns"].integer("hidden turns", Always) else: 0,
-        stolenFrom: if entry.hasKey("stolenFrom") and
-            entry["stolenFrom"].kind != JNull:
-          some(entry["stolenFrom"].integer("stolen from", 0, PlayerCount - 1))
-          else: none(int))
+      let minion = minionFromJson(entry)
       # Trinkets have no toughness; minions always have some.
       if minion.owner != owner or minion.card.kind == Spell or
           (minion.card.kind == Minion and minion.currentToughness < 1) or
@@ -553,7 +599,7 @@ proc gameFromJson*(node: JsonNode): GameState =
       boardCount: entry.field("boardCount").integer("visual board count", 0),
       beat: if entry.hasKey("beat"): entry["beat"].integer("visual beat", 0)
         else: 0,
-      card: if kind in {DeathVfx, BounceVfx, TossVfx, StealVfx}:
+      card: if kind in {DeathVfx, BounceVfx, TossVfx, GainControlVfx}:
         cardFromJson(entry.field("card"))
         else: Card(),
       handIndex: if kind in {BounceVfx, TossVfx}:
@@ -563,8 +609,8 @@ proc gameFromJson*(node: JsonNode): GameState =
       home: if entry.hasKey("home"):
         some(entry["home"].integer("visual home", 0, PlayerCount - 1))
         else: none(int),
-      fromPlayer: if kind == StealVfx:
-        entry.field("fromPlayer").integer("steal source", 0, PlayerCount - 1)
+      fromPlayer: if kind == GainControlVfx:
+        entry.field("fromPlayer").integer("control source", 0, PlayerCount - 1)
         else: 0)
     # Removed minions legitimately remain in VFX snapshots after a bounce.
     if event.target.kind notin {HeroChoice, CreatureChoice} or
@@ -580,7 +626,12 @@ proc gameFromJson*(node: JsonNode): GameState =
       player: entry.field("player").integer("toss player", 0, PlayerCount - 1),
       count: entry.field("count").integer("toss count", 1),
       source: entry.field("source").stringValue("toss source"),
-      text: entry.field("text").stringValue("toss text"))
+      text: entry.field("text").stringValue("toss text"),
+      sourcePlayer: if entry.hasKey("sourcePlayer"):
+        entry["sourcePlayer"].integer("toss source player", 0,
+          PlayerCount - 1) else: -1,
+      sourceId: if entry.hasKey("sourceId"):
+        entry["sourceId"].integer("toss source card", 1) else: 0)
     if pending.count > result.players[pending.player].hand.len:
       raise newException(ValueError, "Invalid snapshot pending toss")
     let remaining = entry.field("remaining")
@@ -600,15 +651,40 @@ proc gameFromJson*(node: JsonNode): GameState =
         trigger: entry.field("trigger").integer("trigger index", 0),
         attacker: if entry.hasKey("attacker"):
           choiceFromJson(entry["attacker"]) else: Canceled,
-        onPlay: entry.hasKey("onPlay") and entry["onPlay"].getBool(false))
-      let location = result.minionLocation(pending.sourceId)
-      if not location.found or location.player != pending.owner or
-          not pending.onPlay and pending.trigger >= result.players[
-            location.player].board[location.index].heldRules.triggers().len:
-        raise newException(ValueError, "Invalid snapshot pending trigger")
+        onPlay: entry.hasKey("onPlay") and entry["onPlay"].getBool(false),
+        played: if entry.hasKey("played"): cardFromJson(entry["played"])
+          else: Card(),
+        playedId: if entry.hasKey("playedId"):
+          entry["playedId"].integer("played card", 1) else: 0,
+        departed: if entry.hasKey("departed"):
+          some(minionFromJson(entry["departed"])) else: none(MinionState),
+        lasts: entry.hasKey("lasts") and entry["lasts"].getBool(false))
+      # A destroyed card's trigger reads it as it left; any other's source
+      # is in play, under the trigger's owner. A Lasts count is neither: its
+      # card may have gone or changed hands by the time it comes.
+      if pending.lasts:
+        if pending.onPlay or pending.departed.isSome:
+          raise newException(ValueError, "Invalid snapshot pending trigger")
+      elif pending.departed.isSome:
+        let gone = pending.departed.get
+        if gone.id != pending.sourceId or pending.onPlay or
+            result.minionLocation(gone.id).found or
+            pending.trigger >= gone.heldRules.triggers().len:
+          raise newException(ValueError, "Invalid snapshot pending trigger")
+      else:
+        let location = result.minionLocation(pending.sourceId)
+        if not location.found or location.player != pending.owner or
+            not pending.onPlay and pending.trigger >= result.players[
+              location.player].board[location.index].heldRules.triggers().len:
+          raise newException(ValueError, "Invalid snapshot pending trigger")
       result.pendingTriggers.add pending
   result.gameOver = if node.hasKey("gameOver"): node["gameOver"].getBool(false) else: false
   result.winner = if node.hasKey("winner"): node["winner"].getInt(-1) else: -1
+  # A turn only stays ending while its end-of-turn triggers wait.
+  result.turnEnding = node.hasKey("turnEnding") and
+    node["turnEnding"].getBool(false)
+  if result.turnEnding and not result.waitingChoice:
+    raise newException(ValueError, "Invalid snapshot ending turn")
 
 proc snapshotToJson*(snapshot: Snapshot): JsonNode =
   %*{"schemaVersion": SnapshotSchemaVersion, "matchId": snapshot.matchId,

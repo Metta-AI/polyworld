@@ -11,10 +11,12 @@ type
   Mechanic* = enum
     ## The mechanics that get an explanation, by the word the card prints.
     RangedMechanic = "Ranged"
+    ReadyMechanic = "Ready"
     HiddenMechanic = "Hidden"
+    LastsMechanic = "Lasts"
     SummonMechanic = "Summon"
     FightMechanic = "Fight"
-    StealMechanic = "Gain control"
+    GainControlMechanic = "Gain control"
     OffClassMechanic = "Off-class"
 
 const
@@ -22,37 +24,43 @@ const
     RangedMechanic:
       "Takes no combat damage from minions without Ranged, attacking or " &
       "defending. Spells and other card effects still damage it.",
+    ReadyMechanic:
+      "Can attack the turn it enters play. Gained later, it can attack " &
+      "that turn, if it hasn't already.",
     HiddenMechanic:
-      "Can't be attacked, but can still attack, and card effects still " &
-      "reach it. Hidden 1 lasts until its owner's next turn starts, " &
-      "Hidden 2 a turn longer; plain Hidden lasts while it stays in play.",
+      "Can't be attacked. Hidden(N) Lasts N turns of the owner." &
+      "Plain Hidden lasts while it stays in play.",
+    LastsMechanic:
+      "Leaves play by itself. Lasts N counts down as each of its " &
+      "controller's turns ends and goes to the discard pile at 0. Rules " &
+      "written before it still happen on its last turn.",
     SummonMechanic:
       "Puts the named card into play. Summoned minions can " &
       "attack from their owner's next turn.",
     FightMechanic:
       "The two minions deal their power to each other at once, as in " &
       "combat, so Ranged applies. Neither uses up its attack.",
-    StealMechanic:
-      "The minion joins your board for good, keeping its damage and " &
-      "changes, and can attack from your next turn. Returned or slain, it " &
-      "still goes to its owner's hand or discard pile.",
+    GainControlMechanic:
+      "The card in play joins its new controller's board. Returned or " &
+      "destroyed, it still goes to its owner's hand or discard pile.",
     OffClassMechanic:
       "Cards of a class other than your hero's cost " & $OffClassCost &
-      " more energy, shown as a purple +X. Class cards you control lower " &
-      "that extra cost."
+      " more energy. Class cards you control lower that extra cost."
   ]
 
   KeywordMechanics: array[Keyword, Mechanic] = [
-    Ranged: RangedMechanic
+    Ranged: RangedMechanic,
+    Ready: ReadyMechanic
   ]
 
 proc mechanic(rule: Rule): Option[Mechanic] =
   ## The mechanic this rule prints, not counting the rules inside it.
   if rule of KeywordRule: some(KeywordMechanics[KeywordRule(rule).keyword])
   elif rule of HiddenRule: some(HiddenMechanic)
+  elif rule of LastsRule: some(LastsMechanic)
   elif rule of SummonRule: some(SummonMechanic)
   elif rule of FightRule: some(FightMechanic)
-  elif rule of StealRule: some(StealMechanic)
+  elif rule of GainControlRule: some(GainControlMechanic)
   elif rule of LevelUpRule: some(OffClassMechanic)
   else: none(Mechanic)
 

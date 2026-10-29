@@ -14,13 +14,21 @@ import
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
     terrainsurfaces, viewers, visions, worldbars, worldtexts],
+<<<<<<< Updated upstream
   appearances, assets, content, maps, sim, game, replays, ui, controls
+=======
+  attackclips, assets, content, maps, sim, game, replays, ui, controls
+>>>>>>> Stashed changes
 
 when defined(takeScreenshot):
   import std/[os, strutils]
 
 const
-  DefaultCameraDistance = 13.0'f
+  CameraDistanceScale = 1.75'f32
+    ## Pulls every camera mode back so spectators see more of the dungeon.
+  DefaultCameraDistance = 13.0'f * CameraDistanceScale
+  ArenaCameraDistance = 17.0'f32
+    ## Frames the whole 10x10 arena room, walls included.
   AtlasPath = TmpRoot & "/cta.atlas.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10
@@ -30,6 +38,10 @@ const
   FacingOffset = 0.4'f32
   FacingLength = 0.45'f32
   FacingHalfWidth = 0.18'f32
+  CorpseLingerTicks = TickRate * 8
+    ## How long a fallen monster lies still before it sinks away.
+  CorpseSinkTicks = TickRate * 3 div 2
+  CorpseSinkDepth = 1.0'f32
 
 type
   ActorVisual = object
@@ -39,6 +51,16 @@ type
     clip: int
     visible: bool
     pose: CharacterPose
+
+  Corpse = object
+    ## An actor the simulation removed when it fell. The client keeps its
+    ## body to play the death clip; monsters then sink, heroes stay down.
+    kind: ActorKind
+    class: uint8
+    home: TileRef
+    position: Vec3
+    angle: float32
+    tick: int32       ## the tick it fell on
 
   SeekCheckpoint = object
     ## Captures all authoritative state needed for an exact replay seek.
@@ -291,15 +313,58 @@ proc runGraphics*() =
     selectionOutline = initSelectionOutline()
     models: CharacterModels
   profileBlock "models":
+<<<<<<< Updated upstream
     models = loadCharacterModels()
   let
     heroModels = models.heroes
     monsterModels = models.monsters
+=======
+    let
+      library = readManifest(ChargenLibrary)
+      roster = readCharacterRoster()
+
+    proc loadPresetModel(preset: Preset, height: float32): CharacterModel =
+      ## Assembles existing equipment and preserves the authored face colors.
+      result = loadCharacterModel(
+        readPresetCharacter(ChargenLibrary, library, preset, CharacterClips),
+        height
+      )
+      result.fitCharacterHeight(height, result.clipIndex("Idle_Loop"))
+      for category in library.presetManifest(preset).categories:
+        if category.key in ["Eyes", "Mouth", "Brow"]:
+          for item in category.items:
+            result.unlitParts.add item.nodes
+
+    for class in HeroClass:
+      let preset = library.namedPreset(HeroPresets[class])
+      heroModels[class] = loadPresetModel(preset, HeroTargetHeight)
+      let clips = class.heroClips()
+      if clips[2] in AuthoredClips:
+        var held: seq[string]
+        for category in library.presetManifest(preset).categories:
+          if category.key == "Right hand":
+            for item in category.items:
+              held.add item.nodes
+        discard heroModels[class].addAttackClip(clips[2], clips[0], held)
+    for species in Species:
+      let
+        entry = roster.mobs[species.ord]
+        model = loadPresetModel(
+          entry.preset, HeroTargetHeight * RankScales[species.monsterRank]
+        )
+        rgb = entry.skinRgb
+      partNodes(model.file.root).applySkin(
+        library.presetManifest(entry.preset), color(rgb[0], rgb[1], rgb[2], 1)
+      )
+      monsterModels[species] = model
+>>>>>>> Stashed changes
   drawSplash(sk, window, splash.name)
 
   var
     heroIdle, heroRun, heroAttack: array[HeroClass, int]
     monsterIdle, monsterRun, monsterAttack: array[Species, int]
+    heroDeath: array[HeroClass, int]
+    monsterDeath: array[Species, int]
   for class in HeroClass:
     let
       model = heroModels[class]
@@ -307,6 +372,7 @@ proc runGraphics*() =
     heroIdle[class] = model.clipIndex(clips[0])
     heroRun[class] = model.clipIndex(clips[1])
     heroAttack[class] = model.clipIndex(clips[2])
+    heroDeath[class] = model.clipIndex(DeathClip)
   for species in Species:
     let
       model = monsterModels[species]
@@ -314,9 +380,15 @@ proc runGraphics*() =
     monsterIdle[species] = model.clipIndex(clips[0])
     monsterRun[species] = model.clipIndex(clips[1])
     monsterAttack[species] = model.clipIndex(clips[2])
+    monsterDeath[species] = model.clipIndex(DeathClip)
 
   var
+<<<<<<< Updated upstream
     visuals: seq[ActorVisual]
+=======
+    visuals: seq[HeroVisual]
+    corpses: seq[Corpse]
+>>>>>>> Stashed changes
     previousActorPositions: Table[int32, Vec3]
     previousActorFacings: Table[int32, float32]
     renderAlpha = 1.0'f32
@@ -366,6 +438,21 @@ proc runGraphics*() =
       previous = previousActorFacings.getOrDefault(actor.id, current)
     previous + shortestTurn(previous, current) * renderAlpha
 
+  proc attackClipTime(actor: Actor): float32 =
+    ## Times an authored attack clip off the ability rather than the wall
+    ## clock: the wind-up fills the windup ticks and the blow lands on the
+    ## tick the hit does, so the whole clip plays however short the swing.
+    let
+      spec = Abilities[actor.action]
+      ticks = max(float32(actor.actionTicks - 1) + renderAlpha, 0)
+      windup = max(spec.windupTicks.float32, 1)
+      recover = max(spec.recoverTicks.float32, 1)
+    if ticks < windup:
+      AttackImpactTime * ticks / windup
+    else:
+      AttackImpactTime + (AttackClipDuration - AttackImpactTime) *
+        min((ticks - windup) / recover, 1)
+
   type
     ActorParticleState = object
       id: int32
@@ -374,6 +461,9 @@ proc runGraphics*() =
       hp: int16
       action: Ability
       actionTicks: int16
+      home: TileRef
+      position: Vec3
+      angle: float32
       origin: Vec3
       targetFound: bool
       targetPosition: Vec3
@@ -382,6 +472,7 @@ proc runGraphics*() =
     for actor in run.world.actors:
       if not actor.alive:
         continue
+      let position = renderPosition(actor)
       var state = ActorParticleState(
         id: actor.id,
         kind: actor.kind,
@@ -389,7 +480,10 @@ proc runGraphics*() =
         hp: actor.hp,
         action: actor.action,
         actionTicks: actor.actionTicks,
-        origin: renderPosition(actor) + vec3(0, 0.82'f32, 0)
+        home: actor.home,
+        position: position,
+        angle: previousActorFacings.getOrDefault(actor.id, actorYaw(actor)),
+        origin: position + vec3(0, 0.82'f32, 0)
       )
       let targetSlot = run.world.actorSlot(actor.target)
       if targetSlot >= 0 and run.world.actors[targetSlot].alive:
@@ -491,6 +585,34 @@ proc runGraphics*() =
         continue
       emitActorAttack(old)
 
+  proc collectCorpses(oldActors: seq[ActorParticleState]) =
+    ## Keeps a body for everyone who fell this tick, and lets monster
+    ## bodies that have sunk away go.
+    for old in oldActors:
+      let slot = run.world.actorSlot(old.id)
+      if slot < 0 or not run.world.actors[slot].alive:
+        corpses.add Corpse(
+          kind: old.kind,
+          class: old.class,
+          home: old.home,
+          position: old.position,
+          angle: old.angle,
+          tick: run.world.tick
+        )
+    var kept = 0
+    for corpse in corpses:
+      if corpse.kind == HeroActor or run.world.tick - corpse.tick <
+          CorpseLingerTicks + CorpseSinkTicks:
+        corpses[kept] = corpse
+        inc kept
+    corpses.setLen(kept)
+
+  proc advanceTracked() =
+    ## Advances one tick outside the frame loop, still keeping bodies.
+    let oldActors = captureParticleActors()
+    advanceGame()
+    collectCorpses(oldActors)
+
   var
     cameraDistance = DefaultCameraDistance
     cameraTarget = vec3(0, 0, 0)
@@ -506,8 +628,8 @@ proc runGraphics*() =
     actionCam = initActionCam(
       subjectMode = true,
       defaultDistance = DefaultCameraDistance,
-      minDistance = 12,
-      maxDistance = 36,
+      minDistance = 12 * CameraDistanceScale,
+      maxDistance = 36 * CameraDistanceScale,
       tight = 0.35,
       followRate = 3.5,
       zoomRate = 2.5,
@@ -581,9 +703,15 @@ proc runGraphics*() =
     previousActorPositions.clear()
     previousActorFacings.clear()
     particles.clearParticles()
+    var kept = 0
+    for corpse in corpses:
+      if corpse.tick <= run.world.tick:
+        corpses[kept] = corpse
+        inc kept
+    corpses.setLen(kept)
     renderAlpha = 1
     while run.world.tick < target:
-      advanceGame()
+      advanceTracked()
       cacheSeekCheckpoint()
 
   replayCheckpoints = @[captureCheckpoint()]
@@ -701,6 +829,21 @@ proc runGraphics*() =
     selectAllHeroes()
     actionCam.enabled = true
     followSelection = false
+
+  proc arenaCenter(): Vec3 =
+    ## Returns the middle of the arena room's floor.
+    let room = run.dungeon.rooms[ArenaLevel][0]
+    vec3(
+      room.x.float32 + room.width.float32 / 2 - HalfGrid,
+      tileCenter(ArenaLevel, int(room.x), int(room.z)).y,
+      room.z.float32 + room.depth.float32 / 2 - HalfGrid
+    )
+
+  if run.world.isArena and not playerMode():
+    # The arena room fits in one fixed shot, so hold it instead of chasing.
+    actionCam.enabled = false
+    cameraTarget = arenaCenter()
+    cameraDistance = ArenaCameraDistance
 
   proc selectedCenter(): Vec3 =
     ## Returns the midpoint of all selected living heroes.
@@ -1219,11 +1362,12 @@ proc runGraphics*() =
       for _ in 0 ..< getEnv("SIM_TICKS").parseInt:
         if run.world.phase in {EscapedPhase, WipedPhase}:
           break
-        advanceGame()
+        advanceTracked()
       # Snap rather than ease: a capture renders a handful of frames, which
       # is nowhere near enough for a smoothed camera to travel from the
       # entrance to wherever the party actually got to.
-      cameraTarget = partyCenter()
+      if not run.world.isArena:
+        cameraTarget = partyCenter()
     if run.replayMode and existsEnv("REPLAY_TICK"):
       transport.seekTo(int32(getEnv("REPLAY_TICK").parseInt))
       cameraTarget = partyCenter()
@@ -1280,6 +1424,7 @@ proc runGraphics*() =
           advanceGame()
           feedCtaActions(observeTick = true)
           emitTickParticles(oldActors)
+          collectCorpses(oldActors)
           cacheSeekCheckpoint()
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
@@ -1404,7 +1549,7 @@ proc runGraphics*() =
                   10.0'f32 + selectedRadius(groupCenter) * 2.8'f32,
                   16.0'f32,
                   80.0'f32
-                ) * groupCameraScale
+                ) * CameraDistanceScale * groupCameraScale
               cameraTarget = mix(
                 cameraTarget,
                 groupCenter + vec3(0, 0.45'f32, 0),
@@ -1477,6 +1622,7 @@ proc runGraphics*() =
                 else:
                   if hero: heroIdle[actor.heroClass]
                   else: monsterIdle[actor.species]
+<<<<<<< Updated upstream
             visuals[slot].angle = actorRenderFacing(actor)
             if visuals[slot].clip != wantedClip:
               visuals[slot].clip = wantedClip
@@ -1492,6 +1638,42 @@ proc runGraphics*() =
               visuals[slot].animTime
             )
             visuals[slot].visible = true
+=======
+              if visuals[slot].clip != wantedClip:
+                visuals[slot].clip = wantedClip
+                visuals[slot].animTime = 0
+              if active:
+                visuals[slot].animTime += dt * transport.speed.float32
+              if actor.busy and hero and
+                  actor.heroClass.heroClips()[2] in AuthoredClips:
+                visuals[slot].animTime = attackClipTime(actor)
+            drawCharacter(
+              scene, model, position, visuals[slot].angle,
+              visuals[slot].clip, visuals[slot].animTime)
+          for corpse in corpses:
+            if int(corpse.home.level) < visibleFrom:
+              continue
+            if corpse.kind == MonsterActor and
+                not selectedVisible(corpse.home):
+              continue
+            let
+              hero = corpse.kind == HeroActor
+              model =
+                if hero: heroModels[HeroClass(corpse.class)]
+                else: monsterModels[Species(corpse.class)]
+              clip =
+                if hero: heroDeath[HeroClass(corpse.class)]
+                else: monsterDeath[Species(corpse.class)]
+              ticks = float32(run.world.tick - corpse.tick) + renderAlpha
+              sinking = clamp(
+                (ticks - CorpseLingerTicks.float32) / CorpseSinkTicks.float32,
+                0, 1)
+              depth = if hero: 0'f32 else: CorpseSinkDepth * sinking
+            # Death plays once and holds its last frame.
+            drawCharacter(
+              scene, model, corpse.position - vec3(0, depth, 0), corpse.angle,
+              clip, min(ticks / TickRate.float32, model.clipDuration(clip)))
+>>>>>>> Stashed changes
 
         proc drawWorldActors() =
           ## Reuses each actor's pose for shadows, color and outlines.

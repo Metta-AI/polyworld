@@ -121,10 +121,6 @@ type
     visualRng*: Rand
       ## Visual seeds never advance the game's RNG.
 
-proc keywordLine*(minion: MinionState): KeywordLine =
-  ## Its gained and lost keywords, for the type line on its face.
-  KeywordLine(added: minion.addedKeywords, lost: minion.lostKeywords)
-
 proc drawFaceUp*(layout: TableLayout, player: int): bool =
   if layout.drawVisible.isNil: layout.handVisible(player)
   else: layout.drawVisible(player)
@@ -180,7 +176,7 @@ proc queuedSummon*(queued: openArray[VisualEvent], minionId: int): bool =
   ## A summoned or stolen minion whose beat hasn't played yet stays off its
   ## new board.
   for event in queued:
-    if event.kind in {SummonVfx, StealVfx} and
+    if event.kind in {SummonVfx, GainControlVfx} and
         event.target.kind == CreatureChoice and
         event.target.creatureId == minionId:
       return true
@@ -510,7 +506,7 @@ proc countHiddenSummons*(play: var TablePlay, playerCount: int) =
   play.hiddenSummons = newSeq[int](playerCount)
   for event in play.queuedEvents:
     # A stolen minion joins the end of its new board, as a summon does.
-    if event.kind in {SummonVfx, StealVfx}:
+    if event.kind in {SummonVfx, GainControlVfx}:
       inc play.hiddenSummons[event.target.owner]
 
 proc presentationIdle*(play: TablePlay, game: GameState): bool =
@@ -545,6 +541,15 @@ proc resetTable*(play: var TablePlay) =
     visualRng: play.visualRng
   )
 
+type
+  InspectedCard* = object
+    ## The card the inspector shows large, as the table shows it.
+    found*: bool
+    card*: Card
+    power*, toughness*: int  ## A minion in play's live stats, else -1.
+    rules*: seq[RuleLine]  ## A card in play's changed rules.
+    extraCost*: int  ## A card in hand's surcharge.
+
 proc inspectedCard*(
     window: Window,
     viewProjection: Mat4,
@@ -553,28 +558,25 @@ proc inspectedCard*(
     layout: TableLayout,
     hoverIndex: int,
     handOwner = -1
-): tuple[found: bool, card: Card, power, toughness: int,
-    keywords: KeywordLine] =
+): InspectedCard =
   ## The card to show large. While aiming: a legal target under the mouse,
   ## else the card whose rule is being aimed. Otherwise the hovered hand
   ## card, the closest board card under the mouse with its live stats, or
-  ## the visible top of a discard pile. `handOwner` is whose hand
-  ## `hoverIndex` is in (default: the current player).
+  ## the visible top of a discard pile, as printed. `handOwner` is whose
+  ## hand `hoverIndex` is in (default: the current player).
   result.power = -1
   result.toughness = -1
-  proc show(result: var tuple[found: bool, card: Card, power, toughness: int,
-      keywords: KeywordLine], minion: MinionState) =
-    ## A card in play, with its live stats.
+  proc show(result: var InspectedCard, minion: MinionState) =
+    ## A card in play, with its live stats and rules.
     result.card = minion.card
     result.found = true
+    result.rules = minion.ruleLines
     if minion.card.kind == Minion:
       result.power = minion.power
       result.toughness = minion.currentToughness
-      result.keywords = minion.keywordLine
     else:
       result.power = -1
       result.toughness = -1
-      result.keywords = KeywordLine()
   # One card: the closest under the mouse. Its stats come from it alone,
   # never left over from another card the mouse also touches.
   var
@@ -603,6 +605,7 @@ proc inspectedCard*(
     result.card = play.pendingCard.pickedFace(play.pendingPicks,
       game.boardCards())
     result.found = true
+    result.extraCost = game.extraCost(game.currentPlayer, play.pendingCard)
     return
   let
     owner = if handOwner >= 0: handOwner else: game.currentPlayer
@@ -612,6 +615,7 @@ proc inspectedCard*(
       not play.queuedEvents.queuedDraw(owner, hoverIndex):
     result.card = player.hand[hoverIndex]
     result.found = true
+    result.extraCost = game.extraCost(owner, result.card)
     return
   if under.found:
     result.show(game.players[under.owner].board[under.index])
@@ -690,8 +694,7 @@ proc playHandCard*(
         play.pendingChoices = game.availableChoices(card)
         result = true
         if play.pendingChoices.selectableTargetCount() == 0:
-          discard game.runMinionRules(card, NoTarget,
-            sourceId = minionId)
+          discard game.finishPlay(card, @[NoTarget], minionId)
           play.pendingChoices.setLen(0)
           play.statusMessage =
             &"{card.name} enters play without a target."
@@ -726,7 +729,7 @@ proc playHandCard*(
     of Minion, Trinket:
       let minionId = game.playMinion(handIndex)
       if minionId != 0:
-        discard game.runMinionRules(card, sourceId = minionId)
+        discard game.finishPlay(card, @[NoTarget], minionId)
         # Its own slot, counting only the cards up to it: minions
         # its rules summon come after it and appear later.
         let
@@ -846,7 +849,7 @@ proc takePick*(
       if play.pendingTrigger:
         game.resolvePendingTrigger(picks)
       elif card.kind != Spell:
-        game.runMinionRules(card, picks)
+        game.finishPlay(card, picks, play.pendingSourceId)
       else:
         game.playCard(play.pendingCardIndex, picks)
   if resolved and spellAnimation:
@@ -933,7 +936,7 @@ proc updateTargeting*(
       &"{game.waitingTriggerName()} can't be canceled: choose a target."
   elif cancel:
     if card.kind != Spell:
-      discard game.runMinionRules(card, NoTarget)
+      discard game.finishPlay(card, @[NoTarget], play.pendingSourceId)
       play.statusMessage =
         &"{card.name}'s rule finishes without a target."
     else:
@@ -1130,7 +1133,7 @@ proc presentVisualEvents*(
       play.dyingMinions.add DyingMinion(target: event.target, card: event.card,
         heroClass: game.players[event.target.owner].heroClass,
         boardIndex: event.boardIndex, held: true, bouncing: true)
-    elif event.kind == StealVfx:
+    elif event.kind == GainControlVfx:
       # Keep the card in its old slot until its beat moves it across.
       let left = creatureChoice(event.fromPlayer, event.target.creatureId)
       play.dyingMinions.add DyingMinion(target: left, card: event.card,
@@ -1215,11 +1218,11 @@ proc presentVisualEvents*(
           suppressDiscardOwner = owner,
           duration =
             if dying: play.deathDiscard[owner] else: CardMoveDuration)
-      of StealVfx:
+      of GainControlVfx:
         let
           left = creatureChoice(event.fromPlayer, event.target.creatureId)
-          thief = event.target.owner
-          board = game.players[thief].board
+          controller = event.target.owner
+          board = game.players[controller].board
         var source = CardPose()
         for i in 0 ..< play.dyingMinions.len:
           if play.dyingMinions[i].bouncing and
@@ -1233,8 +1236,8 @@ proc presentVisualEvents*(
           if minion.id == event.target.creatureId:
             slot = i
         play.animations.add newCardAnimation(event.card,
-          game.players[thief].heroClass, source,
-          play.liveBoardPose(layout, thief, slot, board.len),
+          game.players[controller].heroClass, source,
+          play.liveBoardPose(layout, controller, slot, board.len),
           arcHeight = 1.0'f32, suppressBoardId = event.target.creatureId,
           duration = 0.7'f32, trackingTarget = event.target)
       of BounceVfx:
@@ -1410,7 +1413,7 @@ proc addTableCards*(
         currentPower = minion.power,
         currentToughness = minion.currentToughness,
         damageFlash = play.activeVfx.flashStrength(minionChoice),
-        keywordLine = minion.keywordLine,
+        ruleLines = minion.ruleLines,
         # Hidden from everyone but its owner, who sees it as it is.
         veiled = minion.hiddenTurns != 0 and playerIndex != viewer
       )
@@ -1631,7 +1634,7 @@ proc addAttackCard*(
     card = atkMinion.card,
     currentPower = atkMinion.power,
     currentToughness = atkMinion.currentToughness,
-    keywordLine = atkMinion.keywordLine
+    ruleLines = atkMinion.ruleLines
   )
   vfx.addCardGlow(atkPose, true, true, true, time)
 
@@ -1808,6 +1811,8 @@ proc updateBots*(
   ## Animates exactly the acting script's action, using human action rules.
   ## Humans choose their own discards and trigger targets. Attacks never
   ## end a turn. A failed script stops acting without selecting a fallback.
+  ## True when a bot's action passed the turn: its End Turn, or the last
+  ## choice its turn's end waited on.
   if game.gameOver:
     # The attack that ended the match still finishes its lunge, so the
     # result can show once the table settles.
@@ -1815,8 +1820,11 @@ proc updateBots*(
     return false
   if play.presentationIdle(game) and not play.attackActive:
     if humanActs():
-      if game.waitingToss and not play.tossPicking:
-        play.startTossPicking(game)
+      if game.waitingToss:
+        # The discard comes first. Triggers queued behind it wait, and most
+        # resolve on their own once it's done: none of them asks yet.
+        if not play.tossPicking:
+          play.startTossPicking(game)
       elif game.waitingTrigger and not play.pendingTargeting:
         play.startTriggerTargeting(game)
     else:
@@ -1840,7 +1848,7 @@ proc updateBots*(
               play.animateTransition(layout, before, game,
                 vm.action.choices.toChoices)
               play.statusMessage = name & " is playing..."
-              if decision == BotEndedTurn:
+              if game.turnNumber != before.turnNumber:
                 play.statusMessage = bots.botTurnStatus(game.currentPlayer,
                   if botName.isNil: "Bot" else: botName(game.currentPlayer))
                 result = true

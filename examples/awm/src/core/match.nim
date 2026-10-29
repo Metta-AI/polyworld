@@ -25,8 +25,8 @@ proc initBotMatch*(seats: openArray[Seat], seed: int64,
     bots: seq[BotVm], maxTicks: uint32,
     recorder: ReplayRecorder = nil): BotMatch =
   ## Starts a deterministic match with explicit seat-owned policies.
-  result = BotMatch(game: newGame(seats, seed), bots: bots, maxTicks: maxTicks,
-    recorder: recorder)
+  result = BotMatch(game: newGame(seats, seed, recordEvents = true),
+    bots: bots, maxTicks: maxTicks, recorder: recorder)
   for bot in result.bots:
     bot.ensureSeed(seed)
 

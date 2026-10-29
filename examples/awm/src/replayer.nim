@@ -90,9 +90,7 @@ proc present(replayer: Replayer, play: var TablePlay, game: var GameState,
   of ActionEndTurn:
     discard game.applyAction(action)
     play.animateTransition(layout, before, game)
-    play.statusMessage =
-      if game.gameOver: ""
-      else: replayer.playerName(game.currentPlayer) & " is thinking..."
+    play.statusMessage = if game.gameOver: "" else: name & " ends the turn."
   of ActionPlayCard:
     discard game.applyAction(action)
     play.addActionArrows(layout, before, game, action)
@@ -103,6 +101,10 @@ proc present(replayer: Replayer, play: var TablePlay, game: var GameState,
     play.addActionArrows(layout, before, game, action)
     play.animateTransition(layout, before, game)
     play.statusMessage = "A trigger resolves."
+  # End Turn, or the last choice the turn's end waited on, passed it.
+  if game.turnNumber != before.turnNumber and not game.gameOver:
+    play.statusMessage =
+      replayer.playerName(game.currentPlayer) & " is thinking..."
   replayer.checkTick(game, replayer.tick)
 
 proc update*(replayer: Replayer, play: var TablePlay, game: var GameState,

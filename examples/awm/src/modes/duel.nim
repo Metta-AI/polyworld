@@ -4,8 +4,9 @@ import std/[math, options, os, random, strformat, tables, times]
 when defined(takeScreenshot):
   import std/strutils
 import chroma, opengl, pixie, silky, vmath, windy
-import ../core/sim, ../core/sessions, ../core/bots, ../core/replays
-import ../app, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
+import ../core/sim, ../core/sessions, ../core/bots, ../core/replays,
+  ../core/eventtext
+import ../app, ../bench, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel,
   ../scene/courtyard, ../scene/heroes, ../net/web, ../scene/placement,
   ../ui/tuning, ../replayer
@@ -107,10 +108,13 @@ proc boardPoses(playerIndex, count: int): seq[CardPose] =
         min(1.75'f32, 9.0'f32 / (count - 1).float32)
     start = -spacing * (count - 1).float32 * 0.5'f32
     z = playerIndex.seatSide() * 1.25'f32
+    # A crowded row overlaps: each card lies a little over the one before.
+    lift = if spacing < CardWidth: RowOverlapLift else: 0'f32
   result.setLen(count)
   for i in 0 ..< count:
     result[i] = CardPose(
-      position: vec3(start + spacing * i.float32, CardPlaneY, z),
+      position: vec3(start + spacing * i.float32, CardPlaneY + lift * i.float32,
+        z),
       yaw: playerIndex.ownerYaw()
     )
 
@@ -166,14 +170,13 @@ proc drawCardReadingView(
     let player = game.players[
       if handOwner >= 0: handOwner else: game.currentPlayer]
     if getEnv("AWM_DEMO_CARD_HOVER") == "1" and player.hand.len > 0:
-      inspected.card = player.hand[0]
-      inspected.found = true
+      inspected = InspectedCard(found: true, card: player.hand[0],
+        power: -1, toughness: -1,
+        extraCost: game.extraCost(if handOwner >= 0: handOwner
+          else: game.currentPlayer, player.hand[0]))
   if not inspected.found:
     return
-  sk.drawCardReading(window, inspected.card, inspected.power,
-    inspected.toughness, inspected.keywords,
-    game.extraCost(if handOwner >= 0: handOwner else: game.currentPlayer,
-      inspected.card))
+  sk.drawCardReading(window, inspected)
 
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
@@ -194,6 +197,7 @@ proc runDuel*(app: App) =
     botClassWait = 1.5'f32
   var
     botVms: seq[BotVm]
+    terminalLog: LogReader  ## Where the terminal's printout of events is.
     seedRng = initRand()
     uiCapturesMouse = false  ## The pointer is over a tuning window.
     chooseCanceled = false  ## The choose screen's button, clicked last frame.
@@ -275,7 +279,7 @@ proc runDuel*(app: App) =
       stderr.writeLine "Player ", player + 1, " has an illegal deck: ", problem
 
   proc startDuel(seats: openArray[Seat], seed: int64) =
-    game = newGame(seats, seed)
+    game = newGame(seats, seed, recordEvents = true)
     play.resetTable()
     phase = PlayGame
     play.addOpeningHands(game, duelLayout)
@@ -690,6 +694,7 @@ proc runDuel*(app: App) =
     tuner.announce(duelTuningTargets())
 
   window.onFrame = proc() =
+    benchBeginFrame()
     var dt = frameDelta(lastFrameTime)
     hudTime += dt
     if app.replay != nil:
@@ -726,6 +731,8 @@ proc runDuel*(app: App) =
       else:
         discard play.updateBots(game, duelLayout, botVms, botClock, humanActs,
           dt)
+        for event in terminalLog.readNew(game):
+          echo event.describe()
 
     let
       aspect = window.size.x.float32 / max(window.size.y.float32, 1)
@@ -864,6 +871,10 @@ proc runDuel*(app: App) =
     if phase == PlayGame:
       play.presentVisualEvents(game, duelLayout, animationTime)
 
+    benchStart(CardsBuild)
+    # Silky's frame starts here: it draws card faces into their textures as
+    # the cards are built.
+    sk.beginUi(window, window.size)
     solid.clear()
     cardSurfaces.clear()
     vfx.clear()
@@ -874,6 +885,7 @@ proc runDuel*(app: App) =
         play.lungingMinion(), cameraEye)
       addAttackCard(solid, cardSurfaces, vfx, sk, play, game, duelLayout,
         animationTime)
+    benchStop(CardsBuild)
 
     if window.buttonPressed[KeyF8]:
       post.settings.enabled = not post.settings.enabled
@@ -899,7 +911,9 @@ proc runDuel*(app: App) =
       selectionStage.drawSky(viewProjection, cameraEye, environmentTime,
         brightness = 0.22)
     solid.draw(viewProjection)
+    benchStart(CardsDraw)
     cardSurfaces.draw(sk, viewProjection)
+    benchStop(CardsDraw)
 
     beginCharacters(scene, window, view, projection, cameraEye)
     scene.lightLikeCourtyard(currentSide)
@@ -961,7 +975,7 @@ proc runDuel*(app: App) =
       glDisable(GL_MULTISAMPLE)
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-    sk.beginUi(window, window.size)
+    benchStart(Ui)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     when PostLayerControls:
       if post.settings.enabled and post.layer != FinalLayer:
@@ -1066,7 +1080,11 @@ proc runDuel*(app: App) =
       app.replay.drawTransport(sk, window)
     when PostPanelControls:
       drawPostPanel(sk, window, post, courtyard)
+    benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
     sk.endUi()
+    sk.drawHudFaces()
+    benchStop(Ui)
+    benchEndFrame("duel")
     when defined(takeScreenshot):
       if existsEnv("AWM_CAPTURE_SEQUENCE"):
         inc screenshotFrame

@@ -159,26 +159,33 @@ proc drawRuleExplanations(sk: Silky, mechanics: seq[Mechanic], origin: Vec2,
     at.y += ExplanationSpacing
 
 proc drawCardReading*(sk: Silky, rect: UiRect, card: Card, power = -1,
-    toughness = -1, keywords = KeywordLine(), extraCost = 0): bool =
+    toughness = -1, rules: seq[RuleLine] = @[], extraCost = 0): bool =
   ## The large preview of the inspected card, in `rect`, with what its
   ## mechanics mean underneath. A minion in play passes its live stats
-  ## (toughness >= 0). True when the preview is shown.
+  ## (toughness >= 0), and any card in play its changed rules. True when
+  ## the preview is shown.
   when defined(takeScreenshot):
     if getEnv("AWM_CAPTURE_NO_HOVER") == "1":
       return false
-  sk.drawCardImage(sk.bakedCardImage(card), rect.origin, rect.size)
-  if toughness >= 0 or extraCost > 0:
-    sk.drawMinionOverlays(card, power, toughness, keywords, rect.origin,
-      rect.size, extraCost)
-  sk.drawRuleExplanations(card.mechanics(keywords.added),
+  let live = card.kind == Minion and toughness >= 0
+  sk.drawFace(FaceState(card: card,
+    power: if live: power else: -1,
+    toughness: if live: toughness else: -1,
+    rules: rules, extraCost: extraCost), rect.origin, rect.size)
+  # What its printed rules mean, and those it gained.
+  var shown = card.rules
+  for line in rules:
+    if line.change == GainedRule:
+      shown.add line.rule
+  sk.drawRuleExplanations(shown.mechanics(),
     rect.origin + vec2(0, rect.size.y + ExplanationGap), rect.size.x)
   true
 
-proc drawCardReading*(sk: Silky, window: Window, card: Card, power = -1,
-    toughness = -1, keywords = KeywordLine(), extraCost = 0): bool =
+proc drawCardReading*(sk: Silky, window: Window, inspected: InspectedCard):
+    bool =
   ## The duel's preview, on the left of the screen.
-  sk.drawCardReading(cardReadingRect(window), card, power, toughness, keywords,
-    extraCost)
+  sk.drawCardReading(cardReadingRect(window), inspected.card,
+    inspected.power, inspected.toughness, inspected.rules, inspected.extraCost)
 
 const
   ChooseCardHeight* = 820'f32  ## The offered cards, as tall as the screen allows.
@@ -260,8 +267,8 @@ proc drawChooseScreen*(sk: Silky, window: Window, card: Card,
       # A gold edge under the card the cursor is over.
       let frame = shown.scaled(1.035'f32)
       sk.drawRect(frame.origin, frame.size, rgbx(215, 181, 112, alpha))
-    sk.drawCardImage(sk.bakedCardImage(options[index]), shown.origin,
-      shown.size, rgbx(255, 255, 255, alpha))
+    sk.drawFlatFace(options[index], shown.origin, shown.size,
+      rgbx(255, 255, 255, alpha))
   if picked.isSome:
     return false
   drawButton(sk, window, chooseCancelRect(window), "Cancel")

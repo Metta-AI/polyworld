@@ -216,7 +216,7 @@ block:
   doAssert action.kind == ActionPlayCard
   doAssert action.choices[0].toChoice == optionChoice(1)
 
-echo "The reference script steals the biggest threat"
+echo "The reference script takes control of the biggest threat"
 block:
   var played = fixture(16)
   played.game.players[0].hand = @[baseCardNamed("Control")]
