@@ -5,17 +5,15 @@
 Two teams of five BASIC heroes battle to slay the enemy god. The official
 Softmax ladder uses OpenSkill based only on team wins, losses, and draws,
 with rating-based matchmaking. Team Draft allows one of each hero per team;
-opposing teams may pick the same hero. Game results separately report
-**Emmett's Glory**: each winning hero's lifetime XP divided by
-elapsed simulated minutes, rounded down to whole points. Fractional minutes
-and drafting time count. Losing teams, draws, and timeouts score zero.
-There is no fixed XP penalty per minute. Zero-duration games score zero.
+opposing teams may pick the same hero. Hosted results give every winning
+hero 1 and every losing hero 0. Draws and timeouts give all heroes 0.
+XP, Glory, match duration, and winning margins do not affect ladder ratings.
+Lifetime XP remains available separately for analysis.
 
 Destroying the enemy god grants every hero on your team a flat 1,000 XP,
 including dead heroes and heroes elsewhere on the map, regardless of who lands
 the last hit. This is awarded once on the final tick and included in lifetime XP
-before calculating Emmett's Glory. Finishing sooner increases the XP-per-minute
-score. Timeouts grant no god reward.
+for analysis. It does not affect ladder ratings. Timeouts grant no god reward.
 Destroying a tower or barracks grants its killer 200 XP and 75 gold.
 Towers fire once per second, and reload continues when they lose or switch
 targets. Their homing fireballs deal damage on arrival and follow the original
@@ -586,9 +584,9 @@ uncertainty (`sigma`) 25/3. The board shows conservative MMR (`mu - 3 * sigma`),
 skill, uncertainty, win rate, and mean game score. MMR uses only team wins,
 losses, and draws. Keep `margin_scale: null`: XP, Glory, and the size of a win
 must not affect rating changes. The platform derives team placements from
-winner-only scores: the winning team has positive Glory and the losing team
-has zero; draws and timeouts give both teams zero. OpenSkill receives only
-those placements. The mean-score column is informational.
+binary results: every winning hero has 1 and every losing hero has 0;
+draws and timeouts give both teams zero. OpenSkill receives only
+those placements. The mean-score column is the fraction of appearances won.
 Matchmaking uses estimated skill (`mu`), including initial skill for new
 entrants, while the leaderboard uses conservative MMR.
 
@@ -639,7 +637,7 @@ Only the last-hitting unit's team receives neutral XP. Eligible living heroes
 within six tiles on the same navigation floor split the pool. An eligible hero
 last hitter receives 15% first; the other 85% is shared among all eligible
 heroes, including that hero. Otherwise the full pool is shared. Only a hero
-last hitter receives gold. XP contributes to Emmett's Glory when the hero's team wins.
+last hitter receives gold. XP does not affect ladder ratings.
 
 Neutral objects use `objectKind(i) = 6`, `objectTeam(i) = 2`, and
 `objectClass(i) = 1`, `2`, or `3` for difficulty. Existing health, facing,

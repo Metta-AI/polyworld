@@ -150,14 +150,12 @@ ARM and x86 coverage. `tools/replay_probe.html` captures the Softmax iframe prot
 CTA stores authoritative per-hero banked gold and return flags.
 They are cloned, restored and hashed with the world. Surviving returned heroes tied
 for the most banked gold receive 1; every other hero receives 0. Light vs Dark
-also emits binary scores. GotA emits Emmett's Glory: lifetime XP per elapsed
-minute for the winning team, rounded down to integers, and zero for losses,
-draws, or timeouts, in zero-based platform slot order.
-GotA standings use OpenSkill Plackett-Luce with initial `mu: 25` and
-`sigma: 25/3`. MMR uses team wins, losses, and draws only. Keep
-`margin_scale: null` so XP and Glory cannot weight rating changes. Winner-only
-Glory determines team placements; OpenSkill receives those placements without
-the score margin. Emmett's Glory remains in game results for analysis.
+also emits binary scores. GotA emits binary results in zero-based platform slot order: 1 for each
+winning hero and 0 for losses, draws, or timeouts. Lifetime XP remains a
+separate analysis field. GotA standings use OpenSkill Plackett-Luce with
+initial `mu: 25` and `sigma: 25/3`. MMR uses team wins, losses, and draws
+only. Keep `margin_scale: null` so score margins cannot weight rating
+changes. XP, Glory, and match duration have no effect on ladder ratings.
 Its league scheduler must preserve `strategy: "team_n"`, `team_count: 2`,
 `team_layout: "blocks"`, `matchmaking: "elo_softmax"`,
 `matchmaking_temperature: 100`, and

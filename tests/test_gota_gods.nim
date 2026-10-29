@@ -186,6 +186,14 @@ for attacker in Team:
       if before.heroes[i].state == Dying:
         doAssert hero.state == Dying and hero.hp == 0
     doAssert capped.level == HeroMaxLevel and capped.xp == 1000
+    let ratings = world.clone()
+    for i, hero in ratings.heroes:
+      hero.totalXp = i * 10_000
+    for i, value in ratings.scores():
+      doAssert value == int(ratings.heroes[i].team == attacker)
+    ratings.draw = true
+    for value in ratings.scores():
+      doAssert value == 0
     when defined(replayEvents):
       var rewards = 0
       for event in world.events:

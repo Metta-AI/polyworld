@@ -267,12 +267,7 @@ proc episode(
           outcome = output["outcome"].getStr
           won = (outcome == "RedTeam" and slot < 5) or
             (outcome == "BlueTeam" and slot >= 5)
-          ticks = output["ticks"].getInt
-          expected =
-            if won and ticks > 0:
-              int(output["total_xp"][slot].getBiggestInt * 1440 div ticks)
-            else:
-              0
+          expected = int(won)
         doAssert score.kind == JInt
         doAssert score.getInt() == expected
     else:
