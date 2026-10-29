@@ -8,6 +8,19 @@ when defined(vcc):
 else:
   {.localPassC: "-ffp-contract=off".}
 
+when defined(tensorBlas):
+  when defined(macosx):
+    {.passL: "-framework Accelerate".}
+    const BlasHeader = "<Accelerate/Accelerate.h>"
+  else:
+    {.passL: "-lopenblas".}
+    const BlasHeader = "<cblas.h>"
+  proc tensorGemm(order, transA, transB, rows, columns, inner: cint,
+      alpha: cfloat, a: ptr float32, lda: cint, b: ptr float32, ldb: cint,
+      beta: cfloat, c: ptr float32, ldc: cint)
+      {.importc: "cblas_sgemm", header: BlasHeader.}
+    ## Calls optional accelerated float32 matrix arithmetic.
+
 const
   TensorMagic = "PWTENS01"
   TensorRanks = 8
@@ -594,6 +607,139 @@ proc sameHandle(a, b: Value): bool =
 
 {.push overflowChecks: off.}
 
+proc writeFloats*(runtime: Runtime, destination: Value,
+    values: openArray[float32]) =
+  ## Imports host observations into an existing bounded float32 tensor.
+  let output = runtime.tensorView(destination)
+  output.writable()
+  if output.dtype != Float32Tensor or output.count != values.len:
+    fail("float import needs matching float32 destination")
+  runtime.meter(int64(values.len))
+  var bytes = runtime.payload(output)
+  for i, value in values:
+    bytes.storeFloat(output, i, value)
+  runtime.putBlob(destination, bytes, "tensor")
+
+proc tensorConv2d(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Applies CHW convolution with square stride and symmetric zero padding.
+  let
+    input = runtime.tensorView(arguments[0])
+    weights = runtime.tensorView(arguments[1])
+    bias = runtime.tensorView(arguments[2])
+    stride = int(arguments[3].asInt)
+    padding = int(arguments[4].asInt)
+    output = runtime.tensorView(arguments[5])
+  output.writable()
+  if input.dtype != Float32Tensor or weights.dtype != Float32Tensor or
+    bias.dtype != Float32Tensor or output.dtype != Float32Tensor or
+    input.rank != 3 or weights.rank != 4 or bias.rank != 1 or
+    output.rank != 3 or stride < 1 or stride > 1024 or
+    padding < 0 or padding > 1024:
+      fail("conv2d needs float32 CHW input, OIHW weights and valid stride/padding")
+  let
+    channels = input.shape[0]
+    height = input.shape[1]
+    width = input.shape[2]
+    outputs = weights.shape[0]
+    kh = weights.shape[2]
+    kw = weights.shape[3]
+    oh = (height + padding * 2 - kh) div stride + 1
+    ow = (width + padding * 2 - kw) div stride + 1
+    inner = channels * kh * kw
+    area = oh * ow
+  if height + padding * 2 < kh or width + padding * 2 < kw or
+    weights.shape[1] != channels or bias.count != outputs or
+    output.shape[0] != outputs or output.shape[1] != oh or
+    output.shape[2] != ow:
+      fail("conv2d shape mismatch")
+  runtime.meter(int64(output.count) * int64(inner) * 2)
+  var bytes = runtime.payload(output)
+  when defined(tensorBlas):
+    let count = int64(inner) * int64(area)
+    runtime.checkNativeMemory(count * 4 + int64(bytes.len))
+    var patches = newSeq[float32](int(count))
+    for channel in 0 ..< channels:
+      for ky in 0 ..< kh:
+        for kx in 0 ..< kw:
+          let row = (channel * kh + ky) * kw + kx
+          for y in 0 ..< oh:
+            let iy = y * stride + ky - padding
+            for x in 0 ..< ow:
+              let ix = x * stride + kx - padding
+              if iy >= 0 and iy < height and ix >= 0 and ix < width:
+                patches[row * area + y * ow + x] =
+                  input.floating((channel * height + iy) * width + ix)
+    let data = cast[ptr UncheckedArray[float32]](
+      addr bytes[12 + output.rank * 4])
+    tensorGemm(101, 111, 111, cint(outputs), cint(area), cint(inner),
+      1, cast[ptr float32](weights.data), cint(inner), addr patches[0],
+      cint(area), 0, addr data[0], cint(area))
+    for row in 0 ..< outputs:
+      for cell in 0 ..< area:
+        bytes.storeFloat(output, row * area + cell,
+          data[row * area + cell] + bias.floating(row))
+  else:
+    for row in 0 ..< outputs:
+      for y in 0 ..< oh:
+        for x in 0 ..< ow:
+          var sum = 0.0'f
+          for channel in 0 ..< channels:
+            for ky in 0 ..< kh:
+              let iy = y * stride + ky - padding
+              if iy < 0 or iy >= height:
+                continue
+              for kx in 0 ..< kw:
+                let ix = x * stride + kx - padding
+                if ix >= 0 and ix < width:
+                  sum += input.floating((channel * height + iy) * width + ix) *
+                    weights.floating(((row * channels + channel) * kh + ky) * kw + kx)
+          bytes.storeFloat(output, (row * oh + y) * ow + x,
+            sum + bias.floating(row))
+  runtime.putBlob(arguments[5], bytes, "tensor")
+  arguments[5]
+
+proc tensorGroupNorm(runtime: Runtime, arguments: openArray[Value]): Value =
+  ## Normalizes contiguous channel groups with per-channel affine parameters.
+  let
+    input = runtime.tensorView(arguments[0])
+    scale = runtime.tensorView(arguments[1])
+    bias = runtime.tensorView(arguments[2])
+    groups = int(arguments[3].asInt)
+    epsilon = runtime.tensorView(arguments[4])
+    output = runtime.tensorView(arguments[5])
+  output.writable()
+  sameShape(input, output)
+  if input.dtype != Float32Tensor or scale.dtype != Float32Tensor or
+    bias.dtype != Float32Tensor or epsilon.dtype != Float32Tensor or
+    scale.rank != 1 or bias.rank != 1 or epsilon.count != 1 or
+    scale.count != input.shape[0] or bias.count != scale.count or
+    groups < 1 or groups > scale.count or scale.count mod groups != 0 or
+    not epsilon.floating(0).finite or epsilon.floating(0) <= 0:
+      fail("group norm needs float32 channel weights, positive epsilon and groups")
+  runtime.meter(int64(input.count) * 12)
+  var bytes = runtime.payload(output)
+  let
+    area = input.count div scale.count
+    count = input.count div groups
+  for group in 0 ..< groups:
+    var mean, variance: float64
+    let start = group * count
+    for i in start ..< start + count:
+      mean += float64(input.floating(i))
+    mean /= float64(count)
+    for i in start ..< start + count:
+      let difference = float64(input.floating(i)) - mean
+      variance += difference * difference
+    let inverse = float32(1.0 / sqrt(
+      variance / float64(count) + float64(epsilon.floating(0))))
+    for i in start ..< start + count:
+      let channel = i div area
+      bytes.storeFloat(output, i,
+        (input.floating(i) - float32(mean)) * inverse *
+        scale.floating(channel) + bias.floating(channel))
+  runtime.putBlob(arguments[5], bytes, "tensor")
+  arguments[5]
+
 proc tensorDense(runtime: Runtime, arguments: openArray[Value]): Value =
   ## Computes ordered row-major affine products with optional bias first.
   let
@@ -618,6 +764,18 @@ proc tensorDense(runtime: Runtime, arguments: openArray[Value]): Value =
     fail("dense bias must be a tensor or integer zero")
   runtime.meter(int64(weights.count) * 2 + int64(output.count))
   var bytes = runtime.payload(output)
+  when defined(tensorBlas):
+    if output.dtype == Float32Tensor:
+      let data = cast[ptr UncheckedArray[float32]](
+        addr bytes[12 + output.rank * 4])
+      tensorGemm(101, 111, 111, cint(output.count), 1, cint(input.count),
+        1, cast[ptr float32](weights.data), cint(input.count),
+        cast[ptr float32](input.data), 1, 0, addr data[0], 1)
+      for row in 0 ..< output.count:
+        bytes.storeFloat(output, row,
+          data[row] + (if biased: bias.floating(row) else: 0.0'f))
+      runtime.putBlob(arguments[3], bytes, "tensor")
+      return arguments[3]
   for row in 0 ..< output.count:
     if output.dtype == Float32Tensor:
       var sum = if biased: bias.floating(row) else: 0.0'f
@@ -947,6 +1105,8 @@ proc addTensorFunctions*(host: var Host, policy: Policy = nil) =
         ExpOperation),
     ("tensorTanh", TanhOperation), ("tensorAbs", AbsOperation)]:
       discard host.addFunction(name, 2, unaryTensor(operation), 1)
+  discard host.addFunction("tensorConv2d", 6, tensorConv2d, 1)
+  discard host.addFunction("tensorGroupNorm", 6, tensorGroupNorm, 1)
   discard host.addFunction("tensorDense", 4, tensorDense, 1)
   discard host.addFunction("tensorCsr", 5, tensorCsr, 1)
   discard host.addFunction("tensorCompare", 4, tensorCompare, 1)

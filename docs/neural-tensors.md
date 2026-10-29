@@ -179,3 +179,18 @@ plus BASIC compilation took 0.15..0.46 ms for the small models, 4.22 ms for Davi
 and 17.53 ms for Fly. The ten-player, 2,400-battle-tick synthetic matches had
 identical command sequences and simulation hashes for every author. Whole replay
 file hashes differ because policy source and names are part of the replay header.
+
+### Convolutional policies
+
+`tensorConv2d(input, weights, bias, stride, padding, output)` accepts float32
+CHW inputs, OIHW weights and a vector bias. Stride and symmetric zero padding
+are explicit integers. `tensorGroupNorm(input, scale, bias, groups, epsilon,
+output)` normalizes contiguous channel groups. Epsilon is a positive float32
+scalar tensor. Both operations validate shapes, charge work, and publish the
+output only after successful evaluation. Group normalization can run in place.
+
+The optional `-d:tensorBlas` build uses Accelerate on macOS and OpenBLAS on
+Linux for float32 dense layers and convolution. Integer and fixed operations
+retain their ordered arithmetic. Accelerated float32 rounding can differ from
+the portable implementation; games still replay recorded actions exactly.
+Set `OPENBLAS_NUM_THREADS=1` for games evaluating small per-player networks.
