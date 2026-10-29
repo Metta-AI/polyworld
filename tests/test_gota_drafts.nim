@@ -107,8 +107,8 @@ block:
   doAssert hero.abilityPoints == 1
   doAssert not world.applyBuyback(hero.id)
   doAssert hero.lastActionError == ActionDrafting
-  doAssert not world.applyCastTarget(hero.id, 0, hero.id)
-  doAssert not world.applyCastPoint(hero.id, 1, 32, 32)
+  doAssert not world.applyCastTarget(hero.id, 2, hero.id)
+  doAssert not world.applyCastPoint(hero.id, 0, 32, 32)
   doAssert hero.lastActionError == ActionDrafting
   doAssert world.draftTurn == 0
   for i in 0 ..< 100:
@@ -176,7 +176,7 @@ block:
     removeDir(directory)
   writeFile(path, """
 phase = drafting
-cannotLevel = canLevelAbility(1) = 0
+cannotLevel = canLevelAbility(0) = 0
 cannotShop = canShop() = 0
 unpicked = selfClass = -1 and draftedClass(selfId) = -1
 turn = draftTurnId = selfId

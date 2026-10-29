@@ -192,16 +192,22 @@ proc initializeMatch*() =
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
+  when defined(gotaTestRoom):
+    run.prepareTestTick()
   tickWorld(run, proc() =
-    let draftTurn = run.world.draftHeroId()
+    when not defined(gotaTestRoom):
+      let draftTurn = run.world.draftHeroId()
     flushPlayerCommands(run)
-    if draftTurn == 0 or draftTurn == run.world.draftHeroId():
-      runBotDecisions(run)
+    when not defined(gotaTestRoom):
+      if draftTurn == 0 or draftTurn == run.world.draftHeroId():
+        runBotDecisions(run)
   )
-
-  run.sampleMetrics(run.finished() or
-    (run.replayMode and run.world.tick == run.replayData.hashes.len))
-  run.metrics.finishTick(run.world.tick)
+  when defined(gotaTestRoom):
+    run.finishTestTick()
+  else:
+    run.sampleMetrics(run.finished() or
+      (run.replayMode and run.world.tick == run.replayData.hashes.len))
+    run.metrics.finishTick(run.world.tick)
 
 ## Headless reporting and replay recording.
 

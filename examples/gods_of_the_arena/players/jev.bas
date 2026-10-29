@@ -28,12 +28,21 @@ sub moveToGoal(marching)
   if selfRootTicks > 0 then
     exit sub
   end if
+  if orderActive and selfInfo(5) then
+    if goalX = orderX and goalY = orderY and marching = orderMarch then
+      exit sub
+    end if
+  end if
   if marching then
     accepted = attackMove(goalX, goalY)
   else
     accepted = walkTo(goalX, goalY)
   end if
   if accepted then
+    orderActive = 1
+    orderX = goalX
+    orderY = goalY
+    orderMarch = marching
     exit sub
   end if
   ' Generated terrain can block an approximate lane waypoint.
@@ -49,6 +58,10 @@ sub moveToGoal(marching)
             accepted = walkTo(tileX, tileY)
           end if
           if accepted then
+            orderActive = 1
+            orderX = goalX
+            orderY = goalY
+            orderMarch = marching
             exit sub
           end if
         end if
@@ -272,6 +285,7 @@ if request > 0 then
 end if
 
 if selfHp <= 0 then
+  orderActive = 0
   crossedLane = 0
   end
 end if
@@ -288,12 +302,12 @@ askAdvice()
 for upgrade = 1 to 4
   if canLevelAbility(3) then
     levelAbility(3)
+  elseif canLevelAbility(0) then
+    levelAbility(0)
   elseif canLevelAbility(1) then
     levelAbility(1)
   elseif canLevelAbility(2) then
     levelAbility(2)
-  elseif canLevelAbility(0) then
-    levelAbility(0)
   end if
 next upgrade
 
@@ -311,7 +325,10 @@ if retreating then
 end if
 if targetId <> 0 then
   if selfTarget <> targetId then
-    attackTarget(targetId)
+    accepted = attackTarget(targetId)
+    if accepted then
+      orderActive = 0
+    end if
   end if
   end
 end if

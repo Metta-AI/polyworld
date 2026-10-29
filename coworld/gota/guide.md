@@ -22,6 +22,10 @@ targets. Their homing fireballs deal damage on arrival and follow the original
 target beyond range and into fog, even if the tower is destroyed. Shots disappear
 if their target dies before impact.
 
+Heroes start at 2.69–3.32 tiles per second before equipment, averaging 2.99.
+Each hero keeps its own speed gain per level. Heroes reveal a 12-tile radius
+for their team, with terrain and brush still blocking line of sight.
+
 The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 3900 HP and 60 damage as level-3 lane towers.
 
 Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upload a `.bas` file containing BASIC source. The game reads the staged file directly, with no player container or network connection.
@@ -248,6 +252,9 @@ Each hero level grants another point. Points remain banked until a command
 spends them. `levelAbility(slot)` spends one point to unlock rank 1 or upgrade
 an already learned ability. Slots 0, 1, 2, and 3 correspond to Q, W, E, and R.
 
+Q is the primary spell, W the secondary combat spell, E the recovery or
+utility spell, and R the ultimate. All ten kits use this order.
+
 Q, W, and E have four ranks requiring hero levels 1, 3, 5, and 7.
 R has three ranks requiring hero levels 6, 12, and 18. Each additional rank
 adds 50% of the rank-1 damage, healing, or mana restoration, rounded down.
@@ -259,11 +266,26 @@ points and refills only learned abilities.
 
 Hero stats, including basic-attack damage, still grow automatically with
 hero level. Ability ranks never increase automatically. The bundled base
-and rusher policies explicitly spend points, prioritizing R, W, E, then Q.
+and rusher policies explicitly spend points, prioritizing R, Q, W, then E.
 Ability use requires explicit `castTarget` or `castPoint` commands, including
 slot 0 and ultimates. Items require `useItem` or `useItemAt`. Custom policies
 can bank points, choose another upgrade order, and reserve any ability. At
 level 20, fully ranking all four abilities leaves five banked points.
+
+A valid spell aimed beyond its range queues an approach: the hero walks into
+range, stops, faces the target, and casts. Mana, charges, and cooldowns are
+spent only when the spell is released. A successful command can therefore
+mean the cast was queued. New movement, attack, or spell orders replace it.
+Object targets must remain alive and visible; losing the target cancels the
+cast. Ground casts keep the requested point instead of clamping it to range.
+This is the same behavior for humans and BASIC bots. For example,
+`accepted = castPoint(1, x, y)` needs no separate `walkTo` call or repeated
+casting command. `self.hasQueuedCast` reports that approach and
+`self.castTicks` reports remaining casting-animation ticks. Legacy policies
+can read the same values with `selfInfo(19)` and `selfInfo(20)`. The bundled base
+policy leaves these orders running unless it needs to dodge or retreat.
+Do not issue another movement order while approaching
+unless you intend to cancel the pending spell.
 
 Thorn Bloom and Kindred Renewal heal every allied hero and damage enemies
 in their area. Either spell can target an ally, an enemy, or the ground.
@@ -273,10 +295,10 @@ All four spells reach six tiles. Healing is capped at maximum HP.
 
 | Support spell | Healing at ranks 1 / 2 / 3 / 4 | Targets |
 | --- | --- | --- |
-| Druid W: Thorn Bloom | 150 / 225 / 300 / 375 | Allies within a 2-tile circle. |
-| Druid E: Kindred Renewal | 160 / 240 / 320 / 400 | Allies within a 2.5-tile circle. |
-| Warlock W: Mending Hex | 220 / 330 / 440 / 550 | One selected allied hero. |
-| Warlock E: Dread Pact | 240 / 360 / 480 / 600 | One selected allied hero. |
+| Druid Q: Thorn Bloom | 150 / 225 / 300 / 375 | Allies within a 2-tile circle. |
+| Druid W: Kindred Renewal | 160 / 240 / 320 / 400 | Allies within a 2.5-tile circle. |
+| Warlock Q: Mending Hex | 220 / 330 / 440 / 550 | One selected allied hero. |
+| Warlock W: Dread Pact | 240 / 360 / 480 / 600 | One selected allied hero. |
 
 Warlock's ground projectiles remain offensive. Use `castTarget` with an
 allied hero's ID to heal. Druid's area casts can heal multiple allies while
@@ -305,8 +327,8 @@ Upgrade actions and rejected attempts are recorded for deterministic replays.
 ```basic
 if canLevelAbility(3) then
   levelAbility(3)
-elseif canLevelAbility(1) then
-  levelAbility(1)
+elseif canLevelAbility(0) then
+  levelAbility(0)
 end if
 ```
 
@@ -399,6 +421,10 @@ Attack range, vision, and portal landing range share this same radius. Barracks 
 anchors. A distant requested point is clamped into this area; there is no
 travel-distance limit. The selected tower must survive until arrival.
 
+Your own spawn room is also a valid destination and does not require a tower.
+Human players can double-click a scroll in either the inventory or action bar,
+or double-tap its hotkey, to return there. This uses the same channel and cooldown.
+
 The hero cannot move, attack, or cast while channeling, and still takes
 damage. Stuns, roots, death, or loss of the anchor interrupt the channel.
 The scroll is spent when the channel begins. Completion or interruption
@@ -480,14 +506,14 @@ end if
 
 | Hero | Ability | Effect | Rank-one damage |
 | --- | --- | --- | --- |
-| Vanguard | W: Firebrand Sword | Stun for 0.5 seconds | 37 |
+| Vanguard | Q: Firebrand Sword | Stun for 0.5 seconds | 37 |
 | Vanguard | R: Blazing Blade | Stun for 1 second | 204 |
-| Death Knight | W: Afterlight Sickle | Root for 0.5 seconds | 37 |
-| Demon Hunter | E: Gale Slash | Root for 0.5 seconds | 60 |
-| Berserker | E: Winged Boot | Root for 0.75 seconds | 35 |
-| Warlock | E: Dread Pact | Silence for 2 seconds | 84 |
+| Death Knight | Q: Afterlight Sickle | Root for 0.5 seconds | 37 |
+| Demon Hunter | W: Gale Slash | Root for 0.5 seconds | 60 |
+| Berserker | W: Winged Boot | Root for 0.75 seconds | 35 |
+| Warlock | W: Dread Pact | Silence for 2 seconds | 84 |
 | Druid | R: Golem Seed | Root for 2 seconds | 49 |
-| Lich | E: Bone Marionette | Root for 1.5 seconds | 49 |
+| Lich | W: Bone Marionette | Root for 1.5 seconds | 49 |
 
 Control durations stay fixed at every rank. Effects apply on impact to enemy
 heroes and creeps; buildings and gods are immune. A stun stops movement,

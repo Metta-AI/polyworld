@@ -251,12 +251,12 @@ for item in [HealthPotion, VitalityElixir, ManaPotion, ManaElixir]:
   doAssert world.applyReplayAction(action)
   doAssert game.stateHash() == expected
 
-echo "Testing item hotkeys arm, double-tap self-cast, and preserve targeting"
-block:
+echo "Testing item clicks and hotkeys share double-tap self-casting"
+for item in [HealthPotion, ManaPotion, VitalityElixir, ManaElixir]:
   let
     game = quietGame()
     hero = game.world.heroes[0]
-  hero.inventory[0] = HealthPotion
+  hero.inventory[0] = item
   hero.itemCounts[0] = 4
   game.networked = true
   clearPlayerCommands()
@@ -281,6 +281,16 @@ block:
   let decoded = decodeReplay(recorder.data.encodeReplay())
   doAssert decoded.actions[0].second == game.world.heroes[1].id
   clearPlayerCommands()
+  game.submissions.setLen(0)
+  hero.inventory[5] = item
+  hero.itemCounts[5] = 4
+  activatePlayerItem(game.world, hero.id, 5, 15.0)
+  activatePlayerItem(game.world, hero.id, 5, 15.5, doubleClick = true)
+  game.flushPlayerCommands()
+  doAssert game.submissions.len == 1
+  doAssert game.submissions[0].action.first == 5
+  doAssert game.submissions[0].action.second == hero.id
+  clearPlayerCommands()
 
 echo "Testing BASIC inventory queries and exact replay regeneration"
 block:
@@ -301,7 +311,7 @@ block:
 shop = canShop()
 spawn = inOwnSpawn()
 if started = 0 then
-  learned = levelAbility(1)
+  learned = levelAbility(0)
   bought = buyItem(22)
   boughtAgain = buyItem(22)
   started = 1
@@ -312,7 +322,7 @@ end if
 count = itemCount(0)
 remaining = itemCooldown(0)
 invalid = itemCooldown(-1) + itemCooldown(99)
-castPoint(1, selfX, selfY)
+castPoint(0, selfX, selfY)
 """)
   game.loadBots([BotGroup(path: path, count: 10)])
   game.recorder = initReplayRecorder(game.currentSetup(300), game.map.preset)

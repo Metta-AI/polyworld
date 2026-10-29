@@ -154,7 +154,7 @@ block:
   doAssert not world.applyCastTarget(hero.id, -200, 105)
   world.error(ActionInvalidSlot)
   doAssert world.last(ActionRejected).slot == -200
-  doAssert not world.applyCastPoint(hero.id, 1, -1, 0)
+  doAssert not world.applyCastPoint(hero.id, 0, -1, 0)
   world.error(ActionInvalidPoint)
   doAssert not world.applyBuyItem(hero.id, -1)
   world.error(ActionUnknownItem)
@@ -205,31 +205,36 @@ block:
   hero.cooldowns[PrimaryAbility] = 1
   hero.charges[PrimaryAbility] = 0
   hero.mana = 0
-  doAssert not world.applyCastTarget(hero.id, 1, 105)
+  doAssert not world.applyCastTarget(hero.id, 0, 105)
   world.error(ActionCooldown)
   hero.cooldowns[PrimaryAbility] = 0
-  doAssert not world.applyCastTarget(hero.id, 1, 105)
+  doAssert not world.applyCastTarget(hero.id, 0, 105)
   world.error(ActionNoCharges)
   hero.charges[PrimaryAbility] = 1
-  doAssert not world.applyCastTarget(hero.id, 1, 105)
+  doAssert not world.applyCastTarget(hero.id, 0, 105)
   world.error(ActionInsufficientMana)
   hero.mana = 1000
   world.casts.setLen(512)
-  doAssert not world.applyCastTarget(hero.id, 1, 105)
+  doAssert not world.applyCastTarget(hero.id, 0, 105)
   world.error(ActionSpellLimit)
   world.casts.setLen(0)
   for cell in world.teamVisible[RedTeam.ord].mitems:
     cell = 0
-  doAssert not world.applyCastTarget(hero.id, 1, 105)
+  doAssert not world.applyCastTarget(hero.id, 0, 105)
   world.error(ActionTargetUnavailable)
-  doAssert not world.applyCastTarget(hero.id, 1, 99999)
+  doAssert not world.applyCastTarget(hero.id, 0, 99999)
   world.error(ActionTargetUnavailable)
   for cell in world.teamVisible[RedTeam.ord].mitems:
     cell = 255
   world.heroes[1].position.x =
     heroAbility(hero.class, PrimaryAbility).abilitySpec.range + 1
-  doAssert not world.applyCastTarget(hero.id, 1, 105)
-  world.error(ActionOutOfRange)
+  var preview: SpellCast
+  doAssert world.aimAbility(hero, PrimaryAbility, 105, hero.position,
+    preview) == ActionOutOfRange
+  world.applyControl(hero.id, RootControl, TickRate)
+  doAssert not world.applyCastTarget(hero.id, 0, 105)
+  world.error(ActionRooted)
+  hero.controls[RootControl].ends = 0
   hero.state = Dying
   doAssert not world.applyAttackTarget(hero.id, 0)
   world.error(ActionNotAlive)

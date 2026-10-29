@@ -111,9 +111,10 @@ proc queueUseItemAt*(heroId, slot, mapX, mapY: int32) =
 proc activatePlayerItem*(
     world: World,
     heroId, slot: int32,
-    tapTime = -1.0
+    tapTime: float64,
+    doubleClick = false
 ) =
-  ## Arms item targeting; a second quick hotkey press uses a potion on self.
+  ## Arms item targeting; a second quick click or key press uses it on self.
   let hero = world.heroById(heroId)
   if hero.id == 0 or slot < 0 or slot >= InventorySlots:
     return
@@ -121,16 +122,21 @@ proc activatePlayerItem*(
     item = hero.inventory[slot]
     spec = item.itemSpec
     potion = spec.heal > 0 or spec.restore > 0
-    doubleTap = potion and armedItem == slot and itemTapHero == heroId and
+    doubleTap = (potion or item == PortalScroll) and
+      armedItem == slot and itemTapHero == heroId and
       itemTapSlot == slot and tapTime >= itemTapTime and itemTapTime >= 0 and
-      tapTime - itemTapTime <= 0.35
+      (doubleClick or tapTime - itemTapTime <= 0.35)
   itemTapTime = tapTime
   itemTapHero = heroId
   itemTapSlot = slot
   armedAbility = -1
   armedItem = -1
   if doubleTap:
-    queueUseItem(heroId, slot, heroId)
+    if item == PortalScroll:
+      let home = hero.portalHome()
+      queueUseItemAt(heroId, slot, mapCoordinate(home.x), mapCoordinate(home.z))
+    else:
+      queueUseItem(heroId, slot, heroId)
     itemTapTime = -1
   elif item == PortalScroll or potion:
     armedItem = slot

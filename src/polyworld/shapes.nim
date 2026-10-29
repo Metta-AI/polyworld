@@ -224,6 +224,22 @@ proc addTriangle*(
   renderer.vertices.writeVertex(first + VertexFloats, b, uvB, painted)
   renderer.vertices.writeVertex(first + 2 * VertexFloats, c, uvC, painted)
 
+proc addTriangle*(
+    renderer: var ShapeRenderer,
+    points: array[3, Vec3],
+    colors: array[3, ColorRGBX]
+) =
+  ## Adds a triangle with independent vertex colors for soft fades.
+  let first = renderer.vertices.len
+  renderer.vertices.setLen(first + 3 * VertexFloats)
+  for i in 0 ..< 3:
+    renderer.vertices.writeVertex(
+      first + i * VertexFloats,
+      points[i],
+      vec2(0.5),
+      vertexColor(colors[i])
+    )
+
 proc addQuad*(
     renderer: var ShapeRenderer,
     a,

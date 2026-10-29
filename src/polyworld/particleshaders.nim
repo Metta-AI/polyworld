@@ -10,7 +10,14 @@ type ParticleEffectKind* = enum
   Fireball,
   FireBurst,
   ArrowWake,
-  HealingAura
+  HealingAura,
+  ManaAura,
+  PoisonAura,
+  PortalBurst,
+  PoisonCapsule,
+  PoisonBurst,
+  LeafBolt,
+  LeafBurst
 
 var
   uParticleViewProjection*: Uniform[Mat4]
@@ -75,6 +82,37 @@ proc evaluateParticle(
   var state: float32 = particleId * 17.0'f +
     uParticleSeed * 0.123'f
 
+  if uParticleEffectKind == LeafBolt.ord.int32 or
+    uParticleEffectKind == LeafBurst.ord.int32:
+      let
+        phase = particleRandom(state) * 6.2831853'f
+        tint = particleRandom(state)
+      if uParticleEffectKind == LeafBolt.ord.int32:
+        let travel = max(uParticleTravelTime, 0.05'f)
+        if elapsed > travel:
+          return
+        let t = elapsed / travel
+        position = mix(uParticleOrigin, uParticleTarget, t) + vec3(
+          cos(phase + elapsed * 5.0'f) * 0.16'f,
+          sin(phase * 2.0'f + elapsed * 6.0'f) * 0.12'f,
+          sin(phase + elapsed * 5.0'f) * 0.16'f
+        )
+        color = vec4(0.12'f + tint * 0.12'f, 0.35'f + tint * 0.25'f, 0.06'f, 1.0'f)
+      else:
+        if elapsed > 0.6'f:
+          return
+        position = uParticleOrigin + vec3(
+          cos(phase) * elapsed * 1.2'f,
+          elapsed * 0.6'f - elapsed * elapsed * 2.0'f,
+          sin(phase) * elapsed * 1.2'f
+        )
+        color = vec4(0.15'f, 0.45'f + tint * 0.15'f, 0.06'f,
+          1.0'f - elapsed / 0.6'f)
+      size = 0.13'f + tint * 0.045'f
+      life = phase + elapsed * 4.0'f
+      alive = 1.0'f
+      return
+
   if uParticleEffectKind == CombatSparks.ord.int32:
     let
       birth = particleId * 0.0025'f
@@ -99,7 +137,19 @@ proc evaluateParticle(
     alive = 1.0'f
     return
 
-  if uParticleEffectKind == MagicBurst.ord.int32:
+  if uParticleEffectKind == PortalBurst.ord.int32 and particleId < 1.0'f:
+    if elapsed < 0.0'f or elapsed >= 0.4'f:
+      return
+    life = elapsed / 0.4'f
+    position = uParticleOrigin
+    size = mix(1.5'f, 2.8'f, life)
+    color = vec4(0.85'f, 0.8'f, 1.0'f, (1.0'f - life) * 0.9'f)
+    alive = 1.0'f
+    return
+
+  if uParticleEffectKind == MagicBurst.ord.int32 or
+    uParticleEffectKind == PortalBurst.ord.int32 or
+    uParticleEffectKind == PoisonBurst.ord.int32:
     let
       birth = particleId * 0.0035'f
       age = elapsed - birth
@@ -122,6 +172,12 @@ proc evaluateParticle(
       vec4(0.85'f, 0.18'f, 1.0'f, 0.0'f),
       progress
     )
+    if uParticleEffectKind == PoisonBurst.ord.int32:
+      color = mix(
+        vec4(0.72'f, 0.24'f, 1.0'f, 0.95'f),
+        vec4(0.18'f, 0.03'f, 0.28'f, 0.0'f),
+        progress
+      )
     alive = 1.0'f
     return
 
@@ -150,37 +206,49 @@ proc evaluateParticle(
     alive = 1.0'f
     return
 
-  if uParticleEffectKind == HealingAura.ord.int32:
-    let
-      birth = particleId * 0.008'f
-      age = elapsed - birth
-      lifetime = 0.9'f + particleRandom(state) * 0.45'f
-    if age < 0.0'f or age >= lifetime:
+  if uParticleEffectKind == HealingAura.ord.int32 or
+    uParticleEffectKind == ManaAura.ord.int32 or
+    uParticleEffectKind == PoisonAura.ord.int32:
+      let
+        birth = particleId * 0.008'f
+        age = elapsed - birth
+        lifetime = 0.9'f + particleRandom(state) * 0.45'f
+      if age < 0.0'f or age >= lifetime:
+        return
+      let
+        progress = age / lifetime
+        angle = particleRandom(state) * 6.28318530718'f + age * 4.2'f
+        radius = 0.28'f + particleRandom(state) * 0.62'f
+      position = uParticleOrigin + vec3(
+        cos(angle) * radius,
+        particleRandom(state) * 0.35'f + age * 1.25'f,
+        sin(angle) * radius
+      )
+      velocity = vec3(
+        -sin(angle) * radius * 4.2'f,
+        1.25'f,
+        cos(angle) * radius * 4.2'f
+      )
+      life = progress
+      size = mix(0.075'f, 0.025'f, progress) *
+        (0.75'f + particleRandom(state) * 0.55'f)
+      color = mix(
+        vec4(0.42'f, 1.0'f, 0.48'f, 0.95'f),
+        vec4(1.0'f, 0.88'f, 0.24'f, 0.0'f),
+        progress
+      )
+      if uParticleEffectKind == ManaAura.ord.int32:
+        color = mix(
+          vec4(0.25'f, 0.65'f, 1.0'f, 0.95'f),
+          vec4(0.75'f, 0.9'f, 1.0'f, 0.0'f), progress
+        )
+      elif uParticleEffectKind == PoisonAura.ord.int32:
+        color = mix(
+          vec4(0.65'f, 0.25'f, 0.95'f, 0.95'f),
+          vec4(0.18'f, 0.03'f, 0.28'f, 0.0'f), progress
+        )
+      alive = 1.0'f
       return
-    let
-      progress = age / lifetime
-      angle = particleRandom(state) * 6.28318530718'f + age * 4.2'f
-      radius = 0.28'f + particleRandom(state) * 0.62'f
-    position = uParticleOrigin + vec3(
-      cos(angle) * radius,
-      particleRandom(state) * 0.35'f + age * 1.25'f,
-      sin(angle) * radius
-    )
-    velocity = vec3(
-      -sin(angle) * radius * 4.2'f,
-      1.25'f,
-      cos(angle) * radius * 4.2'f
-    )
-    life = progress
-    size = mix(0.075'f, 0.025'f, progress) *
-      (0.75'f + particleRandom(state) * 0.55'f)
-    color = mix(
-      vec4(0.42'f, 1.0'f, 0.48'f, 0.95'f),
-      vec4(1.0'f, 0.88'f, 0.24'f, 0.0'f),
-      progress
-    )
-    alive = 1.0'f
-    return
 
   let
     travel: float32 = max(uParticleTravelTime, 0.05'f)
@@ -188,6 +256,31 @@ proc evaluateParticle(
     pathDirection: Vec3 = safeParticleDirection(path)
     pathSpeed: float32 = length(path) / travel
     progress: float32 = clamp(elapsed / travel, 0.0'f, 1.0'f)
+
+  if uParticleEffectKind == PoisonCapsule.ord.int32:
+    let
+      arcHeight = clamp(length(path) * 0.3'f, 0.6'f, 2.2'f)
+      delay = max(0.0'f, particleId - 2.0'f) * 0.009'f
+      age = elapsed - delay
+    if age < 0.0'f or age > travel:
+      return
+    let t = clamp(age / travel, 0.0'f, 1.0'f)
+    position = mix(uParticleOrigin, uParticleTarget, t) +
+      vec3(0.0'f, 4.0'f * arcHeight * t * (1.0'f - t), 0.0'f)
+    velocity = path / travel +
+      vec3(0.0'f, 4.0'f * arcHeight * (1.0'f - 2.0'f * t) / travel, 0.0'f)
+    if particleId < 3.0'f:
+      position += vec3(0.0'f, (particleId - 1.0'f) * 0.08'f, 0.0'f)
+      size = 0.10'f
+      color = vec4(0.42'f, 0.08'f, 0.65'f, 1.0'f)
+    else:
+      position += particleDirection(state) * 0.06'f
+      size = mix(0.065'f, 0.015'f, particleId / 24.0'f)
+      color = vec4(0.6'f, 0.2'f, 0.85'f,
+        (1.0'f - particleId / 24.0'f) * 0.55'f)
+    life = t
+    alive = 1.0'f
+    return
 
   if uParticleEffectKind == MagicBolt.ord.int32:
     if particleId < 4.0'f:
@@ -378,13 +471,31 @@ proc gameParticleFragment*(
   ## Draws a feathered particle with a bright center.
   if fragmentAlive < 0.5'f:
     discardFragment()
+  if uParticleEffectKind == LeafBolt.ord.int32 or
+    uParticleEffectKind == LeafBurst.ord.int32:
+      let
+        raw = fragmentUv * 2.0'f - vec2(1.0'f)
+        angle = fragmentLife
+        point = vec2(
+          raw.x * cos(angle) - raw.y * sin(angle),
+          raw.x * sin(angle) + raw.y * cos(angle)
+        )
+        width = max(0.0'f, 0.5'f * (1.0'f - point.y * point.y))
+        edge = min(width - abs(point.x), 0.9'f - abs(point.y))
+        alpha = smoothstep(0.0'f, 0.06'f, edge) * fragmentColor.w
+        vein = 1.0'f - smoothstep(0.0'f, 0.025'f, abs(point.x))
+      if alpha < 0.004'f:
+        discardFragment()
+      fragColor = vec4(fragmentColor.xyz + vec3(0.08'f, 0.12'f, 0.025'f) * vein, alpha)
+      return
   let
     point = fragmentUv * 2.0'f - 1.0'f
     radiusSquared = dot(point, point)
     glow = exp(-radiusSquared * 3.4'f)
     core = exp(-radiusSquared * 15.0'f)
     flicker = 0.9'f + 0.1'f * sin(fragmentLife * 19.0'f)
-    alpha = fragmentColor.w * min(1.0'f, glow + core) * flicker
+    edgeFade = 1.0'f - smoothstep(0.65'f, 1.0'f, radiusSquared)
+    alpha = fragmentColor.w * min(1.0'f, glow + core) * flicker * edgeFade
   if alpha < 0.004'f:
     discardFragment()
   fragColor = vec4(

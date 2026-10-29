@@ -194,3 +194,20 @@ for tile in -mapTiles() .. mapTiles():
     let position = tile.int32 * WorldScale + offset
     doAssert mapCoordinate(position, RedTeam) +
       mapCoordinate(-position, BlueTeam) == mapTiles() - 1
+
+echo "Testing JEV compiles with persistent movement orders"
+block:
+  let game = newGame(generateMap(54), 100_000, 10, false,
+    ReplayData(), drafting = false)
+  game.loadBots([
+    BotGroup(path: Policies / "jev.bas", count: 1),
+    BotGroup(path: IdlePolicy, count: 9)
+  ])
+  doAssert game.heroVms[0] != nil
+  doAssert not game.heroVms[0].failed
+
+echo "Testing hosted policies match bundled policies"
+for name in ["base.bas", "rusher.bas", "puller.bas"]:
+  doAssert readFile(Policies / name) == readFile(
+    Policies.parentDir.parentDir.parentDir / "coworld/gota/players" / name
+  )

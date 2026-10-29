@@ -41,9 +41,9 @@ type
   HeroRole* = enum
     Frontline, Carry, Mage, Support, Fighter
   HeroAbilitySlot* = enum
-    PassiveAbility,
     PrimaryAbility,
     SecondaryAbility,
+    PassiveAbility,
     UltimateAbility
   Ability* = enum
     LionGuard, FirebrandSword, InfernoAegis, BlazingBlade,
@@ -182,12 +182,12 @@ const
       maxLevelMana: 254,
       baseDamage: 33,
       damagePerLevel: 6,
-      baseMovePerTick: 5_665,
+      baseMovePerTick: 7_138,
       movePerLevel: 40,
       attackRange: 70_000,
       attackTicks: 27,
       abilities: [
-        LionGuard, FirebrandSword, InfernoAegis, BlazingBlade
+        FirebrandSword, InfernoAegis, LionGuard, BlazingBlade
       ]
     ),
     HeroSpec(
@@ -201,12 +201,12 @@ const
       maxLevelMana: 361,
       baseDamage: 21,
       damagePerLevel: 12,
-      baseMovePerTick: 5_610,
+      baseMovePerTick: 7_069,
       movePerLevel: 174,
       attackRange: 360_000,
       attackTicks: 30,
       abilities: [
-        DragonSight, VerdantArrow, RicochetDisc, StormEagle
+        VerdantArrow, RicochetDisc, DragonSight, StormEagle
       ]
     ),
     HeroSpec(
@@ -219,12 +219,12 @@ const
       maxLevelMana: 479,
       baseDamage: 26,
       damagePerLevel: 5,
-      baseMovePerTick: 6_324,
+      baseMovePerTick: 7_968,
       movePerLevel: 71,
       attackRange: 300_000,
       attackTicks: 30,
       abilities: [
-        ManaCrystal, FrostLance, MeteorStrike, ArcaneMeteor
+        FrostLance, MeteorStrike, ManaCrystal, ArcaneMeteor
       ]
     ),
     HeroSpec(
@@ -237,12 +237,12 @@ const
       maxLevelMana: 427,
       baseDamage: 24,
       damagePerLevel: 2,
-      baseMovePerTick: 6_592,
+      baseMovePerTick: 8_306,
       movePerLevel: 72,
       attackRange: 240_000,
       attackTicks: 30,
       abilities: [
-        NatureTalisman, HealingBloom, KindredWisps, GolemSeed
+        HealingBloom, KindredWisps, NatureTalisman, GolemSeed
       ]
     ),
     HeroSpec(
@@ -255,12 +255,12 @@ const
       maxLevelMana: 230,
       baseDamage: 29,
       damagePerLevel: 5,
-      baseMovePerTick: 6_125,
+      baseMovePerTick: 7_718,
       movePerLevel: 168,
       attackRange: 75_000,
       attackTicks: 15,
       abilities: [
-        ShadowCloak, VoidBlade, GaleSlash, ShadowComet
+        VoidBlade, GaleSlash, ShadowCloak, ShadowComet
       ]
     ),
     HeroSpec(
@@ -273,12 +273,12 @@ const
       maxLevelMana: 249,
       baseDamage: 36,
       damagePerLevel: 6,
-      baseMovePerTick: 5_335,
+      baseMovePerTick: 6_722,
       movePerLevel: 38,
       attackRange: 76_000,
       attackTicks: 28,
       abilities: [
-        SanguineChalice, AfterlightSickle, WitheringIdol, DarkEclipse
+        AfterlightSickle, WitheringIdol, SanguineChalice, DarkEclipse
       ]
     ),
     HeroSpec(
@@ -292,12 +292,12 @@ const
       maxLevelMana: 340,
       baseDamage: 19,
       damagePerLevel: 12,
-      baseMovePerTick: 5_390,
+      baseMovePerTick: 6_791,
       movePerLevel: 168,
       attackRange: 360_000,
       attackTicks: 30,
       abilities: [
-        FinalMeasure, SiegeScarab, LodestoneSurge, ClockworkCharge
+        SiegeScarab, LodestoneSurge, FinalMeasure, ClockworkCharge
       ]
     ),
     HeroSpec(
@@ -310,12 +310,12 @@ const
       maxLevelMana: 517,
       baseDamage: 24,
       damagePerLevel: 5,
-      baseMovePerTick: 5_880,
+      baseMovePerTick: 7_409,
       movePerLevel: 59,
       attackRange: 330_000,
       attackTicks: 30,
       abilities: [
-        FrostSigil, IceSpear, BoneMarionette, BoundVoid
+        IceSpear, BoneMarionette, FrostSigil, BoundVoid
       ]
     ),
     HeroSpec(
@@ -328,12 +328,12 @@ const
       maxLevelMana: 504,
       baseDamage: 26,
       damagePerLevel: 2,
-      baseMovePerTick: 6_014,
+      baseMovePerTick: 7_578,
       movePerLevel: 68,
       attackRange: 270_000,
       attackTicks: 30,
       abilities: [
-        AetherSiphon, MothHex, DreadTotem, VoidPortal
+        MothHex, DreadTotem, AetherSiphon, VoidPortal
       ]
     ),
     HeroSpec(
@@ -346,12 +346,12 @@ const
       maxLevelMana: 216,
       baseDamage: 41,
       damagePerLevel: 7,
-      baseMovePerTick: 6_375,
+      baseMovePerTick: 8_033,
       movePerLevel: 174,
       attackRange: 80_000,
       attackTicks: 20,
       abilities: [
-        RageCrucible, MoltenFist, WingedBoot, VolcanicEruption
+        MoltenFist, WingedBoot, RageCrucible, VolcanicEruption
       ]
     )
   ]

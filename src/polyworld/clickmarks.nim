@@ -61,10 +61,10 @@ proc clickMarkSettings*(): FxSettings =
   result.fadeIn = 0
   result.fadeOut = 0.45
 
-proc initClickMarks*(): ClickMarkSystem =
+proc initClickMarks*(settings = clickMarkSettings()): ClickMarkSystem =
   ## Creates the shared click cylinder and uploads it once.
   result.renderer = initFxRenderer()
-  result.settings = clickMarkSettings()
+  result.settings = settings
   result.renderer.uploadFxMesh(result.settings)
 
 proc emitClickMark*(system: var ClickMarkSystem, origin: Vec3) =

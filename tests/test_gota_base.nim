@@ -8,14 +8,15 @@ const
   Root = currentSourcePath().parentDir.parentDir
   Policy = Root / "examples/gods_of_the_arena/players/base.bas"
 
-proc policyGame(team = RedTeam, size = defaultConfig().mapSize): Game =
+proc policyGame(team = RedTeam, size = defaultConfig().mapSize,
+    policy = Policy): Game =
   ## Creates one real policy VM with controllable opponents and allied towers.
   var preset = defaultConfig()
   preset.mapSize = size
   result = newGame(
     generateMap(54, preset), 100_000, 10, false, ReplayData(), drafting = false
   )
-  result.loadBots([BotGroup(path: Policy, count: 10)])
+  result.loadBots([BotGroup(path: policy, count: 10)])
   result.recorder = initReplayRecorder(result.currentSetup(1000), preset)
   for i, hero in result.world.heroes:
     hero.abilityLevels[PassiveAbility] = 1
@@ -67,7 +68,7 @@ block:
     "useItem", "useItemAt", "readTile"]:
       doAssert name & "(" in source, "Reference policy omits " & name
 
-echo "Testing base spends ability points in R, W, E, Q order at legal levels"
+echo "Testing base spends ability points in R, Q, W, E order at legal levels"
 for class in HeroClass:
   let
     game = policyGame()
@@ -130,6 +131,7 @@ for team in Team:
       hero.charges = [0'i32, 0, 0, 0]
       hero.charges[slot] = spec.charges
       game.world.casts.setLen(0)
+      hero.castPoseUntil = 0
       let actions = game.decide()
       doAssert game.world.casts.len == 1, $team & " " & $ability
       let spell = game.world.casts[0]
@@ -205,7 +207,7 @@ for class in [VanguardKnight, DruidWarden, Warlock]:
     hero.refreshHeroStats()
     hero.hp = hero.maxHp
     hero.mana = hero.maxMana
-    hero.abilityLevels = [0'i32, 0, 1, 0]
+    hero.abilityLevels = [0'i32, 1, 0, 0]
     hero.place(point)
     ally.place(WorldPoint(
       x: point.x + distance * WorldScale, y: point.y, z: point.z
@@ -292,7 +294,7 @@ for reason in [ActionNoCharges, ActionCooldown, ActionInsufficientMana,
     hero.refreshHeroStats()
     hero.hp = hero.maxHp
     hero.mana = hero.maxMana
-    hero.abilityLevels = [0'i32, 1, 0, 0]
+    hero.abilityLevels = [1'i32, 0, 0, 0]
     hero.charges[PrimaryAbility] = 1
     hero.place(point)
     enemy.place(point)
@@ -307,7 +309,7 @@ for reason in [ActionNoCharges, ActionCooldown, ActionInsufficientMana,
       hero.mana = 0
     of ActionOutOfRange:
       enemy.place(WorldPoint(
-        x: point.x + 7 * WorldScale, y: point.y, z: point.z
+        x: point.x + 20 * WorldScale, y: point.y, z: point.z
       ))
     else:
       doAssert false
@@ -391,3 +393,55 @@ for size in [defaultConfig().mapSize]:
     " instructions, ", game.heroVms[0].lastWork, " work units"
 
 echo "GotA base policy checks passed"
+
+echo "Testing base and puller preserve walk-to-cast orders until release"
+for policy in [Policy, Policy.parentDir / "puller.bas"]:
+  let
+    game = policyGame(policy = policy)
+    hero = game.world.heroes[0]
+    enemy = game.world.heroes[5]
+    point = game.middle()
+  game.world.camps.setLen(0)
+  game.world.footmen.setLen(0)
+  hero.class = Arcanist
+  hero.refreshHeroStats()
+  hero.hp = hero.maxHp
+  hero.mana = hero.maxMana
+  hero.abilityLevels = [1'i32, 0, 0, 0]
+  hero.charges[PrimaryAbility] = 1
+  hero.place(point)
+  enemy.place(WorldPoint(
+    x: point.x + 7 * WorldScale, y: point.y, z: point.z
+  ))
+  enemy.hp = enemy.maxHp
+  enemy.state = Marching
+  let actions = game.decide()
+  doAssert actions.hasAction(ActionCastTarget)
+  doAssert not actions.hasAction(ActionAttackTarget)
+  doAssert not actions.hasAction(ActionWalkTo)
+  doAssert not actions.hasAction(ActionAttackMove)
+  doAssert hero.hasQueuedCast
+  doAssert hero.charges[PrimaryAbility] == 1
+  doAssert game.world.casts.len == 0
+  let target = enemy.position
+  var released = false
+  for i in 0 ..< 10 * TickRate:
+    enemy.place(target)
+    game.tickWorld(proc() = game.runBotDecisions())
+    if game.world.casts.len > 0:
+      released = true
+      break
+  doAssert released
+  doAssert not hero.hasQueuedCast
+  doAssert hero.charges[PrimaryAbility] == 0
+  var requests = 0
+  for action in game.recorder.data.actions:
+    if action.kind in [ActionCastTarget, ActionCastPoint]:
+      inc requests
+  doAssert requests == 1
+  doAssert game.world.casts[0].ability == FrostLance
+  let whileCasting = game.decide()
+  doAssert not whileCasting.hasAction(ActionAttackTarget)
+  doAssert not whileCasting.hasAction(ActionAttackMove)
+  doAssert not whileCasting.hasAction(ActionWalkTo)
+  doAssert not whileCasting.hasAction(ActionCastTarget)

@@ -50,10 +50,14 @@ for class in HeroClass:
   let hp = target.hp
   doAssert not world.applyUseItem(hero.id, 0)
   doAssert target.hp == hp and hero.itemCounts[0] == 3
+  doAssert world.itemUses.len == 0
   target.position.x = range
   doAssert world.applyUseItem(hero.id, 0)
   doAssert target.hp == hp - PoisonPotion.itemSpec.strike
   doAssert hero.itemCounts[0] == 2
+  doAssert world.itemUses.len == 1
+  doAssert world.itemUses[0].origin == hero.position
+  doAssert world.itemUses[0].position == target.position
 
 echo "Testing poison rejects hidden, dead and friendly targets"
 block:

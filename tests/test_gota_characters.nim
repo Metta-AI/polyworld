@@ -1,7 +1,7 @@
 import
-  std/[math, os],
+  std/[math, os, strutils],
   gltf, vmath,
-  polyworld/[characters, chargen],
+  polyworld/[characters, chargen, weapontrails],
   ../examples/gods_of_the_arena/[assets, content],
   ../tools/posedbounds
 
@@ -28,6 +28,29 @@ for class in HeroClass:
     doAssert model.clipDuration(clip) > 0, name & ": " & animation
   let attack = model.clipIndex(class.heroAnimationNames()[3])
   doAssert class.heroStrikeTime() < model.clipDuration(attack)
+  if class.heroSpec.attackStyle == MeleeAttack:
+    let inventory = manifest.presetManifest(manifest.namedPreset(name))
+    var tips = 0
+    for category in inventory.categories:
+      if category.key notin ["Right hand", "Left hand"]:
+        continue
+      for item in category.items:
+        let weapon = item.name.toLowerAscii()
+        if weapon.endsWith("sword") or weapon.endsWith("dagger") or
+          weapon.endsWith("axe"):
+            let marker = weaponTip(file.root, item.nodes, item.attachmentBone)
+            file.root.activeClips = @[attack]
+            file.root.animTime = 0
+            file.root.updateAnimation(0)
+            file.root.updateTransforms(model.baseTransform)
+            let before = marker.sample(0).tip
+            file.root.animTime = class.heroStrikeTime()
+            file.root.updateAnimation(0)
+            file.root.updateTransforms(model.baseTransform)
+            doAssert (marker.sample(1).tip - before).length > 0.01,
+              name & ": weapon tip did not follow the attack."
+            inc tips
+    doAssert tips == (if class in {DemonHunter, Berserker}: 2 else: 1)
   for animation in HeroClips:
     let clip = model.clipIndex(animation)
     for time in [0'f, model.clipDuration(clip) / 2, model.clipDuration(clip)]:

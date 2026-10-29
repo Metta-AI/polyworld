@@ -68,14 +68,14 @@ block:
   doAssert hero.charges == [0'i32, 0, 0, 0]
   doAssert world.casts.len == 0
   let mana = hero.mana
-  doAssert not world.applyCastTarget(hero.id, 0, hero.id)
+  doAssert not world.applyCastTarget(hero.id, 2, hero.id)
   doAssert hero.lastActionError == ActionAbilityLocked
   doAssert hero.mana == mana and hero.abilityPoints == 1
   world.reject(-1, ActionInvalidSlot)
   world.reject(int32.high, ActionInvalidSlot)
   world.reject(3, ActionHeroLevelRequired)
-  doAssert not world.applyLevelAbility(-1, 0)
-  doAssert world.applyLevelAbility(hero.id, 1)
+  doAssert not world.applyLevelAbility(-1, 2)
+  doAssert world.applyLevelAbility(hero.id, 0)
   doAssert hero.abilityLevels[PrimaryAbility] == 1
   doAssert hero.charges[PrimaryAbility] == 3
   doAssert hero.abilityPoints == 0
@@ -84,14 +84,14 @@ block:
     doAssert event.kind == AbilityLeveled
     doAssert event.actor.id == hero.id and event.detail == FirebrandSword.ord
     doAssert event.before == 0 and event.after == 1 and event.amount == 1
-  world.reject(0, ActionNoAbilityPoints)
+  world.reject(2, ActionNoAbilityPoints)
   hero.level = 2
-  world.reject(1, ActionHeroLevelRequired)
+  world.reject(0, ActionHeroLevelRequired)
   hero.state = Dying
-  world.reject(0, ActionNotAlive)
+  world.reject(2, ActionNotAlive)
   hero.state = Marching
   hero.hp = 0
-  world.reject(0, ActionNotAlive)
+  world.reject(2, ActionNotAlive)
 
 echo "Testing rank gates and maximums across all hero levels"
 block:
@@ -217,14 +217,14 @@ block:
   enemy.hp = 10_000
   enemy.maxHp = 10_000
   enemy.state = Marching
-  doAssert world.applyLevelAbility(hero.id, 2)
+  doAssert world.applyLevelAbility(hero.id, 1)
   game.step()
-  doAssert world.applyCastTarget(hero.id, 2, enemy.id)
+  doAssert world.applyCastTarget(hero.id, 1, enemy.id)
   let
     charges = hero.charges
     cooldowns = hero.cooldowns
     recharges = hero.recharges
-  doAssert world.applyLevelAbility(hero.id, 2)
+  doAssert world.applyLevelAbility(hero.id, 1)
   doAssert hero.charges == charges and hero.cooldowns == cooldowns
   doAssert hero.recharges == recharges
   doAssert world.casts[0].level == 1
@@ -241,7 +241,7 @@ block:
     game = quietGame()
     hero = game.world.heroes[0]
     initial = game.stateHash()
-  queueLevelAbility(hero.id, 1)
+  queueLevelAbility(hero.id, 0)
   game.flushPlayerCommands()
   doAssert hero.abilityLevels[PrimaryAbility] == 1
   doAssert game.stateHash() != initial
@@ -259,8 +259,8 @@ block:
   restored.deathTicks = 24 + 8 * TickRate - 1
   game.step(2)
   doAssert restored.hp > 0 and restored.abilityPoints == 0
-  doAssert restored.abilityLevels == [0'i32, 1, 0, 0]
-  doAssert restored.charges == [0'i32, 3, 0, 0]
+  doAssert restored.abilityLevels == [1'i32, 0, 0, 0]
+  doAssert restored.charges == [3'i32, 0, 0, 0]
 
 echo "Testing live BASIC progression observations and deterministic replays"
 block:
@@ -280,23 +280,23 @@ block:
   writeFile(path, """
 if initialized = 0 then
   pointsBefore = abilityPoints()
-  locked = abilityLevel(1)
-  lockedDamage = abilityDamage(1)
+  locked = abilityLevel(0)
+  lockedDamage = abilityDamage(0)
   rejected = levelAbility(3)
   gateError = lastActionError() = ActionHeroLevelRequired
-  accepted = levelAbility(1)
+  accepted = levelAbility(0)
   cleared = lastActionError() = NoActionError
-  rank = abilityLevel(1)
+  rank = abilityLevel(0)
   pointsAfter = abilityPoints()
-  required = abilityRequiredLevel(1)
-  maximum = abilityMaxLevel(1)
+  required = abilityRequiredLevel(0)
+  maximum = abilityMaxLevel(0)
   ultimateMaximum = abilityMaxLevel(3)
   ultimateRequired = abilityRequiredLevel(3)
-  canUpgrade = canLevelAbility(1)
-  damage = abilityDamage(1)
-  healing = abilityHeal(1)
-  restore = abilityRestore(1)
-  cost = abilityManaCost(1)
+  canUpgrade = canLevelAbility(0)
+  damage = abilityDamage(0)
+  healing = abilityHeal(0)
+  restore = abilityRestore(0)
+  cost = abilityManaCost(0)
   invalid = abilityLevel(-1) + abilityLevel(4) + abilityLevel(2147483647)
   invalid = invalid + canLevelAbility(-1) + abilityMaxLevel(4)
   invalid = invalid + abilityRequiredLevel(-1) + abilityDamage(4)

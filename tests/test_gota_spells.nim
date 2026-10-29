@@ -510,7 +510,7 @@ block:
       pending = true
   doAssert pending
 
-echo "Testing explicit healing while walking without a combat target"
+echo "Testing explicit healing stops walking without needing a combat target"
 for (class, slot) in [
   (DruidWarden, PrimaryAbility),
   (DruidWarden, SecondaryAbility),
@@ -537,7 +537,7 @@ for (class, slot) in [
       mana = hero.mana
     doAssert game.world.applyCastTarget(hero.id, slot.ord.int32, patient.id)
     game.tickWorld(nil)
-    doAssert hero.hasMoveTarget and hero.attackObjectId == 0
+    doAssert not hero.hasMoveTarget and hero.attackObjectId == 0
     doAssert game.world.casts.len == 1, $ability
     doAssert game.world.casts[0].ability == ability
     doAssert hero.charges[slot] == spec.charges - 1

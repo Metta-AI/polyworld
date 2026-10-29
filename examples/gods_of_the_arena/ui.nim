@@ -1,11 +1,11 @@
 ## Gods of the Arena Silky HUD.
 
 import
-  std/[strformat, strutils],
+  std/[strformat, strutils, times],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels, profiles, networks],
-  assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras
+  assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -88,7 +88,7 @@ proc currentLayout*(window: Window): GameUiLayout =
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
       gameUiScale(window),
-    if run.networked: 0.0'f else: TransportHeight
+    if run.networked or defined(gotaTestRoom): 0.0'f else: TransportHeight
   )
 
 var
@@ -232,6 +232,10 @@ proc mouseOverUi*(
     primaryId = 0'i32
 ): bool =
   ## Returns whether the pointer is over a visible game UI panel.
+  when defined(gotaTestRoom):
+    if mouse.x >= 12 and mouse.x < 392 and
+      mouse.y >= 94 and mouse.y < 398:
+        return true
   if run.world.phase == Drafting or shopOpen or
     window.statsContains(mouse) or mouseOverDebugMenu(mouse):
       return true
@@ -884,12 +888,14 @@ proc drawUi*(
     followSelection: var bool,
     actionCam: var ActionCam,
     focusPlayerHero: var bool,
+    attackMoveArmed: var bool,
+    attackMoveHeld: bool,
     networkStats: NetworkStats = nil
 ) {.measure.} =
   ## Draws every Silky HUD panel for the current frame.
   if run.world.phase == Drafting:
     sk.drawDraft(window, currentLayout(window).size, transport.playing)
-    if not run.networked:
+    if not run.networked and not defined(gotaTestRoom):
       transport.drawTransport(
         sk, window, currentLayout(window).transportPanel, actionCam,
         followSelection, addr statsState.toggled
@@ -918,6 +924,22 @@ proc drawUi*(
     if actionCam.enabled and actionCam.locked: actionCam.lockId
     else: primaryId
   var selection = selectedUnit(detailId, viewMode)
+  let
+    basic = GameUiPanel(
+      origin: details.portrait.origin + vec2(0, 158), size: vec2(40)
+    )
+    controlsHero = options.playerSlot > 0 and not run.replayMode and
+      selection.kind == SelectedHero and
+      selection.id == run.world.heroes[options.playerSlot - 1].id
+    attackClicked = controlsHero and selection.hp > 0 and
+      window.hudClicked(sk, basic)
+  if (window.mousePressed(MouseLeft) or window.mousePressed(MouseRight)) and
+    mouseOverUi(window, sk.mousePos, primaryId) and not attackClicked:
+      attackMoveArmed = attackMoveHeld
+  if attackClicked:
+    attackMoveArmed = attackMoveHeld or not attackMoveArmed
+    armedAbility = -1
+    armedItem = -1
   if selection.id != 0:
     discard sk.beginFrame(chrome.details)
 
@@ -1036,7 +1058,8 @@ proc drawUi*(
         isPicked(tower.id, selectedIds)
       )
   for fort in run.world.forts:
-    if visibleInView(viewMode, fort.team, fort.center):
+    if not defined(gotaTestRoom) and
+      visibleInView(viewMode, fort.team, fort.center):
       sk.drawMinimapIcon(
         WhiteTileKey,
         minimapPosition(renderPoint(fort.center), minimapPanel),
@@ -1102,12 +1125,13 @@ proc drawUi*(
       focusPlayerHero = true
     if selection.kind == SelectedHero:
       let
-        basic = GameUiPanel(
-          origin: portrait.origin + vec2(0, 158), size: vec2(40)
-        )
         melee = selection.attackCasting == MeleeCast
-      sk.drawWellImage(
-        basic, if melee: "attack" else: "bow", iconSize = 32
+        attacking = controlsHero and attackMoveArmed
+      sk.drawSprite(
+        if melee: "attack" else: "bow",
+        basic.origin + vec2(4),
+        vec2(32),
+        if attacking: rgbx(255, 55, 45, 255) else: rgbx(255, 255, 255, 255)
       )
       sk.drawLabel(
         "BASIC ATTACK",
@@ -1187,6 +1211,15 @@ proc drawUi*(
             item.itemSpec.cooldownTicks)
         else:
           sk.drawWellImage(well, "")
+        if controlsHero and selection.hp > 0 and
+          window.hudClicked(sk, well):
+            activatePlayerItem(
+              run.world,
+              selection.id,
+              int32(i),
+              epochTime(),
+              window.buttonPressed[DoubleClick]
+            )
   let playerHero =
     options.playerSlot > 0 and not run.replayMode
   let playerHeroId =
@@ -1219,7 +1252,13 @@ proc drawUi*(
       sk.drawSlot(slotPanel)
     if playerHero and inventoryHero.id != 0 and inventoryHero.hp > 0 and
       window.hudClicked(sk, slotPanel):
-        activatePlayerItem(run.world, playerHeroId, int32(slot))
+        activatePlayerItem(
+          run.world,
+          playerHeroId,
+          int32(slot),
+          epochTime(),
+          window.buttonPressed[DoubleClick]
+        )
 
   if selection.id != 0:
     let
@@ -1490,7 +1529,7 @@ proc drawUi*(
       run.hashCheck.error
     )
 
-  if not run.networked:
+  if not run.networked and not defined(gotaTestRoom):
     transport.drawTransport(
       sk,
       window,
@@ -1517,6 +1556,40 @@ proc drawUi*(
       hudScratch.add "Marching"
   sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch, networkStats)
   statsState.syncDirector(actionCam, statsTable, window.tabHeld)
+  if not window.statsContains(sk.mousePos) and
+    not mouseOverDebugMenu(sk.mousePos):
+      if controlsHero and sk.hovered(basic) and sk.mouseIdleTime >= 0.5:
+        let previousStyle = sk.textStyle
+        sk.textStyle = "Small"
+        sk.tooltipAnchor = rect(basic.origin, basic.size)
+        tooltip("Attack move")
+        sk.textStyle = previousStyle
+      if selection.kind == SelectedHero and selection.id != 0:
+        for slot in HeroAbilitySlot:
+          let well = details.abilities[slot.ord]
+          if sk.hovered(well):
+            sk.drawAbilityTooltip(
+              selection.abilities[slot],
+              selection.abilityLevels[slot],
+              well,
+              chrome.layout.size,
+              AbilityKeys[slot.ord]
+            )
+        for slot in 0 .. 1:
+          let
+            well = details.abilities[slot + 4]
+            item = selection.inventory[slot]
+          if item != NoItem and sk.hovered(well):
+            sk.drawItemTooltip(item, well, chrome.layout.size,
+              AbilityKeys[slot + 4])
+      if inventoryHero.id != 0:
+        for slot in 0 ..< InventorySlots:
+          let
+            well = inventory.slots[slot]
+            item = inventoryHero.inventory[slot]
+          if item != NoItem and sk.hovered(well):
+            sk.drawItemTooltip(item, well, chrome.layout.size,
+              if slot < 2: AbilityKeys[slot + 4] else: "")
 
 proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
   ## Presents readable statistics above the HUD at every window width.
@@ -1527,3 +1600,34 @@ proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
   sk.drawStatsOverlay(
     window, currentLayout(window), statsState, currentStats(), run.history
   )
+
+when defined(gotaTestRoom):
+  import lobbies
+
+  proc drawTestRoom*(sk: Silky): int =
+    ## Offers immediate hero changes using the existing Silky theme.
+    result = -1
+    let hero = run.world.heroes[0]
+    sk.lobbyPanel(vec2(12, 94), vec2(380, 304))
+    sk.drawLabel(
+      "HERO TEST ROOM", vec2(24, 104), vec2(356, 28),
+      sk.theme.defaultTextColor, "H1", CenterAlign
+    )
+    for class in HeroClass:
+      let at = vec2(
+        (24 + (class.ord mod 2) * 182).float32,
+        (140 + (class.ord div 2) * 36).float32
+      )
+      if sk.lobbyButton(
+        class.heroSpec.name, at, 174,
+        selected = class == hero.class, height = 32
+      ):
+        result = class.ord
+    if sk.lobbyButton("Reset hero", vec2(24, 326), 174, height = 32):
+      result = hero.class.ord
+    if sk.lobbyButton("Wound hero", vec2(206, 326), 174, height = 32):
+      result = -2
+    sk.drawLabel(
+      "Level 20 / unlimited casts / 1s cooldowns", vec2(24, 366), vec2(356, 24),
+      sk.theme.defaultTextColor, "Default", CenterAlign
+    )

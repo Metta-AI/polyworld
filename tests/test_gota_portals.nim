@@ -2,7 +2,7 @@ import
   std/[os, tempfiles],
   bassy,
   polyworld/[cli, pathing, tapes],
-  ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
+  ../examples/gods_of_the_arena/[bots, content, controls, maps, replays, sim]
 
 proc portalGame(team = RedTeam, size = defaultConfig().mapSize): Game =
   ## Creates a quiet match with one living hero and allied tower anchors.
@@ -37,6 +37,31 @@ proc step(game: Game, ticks: int32) =
   for i in 0 ..< ticks:
     game.tickWorld(nil)
 
+echo "Double-using an inventory scroll returns to spawn without a tower."
+for team in Team:
+  let
+    game = portalGame(team)
+    hero = game.world.heroes[team.ord * 5]
+  for tower in game.world.buildings.mitems:
+    tower.hp = 0
+  game.world.syncBuildings()
+  hero.place(WorldPoint())
+  hero.inventory[5] = PortalScroll
+  hero.itemCounts[5] = 2
+  clearPlayerCommands()
+  activatePlayerItem(game.world, hero.id, 5, 1.0)
+  game.flushPlayerCommands()
+  doAssert hero.portalEnds == 0 and armedItem == 5
+  activatePlayerItem(game.world, hero.id, 5, 1.5, doubleClick = true)
+  game.flushPlayerCommands()
+  doAssert hero.portalEnds > game.world.tick
+  doAssert hero.itemCounts[5] == 1
+  game.step(PortalChannelTicks)
+  doAssert hero.inOwnSpawn
+  doAssert hero.portalEnds == 0
+  doAssert hero.portalCooldownEnds > game.world.tick
+  clearPlayerCommands()
+
 echo "Testing scroll stacks, channel timing, landing and shared cooldown"
 for size in [defaultConfig().mapSize]:
   for team in Team:
@@ -64,7 +89,7 @@ for size in [defaultConfig().mapSize]:
     doAssert hero.lastActionError == ActionChanneling
     doAssert not world.applyAttackMove(hero.id, aim, aim)
     doAssert not world.applyAttackTarget(hero.id, 0)
-    doAssert not world.applyCastTarget(hero.id, 0, hero.id)
+    doAssert not world.applyCastTarget(hero.id, 2, hero.id)
     doAssert not world.applyUseItem(hero.id, 0)
     doAssert not world.applyUseItemAt(hero.id, 0, aim, aim)
     game.step(PortalChannelTicks - 1)

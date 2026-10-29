@@ -63,12 +63,10 @@ sub learnAbilities()
       if rank < abilityMaxLevel(spellSlot) then
         if selfLevel >= abilityRequiredLevel(spellSlot) then
           if canLevelAbility(spellSlot) then
-            ' Prefer R, W, E, Q whenever the next rank is legal.
-            score = spellSlot
-            if spellSlot = 1 then
-              score = 2
-            elseif spellSlot = 2 then
-              score = 1
+            ' Prefer R, Q, W, E whenever the next rank is legal.
+            score = 2 - spellSlot
+            if spellSlot = 3 then
+              score = 3
             end if
             if score > upgradeScore then
               upgradeScore = score
@@ -641,7 +639,7 @@ sub moveTo(goalX, goalY, marching)
     exit sub
   end if
   if goalX = orderX and goalY = orderY and marching = orderMarch then
-    if worldTick - orderTick < tickRate * 2 then
+    if selfInfo(5) then
       exit sub
     end if
   end if
@@ -721,10 +719,19 @@ sub moveTo(goalX, goalY, marching)
 end sub
 
 sub spells()
+  castIssued = 0
   if selfSilenceTicks > 0 then
     exit sub
   end if
-  for spellSlot = 0 to 3
+  ' Try recovery first, followed by the two combat spells and ultimate.
+  for castStep = 0 to 3
+    spellSlot = castStep - 1
+    if castStep = 0 then
+      spellSlot = 2
+    elseif castStep = 3 then
+      spellSlot = 3
+    end if
+    castRange(spellSlot) = abilityInfo(spellSlot, 0)
     charges = abilityCharges(spellSlot)
     recharge = abilityRecharge(spellSlot)
     damage = abilityDamage(spellSlot)
@@ -735,9 +742,9 @@ sub spells()
       if abilityCooldown(spellSlot) = 0 and selfMana >= cost then
         castId = 0
         if healing > 0 and healMissing >= healing \ 2 then
-          if selfClass = DruidWarden and spellSlot > 0 then
+          if (selfClass = DruidWarden or selfClass = Warlock) and spellSlot < 2 then
             castId = healId
-          elseif selfClass = VanguardKnight and spellSlot = 2 then
+          elseif selfClass = VanguardKnight and spellSlot = 1 then
             ' Aegis heals around us, even when only an ally is wounded.
             castId = selfId
           elseif selfMaxHp - selfHp >= healing \ 2 then
@@ -746,7 +753,9 @@ sub spells()
         elseif restore > 0 and selfMaxMana - selfMana >= restore then
           castId = selfId
         elseif damage > 0 and bestId <> 0 and pullStage = 0 and pullWaiting = 0 then
-          if bestDistance <= castRange(spellSlot) * castRange(spellSlot) then
+          ' Request a short approach instead of waiting for perfect range.
+          approachRange = castRange(spellSlot) + 4
+          if bestDistance <= approachRange * approachRange then
             if bestDistance >= castMinimum(spellSlot) * castMinimum(spellSlot) then
               ' Save the last recharging charge for valuable targets.
               if bestKind <> 3 or charges > 1 or recharge <= tickRate then
@@ -783,6 +792,8 @@ sub spells()
                 accepted = castPoint(spellSlot, originX + side * aimX, originY + side * aimY)
                 actionError = lastActionError()
                 if accepted then
+                  castIssued = 1
+                  orderMarch = -1
                   exit sub
                 end if
               end if
@@ -794,12 +805,14 @@ sub spells()
           accepted = castTarget(spellSlot, castId)
           actionError = lastActionError()
           if accepted then
+            castIssued = 1
+            orderMarch = -1
             exit sub
           end if
         end if
       end if
     end if
-  next spellSlot
+  next castStep
 end sub
 
 if drafting then
@@ -850,72 +863,43 @@ if initialized = 0 then
   previousY = myY
   crossedMiddle = 0
   retreating = 0
-  ' The host exposes effects and costs, but not spell range or cast shape.
-  ' These small tables mirror content.nim; all distances are in tiles.
-  castRange(0) = 0
-  castRange(1) = 1.5
-  castRange(2) = 2.5
-  castRange(3) = 2
-  castDelay(2) = 24
+  ' Keep tactical lead times here; read current ranges from the host below.
+  castDelay(1) = 24
   castDelay(3) = 24
-  healRange = 4
+  healRange = 0
   for spellSlot = 0 to 3
-    castGround(spellSlot) = spellSlot >= 2
+    castGround(spellSlot) = spellSlot = 1 or spellSlot = 3
     castMinimum(spellSlot) = 0
+    if abilityHeal(spellSlot) > 0 and abilityInfo(spellSlot, 0) > healRange then
+      healRange = abilityInfo(spellSlot, 0)
+    end if
   next spellSlot
   if selfClass = VanguardKnight then
-    healRange = 7 / 3
-    castRange(2) = 7 / 3
-    castRange(3) = 11 / 6
-    castDelay(2) = 12
+    castDelay(1) = 12
     castDelay(3) = 6
-  elseif selfClass = Ranger then
-    castRange(0) = 7
-    castRange(1) = 6
-    castRange(2) = 6.5
-    castRange(3) = 8
   elseif selfClass = Arcanist then
-    castRange(1) = 5.5
-    castRange(2) = 6
-    castRange(3) = 7
-    castDelay(2) = 48
-    castDelay(3) = 72
+    castDelay(1) = 24
+    castDelay(3) = 36
   elseif selfClass = DruidWarden then
-    castRange(1) = 4
-    castRange(2) = 4
-    castRange(3) = 10 / 3
+    castDelay(1) = 12
   elseif selfClass = DemonHunter then
-    castRange(2) = 2
-    castRange(3) = 5
-    castDelay(2) = 6
+    castDelay(1) = 6
     castGround(3) = 0
   elseif selfClass = DeathKnight then
-    castRange(2) = 8 / 3
-    castRange(3) = 7 / 3
     castDelay(3) = 12
     castGround(3) = 0
     castMinimum(3) = 2 / 3
   elseif selfClass = Crossbowman then
-    castRange(0) = 7
-    castRange(1) = 20 / 3
-    castRange(2) = 6
-    castRange(3) = 7.5
-    castDelay(2) = 12
+    castDelay(1) = 12
   elseif selfClass = Lich then
-    castRange(0) = 6
-    castRange(1) = 20 / 3
-    castRange(2) = 5
-    castRange(3) = 6.5
     castGround(3) = 0
   elseif selfClass = Warlock then
-    castRange(1) = 14 / 3
-    castRange(2) = 4
-    castRange(3) = 5
+    castDelay(1) = 18
+    castGround(1) = 0
     castGround(3) = 0
   elseif selfClass = Berserker then
-    castRange(3) = 13 / 6
-    castDelay(2) = 12
-    castDelay(3) = 48
+    castDelay(1) = 12
+    castDelay(3) = 24
   end if
 end if
 
@@ -939,7 +923,6 @@ learnAbilities()
 observe()
 pullCamps()
 inventory()
-spells()
 dodgeWarnings()
 
 if selfHp * 4 < selfMaxHp or (bestKind = 6 and selfHp * 10 < selfMaxHp * 4) then
@@ -997,6 +980,15 @@ if worldTick < pullHandoffUntil then
   end
 end if
 
+' Pulling, dodging, and retreating above may deliberately replace a spell.
+if selfInfo(19) or selfInfo(20) > 0 then
+  end
+end if
+spells()
+if castIssued then
+  end
+end if
+
 if bestId <> 0 then
   ' Finish a windup before kiting; never cancel every swing with movement.
   if bestKind = 2 and aimedAtUs > 0 and attackRange >= 3 then
@@ -1028,7 +1020,7 @@ if bestId <> 0 then
       blockedId = bestId
       blockedUntil = worldTick + tickRate * 3
     else
-      orderTick = 0
+      orderMarch = -1
     end if
   end if
   end

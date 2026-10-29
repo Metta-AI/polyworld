@@ -57,14 +57,40 @@ myY = originY + side * selfY
 for upgrade = 1 to 4
   if canLevelAbility(3) then
     levelAbility(3)
+  elseif canLevelAbility(0) then
+    levelAbility(0)
   elseif canLevelAbility(1) then
     levelAbility(1)
   elseif canLevelAbility(2) then
     levelAbility(2)
-  elseif canLevelAbility(0) then
-    levelAbility(0)
   end if
 next upgrade
+
+' Keep marching orders until their destination changes or the route ends.
+sub moveTo(goalX, goalY, marching)
+  if orderActive and selfInfo(5) then
+    if goalX = orderX and goalY = orderY and marching = orderMarch then
+      exit sub
+    end if
+  end if
+  if marching then
+    accepted = attackMove(originX + side * goalX, originY + side * goalY)
+  else
+    accepted = walkTo(originX + side * goalX, originY + side * goalY)
+  end if
+  if accepted then
+    orderActive = 1
+    orderX = goalX
+    orderY = goalY
+    orderMarch = marching
+  end if
+end sub
+
+if selfHp <= 0 then
+  orderActive = 0
+  crossedMiddle = 0
+  end
+end if
 
 dim allyX(9)
 dim allyY(9)
@@ -119,7 +145,7 @@ sub rush()
     regroup = 0
   end if
   if regroup then
-    walkTo(originX + side * centerX, originY + side * centerY)
+    moveTo(centerX, centerY, 0)
     exit sub
   end if
 
@@ -145,7 +171,12 @@ sub rush()
     index = index + 1
   wend
   if bestId <> 0 then
-    attackTarget(bestId)
+    if selfTarget <> bestId then
+      accepted = attackTarget(bestId)
+      if accepted then
+        orderActive = 0
+      end if
+    end if
     exit sub
   end if
 
@@ -163,9 +194,9 @@ sub rush()
     crossedMiddle = 1
   end if
   if crossedMiddle then
-    attackMove(originX + side * (mapWidth - 1 - homeX), originY + side * (mapHeight - 1 - homeY))
+    moveTo(mapWidth - 1 - homeX, mapHeight - 1 - homeY, 1)
   else
-    attackMove(originX + side * middleX, originY + side * middleY)
+    moveTo(middleX, middleY, 1)
   end if
 end sub
 

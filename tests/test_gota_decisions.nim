@@ -7,7 +7,7 @@ import
 const Source = """
 if selfId = 100 then
   used = useItem(0)
-  cast = castPoint(2, selfX, selfY)
+  cast = castPoint(1, selfX, selfY)
 end if
 seenHp = 0
 for i = 0 to objectCount() - 1

@@ -103,6 +103,67 @@ for class in HeroClass:
     $class & " kept walking after reaching attack range"
 
 echo "Testing basic attack damage scales independently of all four spells"
+block:
+  let
+    game = attackGame(Crossbowman)
+    hero = game.world.heroes[0]
+    other = game.enemyHero(WorldScale)
+  other.hp = 1
+  doAssert game.world.applyAttackTarget(hero.id, other.id)
+  var sawShot = false
+  for tick in 0 ..< int(heroAttackTicks(Crossbowman)):
+    let targetPosition = other.position
+    game.tickWorld(nil)
+    if game.world.attackEffects.len > 0:
+      doAssert game.world.attackEffects[0].sourceId == hero.id
+      doAssert game.world.attackEffects[0].position == targetPosition
+      doAssert other.hp <= 0
+      sawShot = true
+      break
+  doAssert sawShot
+  for tick in 0 ..< int(heroAttackTicks(Crossbowman)):
+    game.tickWorld(nil)
+    doAssert game.world.attackEffects.len == 0
+
+echo "Testing creep killing blows retain their actual impact positions"
+for kind in CreepKind:
+  for victimIsHero in [false, true]:
+    let
+      game = attackGame(Crossbowman)
+      hero = game.world.heroes[0]
+    hero.controls[StunControl].ends = 100_000
+    game.addCreep(1000, 0, RedTeam)
+    game.world.footmen[0].kind = kind
+    game.world.footmen[0].swingTicks = -1
+    if victimIsHero:
+      discard game.enemyHero(WorldScale div 2)
+      game.world.heroes[5].hp = 1
+    else:
+      game.addCreep(1001, WorldScale div 2)
+      game.world.footmen[1].hp = 1
+      game.world.footmen[1].controls[StunControl].ends = 100_000
+    var sawHit = false
+    for tick in 0 ..< 100:
+      let position =
+        if victimIsHero: game.world.heroes[5].position
+        else: game.world.footmen[1].position
+      game.tickWorld(nil)
+      for hit in game.world.attackEffects:
+        if hit.sourceId == 1000:
+          doAssert not sawHit
+          doAssert hit.position == position
+          doAssert hit.position != WorldPoint()
+          doAssert hit.style ==
+            (if kind == RangedCreep: MagicAttack else: MeleeAttack)
+          sawHit = true
+      if sawHit:
+        break
+    doAssert sawHit
+    for tick in 0 ..< 100:
+      game.tickWorld(nil)
+      for hit in game.world.attackEffects:
+        doAssert hit.sourceId != 1000
+
 for class in HeroClass:
   for level in [1, 10, 20]:
     let
@@ -184,6 +245,9 @@ block:
   doAssert hero.attackObjectId == 0 and not hero.hasMoveTarget
   doAssert hero.movePath.len == 0
   game.addCreep(1000, 100_000)
+  while game.world.tick < hero.castPoseUntil:
+    doAssert hero.attackObjectId == 0
+    game.tickWorld(nil)
   game.tickWorld(nil)
   doAssert hero.attackObjectId == 1000
 

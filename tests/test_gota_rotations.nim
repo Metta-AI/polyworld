@@ -45,6 +45,7 @@ proc rotate(hero: Hero) =
   hero.body = hero.body.rotated
   hero.navLayer = hero.navLayer.opposite
   hero.portalDestination = hero.portalDestination.rotated
+  hero.queuedCastPoint = hero.queuedCastPoint.rotated
   for point in hero.movePath.mitems:
     point = point.rotated
   for layer in hero.movePathLayers.mitems:

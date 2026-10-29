@@ -128,3 +128,44 @@ proc generateMap*(
     mainRoads: savedArena.mainRoads
   )
   battleMapHash = result.hash
+
+when defined(gotaTestRoom):
+  proc generateTestRoom*(): MapData =
+    ## Installs a small stone room with an impassable raised perimeter.
+    const Size = 28
+    activeMapResolution = Size
+    savedArena = ArenaData(
+      baseAreas: newSeq[BaseArea](Size * Size)
+    )
+    arenaReady = true
+    var roomLayers: seq[QuadLayer]
+    for i in 0 .. 3:
+      roomLayers.add QuadLayer(
+        originX: mapOrigin(), originZ: mapOrigin(),
+        width: Size, depth: Size, slab: i != 0, water: i == WaterLayer,
+        tiles: newSeq[Tile](Size * Size)
+      )
+    result = MapData(
+      seed: 42, resolution: Size, preset: defaultConfig(),
+      minimap: newSeq[uint32](Size * Size),
+      mainRoads: newSeq[bool](Size * Size)
+    )
+    for z in 0 ..< Size:
+      for x in 0 ..< Size:
+        let
+          index = z * Size + x
+          wall = x == 0 or z == 0 or x == Size - 1 or z == Size - 1
+        var tile = Tile(
+          flags: TileExists or TileConnectedEast or TileConnectedSouth,
+          kind: ArenaKindBase + 2
+        )
+        if wall:
+          tile.flags = tile.flags or TileImpassable
+          tile.tops = [16'i16, 16, 16, 16]
+        else:
+          savedArena.baseAreas[index] = RedKeep
+        roomLayers[0].tiles[index] = tile
+        result.minimap[index] = if wall: 0xff494949'u32 else: 0xffa4a4a4'u32
+    installImmutableLayers(roomLayers)
+    result.hash = mapFingerprint()
+    battleMapHash = result.hash

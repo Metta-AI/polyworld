@@ -100,6 +100,8 @@ type
     EdgeColorUniform
     PatternUniform
     NoiseUniform
+    EdgeFadeUniform
+    EdgeShapeUniform
 
   FxSettings* = object
     name*: string
@@ -219,7 +221,9 @@ const UniformNames: array[FxUniform, string] = [
   "uEndColor",
   "uEdgeColor",
   "uPattern",
-  "uNoise"
+  "uNoise",
+  "uEdgeFade",
+  "uEdgeShape"
 ]
 
 ## Preset serialization
@@ -1735,6 +1739,8 @@ var
   uEdgeColor: Uniform[Vec4]
   uPattern: Uniform[Sampler2D]
   uNoise: Uniform[Sampler2D]
+  uEdgeFade: Uniform[Vec4]
+  uEdgeShape: Uniform[Vec2]
 
 proc fxVertex(
   gl_Position: var Vec4,
@@ -1843,6 +1849,26 @@ proc fxFragment(
     )
     rgb = mix(uEdgeColor.xyz, rgb, edge)
     alpha = mix(uEdgeColor.w * uAlpha, alpha, edge)
+  # Fade authored boundaries independently of scrolling texture coordinates.
+  var edgeAlpha = 1.0'f
+  if uEdgeFade.x > 0.0'f:
+    edgeAlpha *= smoothstep(0.0'f, uEdgeFade.x, fragmentUv.x)
+  if uEdgeFade.y > 0.0'f:
+    edgeAlpha *= smoothstep(0.0'f, uEdgeFade.y, 1.0'f - fragmentUv.x)
+  if uEdgeFade.z > 0.0'f:
+    edgeAlpha *= smoothstep(0.0'f, uEdgeFade.z, fragmentUv.y)
+  if uEdgeFade.w > 0.0'f:
+    edgeAlpha *= smoothstep(0.0'f, uEdgeFade.w, 1.0'f - fragmentUv.y)
+  if uEdgeShape.x == 1.0'f:
+    edgeAlpha *= smoothstep(0.0'f, 0.12'f,
+      1.0'f - length(fragmentUv * 2.0'f - vec2(1.0'f)))
+  elif uEdgeShape.x == 2.0'f:
+    let
+      x = fragmentUv.x * 2.0'f - 1.0'f
+      y = abs(fragmentUv.y * 2.0'f - 1.0'f) * uEdgeShape.y
+      cap = max(0.0'f, y - (uEdgeShape.y - 1.0'f))
+    edgeAlpha *= smoothstep(0.0'f, 0.12'f, 1.0'f - length(vec2(x, cap)))
+  alpha *= edgeAlpha
   if alpha < 0.003'f:
     discardFragment()
   fragColor = vec4(rgb, alpha)
@@ -2202,6 +2228,24 @@ proc fxModel*(axis: FxAxis): Mat4 =
   of ZAxis:
     rotateX(PI.float32 * 0.5'f32)
 
+proc fxEdgeFade*(settings: FxSettings): Vec4 =
+  ## Softens open UV boundaries without fading closed angular seams.
+  case settings.shape
+  of QuadShape, RibbonShape, CrossPlanesShape, AoeLineShape:
+    result = vec4(0.08'f)
+  of RingShape, ArcShape, AoeCircleShape, AoeConeShape:
+    result.z = if settings.innerRadius > MinimumDimension: 0.12'f else: 0
+    result.w = 0.12'f
+    if settings.shape in {ArcShape, AoeConeShape} and
+      abs(settings.arcDegrees) < FullArcThreshold:
+        result.x = 0.08'f
+        result.y = 0.08'f
+  of CylinderShape, ConeShape, TubeShape:
+    result.z = 0.06'f
+    result.w = 0.14'f
+  else:
+    discard
+
 proc drawFxMesh*(
     renderer: FxRenderer,
     settings: FxSettings,
@@ -2235,6 +2279,18 @@ proc drawFxMesh*(
   of AdditiveBlend:
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE)
   glUseProgram(renderer.program)
+  let edgeFade = fxEdgeFade(settings)
+  glUniform4f(location(EdgeFadeUniform),
+    edgeFade.x, edgeFade.y, edgeFade.z, edgeFade.w)
+  let edgeShape =
+    case settings.shape
+    of DiscShape:
+      vec2(1, 0)
+    of AoeCapsuleShape:
+      vec2(2, 1 + settings.length / max(settings.width, MinimumDimension))
+    else:
+      vec2(0)
+  glUniform2f(location(EdgeShapeUniform), edgeShape.x, edgeShape.y)
   glUniformMatrix4fv(
     location(ViewProjectionUniform),
     1,

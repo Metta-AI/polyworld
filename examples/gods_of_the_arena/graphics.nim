@@ -1,12 +1,12 @@
 ## Window, terrain rendering, characters, camera, and HUD for the arena.
 
 import
-  std/[math, tables, times],
+  std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors,
+  aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
-  polyworld/clickmarks, polyworld/fxshapes,
+  polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
   polyworld/tapes, polyworld/toon, polyworld/metrics,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
@@ -18,7 +18,7 @@ import
     visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
 
 when defined(takeScreenshot):
-  import std/[os, strutils]
+  import std/os
 
 const
   DefaultCameraDistance = 17.0'f / 1.2'f
@@ -126,8 +126,9 @@ var
   godRenderClips: array[Team, array[GodAnimation, int]]
   heroModels: array[HeroClass, CharacterModel]
   heroRenderClips: array[HeroClass, array[5, int]]
-  heroCastClips: array[HeroClass, int]
+  heroCastClips: array[HeroClass, array[3, int]]
   heroPortalClips: array[HeroClass, int]
+  heroWeaponTips: array[HeroClass, array[2, WeaponTip]]
   footmanEyes: array[Team, array[CreepKind, DeathEyes]]
   godEyes: array[Team, DeathEyes]
   heroEyes: array[HeroClass, DeathEyes]
@@ -279,6 +280,7 @@ proc runGraphics*(
   scene.useToonShading()
   var
     worldCharacters: seq[WorldCharacter]
+    visibleBuildings: seq[int]
     worldCharacterCount: int
     directorSubjects: seq[Subject]
   if heroModels[HeroClass.low] == nil:
@@ -352,17 +354,42 @@ proc runGraphics*(
           heroEyes[class]
         )
         model.fitCharacterHeight(HeroTargetHeight, model.clipIndex("Idle_Loop"))
+        if class.heroSpec.attackStyle == MeleeAttack:
+          let inventory = characterLibrary.presetManifest(
+            characterLibrary.namedPreset(HeroPresets[class])
+          )
+          for category in inventory.categories:
+            if category.key notin ["Right hand", "Left hand"]:
+              continue
+            for item in category.items:
+              let name = item.name.toLowerAscii()
+              if name.endsWith("sword") or name.endsWith("dagger") or
+                name.endsWith("axe"):
+                  heroWeaponTips[class][int(category.key == "Left hand")] =
+                    weaponTip(model.file.root, item.nodes, item.attachmentBone)
         heroEyes[class].merge()
         heroModels[class] = model
         for i, name in class.heroAnimationNames():
           heroRenderClips[class][i] = model.clipIndex(name)
-        heroCastClips[class] = model.clipIndex("Spell_Simple_Shoot")
+        for i, name in HeroCastAnimations:
+          heroCastClips[class][i] = model.clipIndex(name)
         heroPortalClips[class] = model.clipIndex("Spell_Simple_Idle_Loop")
+  var moveMarkSettings = clickMarkSettings()
+  moveMarkSettings.radius *= 0.6
+  moveMarkSettings.height *= 0.6
+  moveMarkSettings.startColor = vec4(0.2, 1.0, 0.25, 0.9)
+  moveMarkSettings.endColor = vec4(0.05, 0.7, 0.1, 0.0)
+  moveMarkSettings.edgeColor = vec4(0.45, 1.0, 0.5, 1.0)
+  var attackMarkSettings = moveMarkSettings
+  attackMarkSettings.startColor = vec4(1.0, 0.15, 0.1, 0.9)
+  attackMarkSettings.endColor = vec4(0.7, 0.03, 0.02, 0.0)
+  attackMarkSettings.edgeColor = vec4(1.0, 0.35, 0.25, 1.0)
   var
     particles = initParticleSystem()
     spellEffects = initSpellRenderer()
     arenaCursors = initArenaCursors()
-    clickMarks = initClickMarks()
+    clickMarks = initClickMarks(moveMarkSettings)
+    attackMarks = initClickMarks(attackMarkSettings)
     worldShapes = initShapeRenderer()
     waypointShapes = initShapeRenderer()
     waypointText = initWorldBarRenderer()
@@ -553,6 +580,8 @@ proc runGraphics*(
     replayCheckpoints: seq[SeekCheckpoint]
     previousUnitPositions: Table[int32, Vec3]
     previousUnitFacings: Table[int32, float32]
+    heroTrails = newSeq[array[2, WeaponTrail]](run.world.heroes.len)
+    trailClasses = newSeq[HeroClass](run.world.heroes.len)
     renderAlpha = 1.0'f32
     animationAlpha = 0.0'f32
     viewMode =
@@ -596,6 +625,26 @@ proc runGraphics*(
       previous = previousUnitFacings.getOrDefault(id, current)
     previous + shortestTurn(previous, current) * renderAlpha
 
+  proc targetRenderOffset(id: int32): Vec3 =
+    ## Keeps target-bound effects aligned with the interpolated unit model.
+    if id == 0:
+      return
+    let hero = run.world.heroById(id)
+    if hero.id != 0:
+      return unitRenderPoint(id, hero.position) - renderPoint(hero.position)
+    let creep = run.world.footmanById(id)
+    if creep.id != 0:
+      return unitRenderPoint(id, creep.position) - renderPoint(creep.position)
+
+  proc outlineRenderOffset(spell: SpellCast, targetId: int32): Vec3 =
+    ## Smooths tracked targets without moving ground-anchored cast previews.
+    let spec = spell.ability.abilitySpec(spell.level)
+    if spec.casting == AreaCast:
+      if not spec.fromCaster:
+        return targetRenderOffset(targetId)
+      return
+    targetRenderOffset(spell.targetId)
+
   proc unitRenderTime(ticks: int32): float32 =
     ## Samples authoritative animation state continuously between ticks.
     (ticks.float32 + animationAlpha) / TickRate.float32
@@ -613,11 +662,15 @@ proc runGraphics*(
       result.clip = heroPortalClips[hero.class]
       result.time = unitRenderTime(hero.animTicks)
       return
-    for spell in run.world.casts:
-      let age = run.world.tick - spell.started
-      if spell.heroId == hero.id and age >= 0 and age < 12:
-        result.clip = heroCastClips[hero.class]
-        result.time = min((age.float32 + animationAlpha) / 12, 1) *
+    if hero.castPoseUntil > run.world.tick and
+      hero.controls[StunControl].ends <= run.world.tick:
+        let
+          progress = clamp(1 - (hero.castPoseUntil.float32 -
+            run.world.tick.float32 - animationAlpha) /
+            (TickRate div 2).float32, 0.0'f, 1.0'f)
+          phase = min(int(progress * 3), 2)
+        result.clip = heroCastClips[hero.class][phase]
+        result.time = min(progress * 3 - phase.float32, 0.999'f) *
           model.clipDuration(result.clip)
         return
     if hero.animClip in heroAttackClips:
@@ -1010,7 +1063,8 @@ proc runGraphics*(
         )
       )
     for i, god in gods:
-      if not visibleInView(god.team, run.world.forts[i].center):
+      if defined(gotaTestRoom) or
+        not visibleInView(god.team, run.world.forts[i].center):
         continue
       let
         model = godModels[god.team]
@@ -1048,15 +1102,14 @@ proc runGraphics*(
     panning = false
     minimapPanning = false
     cameraEye = vec3(0, 0, 0)
-    primaryId = 0'i32
-    selectedIds: seq[int32]
+    primaryId = if defined(gotaTestRoom): FirstHeroId else: 0'i32
+    selectedIds = if defined(gotaTestRoom): @[FirstHeroId] else: newSeq[int32]()
     selectionPressPosition = vec2(0)
-    rightPressPosition = vec2(0)
-    rightOrderStarted = false
     selectionStarted = false
     selectionAdditive = false
     attackMoveArmed = false
     aimSpell: SpellCast
+    aimTargetId = 0'i32
     aimVisible = false
     aimError = NoActionError
     cursorMode = -1
@@ -1112,6 +1165,7 @@ proc runGraphics*(
           shopOpen = not shopOpen
           armedAbility = -1
           armedItem = -1
+          attackMoveArmed = false
           return
         if shopOpen and button != KeySpace:
           return
@@ -1127,7 +1181,7 @@ proc runGraphics*(
       transport.handleKey(button)
     elif button == KeyC:
       actionCam.toggle(followSelection)
-    elif button == KeyT:
+    elif button == KeyT and not defined(gotaTestRoom):
       scene.toggleShading()
     elif button == KeyO:
       showOccludedCharacters = not showOccludedCharacters
@@ -1509,7 +1563,6 @@ proc runGraphics*(
     syncViewMode()
     if matchMenu != HiddenMatchMenu or shopOpen or run.world.phase == Drafting:
       selectionStarted = false
-      rightOrderStarted = false
       minimapPanning = false
       return
     if focusPlayerHero:
@@ -1536,11 +1589,6 @@ proc runGraphics*(
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    var minimapPoint: Vec2
-    if window.mousePressed(MouseRight) and (not overUi or
-      (armedItem >= 0 and window.minimapAim(sk.mousePos, minimapPoint))):
-      rightPressPosition = window.mousePos.vec2
-      rightOrderStarted = true
     if window.mousePressed(MouseMiddle) and
         (not overUi or (mouseKeyAliasesEnabled and
           window.buttonPressed[MouseMiddleKey])):
@@ -1660,6 +1708,29 @@ proc runGraphics*(
     elif followSelection:
       followSelection = false
 
+  proc pickActionTarget(viewProjection: Mat4, healing = false): int32 =
+    ## Keeps precise mesh hits, then searches near the clicked map position.
+    result = pickEntity(viewProjection)
+    if result != 0:
+      return
+    let
+      hero = run.world.heroById(playerHeroId())
+      (origin, direction) = mouseRay(
+        window.mousePos.vec2, window.size.vec2, viewProjection
+      )
+      ground = pickTile(origin, direction)
+    if hero.id == 0 or not ground.hit:
+      return
+    let center = tileCenter(ground.layer, ground.x, ground.z)
+    var point = center
+    if abs(direction.y) > 0.0001'f:
+      point = origin + direction * ((center.y - origin.y) / direction.y)
+    result = run.world.nearbyTarget(hero.team, WorldPoint(
+      x: int32(round(point.x * WorldScale.float32)),
+      y: int32(round(point.y * WorldScale.float32)),
+      z: int32(round(point.z * WorldScale.float32))
+    ), healing)
+
   proc issueGroundOrder(viewProjection: Mat4, attackMove: bool) =
     ## Walks or attack-moves the human hero onto the tile under the pointer.
     let heroId = playerHeroId()
@@ -1684,6 +1755,12 @@ proc runGraphics*(
       queueWalkTo(heroId, mapX, mapY)
     selectEntity(heroId)
 
+  proc holdingAttackMove(): bool =
+    ## Keeps attack-move armed while A is held without Control.
+    window.buttonDown[KeyA] and
+      not window.buttonDown[KeyLeftControl] and
+      not window.buttonDown[KeyRightControl]
+
   proc previewGroundClick(viewProjection: Mat4) =
     ## Shows local click feedback before release or any server acknowledgement.
     if not playerMode() or shopOpen or matchMenu != HiddenMatchMenu or
@@ -1695,7 +1772,7 @@ proc runGraphics*(
         return
     let
       hero = run.world.heroById(playerHeroId())
-      picked = pickEntity(viewProjection)
+      picked = pickActionTarget(viewProjection)
     if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
       return
     if picked != 0 and objectTeam(picked) != objectTeam(hero.id):
@@ -1706,9 +1783,11 @@ proc runGraphics*(
       )
       ground = pickWalkableTile(origin, direction)
     if ground.hit:
-      clickMarks.emitClickMark(
-        tileCenter(ground.layer, ground.x, ground.z)
-      )
+      let point = tileCenter(ground.layer, ground.x, ground.z)
+      if attackMoveArmed:
+        attackMarks.emitClickMark(point)
+      else:
+        clickMarks.emitClickMark(point)
 
   proc updatePlayerSpells() =
     ## Casts self abilities immediately and enters aiming for other spells.
@@ -1740,7 +1819,9 @@ proc runGraphics*(
         (window.mousePos.vec2 - selectionPressPosition).length <=
           6.0'f32 and
         not mouseOverUi(window, sk.mousePos, primaryId):
-      let picked = pickEntity(viewProjection)
+      let picked =
+        if playerMode(): pickActionTarget(viewProjection)
+        else: pickEntity(viewProjection)
       if playerMode() and attackMoveArmed:
         let heroId = playerHeroId()
         if picked != 0 and objectTeam(picked) != objectTeam(heroId):
@@ -1748,7 +1829,7 @@ proc runGraphics*(
           selectEntity(heroId)
         else:
           issueGroundOrder(viewProjection, true)
-        attackMoveArmed = false
+        attackMoveArmed = holdingAttackMove()
       elif picked != 0:
         selectEntity(picked, selectionAdditive)
         if playerMode() and objectTeam(picked) != objectTeam(playerHeroId()):
@@ -1758,7 +1839,7 @@ proc runGraphics*(
     selectionStarted = false
 
   proc updatePlayerOrder(viewProjection: Mat4) =
-    ## Confirms an aimed cast, or turns a right-click into a movement order.
+    ## Confirms aimed casts and submits right-click orders on mouse-down.
     if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
       run.world.phase == Drafting:
         return
@@ -1766,9 +1847,8 @@ proc runGraphics*(
       window.mouseReleased(MouseLeft) and selectionStarted
     if leftCast:
       selectionStarted = false
-    elif not window.mouseReleased(MouseRight) or not rightOrderStarted:
+    elif not window.mousePressed(MouseRight):
       return
-    rightOrderStarted = false
     var minimapPoint: Vec2
     if armedItem >= 0 and
       run.world.heroById(playerHeroId()).inventory[armedItem] == PortalScroll and
@@ -1783,12 +1863,19 @@ proc runGraphics*(
       return
     if mouseOverUi(window, sk.mousePos, primaryId):
       return
-    let press = if leftCast: selectionPressPosition else: rightPressPosition
-    if (window.mousePos.vec2 - press).length > 6.0'f:
-      return
     let
       heroId = playerHeroId()
-      picked = pickEntity(viewProjection)
+      hero = run.world.heroById(heroId)
+      healing =
+        if armedItem >= 0:
+          hero.inventory[armedItem].itemSpec.heal > 0 or
+            hero.inventory[armedItem].itemSpec.restore > 0
+        elif armedAbility >= 0:
+          heroAbility(hero.class, HeroAbilitySlot(armedAbility)).abilitySpec.kind in
+            {Heal, Restore}
+        else:
+          false
+      picked = pickActionTarget(viewProjection, healing)
     selectEntity(heroId)
     if armedItem >= 0:
       if run.world.heroById(heroId).inventory[armedItem] != PortalScroll:
@@ -1817,7 +1904,7 @@ proc runGraphics*(
       selectEntity(heroId)
       return
     if armedAbility >= 0:
-      if aimError != NoActionError:
+      if aimError notin {NoActionError, ActionOutOfRange}:
         return
       let
         hero = heroById(run.world, heroId)
@@ -1826,7 +1913,8 @@ proc runGraphics*(
           hero.abilityLevels[slot]
         )
       if hero.hp <= 0 or hero.state == Dying or hero.charges[slot] <= 0 or
-        hero.cooldowns[slot] > 0 or hero.mana < spec.manaCost:
+        hero.cooldowns[slot] > 0 or
+        (hero.mana < spec.manaCost and not defined(gotaTestRoom)):
           return
       if spec.casting == SelfCast:
         queueCastTarget(heroId, armedAbility, heroId)
@@ -1852,14 +1940,15 @@ proc runGraphics*(
       return
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
-      attackMoveArmed = false
+      attackMoveArmed = holdingAttackMove()
       return
     issueGroundOrder(viewProjection, attackMoveArmed)
-    attackMoveArmed = false
+    attackMoveArmed = holdingAttackMove()
 
   proc updateAim(viewProjection: Mat4) =
     ## Resolves the visible aim using the same geometry as simulation casts.
     aimVisible = false
+    aimTargetId = 0
     aimError = NoActionError
     var nextCursor = 0
     if playerMode() and matchMenu == HiddenMatchMenu and not shopOpen and
@@ -1882,7 +1971,7 @@ proc runGraphics*(
               slot = HeroAbilitySlot(armedAbility)
               ability = heroAbility(hero.class, slot)
               spec = ability.abilitySpec(hero.abilityLevels[slot])
-              picked = pickEntity(viewProjection)
+              picked = pickActionTarget(viewProjection, spec.kind in {Heal, Restore})
               targetId =
                 if picked != 0 and
                   spec.canTarget(objectTeam(picked) == objectTeam(hero.id)):
@@ -1903,10 +1992,11 @@ proc runGraphics*(
                 point.y = fixedSurfaceHeightNear(
                   point, hero.position.y, hero.team
                 )
-              aimError = run.world.aimAbility(
+              aimError = run.world.placementPreview(
                 hero, slot, targetId, point, aimSpell
               )
-              aimVisible = aimError == NoActionError
+              aimTargetId = targetId
+              aimVisible = aimError in {NoActionError, ActionOutOfRange}
               if aimVisible:
                 if hero.controls[StunControl].ends > run.world.tick:
                   aimError = ActionStunned
@@ -1920,7 +2010,7 @@ proc runGraphics*(
                   aimError = ActionCooldown
                 elif hero.charges[slot] <= 0:
                   aimError = ActionNoCharges
-                elif hero.mana < spec.manaCost:
+                elif hero.mana < spec.manaCost and not defined(gotaTestRoom):
                   aimError = ActionInsufficientMana
             else:
               aimError = ActionInvalidPoint
@@ -1951,25 +2041,25 @@ proc runGraphics*(
     worldShapes.addPolyline(ring, color, 0.04'f)
 
   proc drawAimBanner() =
-    ## Identifies the armed command and explains how to confirm or cancel it.
+    ## Identifies the armed spell or item and explains how to cast it.
     if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
       run.world.phase == Drafting or
-      (armedAbility < 0 and armedItem < 0 and not attackMoveArmed):
+      (armedAbility < 0 and armedItem < 0):
         return
     let
       width = min(800.0'f, window.size.x.float32 / sk.uiScale - 32)
       at = vec2((window.size.x.float32 / sk.uiScale - width) / 2, 146)
     var
-      title = "Attack move"
-      detail = "Click a target or destination. Esc to cancel."
+      title: string
+      detail: string
     if armedItem >= 0:
       let item = run.world.heroById(playerHeroId()).inventory[armedItem]
       if item == PortalScroll:
         title = "Portal scroll - Tower landing area"
-        detail = "Click a destination near an allied tower. Esc to cancel."
+        detail = "Click near an allied tower. Double-click the icon or tap its key twice to return home. Esc to cancel."
       else:
         title = item.itemSpec.name & " - Allied hero"
-        detail = "Click yourself or a nearby ally. Double-tap the item key for self. Esc to cancel."
+        detail = "Click yourself or a nearby ally. Double-click the icon or tap its key twice for self. Esc to cancel."
     elif armedAbility >= 0:
       let
         hero = run.world.heroById(playerHeroId())
@@ -1993,7 +2083,9 @@ proc runGraphics*(
         of LineFootprint, CapsuleFootprint: title.add "Directional path"
         of CrossFootprint: title.add "Cross area"
       detail =
-        if aimError != NoActionError: aimError.actionErrorMessage()
+        if aimError == ActionOutOfRange:
+          "Click to walk into range, then cast. Esc to cancel."
+        elif aimError != NoActionError: aimError.actionErrorMessage()
         else: "Left or right-click to cast. Esc to cancel."
     sk.lobbyPanel(at, vec2(width, 100))
     sk.drawLabel(
@@ -2022,34 +2114,6 @@ proc runGraphics*(
   const SimulationStep = 1.0'f32 / TickRate.float32
 
   var lastFrameTime = epochTime()
-
-  proc particleTargetPosition(id: int32): tuple[
-      found: bool,
-      position: Vec3
-  ] =
-    ## Returns the presentation-space center of one combat target.
-    let hero = heroById(run.world, id)
-    if hero.id != 0:
-      return (
-        true,
-        renderPoint(hero.position) + vec3(0, 0.85'f32, 0)
-      )
-    let footman = footmanById(run.world, id)
-    if footman.id != 0:
-      return (
-        true,
-        renderPoint(footman.position) + vec3(0, 0.65'f32, 0)
-      )
-    let tower = buildingById(run.world, id)
-    if tower.id != 0:
-      return (
-        true,
-        renderPoint(tower.position) +
-          vec3(0, buildingScale(tower) * 0.55'f32, 0)
-      )
-    for i, fort in run.world.forts:
-      if fort.id == id:
-        return (true, gods[i].position + vec3(0, 1.0'f32, 0))
 
   proc emitAttackParticles(
       style: HeroAttackStyle,
@@ -2085,62 +2149,59 @@ proc runGraphics*(
         )
       )
 
-  proc emitTickParticles(
-      oldHeroLanded: seq[bool],
-      oldFootmanLanded: Table[int32, bool]
-  ) =
-    ## Emits each authoritative attack transition exactly once.
-    for i, hero in run.world.heroes:
-      if i >= oldHeroLanded.len or oldHeroLanded[i] or
-          not hero.damageLanded:
-        continue
-      let target = particleTargetPosition(hero.attackObjectId)
-      if not target.found:
-        continue
-      let origin = renderPoint(hero.position) + vec3(0, 0.9'f32, 0)
-      emitAttackParticles(
-        hero.class.heroSpec.attackStyle,
-        origin,
-        target.position
-      )
-    for footman in run.world.footmen:
-      if oldFootmanLanded.getOrDefault(footman.id, false) or
-          not footman.damageLanded:
-        continue
-      let targetId =
-        if footman.targetId != 0:
-          footman.targetId
-        elif footman.targetHeroId != 0:
-          footman.targetHeroId
-        elif footman.targetBuildingId != 0:
-          footman.targetBuildingId
-        elif footman.team == RedTeam:
-          run.world.forts[1].id
-        else:
-          run.world.forts[0].id
-      let target = particleTargetPosition(targetId)
-      if target.found:
-        let style =
-          if footman.kind == RangedCreep: MagicAttack
-          else: MeleeAttack
-        emitAttackParticles(
-          style,
-          renderPoint(footman.position) + vec3(0, 1.4'f, 0),
-          target.position
+  proc emitTickParticles() =
+    ## Emits successful item uses and authoritative attack transitions once.
+    for use in run.world.itemUses:
+      if viewMode != 0 and
+        not visible(run.world, Team(viewMode - 1), use.position):
+          continue
+      if use.item == PoisonPotion:
+        if not run.world.effectVisible(viewMode, renderPoint(use.origin)):
+          continue
+        let
+          origin = renderPoint(use.origin) + vec3(0, 1.0, 0)
+          target = renderPoint(use.position) + vec3(0, 0.8, 0)
+        particles.emitParticleProjectile(
+          PoisonCapsule,
+          PoisonBurst,
+          origin,
+          target,
+          clamp((target - origin).length / 12.0'f, 0.25'f, 0.65'f)
         )
+        continue
+      let effect =
+        if use.item.itemSpec.heal > 0: HealingAura
+        elif use.item.itemSpec.restore > 0: ManaAura
+        else: PoisonAura
+      particles.emitParticleBurst(effect, renderPoint(use.position))
+    for hit in run.world.attackEffects:
+      let
+        origin = renderPoint(hit.origin) + vec3(0, 0.9, 0)
+        target = renderPoint(hit.position) + vec3(0, 0.8, 0)
+      if not run.world.effectVisible(viewMode, origin) or
+        not run.world.effectVisible(viewMode, target):
+          continue
+      if hit.leaves:
+        particles.emitParticleProjectile(
+          LeafBolt,
+          LeafBurst,
+          origin,
+          target,
+          clamp((target - origin).length / 13.0'f, 0.12'f, 0.48'f)
+        )
+        continue
+      emitAttackParticles(
+        hit.style,
+        origin,
+        target
+      )
 
   proc advanceRenderedSimulation(packet = RoomMessage()) =
     ## Advances one simulation tick and starts any new god animation.
     let wasGameOver = run.world.gameOver
-    var
-      oldHeroLanded = newSeq[bool](run.world.heroes.len)
-      oldPortalEnds = newSeq[int32](run.world.heroes.len)
-      oldFootmanLanded: Table[int32, bool]
+    var oldPortalEnds = newSeq[int32](run.world.heroes.len)
     for i, hero in run.world.heroes:
-      oldHeroLanded[i] = hero.damageLanded
       oldPortalEnds[i] = hero.portalEnds
-    for footman in run.world.footmen:
-      oldFootmanLanded[footman.id] = footman.damageLanded
     captureUnitPositions()
     if network == nil:
       advanceGame()
@@ -2148,13 +2209,19 @@ proc runGraphics*(
       network.applyPacket(packet)
     for i, hero in run.world.heroes:
       if oldPortalEnds[i] > 0 and hero.portalEnds == 0:
+        let
+          arrival = renderPoint(hero.position)
+          departure = previousUnitPositions.getOrDefault(hero.id, arrival)
+        if hero.hp > 0 and run.world.tick >= oldPortalEnds[i] and
+          departure != arrival:
+            for point in [departure, arrival]:
+              if run.world.effectVisible(viewMode, point):
+                particles.emitParticleBurst(PortalBurst, point + vec3(0, 0.8, 0))
         previousUnitPositions[hero.id] = renderPoint(hero.position)
     feedGotaActions(observeTick = true)
-    emitTickParticles(
-      oldHeroLanded,
-      oldFootmanLanded
-    )
-    if network == nil and (int(run.world.tick) mod SeekCheckpointTicks == 0 or
+    emitTickParticles()
+    if not defined(gotaTestRoom) and network == nil and
+        (int(run.world.tick) mod SeekCheckpointTicks == 0 or
         int32(run.world.tick) == transport.timelineEnd):
       if replayCheckpoints.len == 0 or
           replayCheckpoints[^1].tick < int(run.world.tick):
@@ -2180,6 +2247,8 @@ proc runGraphics*(
     previousUnitPositions.clear()
     previousUnitFacings.clear()
     particles.clearParticles()
+    for trails in heroTrails.mitems:
+      trails = default(typeof(trails))
     renderAlpha = 1
     animationAlpha = 0
     for god in gods.mitems:
@@ -2192,9 +2261,10 @@ proc runGraphics*(
             replayCheckpoints[^1].tick < int(run.world.tick):
           replayCheckpoints.add captureCheckpoint()
 
-  if not run.replayMode and network == nil:
-    startReplayRecording(uint32(options.maximumTicks))
-  replayCheckpoints = @[captureCheckpoint()]
+  when not defined(gotaTestRoom):
+    if not run.replayMode and network == nil:
+      startReplayRecording(uint32(options.maximumTicks))
+    replayCheckpoints = @[captureCheckpoint()]
 
   let cleanScreenshot =
     when defined(takeScreenshot): existsEnv("CLEAN_SCREENSHOT")
@@ -2297,7 +2367,8 @@ proc runGraphics*(
       profileBlock "camera":
         updateCamera(dt)
       let recorded =
-        if run.recorder != nil: int32(run.recorder.data.hashes.len)
+        if defined(gotaTestRoom): run.world.tick
+        elif run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
       transport.durationTicks = run.durationTicks()
       transport.sync(int32(run.world.tick), recorded, run.finished())
@@ -2352,7 +2423,8 @@ proc runGraphics*(
             run.historyPlayback = transport.inHistory
             advanceRenderedSimulation()
             let recordedNow =
-              if run.recorder != nil: int32(run.recorder.data.hashes.len)
+              if defined(gotaTestRoom): run.world.tick
+              elif run.recorder != nil: int32(run.recorder.data.hashes.len)
               else: int32(run.replayPlayer.data.hashes.len)
             transport.durationTicks = run.durationTicks()
             transport.sync(int32(run.world.tick), recordedNow, run.finished())
@@ -2377,6 +2449,7 @@ proc runGraphics*(
         renderAlpha = 1
         animationAlpha = 0
       clickMarks.advanceClickMarks(dt)
+      attackMarks.advanceClickMarks(dt)
       if active:
         particles.advanceParticles(dt)
         for god in gods.mitems:
@@ -2406,6 +2479,12 @@ proc runGraphics*(
         barCameraRight = normalize(cross(cameraForward, vec3(0, 1, 0)))
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
+      if playerMode() and matchMenu == HiddenMatchMenu and not shopOpen and
+        run.world.phase != Drafting and
+        (holdingAttackMove() or window.buttonReleased[KeyA]) and
+        not window.buttonDown[KeyLeftControl] and
+        not window.buttonDown[KeyRightControl]:
+          attackMoveArmed = true
       updatePlayerSpells()
       previewGroundClick(viewProjection)
       updateWorldSelection(viewProjection)
@@ -2421,6 +2500,10 @@ proc runGraphics*(
           clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
+        visibleBuildings.setLen(0)
+        for i, tower in run.world.buildings:
+          if tower.hp > 0 and visibleInView(tower.team, tower.position):
+            visibleBuildings.add i
         profileBlock "prepare character poses":
           var count = 0
           for footman in run.world.footmen:
@@ -2446,8 +2529,9 @@ proc runGraphics*(
               sizeFactor = creepSize(footman)
             )
             inc count
-          for hero in run.world.heroes:
+          for heroIndex, hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
+              heroTrails[heroIndex] = default(array[2, WeaponTrail])
               continue
             let
               pose = heroRenderPose(hero)
@@ -2467,9 +2551,28 @@ proc runGraphics*(
               pose.time,
               sizeFactor = hero.heroSizeFactor()
             )
+            if dead or trailClasses[heroIndex] != hero.class:
+              heroTrails[heroIndex] = default(array[2, WeaponTrail])
+            trailClasses[heroIndex] = hero.class
+            if not dead:
+              let
+                seconds = (run.world.tick.float32 + animationAlpha) /
+                  TickRate.float32
+                swing = (hero.swingTicks.float32 + animationAlpha) /
+                  run.world.heroAttackTicks(hero).float32
+                attacking = hero.animClip in heroAttackClips and
+                  hero.castPoseUntil <= run.world.tick and
+                  hero.controls[StunControl].ends <= run.world.tick and
+                  swing >= 0.16'f and swing <= 0.72'f
+              for hand, marker in heroWeaponTips[hero.class]:
+                if marker.joint != nil:
+                  heroTrails[heroIndex][hand].update(
+                    marker.sample(seconds),
+                    attacking
+                  )
             inc count
           for god in gods:
-            if not visibleInView(
+            if defined(gotaTestRoom) or not visibleInView(
                 god.team, run.world.forts[god.team.ord].center):
               continue
             let
@@ -2500,9 +2603,8 @@ proc runGraphics*(
         profileBlock "Shadow pass":
           sunDepthPasses(window.size):
             drawTerrainSunDepth()
-            for tower in run.world.buildings:
-              if tower.hp <= 0:
-                continue
+            for index in visibleBuildings:
+              let tower {.cursor.} = run.world.buildings[index]
               towerPacks[tower.team].drawPropSunDepth(
                 buildingPropName(tower),
                 renderPoint(tower.position),
@@ -2526,9 +2628,8 @@ proc runGraphics*(
             terrainEdgeWorld = run.world
             terrainEdgeRevision = run.world.navigationRevision
           drawTerrain(viewProjection, showTiles)
-          for tower in run.world.buildings:
-            if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
-              continue
+          for index in visibleBuildings:
+            let tower {.cursor.} = run.world.buildings[index]
             towerPacks[tower.team].drawProp(
               buildingPropName(tower),
               renderPoint(tower.position),
@@ -2584,10 +2685,8 @@ proc runGraphics*(
                 scene.toon.groundColor
               )
               drawTerrain(mirroredViewProjection, false)
-              for tower in run.world.buildings:
-                if tower.hp <= 0 or
-                  not visibleInView(tower.team, tower.position):
-                    continue
+              for index in visibleBuildings:
+                let tower {.cursor.} = run.world.buildings[index]
                 towerPacks[tower.team].drawProp(
                   buildingPropName(tower),
                   renderPoint(tower.position),
@@ -2622,63 +2721,60 @@ proc runGraphics*(
             viewProjection,
             barCameraRight,
             barCameraUp,
-            cameraForward
+            cameraForward,
+            if viewMode == 0: @[]
+            else: run.world.teamVisible[viewMode - 1],
+            mapTiles(),
+            vec2(-mapTiles().float32 / 2)
           )
           spellEffects.drawSpells(
             run.world, viewProjection, animationAlpha, viewMode
           )
-          if aimVisible and aimSpell.ability.abilitySpec.casting == AreaCast:
-            spellEffects.drawAim(
-              aimSpell, viewProjection, aimError == NoActionError
-            )
-          clickMarks.drawClickMarks(viewProjection)
-        worldShapes.clear()
-        if aimVisible:
-          let
-            spec = aimSpell.ability.abilitySpec(aimSpell.level)
-            color =
-              if aimError == NoActionError: rgbx(90, 230, 255, 255)
-              else: rgbx(255, 80, 80, 255)
-            origin = renderPoint(aimSpell.origin)
-            destination = renderPoint(aimSpell.position)
-          drawAimRing(
-            origin, spec.range.float32 / WorldScale.float32,
-            rgbx(130, 180, 200, 170)
+          spellEffects.drawPortals(
+            run.world, viewProjection, animationAlpha, viewMode
           )
-          if spec.casting != AreaCast or not spec.fromCaster:
-            var track: array[17, Vec3]
-            for i in 0 .. track.high:
-              track[i] = mix(
-                origin,
-                destination,
-                i.float32 / track.high.float32
-              )
-              track[i].y = groundHeight(track[i].x, track[i].z) +
-                groundOffset(track[i].x, track[i].z) + 0.16'f
-            worldShapes.addPolyline(track, color, 0.06'f)
-          if spec.casting != AreaCast:
-            drawAimRing(destination, 0.3'f, color)
-        for hero in run.world.heroes:
-          if hero.portalEnds <= run.world.tick or hero.hp <= 0:
-            continue
-          for point in [hero.position, hero.portalDestination]:
-            if not visibleInView(hero.team, point):
-              continue
-            var ring: array[49, Vec3]
-            let
-              center = renderPoint(point)
-              radius = 0.5'f + (hero.portalEnds - run.world.tick).float32 /
-                PortalChannelTicks.float32
-            for i in 0 .. ring.high:
-              let angle = i.float32 * 2 * PI.float32 / ring.high.float32
-              ring[i] = center + vec3(cos(angle) * radius, 0.12'f,
-                sin(angle) * radius)
-            worldShapes.addPolyline(ring, rgbx(167, 128, 255, 255), 0.06'f)
+          if aimVisible:
+            spellEffects.drawAim(
+              aimSpell, viewProjection,
+              (run.world.tick.float32 + animationAlpha) / TickRate.float32,
+              aimError in {NoActionError, ActionOutOfRange},
+              outlineRenderOffset(aimSpell, aimTargetId)
+            )
+          let queuedIndex = run.world.heroIndex(
+            if playerMode(): playerHeroId() else: primaryId
+          )
+          if queuedIndex >= 0:
+            let queuedHero = run.world.heroes[queuedIndex]
+            var queuedSpell: SpellCast
+            if (viewMode == 0 or queuedHero.team == Team(viewMode - 1)) and
+              visibleInView(queuedHero.team, queuedHero.position) and
+              run.world.queuedCastPreview(queuedHero, queuedSpell):
+                spellEffects.drawQueuedCast(
+                  queuedSpell,
+                  viewProjection,
+                  (run.world.tick.float32 + animationAlpha) / TickRate.float32,
+                  outlineRenderOffset(queuedSpell, queuedHero.queuedCastTarget)
+                )
+          clickMarks.drawClickMarks(viewProjection)
+          attackMarks.drawClickMarks(viewProjection)
+        worldShapes.clear()
+        let trailTime = (run.world.tick.float32 + animationAlpha) /
+          TickRate.float32
+        for trails in heroTrails:
+          for trail in trails:
+            var visible = true
+            for i in 0 ..< trail.count:
+              if not run.world.effectVisible(viewMode, trail.samples[i].tip) or
+                not run.world.effectVisible(viewMode, trail.samples[i].inner):
+                  visible = false
+                  break
+            if visible:
+              worldShapes.draw(trail, trailTime)
         if playerMode() and armedItem >= 0:
           let hero = run.world.heroById(playerHeroId())
           if hero.inventory[armedItem] != PortalScroll:
             drawAimRing(
-              renderPoint(hero.position),
+              unitRenderPoint(hero.id, hero.position),
               PotionTargetRangeTiles.float32,
               rgbx(120, 221, 145, 255)
             )
@@ -2764,14 +2860,33 @@ proc runGraphics*(
               followSelection,
               actionCam,
               focusPlayerHero,
+              attackMoveArmed,
+              holdingAttackMove(),
               if connection != nil: connection.stats else: nil
             )
+          when defined(gotaTestRoom):
+            if matchMenu == HiddenMatchMenu and not shopOpen:
+              let choice = sk.drawTestRoom()
+              if choice == -2:
+                run.woundTestHero()
+              elif choice >= 0:
+                clearPlayerCommands()
+                run.resetTestHero(HeroClass(choice))
+                primaryId = FirstHeroId
+                selectedIds = @[FirstHeroId]
+                attackMoveArmed = false
+                previousUnitPositions.clear()
+                previousUnitFacings.clear()
+                particles.clearParticles()
+                cameraTarget = vec3(0)
+                renderAlpha = 1
           drawAimBanner()
           let width = window.size.x.float32 / sk.uiScale
           if matchMenu == HiddenMatchMenu and (network == nil or
             network.client.snapshot.phase in {rooms.Ended, Desynced}):
               if sk.menuButton(window,
-                if network == nil: "Return to menu" else: "Return to lobby",
+                if defined(gotaTestRoom): "Exit test room"
+                elif network == nil: "Return to menu" else: "Return to lobby",
                 vec2(width - 190, 8), 180):
                 leaveMatch = true
               if run.recorder != nil and sk.menuButton(window, "Save replay",
@@ -2904,6 +3019,7 @@ proc runGraphics*(
   if not run.replayMode:
     saveRecording()
   clickMarks.closeClickMarks()
+  attackMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
   waypointShapes.closeShapeRenderer()
   waypointText.closeWorldBarRenderer()

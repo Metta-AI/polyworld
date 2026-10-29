@@ -30,6 +30,8 @@ TYPE HeroState
   layer AS INTEGER
   alive AS INTEGER
   hasMoveTarget AS INTEGER
+  hasQueuedCast AS INTEGER
+  castTicks AS INTEGER
   attackDamage AS INTEGER
   targetId AS INTEGER
   attackCooldownTicks AS INTEGER

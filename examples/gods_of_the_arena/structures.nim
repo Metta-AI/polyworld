@@ -29,6 +29,8 @@ const
     "self.layer",
     "self.alive",
     "self.hasMoveTarget",
+    "self.hasQueuedCast",
+    "self.castTicks",
     "self.attackDamage",
     "self.targetId",
     "self.attackCooldownTicks",
@@ -489,6 +491,8 @@ proc refreshOwnStructures*(game: Game, index: int) =
   own("layer", hero.navLayer)
   own("alive", hero.hp > 0)
   own("hasMoveTarget", hero.hasMoveTarget)
+  own("hasQueuedCast", hero.hasQueuedCast)
+  own("castTicks", max(0'i32, hero.castPoseUntil - world.tick))
   own("attackDamage", hero.heroAttackDamage())
   own("attackRange", worldToTiles(hero.class.heroAttackRange(), WorldScale))
   own("moveSpeed", worldToTiles(hero.heroMoveSpeed(), WorldScale))

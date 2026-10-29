@@ -2,6 +2,16 @@
 
 import ../examples/gods_of_the_arena/content
 
+echo "Testing Q/W/E/R slots retain each hero's spell identity"
+doAssert PrimaryAbility.ord == 0
+doAssert SecondaryAbility.ord == 1
+doAssert PassiveAbility.ord == 2
+doAssert UltimateAbility.ord == 3
+for class in HeroClass:
+  let first = class.ord * 4
+  for slot, offset in [1, 2, 0, 3]:
+    doAssert class.heroAbility(HeroAbilitySlot(slot)).ord == first + offset
+
 echo "Testing the GoTA roster contains every hero class once"
 block:
   var seen: set[HeroClass]

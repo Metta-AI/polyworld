@@ -165,7 +165,7 @@ for effect in StunControl .. RootControl:
   hero.cooldowns[PassiveAbility] = 0
   hero.charges[PassiveAbility] = 1
   hero.hp = hero.maxHp - 40
-  doAssert world.applyCastTarget(hero.id, 0, hero.id)
+  doAssert world.applyCastTarget(hero.id, 2, hero.id)
 
 echo "Testing unit control, building immunity, death, and hash coverage"
 block:

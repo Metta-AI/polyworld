@@ -13,6 +13,8 @@ sameSelf = sameSelf and self.position.y = selfInfo(1) + map.origin - .5
 sameSelf = sameSelf and self.moveSpeed = selfInfo(16)
 sameSelf = sameSelf and self.attackRange = selfInfo(15)
 sameSelf = sameSelf and self.abilityPoints = abilityPoints()
+sameSelf = sameSelf and self.hasQueuedCast = selfInfo(19)
+sameSelf = sameSelf and self.castTicks = selfInfo(20)
 sameBuildings = match.enemyTowers = matchInfo(12)
 sameBuildings = sameBuildings and match.enemyBarracks = matchInfo(14)
 sameBuildings = sameBuildings and match.allyTowers = matchInfo(8)
@@ -50,9 +52,9 @@ readTile(-1, -1, -1)
 invalidTile = tile.walkable = 0 and tile.kind = 0
 if stage = 1 then
   before = self.abilityPoints
-  accepted = levelAbility(1)
+  accepted = levelAbility(0)
   refreshed = accepted and lastAction.accepted and lastAction.error = 0
-  refreshed = refreshed and abilities(1).level = abilityLevel(1)
+  refreshed = refreshed and abilities(0).level = abilityLevel(0)
   refreshed = refreshed and self.abilityPoints = before - 1
   accepted = levelAbility(-1)
   rejected = accepted = 0 and lastAction.accepted = 0

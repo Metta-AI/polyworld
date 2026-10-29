@@ -76,7 +76,11 @@ const
   HeroClips* = [
     "Jog_Fwd_Loop", "Idle_Loop", "Death01", "Sword_Idle", "Sword_Attack",
     "Pistol_Idle_Loop", "Pistol_Shoot",
-    "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot"
+    "Spell_Simple_Idle_Loop", "Spell_Simple_Shoot",
+    "Spell_Simple_Enter", "Spell_Simple_Exit"
+  ]
+  HeroCastAnimations* = [
+    "Spell_Simple_Enter", "Spell_Simple_Shoot", "Spell_Simple_Exit"
   ]
   HeroPortraitRoot = DataRoot & "/characters/chargen/portraits/"
   HeroPortraitPaths*: array[HeroClass, string] = [

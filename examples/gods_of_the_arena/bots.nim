@@ -359,6 +359,8 @@ proc infoFunctions(host: var Host, heroId: int32) =
       WorldScale))
     of 18: toValue(worldToTiles(world.forts[1 - hero.team.ord].center.z,
       WorldScale))
+    of 19: toValue(hero.hasQueuedCast)
+    of 20: toValue(max(0'i32, hero.castPoseUntil - world.tick))
     else: toValue(0)
   let objectInfo: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Reads only objects in the same visibility-filtered decision snapshot.

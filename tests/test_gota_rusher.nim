@@ -1,6 +1,6 @@
 import
   std/os,
-  polyworld/cli,
+  polyworld/[cli, pathing],
   ../examples/gods_of_the_arena/[bots, maps, replays, sim]
 
 const Policy = currentSourcePath().parentDir.parentDir /
@@ -23,10 +23,13 @@ proc policyGame(team: Team): Game =
   )
   result.loadBots([BotGroup(path: Policy, count: 10)])
   result.recorder = initReplayRecorder(result.currentSetup(1000))
+  let point = lanePathPoints[1][lanePathPoints[1].len div 4]
+  const Unit = WorldScale div PathUnitsPerTile
   for i, hero in result.world.heroes:
     if i != team.ord * 5:
       result.heroVms[i] = nil
-    hero.place(WorldPoint(x: -10 * WorldScale, z: 10 * WorldScale))
+    hero.place(WorldPoint(x: point.x * Unit, y: point.y * Unit,
+      z: point.z * Unit))
     if hero.team != team:
       hero.hp = 0
       hero.state = Dying
@@ -51,7 +54,9 @@ proc decide(game: Game): ReplayAction =
   for i in before ..< game.recorder.data.actions.len:
     if game.recorder.data.actions[i].kind != ActionLevelAbility:
       inc orders
-  doAssert orders == 1
+  doAssert orders <= 1
+  if orders == 0:
+    return ReplayAction(heroId: -1)
   game.recorder.data.actions[^1]
 
 echo "Testing rusher cohesion, radius boundaries, vision, and middle routing"
@@ -68,6 +73,9 @@ for team in Team:
   doAssert hero.attackMoving
   doAssert action.first == mapTiles() div 2 - team.ord
   doAssert action.second == mapTiles() div 2 - team.ord
+
+  doAssert hero.hasMoveTarget, $hero.lastActionError
+  doAssert game.decide().heroId == -1
 
   ally.place(origin.offset(11))
   action = game.decide()
@@ -86,17 +94,18 @@ for team in Team:
   action = game.decide()
   doAssert action.kind == ActionAttackTarget
   doAssert action.first == enemy.id
+  doAssert game.decide().heroId == -1
   enemy.place(origin.offset(21))
   doAssert game.decide().kind == ActionAttackMove
   enemy.place(origin.offset(20))
   for cell in game.world.teamVisible[team.ord].mitems:
     cell = 0
-  doAssert game.decide().kind == ActionAttackMove
+  doAssert game.decide().heroId == -1
 
   ally.place(origin.offset(30))
   ally.hp = 0
   ally.state = Dying
-  doAssert game.decide().kind == ActionAttackMove
+  doAssert game.decide().heroId == -1
   ally.hp = ally.maxHp
   ally.state = Marching
   doAssert game.decide().kind == ActionWalkTo

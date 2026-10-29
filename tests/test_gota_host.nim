@@ -1,7 +1,7 @@
 import
   std/[os, tempfiles],
   bassy,
-  polyworld/[cli, tapes],
+  polyworld/[cli, pathing, tapes],
   ../examples/gods_of_the_arena/[bots, content, maps, replays, sim]
 
 const ObservationProgram = """
@@ -542,7 +542,7 @@ block:
   hero.spellsReady = false
   doAssert game.world.applyLevelAbility(hero.id, SecondaryAbility.ord.int32)
   hero.refreshHeroStats()
-  writeFile(path, "accepted = castPoint(2.0, selfX + 0.25, selfY - 0.25)\n")
+  writeFile(path, "accepted = castPoint(1.0, selfX + 0.25, selfY - 0.25)\n")
   game.loadBots([BotGroup(path: path, count: 10)])
   for i in 1 ..< game.heroVms.len:
     game.heroVms[i] = nil
@@ -557,6 +557,71 @@ block:
   doAssert spell.position.z ==
     (mapCoordinate(hero.position.z) - mapTiles().int32 div 2) * WorldScale +
     WorldScale div 4
+
+echo "Testing one BASIC castPoint order walks into range and casts"
+block:
+  let
+    directory = createTempDir("gota-cast-order-", "")
+    path = directory / "cast.bas"
+    game = newGame(generateMap(54), 240, 10, false, ReplayData(),
+      drafting = false)
+    hero = game.world.heroes[0]
+  defer:
+    removeDir(directory)
+  game.world.spawnTimerTicks = int32.high
+  for building in game.world.buildings.mitems:
+    building.hp = 0
+  game.world.syncBuildings()
+  for i in 1 ..< game.world.heroes.len:
+    game.world.heroes[i].state = Dying
+    game.world.heroes[i].hp = 0
+    game.world.heroes[i].deathTicks = -100_000
+  hero.class = Arcanist
+  hero.refreshHeroStats()
+  doAssert game.world.applyLevelAbility(hero.id, PrimaryAbility.ord.int32)
+  let spec = FrostLance.abilitySpec(1)
+  hero.charges[PrimaryAbility] = spec.charges
+  hero.spellsReady = true
+  var destination: WorldPoint
+  for i, point in lanePathPoints[1]:
+    let position = WorldPoint(
+      x: point.x * (WorldScale div PathUnitsPerTile),
+      y: point.y * (WorldScale div PathUnitsPerTile),
+      z: point.z * (WorldScale div PathUnitsPerTile)
+    )
+    if i == 0:
+      hero.place(position)
+    elif not within(hero.position, position, spec.range + WorldScale):
+      destination = position
+      break
+  doAssert not within(hero.position, destination, spec.range)
+  let
+    x = mapCoordinate(destination.x)
+    y = mapCoordinate(destination.z)
+    mana = hero.mana
+  writeFile(path, "accepted = castPoint(0, " & $x & ", " & $y & ")\n")
+  game.loadBots([BotGroup(path: path, count: 10)])
+  for i in 1 ..< game.heroVms.len:
+    game.heroVms[i] = nil
+  game.world.rebuildVision()
+  game.runBotDecisions()
+  doAssert not game.heroVms[0].failed, game.heroVms[0].lastError
+  doAssert game.heroVms[0].runtime.getGlobal("accepted") == 1
+  doAssert hero.hasQueuedCast and game.world.casts.len == 0
+  doAssert hero.mana == mana and hero.charges[PrimaryAbility] == spec.charges
+  for tick in 0 ..< 10 * TickRate:
+    game.tickWorld(nil)
+    if game.world.casts.len > 0:
+      break
+  doAssert game.world.casts.len == 1
+  let spell = game.world.casts[0]
+  doAssert spell.ability == FrostLance
+  doAssert mapCoordinate(spell.position.x) == x
+  doAssert mapCoordinate(spell.position.z) == y
+  doAssert within(spell.origin, spell.position, spec.range)
+  doAssert not within(spell.origin, spell.position, WorldScale)
+  doAssert not hero.hasQueuedCast and not hero.hasMoveTarget
+  doAssert hero.charges[PrimaryAbility] == spec.charges - 1
 
 echo "Testing BASIC Emmett's Glory matches final results"
 block:

@@ -18,10 +18,13 @@ type
     renderer: FxRenderer
     areas: seq[AreaMesh]
     preview: AreaMesh
+    queued: AreaMesh
+    queuedContours: array[Ability, seq[seq[Vec2]]]
     meshes: array[Ability, SpellMesh]
     glow: SpellMesh
     trail: SpellMesh
     fireball: SpellMesh
+    portalRing, portalTube: SpellMesh
 
 proc initSpellRenderer*(): SpellRenderer =
   ## Creates the shared spell mesh shader and reusable geometry buffer.
@@ -30,6 +33,13 @@ proc initSpellRenderer*(): SpellRenderer =
 proc spellPoint(point: WorldPoint): Vec3 =
   ## Converts simulation positions only at the rendering boundary.
   vec3(point.x.float32, point.y.float32, point.z.float32) / WorldScale.float32
+
+proc effectVisible*(world: World, viewMode: int32, position: Vec3): bool =
+  ## Checks the displayed effect position, including allied shots into fog.
+  viewMode == 0 or world.visible(Team(viewMode - 1), WorldPoint(
+    x: int32(floor(position.x * WorldScale.float32)),
+    z: int32(floor(position.z * WorldScale.float32))
+  ))
 
 proc footprintSettings*(area: FxArea): FxSettings =
   ## Builds the exact ground outline used by authoritative area hit tests.
@@ -137,6 +147,21 @@ proc spellColor(ability: Ability): Vec3 =
     vec3(0.40, 0.95, 1.0)
   else:
     vec3(1.0, 0.80, 0.30)
+
+proc spellArcHeight*(ability: Ability, distance: float32): float32 =
+  ## Gives thrown payloads and drifting magic a modest visual arc in tiles.
+  let amount =
+    case ability
+    of SiegeScarab, DreadTotem: 0.18'f
+    of MothHex, ShadowComet: 0.12'f
+    else: 0.0'f
+  min(1.25'f, max(0.0'f, distance) * amount)
+
+proc spellArcPoint*(origin, target: Vec3, progress, height: float32): Vec3 =
+  ## Lifts only the middle of a flight while preserving both endpoints.
+  let t = clamp(progress, 0.0'f, 1.0'f)
+  result = mix(origin, target, t)
+  result.y += 4 * height * t * (1 - t)
 
 proc effectSettings(ability: Ability): FxSettings =
   ## Authors animated local geometry separately from the exact hit footprint.
@@ -294,9 +319,6 @@ proc drawTowerShots(
   if effects.fireball.vertices.len == 0:
     effects.fireball = buildFxMesh(settings)
   for shot in world.towerShots:
-    if viewMode > 0 and shot.team != Team(viewMode - 1) and
-      not world.visible(Team(viewMode - 1), shot.position):
-        continue
     let
       age = (world.tick.float32 + alpha - shot.started.float32) /
         TickRate.float32
@@ -314,6 +336,8 @@ proc drawTowerShots(
           mix(shot.previous.spellPoint(), shot.position.spellPoint(), alpha)
       size = if impact: 1 + (1 - fade) * 3 else: 1.0'f
       base = translate(position)
+    if not world.effectVisible(viewMode, position):
+      continue
     settings.startColor.w = fade
     settings.endColor.w = fade * 0.6
     effects.renderer.uploadFxMesh(effects.fireball)
@@ -347,9 +371,6 @@ proc drawSpells*(
       ability = spell.ability
       spec = ability.abilitySpec
       caster = world.heroById(spell.heroId)
-    if viewMode > 0 and caster.team != Team(viewMode - 1) and
-      not world.visible(Team(viewMode - 1), spell.position):
-        continue
     let
       pending = not spell.resolved
       age = max(0.0'f, time - spell.started.float32) / TickRate.float32
@@ -366,6 +387,7 @@ proc drawSpells*(
     var
       position = spell.position.spellPoint()
       angle = arctan2(spell.direction.x.float32, spell.direction.z.float32)
+      pitch = 0.0'f
     case spec.casting
     of ProjectileCast:
       var target = position
@@ -377,14 +399,23 @@ proc drawSpells*(
           let footman = world.footmanById(spell.targetId)
           if footman.id != 0:
             target = footman.position.spellPoint()
-      position = mix(spell.origin.spellPoint(), target, progress)
+      let
+        origin = spell.origin.spellPoint()
+        offset = target - origin
+        distance = length(vec2(offset.x, offset.z))
+        height = spellArcHeight(ability, distance)
+      position = spellArcPoint(origin, target, progress, height)
       position.y += 0.8
+      if height > 0 and distance > 0.001'f:
+        pitch = arctan2(offset.y + 4 * height * (1 - 2 * progress), distance)
     of MeleeCast:
       position = spell.origin.spellPoint() + vec3(0, 0.65, 0)
       angle += life * 0.6 - 0.3
     else:
       position.y = mapHeight(position) + 0.10
-    let base = translate(position) * rotateY(angle)
+    if not world.effectVisible(viewMode, position):
+      continue
+    let base = translate(position) * rotateY(angle) * rotateX(-pitch)
     if spec.casting == AreaCast:
       var
         ground = spec.area.footprintSettings()
@@ -405,6 +436,35 @@ proc drawSpells*(
           spec.area.shape == CrossFootprint
         )
       effects.renderer.uploadFxMesh(effects.areas[index].mesh)
+      if ability in {StormEagle, ClockworkCharge}:
+        # Keep the warning still, then send one front along the cast area.
+        if pending:
+          ground.startColor = vec4(teamColor, 0.14'f)
+          ground.endColor = ground.startColor
+          effects.renderer.drawFxMesh(
+            ground, viewProjection, mat4(), seconds, 0, sizeScale = 1
+          )
+        else:
+          let sweep = clamp(
+            (time - spell.impact.float32) /
+              max((spell.ends - spell.impact).float32, 1),
+            0.0'f,
+            1.0'f
+          )
+          ground.blendMode = AdditiveBlend
+          ground.texture = StreakTexture
+          ground.uvScale = vec2(3, 4)
+          ground.scroll = vec2(0)
+          ground.sweepSource = SweepV
+          ground.sweepBand = 0.24'f
+          ground.sweepSoft = 0.045'f
+          ground.startColor = vec4(light, 0.9'f)
+          ground.endColor = vec4(color, 0.45'f)
+          ground.edgeColor = vec4(light, 1)
+          effects.renderer.drawFxMesh(
+            ground, viewProjection, mat4(), seconds, sweep, sizeScale = 1
+          )
+        continue
       # The full footprint stays visible under the moving decorative layers.
       ground.startColor = vec4(teamColor,
         if pending: 0.12'f + progress * 0.10'f else: fade * 0.20'f)
@@ -427,7 +487,7 @@ proc drawSpells*(
       effects.renderer.drawFxMesh(
         ground, viewProjection, mat4(), seconds, life, sizeScale = 1
       )
-      # A bright front crosses the texture without changing the hit geometry.
+      # One bright front crosses the full cast without restarting on impact.
       ground.sweepSource =
         if spec.area.shape in {CircleFootprint, RingFootprint, SectorFootprint}:
           SweepRadial
@@ -437,9 +497,12 @@ proc drawSpells*(
       ground.sweepSoft = 0.045
       ground.startColor = vec4(light, if pending: 0.7'f else: fade)
       ground.endColor = vec4(color, ground.startColor.w * 0.5)
-      let sweep =
-        if pending: (age * 0.9'f) - floor(age * 0.9'f)
-        else: life
+      let sweep = clamp(
+        (time - spell.started.float32) /
+          max((spell.ends - spell.started).float32, 1),
+        0.0'f,
+        1.0'f
+      )
       effects.renderer.drawFxMesh(
         ground, viewProjection, mat4(), seconds, sweep, sizeScale = 1
       )
@@ -525,45 +588,290 @@ proc drawSpells*(
           color, seconds, fade * 0.6
         )
 
-proc drawAim*(
-  effects: var SpellRenderer,
-  spell: SpellCast,
-  viewProjection: Mat4,
-  valid: bool
-) =
-  ## Draws the actual spell footprint before the player confirms the cast.
+proc placementPreview*(
+  world: World,
+  hero: Hero,
+  slot: HeroAbilitySlot,
+  targetId: int32,
+  point: WorldPoint,
+  spell: var SpellCast
+): ActionError =
+  ## Resolves the footprint at the expected release position for placement.
+  result = world.aimAbility(hero, slot, targetId, point, spell)
+  if result notin {NoActionError, ActionOutOfRange}:
+    return
   let spec = spell.ability.abilitySpec(spell.level)
-  var preview = spell
-  preview.started = 0
-  var ground = spec.area.footprintSettings()
-  let angle = arctan2(spell.direction.x.float32, spell.direction.z.float32)
-  var offset = vec3(0.0'f)
-  if spec.area.shape == CapsuleFootprint:
-    offset.z = ground.width / 2
-  elif spec.area.shape == CrossFootprint:
-    offset.z = -ground.length / 2
-  if not effects.preview.matches(preview) or effects.preview.mesh.indices.len == 0:
-    effects.preview = areaMesh(
-      ground,
-      preview,
-      translate(spell.position.spellPoint()) * rotateY(angle) * translate(offset),
-      spec.area.shape == CrossFootprint
+  if result == ActionOutOfRange and spec.casting == AreaCast and
+    spec.fromCaster:
+      var destination = point
+      if targetId != 0:
+        var target: WorldObject
+        if world.spellTarget(targetId, target):
+          destination = target.position
+      let
+        dx = destination.x.float64 - hero.position.x.float64
+        dz = destination.z.float64 - hero.position.z.float64
+        distance = sqrt(dx * dx + dz * dz)
+      if distance > 0:
+        # Preview the release position at cast range, not the walking hero.
+        spell.position = WorldPoint(
+          x: destination.x - int32(round(dx * spec.range.float64 / distance)),
+          y: destination.y,
+          z: destination.z - int32(round(dz * spec.range.float64 / distance))
+        )
+        spell.origin = spell.position
+  spell.started = 0
+
+proc queuedCastPreview*(world: World, hero: Hero, spell: var SpellCast): bool =
+  ## Resolves the pending order without altering its target or simulation.
+  if hero.id == 0 or not hero.hasQueuedCast or hero.hp <= 0:
+    return false
+  world.placementPreview(
+    hero,
+    hero.queuedCastSlot,
+    hero.queuedCastTarget,
+    hero.queuedCastPoint,
+    spell
+  ) in {NoActionError, ActionOutOfRange}
+
+proc queuedContours*(area: FxArea): seq[seq[Vec2]] =
+  ## Returns closed polygon boundaries for every simulation footprint.
+  const Segments = 64
+  let
+    radius = area.radius.float32 / WorldScale.float32
+    inner = area.innerRadius.float32 / WorldScale.float32
+    halfWidth = area.width.float32 / WorldScale.float32 / 2
+    length = area.length.float32 / WorldScale.float32
+  var points: seq[Vec2]
+  case area.shape
+  of CircleFootprint, RingFootprint:
+    for r in [radius, inner]:
+      if r <= 0:
+        continue
+      points = @[]
+      for i in 0 ..< Segments:
+        let angle = i.float32 * 2 * PI.float32 / Segments.float32
+        points.add vec2(sin(angle), cos(angle)) * r
+      result.add points
+      if area.shape == CircleFootprint:
+        break
+    return
+  of SectorFootprint:
+    let angle = area.angle.float32 * PI.float32 / 180
+    for i in 0 .. Segments:
+      let theta = -angle / 2 + angle * i.float32 / Segments.float32
+      points.add vec2(sin(theta), cos(theta)) * radius
+    if inner > 0:
+      for i in countdown(Segments, 0):
+        let theta = -angle / 2 + angle * i.float32 / Segments.float32
+        points.add vec2(sin(theta), cos(theta)) * inner
+    else:
+      points.add vec2(0)
+  of LineFootprint:
+    points = @[vec2(-halfWidth, 0), vec2(halfWidth, 0),
+      vec2(halfWidth, length), vec2(-halfWidth, length)]
+  of CapsuleFootprint:
+    for cap in 0 .. 1:
+      for i in 0 .. Segments div 2:
+        let
+          theta = (-0.5'f + cap.float32 +
+            i.float32 / (Segments div 2).float32) * PI.float32
+          center = if cap == 0: max(halfWidth, length - halfWidth)
+            else: halfWidth
+        points.add vec2(sin(theta) * halfWidth,
+          center + cos(theta) * halfWidth)
+  of CrossFootprint:
+    let halfLength = length / 2
+    points = @[
+      vec2(-halfWidth, -halfLength), vec2(halfWidth, -halfLength),
+      vec2(halfWidth, -halfWidth), vec2(halfLength, -halfWidth),
+      vec2(halfLength, halfWidth), vec2(halfWidth, halfWidth),
+      vec2(halfWidth, halfLength), vec2(-halfWidth, halfLength),
+      vec2(-halfWidth, halfWidth), vec2(-halfLength, halfWidth),
+      vec2(-halfLength, -halfWidth), vec2(-halfWidth, -halfWidth)
+    ]
+  result.add points
+
+proc drawCastOutline(effects: var SpellRenderer, outline: var AreaMesh,
+    spell: SpellCast, viewProjection: Mat4, seconds: float32, valid: bool,
+    offset: Vec3) =
+  ## Keeps a bright terrain-following wall around the pending action area.
+  let
+    spec = spell.ability.abilitySpec(spell.level)
+    area =
+      if spec.casting == AreaCast: spec.area
+      else: FxArea(shape: CircleFootprint, radius: 27_000)
+  if effects.queuedContours[spell.ability].len == 0:
+    effects.queuedContours[spell.ability] = queuedContours(area)
+  if not outline.matches(spell) or outline.mesh.indices.len == 0:
+    let model = translate(spell.position.spellPoint()) * rotateY(
+      arctan2(spell.direction.x.float32, spell.direction.z.float32)
     )
-  ground.startColor =
-    if valid: vec4(0.25, 0.9, 1.0, 0.4)
-    else: vec4(1.0, 0.2, 0.2, 0.4)
-  ground.endColor = ground.startColor
-  effects.renderer.uploadFxMesh(effects.preview.mesh)
+    outline.mesh.vertices.setLen(0)
+    outline.mesh.indices.setLen(0)
+    for contour in effects.queuedContours[spell.ability]:
+      for i in 0 ..< contour.len:
+        let
+          first = contour[i]
+          last = contour[(i + 1) mod contour.len]
+          segments = max(1, int(ceil((last - first).length / 0.35'f)))
+        for segment in 0 ..< segments:
+          let base = outline.mesh.vertices.len.uint32 div 12
+          for point in [
+            mix(first, last, segment.float32 / segments.float32),
+            mix(first, last, (segment + 1).float32 / segments.float32)
+          ]:
+            var bottom = model * vec3(point.x, 0, point.y)
+            bottom.y = mapHeight(bottom) + 0.08'f
+            for level in 0 .. 1:
+              let
+                height = level.float32
+                vertex = bottom + vec3(0, height * 0.4'f, 0)
+                shimmer = height * sin(bottom.x * 5 + bottom.z * 7)
+              outline.mesh.vertices.add [
+                vertex.x, vertex.y, vertex.z,
+                0.0'f, shimmer, 0,
+                0.0'f, height,
+                height, 0, 0, 0
+              ]
+          outline.mesh.indices.add [
+            base, base + 2, base + 1, base + 1, base + 2, base + 3
+          ]
+    outline.heroId = spell.heroId
+    outline.started = spell.started
+    outline.ability = spell.ability
+    outline.position = spell.position
+    outline.direction = spell.direction
+  var settings = defaultFxSettings()
+  settings.texture = SolidTexture
+  settings.blendMode = AdditiveBlend
+  settings.gradientSource = AxisGradient
+  settings.startColor =
+    if valid: vec4(0.3, 0.95, 1.0, 0.85)
+    else: vec4(1.0, 0.2, 0.15, 0.85)
+  settings.endColor = vec4(settings.startColor.xyz, 0)
+  settings.expandStart = 1
+  settings.expandEnd = 1
+  settings.pulseAmp = 0.04'f
+  settings.pulseSpeed = 3.5'f
+  settings.fadeIn = 0
+  settings.fadeOut = 0
+  effects.renderer.uploadFxMesh(outline.mesh)
   effects.renderer.drawFxMesh(
-    ground, viewProjection, mat4(), 0, 0.5, sizeScale = 1
+    settings, viewProjection, translate(offset), seconds, 0.5, sizeScale = 1
   )
+
+proc drawAim*(effects: var SpellRenderer, spell: SpellCast,
+    viewProjection: Mat4, seconds: float32, valid: bool, offset: Vec3) =
+  ## Moves the glowing placement outline with the cursor until confirmed.
+  effects.drawCastOutline(
+    effects.preview,
+    spell,
+    viewProjection,
+    seconds,
+    valid,
+    offset
+  )
+
+proc drawQueuedCast*(effects: var SpellRenderer, spell: SpellCast,
+    viewProjection: Mat4, seconds: float32, offset: Vec3) =
+  ## Retains the same glowing outline while the hero approaches the cast.
+  effects.drawCastOutline(
+    effects.queued,
+    spell,
+    viewProjection,
+    seconds,
+    true,
+    offset
+  )
+
+proc drawPortals*(effects: var SpellRenderer, world: World,
+    viewProjection: Mat4, alpha: float32, viewMode: int32) =
+  ## Builds energy at both visible endpoints until the teleport completes.
+  let seconds = (world.tick.float32 + alpha) / TickRate.float32
+  var ring = defaultFxSettings()
+  ring.shape = RingShape
+  ring.radius = 0.95
+  ring.innerRadius = 0.78
+  ring.radialSegments = 64
+  ring.texture = StreakTexture
+  ring.blendMode = AdditiveBlend
+  ring.scroll = vec2(0.18, 0)
+  ring.uvScale = vec2(6, 1)
+  ring.fadeIn = 0
+  ring.fadeOut = 0
+  ring.startColor = vec4(0.65, 0.4, 1, 0.85)
+  ring.endColor = ring.startColor
+  var tube = ring
+  tube.shape = CylinderShape
+  tube.height = 2.6
+  tube.radialSegments = 48
+  tube.heightSegments = 12
+  tube.gradientSource = AxisGradient
+  tube.texture = NoiseTexture
+  tube.scroll = vec2(0.14, -0.65)
+  tube.uvScale = vec2(4, 2)
+  tube.startColor = vec4(0.5, 0.28, 1, 0.24)
+  tube.endColor = vec4(0.7, 0.85, 1, 0)
+  tube.waveAmp = 0.025
+  tube.waveFreq = 2
+  tube.waveSpeed = 4
+  for hero in world.heroes:
+    if hero.portalEnds <= world.tick or hero.hp <= 0:
+      continue
+    let progress = clamp(1 - (hero.portalEnds.float32 - world.tick.float32 -
+      alpha) / PortalChannelTicks.float32, 0.0'f, 1.0'f)
+    if effects.portalRing.vertices.len == 0:
+      effects.portalRing = buildFxMesh(ring)
+      effects.portalTube = buildFxMesh(tube)
+    for point in [hero.position, hero.portalDestination]:
+      var center = point.spellPoint()
+      if not world.effectVisible(viewMode, center):
+        continue
+      center.y = mapHeight(center) + 0.09'f
+      let base = translate(center)
+      ring.startColor = vec4(0.65, 0.4 + progress * 0.35, 1, 0.85)
+      ring.endColor = ring.startColor
+      effects.renderer.uploadFxMesh(effects.portalRing)
+      effects.renderer.drawFxMesh(
+        ring, viewProjection, base, seconds, progress, sizeScale = 1
+      )
+      for i in 0 ..< 2:
+        let rise = (seconds * 0.65'f + i.float32 * 0.5'f) mod 1.0'f
+        var halo = ring
+        halo.startColor.w = (1 - rise) * 0.45'f
+        halo.endColor = halo.startColor
+        effects.renderer.drawFxMesh(
+          halo, viewProjection, base * translate(vec3(0, rise * 2.5, 0)),
+          seconds, progress, sizeScale = 1
+        )
+      tube.startColor.w = 0.18'f + progress * 0.2'f
+      effects.renderer.uploadFxMesh(effects.portalTube)
+      effects.renderer.drawFxMesh(
+        tube, viewProjection, base, seconds, progress, sizeScale = 1
+      )
+      for i in 0 ..< 12:
+        let
+          phase = i.float32 / 12
+          rise = (seconds * 0.7'f + phase) mod 1.0'f
+          angle = phase * 2 * PI.float32 + seconds * 2
+          position = center + vec3(
+            cos(angle) * 0.85'f, 0.1'f + rise * 2.6'f,
+            sin(angle) * 0.85'f
+          )
+        effects.drawGlow(viewProjection, translate(position),
+          vec3(0.65, 0.6, 1), seconds, (1 - rise) * (0.8'f + progress))
 
 proc closeSpellRenderer*(effects: var SpellRenderer) =
   ## Releases the spell mesh renderer alongside the other scene effects.
   effects.renderer.closeFxRenderer()
   effects.areas.setLen(0)
   effects.preview = AreaMesh()
+  effects.queued = AreaMesh()
+  effects.queuedContours = default(typeof(effects.queuedContours))
   effects.meshes = default(typeof(effects.meshes))
   effects.glow = default(SpellMesh)
   effects.trail = default(SpellMesh)
   effects.fireball = default(SpellMesh)
+  effects.portalRing = default(SpellMesh)
+  effects.portalTube = default(SpellMesh)

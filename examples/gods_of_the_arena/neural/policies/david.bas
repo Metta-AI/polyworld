@@ -626,6 +626,10 @@ sub nnChoose()
 end sub
 
 sub nnDispatch()
+  ' A cast order walks into range; do not replace it before it finishes.
+  if selfInfo(19) or selfInfo(20) > 0 then
+    exit sub
+  end if
   nnVerb = nnHeads(0)
   nnTarget = nnHeads(1)
   nnPoint = nnHeads(2)

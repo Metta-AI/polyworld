@@ -1,7 +1,7 @@
 ## Bounded GPU particle effects shared by Polyworld game renderers.
 
 import
-  std/strutils,
+  std/[math, strutils],
   opengl, shady, vmath,
   particleshaders
 
@@ -22,12 +22,18 @@ const
   ]
   ParticleVertexSource =
     when defined(emscripten):
-      toShader(gameParticleVertex, glsl3WebGL, shaderVertex)
+      toShader(gameParticleVertex, glsl3WebGL, shaderVertex).replace(
+        "precision highp float;",
+        "precision highp float;\nprecision highp int;"
+      )
     else:
       toShader(gameParticleVertex, glsl4Desktop, shaderVertex)
   ParticleFragmentSource =
     when defined(emscripten):
-      toShader(gameParticleFragment, glsl3WebGL, shaderFragment)
+      toShader(gameParticleFragment, glsl3WebGL, shaderFragment).replace(
+        "precision highp float;",
+        "precision highp float;\nprecision highp int;"
+      )
     else:
       toShader(gameParticleFragment, glsl4Desktop, shaderFragment)
 
@@ -142,7 +148,7 @@ proc effectParticleCount(kind: ParticleEffectKind): int =
     24
   of MagicBolt:
     36
-  of MagicBurst:
+  of MagicBurst, PortalBurst, PoisonBurst:
     32
   of Fireball:
     52
@@ -150,7 +156,11 @@ proc effectParticleCount(kind: ParticleEffectKind): int =
     40
   of ArrowWake:
     24
-  of HealingAura:
+  of PoisonCapsule:
+    24
+  of LeafBolt, LeafBurst:
+    12
+  of HealingAura, ManaAura, PoisonAura:
     48
 
 proc effectLifetime(
@@ -163,7 +173,7 @@ proc effectLifetime(
     0.9'f32
   of MagicBolt:
     travelTime + 0.7'f32
-  of MagicBurst:
+  of MagicBurst, PortalBurst, PoisonBurst:
     1.25'f32
   of Fireball:
     travelTime + 0.8'f32
@@ -171,7 +181,13 @@ proc effectLifetime(
     1.0'f32
   of ArrowWake:
     travelTime + 0.35'f32
-  of HealingAura:
+  of PoisonCapsule:
+    travelTime + 0.25'f
+  of LeafBolt:
+    travelTime
+  of LeafBurst:
+    0.6'f
+  of HealingAura, ManaAura, PoisonAura:
     1.75'f32
 
 proc addParticleEffect(
@@ -300,14 +316,41 @@ proc uploadParticleEffect(
     effect.target.z
   )
 
+proc particlePathVisible*(
+    origin, target: Vec3,
+    visibility: openArray[uint8],
+    width: int,
+    mapOrigin: Vec2
+): bool =
+  ## Hides an effect if any part of its travel path enters unseen tiles.
+  if visibility.len == 0:
+    return true
+  if width <= 0 or visibility.len != width * width:
+    return false
+  let
+    delta = target - origin
+    steps = max(1, int(ceil(max(abs(delta.x), abs(delta.z)) * 2)))
+  for i in 0 .. steps:
+    let
+      point = origin + delta * (i.float32 / steps.float32)
+      x = int(floor(point.x - mapOrigin.x))
+      z = int(floor(point.z - mapOrigin.y))
+    if x < 0 or z < 0 or x >= width or z >= width or
+      visibility[z * width + x] == 0:
+        return false
+  true
+
 proc drawParticles*(
     system: ParticleSystem,
     viewProjection: Mat4,
     cameraRight,
     cameraUp,
-    cameraForward: Vec3
+    cameraForward: Vec3,
+    visibility: openArray[uint8] = [],
+    visibilityWidth = 0,
+    visibilityOrigin = vec2(0)
 ) =
-  ## Draws every active effect with instanced, depth-tested billboards.
+  ## Draws every visible active effect with instanced, depth-tested billboards.
   if system.program.id == 0 or system.effects.len == 0:
     return
   var matrix = viewProjection
@@ -318,9 +361,15 @@ proc drawParticles*(
   glUseProgram(system.program.id)
   glBindVertexArray(system.vertexArray)
   for effect in system.effects:
-    if effect.startTime > system.time:
+    if effect.startTime > system.time or not particlePathVisible(
+      effect.origin,
+      effect.target,
+      visibility,
+      visibilityWidth,
+      visibilityOrigin
+    ):
       continue
-    if effect.kind == ArrowWake:
+    if effect.kind in {ArrowWake, LeafBolt, LeafBurst}:
       glBlendFuncSeparate(
         GL_SRC_ALPHA,
         GL_ONE_MINUS_SRC_ALPHA,

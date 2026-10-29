@@ -395,8 +395,8 @@ proc prepareCharacter*(
   pose.clip = clip
   pose.animTime = animTime
   pose.sizeFactor = sizeFactor
+  model.setCharacterPose(clip, animTime)
   if scene.shading == ToonCharacters:
-    model.setCharacterPose(clip, animTime)
     pose.toon.prepareToonPose(
       model.file.root,
       model.characterTransform(position, facing, sizeFactor),
@@ -405,6 +405,10 @@ proc prepareCharacter*(
         model.mergedMeshes[model.mergedMesh]
       else:
         nil)
+    )
+  else:
+    model.file.root.updateTransforms(
+      model.characterTransform(position, facing, sizeFactor)
     )
 
 proc drawCharacter*(
