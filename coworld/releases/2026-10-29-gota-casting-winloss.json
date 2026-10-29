@@ -1,0 +1,150 @@
+{
+  "date": "2026-10-29",
+  "version": "2026.10.29.1",
+  "url": "https://softmax.com/gods-of-the-arena",
+  "code_commit": "8e6233ca18b01f3e69db34db9217a4230ef4ba26",
+  "assets_commit": "93a704a7bdaaba04727ef1be0d06422c61952312",
+  "coworld_id": "cow_86bec8e2-cd01-443b-80c2-7176c98cf3aa",
+  "canonical": true,
+  "gameplay_version": 75,
+  "changes": [
+    "Reorder Q/W/E slots for all heroes and update bundled policies.",
+    "Support walking into cast range, current-rank tooltips, queued-area previews and casting animations.",
+    "Improve movement, attack-move, consumable controls and spell/projectile effects.",
+    "Increase starting hero speed 26% and hero vision 20%.",
+    "Add local hero test room and updated potion artwork.",
+    "Merge PR #101 shoreline distance fields, foam and water palette.",
+    "Submit binary team results for OpenSkill; XP and Glory cannot influence ratings."
+  ],
+  "validation": {
+    "local_ci_suite": "passed",
+    "hosted_runtime_checks": "passed",
+    "binary_result_regression": "passed",
+    "github_ci": "https://github.com/Metta-AI/polyworld/actions/runs/40924038311",
+    "github_ci_platforms_passed": [
+      "Linux",
+      "macOS",
+      "Windows"
+    ],
+    "hosted_certification": {
+      "coworld_id": "cow_86bec8e2-cd01-443b-80c2-7176c98cf3aa",
+      "state": "certified",
+      "certified": true,
+      "contract_version": "main-7ef26cc0a123",
+      "certification_job_id": "f43a0dc9-19d8-4627-aa4b-78ba93e7f7fb",
+      "failed_step": null,
+      "failure": null,
+      "transcript_summary": [
+        {
+          "id": "matriculate",
+          "status": "pass"
+        },
+        {
+          "id": "source-resolves",
+          "status": "pass"
+        },
+        {
+          "id": "images-reachable",
+          "status": "pass"
+        },
+        {
+          "id": "fixture-conforms",
+          "status": "pass"
+        },
+        {
+          "id": "smoke-episode",
+          "status": "pass"
+        },
+        {
+          "id": "results-conform",
+          "status": "pass"
+        },
+        {
+          "id": "replay-present",
+          "status": "pass"
+        },
+        {
+          "id": "replay-loadable",
+          "status": "pass"
+        },
+        {
+          "id": "players-run",
+          "status": "pass"
+        },
+        {
+          "id": "supporting-roles",
+          "status": "pass"
+        }
+      ],
+      "completed_at": "2026-10-29T17:46:39.320468Z"
+    },
+    "hosted_smoke_matches_passed": 5,
+    "live_policy_verification_matches_passed": 3,
+    "native_hosted_replay_mismatches": 0,
+    "wasm_hosted_replay_errors": 0
+  },
+  "league": {
+    "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+    "ranking": "openskill",
+    "initial_mu": 25,
+    "initial_sigma": 8.333333333333334,
+    "margin_scale": null,
+    "results": "1 for each winner; 0 for losses, draws and timeouts",
+    "reset": {
+      "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+      "rounds_hidden": 1072,
+      "competition_events_deleted": 1173,
+      "divisions_cleared": 1
+    },
+    "draft_mode": "team",
+    "mixed_policy_teams": true,
+    "scheduling_resumed": true,
+    "student_configuration_unchanged": true,
+    "leaderboard_players": 16,
+    "all_leaderboard_players_have_one_post_reset_round": true
+  },
+  "verification_round": {
+    "round_id": "round_878bfcbd-3256-40d3-96c5-a07fcfe27a19",
+    "round_number": 2295,
+    "status": "completed",
+    "completed_matches": 24,
+    "outcomes": {
+      "RedTeam": 8,
+      "BlueTeam": 14,
+      "time_limit": 2
+    },
+    "all_matches_use_new_release": true,
+    "game_log_errors": 0,
+    "policy_logs_checked": 240,
+    "policy_log_errors": 0,
+    "all_bots_active": true,
+    "episode_id": "7d21b80b-5db9-45b8-8fd7-9d48d261fdbe",
+    "watch_url": "https://softmax.com/gods-of-the-arena?e=7d21b80b-5db9-45b8-8fd7-9d48d261fdbe"
+  },
+  "forum_post": {
+    "id": "post_452a7ea7-793d-48b5-b51a-079f061fb88a",
+    "url": "https://softmax.com/gods-of-the-arena/forum/post_452a7ea7-793d-48b5-b51a-079f061fb88a"
+  },
+  "web_bundle": {
+    "index.html": {
+      "bytes": 5185,
+      "sha256": "b2f88b9c45ba0b704854baf2bb416ebdc55291e042d4e8ec953d035b478192ac"
+    },
+    "gota.js": {
+      "bytes": 357606,
+      "sha256": "0bcaf19e7e0c223c5acfa9915c7508114614a36265cec1a577da43ba0b1e019f"
+    },
+    "gota.wasm": {
+      "bytes": 6828191,
+      "sha256": "aaef8ede1437cd01e5d78fe0769ab78c2164ad2c30df8ecc19747f1a9b055c33"
+    },
+    "gota.data": {
+      "bytes": 36629823,
+      "sha256": "92eef2e13ee64e75271afcb6819732a80f22689dfa39524b7e85df5648c34aaa"
+    },
+    "loading-logo.png": {
+      "bytes": 117062,
+      "sha256": "77f67493b682daea39a06ca3542e8671a28e14625c5fd9dac7130046be9cb80a"
+    }
+  }
+}
