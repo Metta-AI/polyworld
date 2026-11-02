@@ -17,17 +17,20 @@ type
 
 var inbox: Channel[Input]
 
-proc serverPort(): Port =
-  ## Reads the port override before opening sockets or starting threads.
+proc serverConfig(): tuple[port: Port, address: string] =
+  ## Reads listening options before opening sockets or starting threads.
   var value = getEnv("PORT", "8090")
+  result.address = getEnv("BIND", "127.0.0.1")
   let arguments = commandLineParams()
   var index = 0
   while index < arguments.len:
     case arguments[index]
     of "--port":
       value = arguments.argumentValue(index, "--port")
+    of "--address":
+      result.address = arguments.argumentValue(index, "--address")
     of "--help", "-h":
-      echo "Usage: gameserver [--port NUMBER]"
+      echo "Usage: gameserver [--port NUMBER] [--address ADDRESS]"
       echo "Port defaults to PORT or 8090; BIND defaults to 127.0.0.1."
       quit(0)
     else:
@@ -36,7 +39,9 @@ proc serverPort(): Port =
   let port = parsePositiveInt32(value, "port")
   if port > 65535:
     fail("port must be between 1 and 65535")
-  Port(port)
+  if result.address.len == 0:
+    fail("address must not be empty")
+  result.port = Port(port)
 
 proc request(request: Request) {.gcsafe.} =
   ## Exposes health checks and the binary WebSocket endpoint.
@@ -59,24 +64,26 @@ proc websocket(
   )):
     socket.close()
 
-proc serve(config: tuple[server: Server, port: Port]) {.thread.} =
+proc serve(
+  config: tuple[server: Server, port: Port, address: string]
+) {.thread.} =
   ## Runs Mummy's socket pump independently of the room scheduler.
-  let address = getEnv("BIND", "127.0.0.1")
-  echo "Polyworld gameserver ws://" & address & ":" & $uint16(config.port) & "/ws"
-  config.server.serve(config.port, address)
+  echo "Polyworld gameserver ws://" & config.address & ":" &
+    $uint16(config.port) & "/ws"
+  config.server.serve(config.port, config.address)
 
-let port = serverPort()
+let config = serverConfig()
 inbox.open(1024)
 var
   server = newServer(
     request, websocket, workerThreads = 2,
     maxBodyLen = 0, maxMessageLen = MaxWireBytes
   )
-  thread: Thread[tuple[server: Server, port: Port]]
+  thread: Thread[tuple[server: Server, port: Port, address: string]]
   relay = Relay(logEvents: true)
   connections: seq[Connection]
   nextConnection = 0
-createThread(thread, serve, (server, port))
+createThread(thread, serve, (server, config.port, config.address))
 while true:
   let now = float64(getMonoTime().ticks) / 1_000_000_000.0
   for i in 0 ..< 1024:

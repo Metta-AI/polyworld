@@ -19,6 +19,7 @@ type
     CommandCastPoint
     CommandLevelAbility
     CommandBuyback
+    CommandStop
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -90,6 +91,10 @@ proc queueUseItem*(heroId, slot: int32, targetId = 0'i32) =
     first: slot,
     second: targetId
   )
+
+proc queueStop*(heroId: int32) =
+  ## Cancels movement and pending orders through the normal command queue.
+  pending.add PlayerCommand(kind: CommandStop, heroId: heroId)
 
 proc queueBuyback*(heroId: int32) =
   ## Queues one buyback through the shared simulation validator.
@@ -181,7 +186,7 @@ proc action(command: PlayerCommand, tick: int32): ReplayAction =
   const Kinds: array[PlayerCommandKind, uint8] = [
     ActionDraft, ActionWalkTo, ActionAttackTarget, ActionAttackMove,
     ActionBuyItem, ActionUseItem, ActionUseItemAt, ActionCastTarget,
-    ActionCastPoint, ActionLevelAbility, ActionBuyback
+    ActionCastPoint, ActionLevelAbility, ActionBuyback, ActionStop
   ]
   ReplayAction(
     tick: uint32(tick), heroId: command.heroId, kind: Kinds[command.kind],

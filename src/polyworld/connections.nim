@@ -1,5 +1,5 @@
 import
-  std/[monotimes, random],
+  std/[monotimes, random, strutils, uri],
   windy,
   rooms, roomclients, networks
 
@@ -7,12 +7,48 @@ type Connection* = ref object
   client*: RoomClient
   address*: string
   socket: WebSocketHandle
-  retryAt, heartbeatAt, receiptAt: float64
+  retryAt, heartbeatAt, receiptAt, openingAt: float64
   stats*: NetworkStats
   playback*: TickPlayback
   incoming, outgoing: PacketQueue
   rng: Rand
   opening, closed: bool
+  transportError: string
+
+proc serverUrl*(address: string): string =
+  ## Completes a bare server address and validates its WebSocket URL.
+  var value = address.strip()
+  if value.len == 0:
+    reject("Enter a server address.")
+  if "://" notin value:
+    value = "ws://" & value
+  var url = parseUri(value)
+  if url.scheme notin ["ws", "wss"] or url.hostname.len == 0 or
+    url.username.len > 0 or url.password.len > 0 or url.anchor.len > 0 or
+    value.contains({' ', '\t', '\r', '\n'}):
+      reject("Use ws://host:port/ws or wss://host/ws.")
+  if url.port.len > 0:
+    try:
+      let port = parseInt(url.port)
+      if port < 1 or port > 65535:
+        reject("Server port must be between 1 and 65535.")
+    except ValueError:
+      reject("Server port must be a number between 1 and 65535.")
+  if url.path.len == 0 or url.path == "/":
+    url.path = "/ws"
+  $url
+
+proc status*(connection: Connection): string =
+  ## Returns the current connection progress or transport failure.
+  if connection == nil:
+    return "Connect to a server to browse rooms."
+  if connection.client.error.len > 0:
+    return connection.client.error
+  if connection.transportError.len > 0:
+    return connection.transportError
+  if connection.opening:
+    return "Connecting to server..."
+  connection.client.status
 
 proc networkTime*(): float64 =
   ## Reads a local monotonic clock for scheduling, never server comparisons.
@@ -45,10 +81,12 @@ proc open(connection: Connection) =
   connection.incoming.clear()
   connection.outgoing.clear()
   connection.opening = true
+  connection.openingAt = networkTime()
   connection.socket = openWebSocket(connection.address)
   connection.socket.onOpen = proc() =
     ## Starts the identity handshake on this socket.
     connection.opening = false
+    connection.transportError = ""
     connection.client.opened()
     connection.stats.active = true
   connection.socket.onMessage = proc(bytes: string, kind: WebSocketMessageKind) =
@@ -71,10 +109,13 @@ proc open(connection: Connection) =
     connection.incoming.clear()
     connection.outgoing.clear()
     connection.client.status = message
+    connection.transportError = "Unable to connect: " & message
     connection.retryAt = networkTime() + 2
   connection.socket.onClose = proc() =
     ## Schedules reconnect without replacing seats or bot runtimes.
     connection.opening = false
+    if connection.transportError.len == 0:
+      connection.transportError = "Connection closed. Retrying..."
     connection.client.lost()
     connection.stats.active = false
     connection.incoming.clear()
@@ -91,7 +132,8 @@ proc reconnectAfter*(connection: Connection, seconds: float64) =
 proc connect*(address, name: string, identity: GameIdentity): Connection =
   ## Creates a reusable game-independent connection.
   result = Connection(
-    address: address, client: RoomClient(identity: identity, name: name),
+    address: serverUrl(address),
+    client: RoomClient(identity: identity, name: name),
     stats: NetworkStats(smoothPlayback: true), rng: initRand(8128)
   )
   result.open()
@@ -105,6 +147,9 @@ proc pump*(connection: Connection) =
   if connection.closed:
     return
   if not connection.client.connected:
+    if connection.opening and now - connection.openingAt >= 10:
+      connection.reconnectAfter(2)
+      connection.transportError = "Connection timed out. Check ws:// or wss://."
     if not connection.opening and now >= connection.retryAt:
       connection.open()
     return

@@ -1044,6 +1044,14 @@ proc drawDebugMenu*(
 proc handleChromeKey*(button: Button): bool =
   ## Handles shared debug keys. F1 toggles this menu, F2 starts or writes
   ## a Fluffy trace.
+  if customBindingsEnabled:
+    if DebugInput.matches(button):
+      debugMenuOpen = not debugMenuOpen
+      return true
+    if TraceInput.matches(button):
+      toggleRuntimeTrace()
+      return true
+    return false
   case button
   of KeyF1:
     debugMenuOpen = not debugMenuOpen

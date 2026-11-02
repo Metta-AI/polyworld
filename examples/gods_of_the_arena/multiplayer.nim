@@ -78,7 +78,7 @@ proc decodeSubmission*(bytes: string): GameSubmission =
     if actionKind notin [uint32(ActionWalkTo), ActionAttackTarget,
       ActionBuyItem, ActionUseItem, ActionAttackMove, ActionCastTarget,
       ActionCastPoint, ActionUseItemAt, ActionLevelAbility, ActionBuyback,
-      ActionDraft]:
+      ActionDraft, ActionStop]:
         reject("Unknown GotA action")
     result.action.kind = uint8(actionKind)
     result.action.slot = cast[int32](reader.get32())
@@ -107,6 +107,14 @@ proc prepareNetworkMatch*(
   config.players.setLen(HeroClassCount)
   for i, seat in snapshot.seats:
     config.players[i].name = seat.name
+    if seat.name == "Human":
+      config.players[i].name = ""
+      for participant in snapshot.participants:
+        if participant.id == seat.owner:
+          config.players[i].name = participant.name
+          break
+      if config.players[i].name.len == 0:
+        reject("Human seat has no named participant")
   let
     map = generateMap(config.seed, config.mapPreset)
     game = newGame(

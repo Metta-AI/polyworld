@@ -253,11 +253,15 @@ relay.send(2, RoomMessage(
 doAssert hashRoom.phase == Desynced
 
 # A valid reconnect token can replace a half-open socket before its close event.
-let oldToken = relay.guest(hashRoom.owner).token
+let
+  oldToken = relay.guest(hashRoom.owner).token
+  oldName = relay.guest(hashRoom.owner).name
 relay.receive(9, RoomMessage(
   kind: Hello, identity: hashRoom.identity, name: "Restored", token: oldToken
 ), 0)
 doAssert relay.guest(hashRoom.owner).connection == 9
+doAssert relay.guest(hashRoom.owner).name == oldName
+doAssert relay.guest(hashRoom.owner).token == oldToken
 relay.disconnect(1)
 doAssert relay.guest(hashRoom.owner).connection == 9
 relay.flush()
@@ -268,6 +272,16 @@ relay.send(2, RoomMessage(kind: LeaveRoom))
 doAssert hashRoom.seats == historicalSeats
 relay.send(9, RoomMessage(kind: ReturnLobby))
 doAssert hashRoom.seats[1].owner == 0
+let
+  lobbySeats = hashRoom.seats
+  lobbyRevision = hashRoom.revision
+relay.disconnect(9)
+relay.receive(10, RoomMessage(
+  kind: Hello, identity: hashRoom.identity, name: "Restored", token: oldToken
+), 0)
+doAssert relay.guest(hashRoom.owner).name == "Restored"
+doAssert hashRoom.seats == lobbySeats
+doAssert hashRoom.revision == lobbyRevision + 1
 
 # Pause freezes the server timeline while still enforcing hash barriers.
 relay = Relay()

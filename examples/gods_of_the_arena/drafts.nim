@@ -1,6 +1,6 @@
 import
   pixie, silky, vmath, windy,
-  polyworld/[chrome, configs, gameuis],
+  polyworld/[inputs, chrome, configs, gameuis],
   assets, content, controls, game, layouts, presets, sim
 
 const
@@ -132,7 +132,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
             sk.drawLabel(sk.fittedLabel(pickedBy, badge.size.x - 8, "Small"),
               badge.origin, badge.size, Muted, "Small", CenterAlign)
             break
-    if canPick and available and hovered and window.buttonPressed[MouseLeft]:
+    if canPick and available and hovered and window.mousePressed(MouseLeft):
       selectedClass = class.ord.int32
   let
     enabled = canPick and selectedClass >= 0 and playing
@@ -158,6 +158,6 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
   sk.drawLabel(if canPick: "LOCK IN HERO" else: "WAITING FOR PICK",
     button.origin, button.size,
     if enabled: rgbx(22, 24, 28, 255) else: Muted, "Bold", CenterAlign)
-  if enabled and sk.hovered(button) and window.buttonPressed[MouseLeft]:
+  if enabled and sk.hovered(button) and window.mousePressed(MouseLeft):
     queueDraft(activeId, selectedClass)
     selectedClass = -1

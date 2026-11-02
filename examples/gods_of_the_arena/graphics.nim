@@ -14,7 +14,7 @@ import
   polyworld/quadterrain,
   polyworld/shadows,
   polyworld/terrainsurfaces, polyworld/waters,
-  polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
+  polyworld/[displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
 
 when defined(takeScreenshot):
@@ -265,10 +265,12 @@ proc runGraphics*(
   window.onButtonPress = nil
   clearPlayerCommands()
   clearProps()
-  let previousMouseAliases = mouseKeyAliasesEnabled
-  mouseKeyAliasesEnabled = options.playerSlot == 0 or run.replayMode
+  let previousBindings = customBindingsEnabled
+  customBindingsEnabled = true
+  bindingCapture = false
   defer:
-    mouseKeyAliasesEnabled = previousMouseAliases
+    customBindingsEnabled = previousBindings
+    bindingCapture = false
   var
     leaveMatch, quitToMenu, leaveRequested: bool
     matchMenu = HiddenMatchMenu
@@ -278,6 +280,7 @@ proc runGraphics*(
     preferences = readPreferences("Polyworld GotA")
   except CatchableError as error:
     saveError = error.msg
+  inputBindings = preferences.bindings
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     amplitude = 2.8'f
@@ -1216,7 +1219,9 @@ proc runGraphics*(
     )
 
   window.onButtonPress = proc(button: Button) =
-    if button == KeyEscape:
+    if bindingCapture:
+      return
+    if MenuInput.matches(button):
       if quitToMenu:
         return
       if matchMenu == HiddenMatchMenu and
@@ -1238,37 +1243,46 @@ proc runGraphics*(
       return
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
-        if button == KeyB:
+        if ShopInput.matches(button):
           shopOpen = not shopOpen
           armedAbility = -1
           armedItem = -1
           attackMoveArmed = false
           return
-        if shopOpen and button != KeySpace:
+        if shopOpen and not PauseInput.matches(button):
           return
-        if button == KeyA and not window.buttonDown[KeyLeftControl] and
-          not window.buttonDown[KeyRightControl]:
+        if AttackMoveInput.matches(button) and
+          not window.actionDown(ControlInput):
             armedAbility = -1
             armedItem = -1
             attackMoveArmed = true
             return
+        if StopInput.matches(button):
+          armedAbility = -1
+          armedItem = -1
+          attackMoveArmed = false
+          queueStop(run.world.heroes[options.playerSlot - 1].id)
+          return
+    if FullscreenInput.matches(button):
+      window.setFullscreen(not window.isFullscreen)
+      return
     if handleChromeKey(button):
       return
-    if button == KeySpace and network == nil:
-      transport.handleKey(button)
-    elif button == KeyC:
+    if PauseInput.matches(button) and network == nil:
+      transport.togglePlay()
+    elif CameraInput.matches(button):
       actionCam.toggle(followSelection)
-    elif button == KeyT and not defined(gotaTestRoom):
+    elif ShadingInput.matches(button) and not defined(gotaTestRoom):
       scene.toggleShading()
-    elif button == KeyO:
+    elif OcclusionInput.matches(button):
       showOccludedCharacters = not showOccludedCharacters
-    elif (button == KeyF or button == KeyG) and
+    elif (ItemOneInput.matches(button) or ItemTwoInput.matches(button)) and
         options.playerSlot > 0 and
         not run.replayMode:
       activatePlayerItem(
         run.world,
         run.world.heroes[options.playerSlot - 1].id,
-        int32(if button == KeyF: 0 else: 1),
+        int32(if ItemOneInput.matches(button): 0 else: 1),
         epochTime()
       )
 
@@ -1656,37 +1670,37 @@ proc runGraphics*(
       actionCam.takeManual()
       cancelCameraEase(cameraEase)
     let overUi = mouseOverUi(window, sk.mousePos, primaryId)
-    if window.buttonPressed[KeyA] and
-        (window.buttonDown[KeyLeftControl] or
-          window.buttonDown[KeyRightControl]):
+    if window.actionPressed(AttackMoveInput) and
+        window.actionDown(ControlInput):
       selectAllHeroes()
     elif window.mousePressed(MouseLeft) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
-        window.buttonDown[KeyLeftShift] or
-        window.buttonDown[KeyRightShift]
+        window.actionDown(ShiftInput)
     if window.mousePressed(MouseMiddle) and
-        (not overUi or (mouseKeyAliasesEnabled and
-          window.buttonPressed[MouseMiddleKey])):
+        (not overUi or window.keyboardPanPressed()):
       if not playerMode():
         followSelection = false
         actionCam.takeManual()
       cancelCameraEase(cameraEase)
     panning =
       window.mouseDown(MouseMiddle) and
-        (not overUi or (mouseKeyAliasesEnabled and
-          window.buttonDown[MouseMiddleKey])) or
+        (not overUi or window.keyboardPanDown()) or
       (not playerMode() and not overUi and window.mouseDown(MouseRight))
 
-    let delta = window.mouseDelta.vec2
+    let
+      delta = window.mouseDelta.vec2
+      zoom = window.scrollDelta.y +
+        (if window.actionDown(ZoomInInput): dt * 30 else: 0) -
+        (if window.actionDown(ZoomOutInput): dt * 30 else: 0)
     if playerMode():
-      if not overUi and window.scrollDelta.y != 0:
+      if not overUi and zoom != 0:
         cancelCameraEase(cameraEase)
         cameraDistance = clamp(
           cameraDistance * pow(
             0.92'f32,
-            window.scrollDelta.y / 3.0'f32
+            zoom / 3.0'f32
           ),
           5.0'f32,
           DefaultCameraDistance
@@ -1700,7 +1714,7 @@ proc runGraphics*(
         cameraTarget.z = clamp(cameraTarget.z, -mapHalfSize(), mapHalfSize())
       elif applyRtsPan(
           cameraTarget,
-          rtsPanDir(window),
+          rtsPanDir(window, preferences.edgeScrolling),
           dt,
           cameraDistance,
           mapHalfSize()
@@ -1726,20 +1740,20 @@ proc runGraphics*(
     if not minimapPanning and
         applyRtsPan(
           cameraTarget,
-          rtsPanDir(window),
+          rtsPanDir(window, preferences.edgeScrolling),
           dt,
           cameraDistance,
           mapHalfSize()
         ):
       followSelection = false
       actionCam.takeManual()
-    if not overUi and window.scrollDelta.y != 0:
+    if not overUi and zoom != 0:
       actionCam.takeManual()
       if followSelection and selectedTargetCount() > 1:
         groupCameraScale = clamp(
           groupCameraScale * pow(
             0.92'f32,
-            window.scrollDelta.y / 3.0'f32
+            zoom / 3.0'f32
           ),
           0.75'f32,
           3.0'f32
@@ -1748,7 +1762,7 @@ proc runGraphics*(
         cameraDistance = clamp(
           cameraDistance * pow(
             0.92'f32,
-            window.scrollDelta.y / 3.0'f32
+            zoom / 3.0'f32
           ),
           5.0'f32,
           400.0'f32
@@ -1833,10 +1847,9 @@ proc runGraphics*(
     selectEntity(heroId)
 
   proc holdingAttackMove(): bool =
-    ## Keeps attack-move armed while A is held without Control.
-    window.buttonDown[KeyA] and
-      not window.buttonDown[KeyLeftControl] and
-      not window.buttonDown[KeyRightControl]
+    ## Keeps attack-move armed while its binding is held without Control.
+    window.actionDown(AttackMoveInput) and
+      not window.actionDown(ControlInput)
 
   proc previewGroundClick(viewProjection: Mat4) =
     ## Shows local click feedback before release or any server acknowledgement.
@@ -1871,10 +1884,11 @@ proc runGraphics*(
     if not playerMode() or shopOpen or run.world.phase == Drafting or
       matchMenu != HiddenMatchMenu:
         return
-    for slot, key in [KeyQ, KeyW, KeyE, KeyR]:
-      if window.buttonPressed[key]:
+    for slot, action in [AbilityOneInput, AbilityTwoInput,
+        AbilityThreeInput, AbilityFourInput]:
+      if window.actionPressed(action):
         let hero = heroById(run.world, playerHeroId())
-        if window.buttonDown[KeyLeftShift] or window.buttonDown[KeyRightShift]:
+        if window.actionDown(ShiftInput):
           queueLevelAbility(hero.id, slot.int32)
           armedAbility = -1
           armedItem = -1
@@ -2558,9 +2572,8 @@ proc runGraphics*(
 
       if playerMode() and matchMenu == HiddenMatchMenu and not shopOpen and
         run.world.phase != Drafting and
-        (holdingAttackMove() or window.buttonReleased[KeyA]) and
-        not window.buttonDown[KeyLeftControl] and
-        not window.buttonDown[KeyRightControl]:
+        (holdingAttackMove() or window.actionReleased(AttackMoveInput)) and
+        not window.actionDown(ControlInput):
           attackMoveArmed = true
       updatePlayerSpells()
       previewGroundClick(viewProjection)
@@ -3067,7 +3080,7 @@ proc runGraphics*(
               sk.menuLabel(saveError, origin + vec2(0, 400), 416, MenuAccent)
           when defined(waterPanel):
             # A developer window for the lakes' look; F4 shows and hides it.
-            if window.buttonPressed[KeyF4]:
+            if window.actionPressed(WaterPanelInput):
               showWaterPanel = not showWaterPanel
             subWindow("Water (F4)", showWaterPanel, vec2(16, 130), vec2(340, 800)):
               template slider(id, caption: string, value: var float32,
@@ -3138,6 +3151,8 @@ proc runGraphics*(
     if network != nil:
       connection.pump()
     pollEvents()
+    when not defined(emscripten):
+      window.updateWindowSettings()
     waitForDisplay()
 
   window.cursor = Cursor(kind: ArrowCursor)

@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-30",
+  "version": "2026.10.30.1",
+  "coworld_id": "cow_8fb0572b-3fdd-4bbf-bd07-ea843a98dd3a",
+  "canonical": true,
+  "change": "Open the normal main menu when no replay is supplied. Preserve replay loading and desync checks.",
+  "scope": "Launcher HTML only; existing JavaScript, WASM, assets, game images, variants and league settings unchanged.",
+  "viewer_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_8fb0572b-3fdd-4bbf-bd07-ea843a98dd3a/sha256%3A5560c7a42cf819bd969059b11cbf556f211269526f6abcedff949c5f51c5b5e5/index.html?v=2",
+  "certification": {
+    "coworld_id": "cow_8fb0572b-3fdd-4bbf-bd07-ea843a98dd3a",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-da576b174d49",
+    "certification_job_id": "90868438-0678-49db-a491-4421b97decf2",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-10-30T19:46:18.377400Z"
+  },
+  "hosted_smoke_matches_passed": 5,
+  "files": {
+    "index.html": "3a4d0e66553085010c59405942c22fd11e20073a0f5c8caefcd83eed65903f8b",
+    "gota.wasm": "aaef8ede1437cd01e5d78fe0769ab78c2164ad2c30df8ecc19747f1a9b055c33",
+    "loading-logo.png": "77f67493b682daea39a06ca3542e8671a28e14625c5fd9dac7130046be9cb80a",
+    "gota.js": "0bcaf19e7e0c223c5acfa9915c7508114614a36265cec1a577da43ba0b1e019f",
+    "gota.data": "92eef2e13ee64e75271afcb6819732a80f22689dfa39524b7e85df5648c34aaa"
+  }
+}

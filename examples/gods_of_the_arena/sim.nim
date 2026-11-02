@@ -5194,9 +5194,34 @@ proc applyCastPoint*(
     offset
   )
 
+proc applyStop*(world: World, heroId: int32): bool =
+  ## Cancels a living hero's orders without moving it toward a tile center.
+  if world.phase == Drafting:
+    return world.finishAction(heroId, ActionStop, 0, 0, 0, ActionDrafting)
+  let hero = world.heroById(heroId)
+  if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
+    return world.finishAction(heroId, ActionStop, 0, 0, 0, ActionNotAlive)
+  hero.stopHeroPath()
+  hero.hasQueuedCast = false
+  hero.castPoseUntil = 0
+  hero.attackObjectId = 0
+  hero.attackMoving = false
+  hero.targetFootmanId = 0
+  hero.targetHeroId = 0
+  hero.targetBuildingId = 0
+  hero.attackingFort = false
+  hero.swingTicks = -1
+  hero.state = Marching
+  hero.animClip = heroIdleClip
+  hero.animTicks = 0
+  world.interruptPortal(hero)
+  world.finishAction(heroId, ActionStop, 0, 0, 0, NoActionError)
+
 proc applyReplayAction*(world: World, action: ReplayAction): bool {.discardable.} =
   ## Applies one recorded bot command without requiring its private VM.
   case action.kind
+  of ActionStop:
+    applyStop(world, action.heroId)
   of ActionWalkTo:
     applyWalkTo(world, action.heroId, action.first, action.second, action.offset)
   of ActionAttackMove:

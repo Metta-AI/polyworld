@@ -1,18 +1,32 @@
 import
   std/[os, strutils],
   chroma, jsony, pixie, silky, vmath, windy,
-  chrome, policies
+  chrome, displays, gameuis, inputs, policies, rtscameras
 
 type
   MenusError* = object of CatchableError
   MenuPage* = enum
     HomeMenu, SingleMenu, MultiplayerMenu, LobbyMenu, SettingsMenu
+  SettingsTab = enum
+    DisplaySettings = "Display"
+    SoundSettings = "Sound"
+    ControlsSettings = "Controls"
+    NetworkingSettings = "Networking"
   Preferences* = object
-    name*: string = "Player"
+    name*: string
     server*: string = "ws://127.0.0.1:8090/ws"
     fullscreen*: bool
+    windowMode*: WindowMode
+    resolution*: WindowResolution
     fps*: int = 60
     interpolation*: bool = true
+    edgeScrolling*: EdgeScrollMode = FullscreenEdgeScroll
+    bindings*: InputBindings = DefaultBindings
+    soundMuted*: bool
+    mainVolume*: int = 100
+    musicVolume*: int = 100
+    fxVolume*: int = 100
+    uiVolume*: int = 100
   LocalPolicy* = object
     name*, bytes*: string
 
@@ -20,6 +34,11 @@ const
   MenuInk* = rgbx(222, 231, 228, 255)
   MenuMuted* = rgbx(137, 158, 150, 255)
   MenuAccent* = rgbx(184, 215, 139, 255)
+
+var
+  settingsTab: SettingsTab
+  captureAction: InputAction
+  captureSlot: int
 
 when defined(emscripten):
   {.emit: """
@@ -102,7 +121,13 @@ proc readPreferences*(app: string): Preferences =
     result = bytes.fromJson(Preferences)
   except JsonError as error:
     raise newException(MenusError, "Cannot read settings: " & error.msg)
+  if result.windowMode == BorderlessWindow:
+    result.windowMode = Fullscreen
   result.fps = clamp(result.fps, 0, 240)
+  result.mainVolume = clamp(result.mainVolume, 0, 100)
+  result.musicVolume = clamp(result.musicVolume, 0, 100)
+  result.fxVolume = clamp(result.fxVolume, 0, 100)
+  result.uiVolume = clamp(result.uiVolume, 0, 100)
   if result.name.len > 64:
     result.name.setLen(64)
 
@@ -112,7 +137,11 @@ proc savePreferences*(preferences: Preferences, app: string) =
 
 proc applyPreferences*(preferences: Preferences, window: Window) =
   ## Applies shared presentation settings to the existing window.
-  window.fullscreen = preferences.fullscreen
+  inputBindings = preferences.bindings
+  when defined(emscripten):
+    window.setFullscreen(preferences.fullscreen)
+  else:
+    window.configureWindow(preferences.windowMode, preferences.resolution)
   framePaceHz = preferences.fps
   interpolateVisuals = preferences.interpolation
 
@@ -239,11 +268,84 @@ proc beginOverlay*(sk: Silky, window: Window, size: Vec2): Vec2 =
   sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
   result = (view - size) * 0.5'f
 
+proc bindingsPanel(
+    sk: Silky,
+    window: Window,
+    preferences: var Preferences,
+    origin: Vec2
+) =
+  ## Edits two bindings per action using the existing Silky buttons.
+  let capturing = bindingCapture
+  if capturing:
+    for key in Button:
+      if key in {ButtonUnknown, DoubleClick, TripleClick, QuadrupleClick}:
+        continue
+      if window.buttonPressed[key]:
+        if key != KeyEscape:
+          preferences.bindings.bindInput(
+            captureAction,
+            captureSlot,
+            if key == KeyBackspace: ButtonUnknown else: key
+          )
+        bindingCapture = false
+        break
+  sk.drawLabel(
+    if capturing: "Press a key or mouse button. Esc cancels; Backspace clears."
+    else: "Click a binding to change it. Conflicting bindings are cleared.",
+    origin + vec2(0, 49), vec2(720, 34), sk.theme.defaultTextColor
+  )
+  frame "Control bindings", origin + vec2(0, 90), vec2(720, 304):
+    sk.startCurrentChildren()
+    let listOrigin = sk.at
+    for action in InputAction:
+      let row = listOrigin + vec2(0, action.ord.float32 * 38)
+      sk.drawLabel($action, row, vec2(295, 36), sk.theme.defaultTextColor)
+      for slot in 0 .. 1:
+        sk.at = row + vec2((300 + slot * 190).float32, 0)
+        let label =
+          if capturing and action == captureAction and slot == captureSlot:
+            "Press a button..."
+          else:
+            preferences.bindings[action][slot].bindingLabel
+        button label, not capturing:
+          captureAction = action
+          captureSlot = slot
+          bindingCapture = true
+  sk.at = origin + vec2(500, 408)
+  button "Reset bindings", not capturing:
+    preferences.bindings = DefaultBindings
+
+proc volumeSlider(
+  sk: Silky,
+  window: Window,
+  caption: string,
+  volume: var int,
+  origin: Vec2
+) =
+  ## Edits a saved volume percentage with the standard Silky slider.
+  sk.drawLabel(caption, origin, vec2(210, 36), sk.theme.defaultTextColor)
+  sk.pushLayout(
+    origin + vec2(210, 0),
+    vec2(420 + sk.theme.padding.float32 * 3, 36)
+  )
+  scrubber("volume" & caption, volume, 0, 100)
+  sk.popLayout()
+  sk.drawLabel(
+    $volume & "%",
+    origin + vec2(645, 0),
+    vec2(75, 36),
+    sk.theme.defaultTextColor
+  )
+
 proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
     app: string, origin: Vec2, title = "Settings"
 ): bool =
   ## Edits preferences with the existing Silky theme and widgets.
+  when defined(emscripten):
+    preferences.fullscreen = window.isFullscreen
+  else:
+    preferences.windowMode = window.windowMode
   let previous = preferences
   sk.draw9Patch(
     "window.9patch",
@@ -254,26 +356,112 @@ proc settingsPanel*(
   if title.len > 0:
     sk.drawLabel(title, origin, vec2(720, 40),
       sk.theme.defaultTextColor, "H1")
-  sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),
-    sk.theme.defaultTextColor)
-  sk.menuInput(window, "displayName", preferences.name,
-    origin + vec2(210, 64), 510)
-  sk.drawLabel("Server", origin + vec2(0, 120), vec2(210, 36),
-    sk.theme.defaultTextColor)
-  sk.menuInput(window, "preferredServer", preferences.server,
-    origin + vec2(210, 120), 510)
-  sk.at = origin + vec2(0, 188)
-  checkBox "Fullscreen", preferences.fullscreen
-  sk.at = origin + vec2(0, 240)
-  checkBox "Visual interpolation", preferences.interpolation
-  sk.drawLabel("FPS limit", origin + vec2(0, 292), vec2(210, 36),
-    sk.theme.defaultTextColor)
-  for i, fps in [30, 60, 120, 0]:
-    sk.at = origin + vec2(210 + i.float32 * 120, 292)
-    radioButton (if fps == 0: "Unlimited" else: $fps), preferences.fps, fps
-  if preferences != previous:
-    preferences.applyPreferences(window)
-  sk.at = origin + vec2(0, 380)
-  button "Save and Back":
+  let
+    tabsLeft = if title.len > 0: 160.0'f else: 0.0'f
+    tabCount = ord(high(SettingsTab)) + 1
+    tabWidth = (720 - tabsLeft - (tabCount - 1).float32 * 8) /
+      tabCount.float32
+  for page in SettingsTab:
+    let
+      tab = GameUiPanel(
+        origin: origin + vec2(tabsLeft + page.ord.float32 * (tabWidth + 8), 0),
+        size: vec2(tabWidth, 40)
+      )
+      interaction = sk.interact(
+        rect(tab.origin, tab.size), not bindingCapture, false
+      )
+    if interaction == Released:
+      settingsTab = page
+    let selected = settingsTab == page
+    sk.drawTab(tab, selected, interaction in {Hovered, Pressed, Held})
+    sk.drawLabel(
+      $page,
+      tab.origin,
+      tab.size,
+      if selected: sk.theme.defaultTextColor else: sk.theme.disabledTextColor,
+      "Default",
+      CenterAlign
+    )
+  case settingsTab
+  of SoundSettings:
+    sk.at = origin + vec2(0, 64)
+    checkBox "Mute all sound", preferences.soundMuted
+    sk.volumeSlider(
+      window, "Main", preferences.mainVolume, origin + vec2(0, 120)
+    )
+    sk.volumeSlider(
+      window, "Music", preferences.musicVolume, origin + vec2(0, 176)
+    )
+    sk.volumeSlider(
+      window, "FX", preferences.fxVolume, origin + vec2(0, 232)
+    )
+    sk.volumeSlider(
+      window, "UI", preferences.uiVolume, origin + vec2(0, 288)
+    )
+    sk.drawLabel(
+      "Audio playback is not available yet.",
+      origin + vec2(0, 352),
+      vec2(720, 36),
+      sk.theme.disabledTextColor
+    )
+  of ControlsSettings:
+    sk.bindingsPanel(window, preferences, origin)
+    inputBindings = preferences.bindings
+  of NetworkingSettings:
+    sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),
+      sk.theme.defaultTextColor)
+    sk.menuInput(window, "displayName", preferences.name,
+      origin + vec2(210, 64), 510)
+    sk.drawLabel("Server", origin + vec2(0, 112), vec2(210, 36),
+      sk.theme.defaultTextColor)
+    sk.menuInput(window, "preferredServer", preferences.server,
+      origin + vec2(210, 112), 510)
+  of DisplaySettings:
+    when defined(emscripten):
+      sk.at = origin + vec2(0, 80)
+      checkBox "Fullscreen", preferences.fullscreen
+    else:
+      sk.drawLabel("Window mode", origin + vec2(0, 64), vec2(210, 36),
+        sk.theme.defaultTextColor)
+      sk.pushLayout(origin + vec2(210, 64),
+        vec2(510 + sk.theme.padding.float32 * 3, 36))
+      dropDown preferences.windowMode, [Windowed, Fullscreen]
+      sk.popLayout()
+      sk.drawLabel("Resolution", origin + vec2(0, 112), vec2(210, 36),
+        sk.theme.defaultTextColor)
+      if preferences.windowMode == Fullscreen:
+        sk.drawLabel("Desktop resolution", origin + vec2(210, 112),
+          vec2(510, 36), sk.theme.defaultTextColor)
+      else:
+        var resolutions = @[CurrentResolution]
+        let limit = window.windowSizeLimit
+        for resolution in Resolution720 .. Resolution2160:
+          let size = resolution.resolutionSize
+          if size.x <= limit.x and size.y <= limit.y:
+            resolutions.add resolution
+        sk.pushLayout(origin + vec2(210, 112),
+          vec2(510 + sk.theme.padding.float32 * 3, 36))
+        dropDown preferences.resolution, resolutions
+        sk.popLayout()
+    sk.at = origin + vec2(0, 160)
+    checkBox "Visual interpolation", preferences.interpolation
+    sk.drawLabel("FPS limit", origin + vec2(0, 204), vec2(210, 36),
+      sk.theme.defaultTextColor)
+    for i, fps in [30, 60, 120, 0]:
+      sk.at = origin + vec2(210 + i.float32 * 120, 204)
+      radioButton (if fps == 0: "Unlimited" else: $fps), preferences.fps, fps
+    sk.drawLabel("Edge scrolling", origin + vec2(0, 248), vec2(210, 36),
+      sk.theme.defaultTextColor)
+    sk.pushLayout(
+      origin + vec2(210, 248),
+      vec2(510 + sk.theme.padding.float32 * 3, 36)
+    )
+    dropDown preferences.edgeScrolling,
+      [NoEdgeScroll, FullscreenEdgeScroll, AlwaysEdgeScroll]
+    sk.popLayout()
+    if preferences != previous:
+      preferences.applyPreferences(window)
+  sk.at = origin + vec2(0, 408)
+  button "Save and Back", not bindingCapture:
     preferences.savePreferences(app)
     result = true

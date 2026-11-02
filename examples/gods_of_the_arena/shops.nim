@@ -3,7 +3,7 @@
 import
   std/strutils,
   pixie, silky, vmath, windy,
-  polyworld/[chrome, gameuis, stackpanels],
+  polyworld/[inputs, chrome, gameuis, stackpanels],
   content, controls, layouts, sim
 
 const
@@ -78,7 +78,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   sk.drawTab(close, hovered = sk.hovered(close))
   sk.drawLabel("CLOSE  Esc", close.origin, close.size, White, "Bold",
     CenterAlign)
-  if window.buttonPressed[MouseLeft] and sk.hovered(close):
+  if window.mousePressed(MouseLeft) and sk.hovered(close):
     shopOpen = false
   sk.drawSprite("gold", wallet.origin + vec2(0, 16), vec2(32))
   sk.drawLabel($hero.gold & " gold", wallet.origin + vec2(44, 0),
@@ -124,7 +124,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
       price.origin + vec2(84, 0), vec2(price.size.x - 84, 28),
       if enabled: Gold else: Muted, "Small"
     )
-    if enabled and hovered and window.buttonPressed[MouseLeft]:
+    if enabled and hovered and window.mousePressed(MouseLeft):
       queueBuyItem(hero.id, item.ord.int32)
       waitingItem = item
       receiptSerial = purchaseReceipt.serial

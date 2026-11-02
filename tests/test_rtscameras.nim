@@ -21,6 +21,12 @@ block:
   doAssert not rtsEdgePanAllowed(true, false, false)
   doAssert not rtsEdgePanAllowed(true, true, true)
   doAssert rtsEdgePanAllowed(true, true, false)
+  for fullscreen in [false, true]:
+    doAssert not rtsEdgePanAllowed(fullscreen, true, false, NoEdgeScroll)
+    doAssert rtsEdgePanAllowed(fullscreen, true, false, AlwaysEdgeScroll)
+    for mode in EdgeScrollMode:
+      doAssert not rtsEdgePanAllowed(fullscreen, false, false, mode)
+      doAssert not rtsEdgePanAllowed(fullscreen, true, true, mode)
 
 echo "Testing combined pan does not double a held direction"
 block:

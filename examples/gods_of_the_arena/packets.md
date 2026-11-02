@@ -298,3 +298,15 @@ even when delivery is restricted to a team inbox.
 | [replays.nim](replays.nim) | Action IDs and replay version. |
 | [sim.nim](sim.nim) | Execution and state hash. |
 | [bots.nim](bots.nim) | Mailbox and action feedback. |
+
+### ActionStop
+
+Cancels movement, chasing, queued casts, and portal channeling. The hero
+stays at its current position and can still acquire basic attacks normally.
+
+| Field | Value |
+| --- | --- |
+| `kind` | `19` |
+| `heroId` | Controlled hero ID |
+| `slot`, `first`, `second` | `0` |
+| `offset` | Zero |

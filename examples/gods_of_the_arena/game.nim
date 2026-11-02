@@ -6,7 +6,7 @@
 
 import
   std/[math, os, strformat, strutils, times],
-  polyworld/[cli, controllers, metrics, profiles, tapes, timings],
+  polyworld/[cli, controllers, metrics, profiles, rooms, tapes, timings],
   content,
   maps,
   sim,
@@ -20,6 +20,8 @@ when defined(coworld):
 var
   matchConfig* = GotaConfig(seed: ArenaSeed)
   serverAddress*: string
+  playerNameOverride*: string
+  localPlayerName*: string
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
@@ -30,6 +32,7 @@ proc usage() =
   echo "  --bot PATH[:N]          The equivalent two-argument form."
   echo "  --player                Control the first hero; supply 9 bots."
   echo "  --player:N              Control hero N (1-10); supply 9 bots."
+  echo "  --player NAME           Save a nonnumeric player display name."
   echo "  --replay PATH           Play an action replay instead of bots."
   echo "  --record PATH           Record bot actions to a replay."
   echo "  --seconds NUMBER        Battle seconds (default 1200)."
@@ -72,8 +75,17 @@ proc parseGameOptions(validateMatch: bool): GameOptions =
   )
   index = 0
   while index < arguments.len:
-    let argument = arguments[index]
-    if result.takeCommonFlag(arguments, index, argument):
+    var argument = arguments[index]
+    if argument == "--player" and index + 1 < arguments.len and
+      not arguments[index + 1].startsWith("--"):
+        argument = "--player=" & arguments.argumentValue(index, "--player")
+    if argument.startsWith("--player=") and
+      not argument[9 .. ^1].allCharsInSet({'0' .. '9'}):
+        let name = argument[9 .. ^1].strip()
+        if name.len > 64 or not name.validName:
+          fail("--player requires a nonempty display name of at most 64 bytes")
+        playerNameOverride = name
+    elif result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
@@ -186,6 +198,10 @@ proc initializeMatch*() =
           var config = localGameConfig(options, HeroClassCount)
           if matchConfig.players.len > 0:
             config.players = matchConfig.players
+          if options.playerSlot > 0 and
+            options.playerSlot.int <= config.players.len and
+            localPlayerName.len > 0:
+              config.players[options.playerSlot - 1].name = localPlayerName
           config.withMapPreset(gameMap.preset, matchConfig.draftMode)
     run.recorder.data.config.validateConfig(HeroClassCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)

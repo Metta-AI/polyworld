@@ -326,3 +326,29 @@ block:
         doAssert playback.stateHash() == activeHash
     doAssert playback.hashCheck.mismatches == 0, playback.hashCheck.error
     doAssert playback.stateHash() == game.stateHash()
+
+echo "Testing stop cancels orders without moving to a tile center"
+block:
+  let
+    game = controlGame()
+    world = game.world
+    hero = world.heroes[0]
+    position = hero.position
+  game.recorder = initReplayRecorder(game.currentSetup(100), game.map.preset)
+  doAssert world.applyWalkTo(hero.id, mapCoordinate(position.x) + 3,
+    mapCoordinate(position.z))
+  hero.attackMoving = true
+  hero.hasQueuedCast = true
+  hero.portalEnds = world.tick + 20
+  doAssert game.submitAction(ReplayAction(kind: ActionStop, heroId: hero.id))
+  doAssert hero.position == position
+  doAssert not hero.hasMoveTarget and not hero.hasQueuedCast
+  doAssert not hero.attackMoving
+  doAssert hero.portalEnds == 0
+  let data = decodeReplay(encodeReplay(game.recorder.data))
+  doAssert data.actions[^1].kind == ActionStop
+  hero.hasMoveTarget = true
+  hero.hasQueuedCast = true
+  doAssert world.applyReplayAction(data.actions[^1])
+  doAssert not hero.hasMoveTarget and not hero.hasQueuedCast
+  doAssert hero.position == position

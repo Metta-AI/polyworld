@@ -231,7 +231,7 @@ for width in [TransportMinWidth, 1280.0'f, 1920, 3840]:
   checkPanels(panel, transport.speeds)
   checkPanels(panel, [
     transport.loop, transport.scrub, transport.recorded,
-    transport.camera, transport.tick
+    transport.camera, transport.fullscreen, transport.tick
   ])
   doAssert transport.scrub.size.x >= 80
   doAssert transport.scrub.origin.x >=

@@ -255,6 +255,11 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
       identity: message.identity
     )
     relay.guests.add guest
+  let
+    room = relay.room(guest.room)
+    renamed = guest.name != message.name
+  if room == nil or room.phase == Lobby:
+    guest.name = message.name
   guest.connection = connection
   relay.logEvent(
     if message.token.len > 0: "player.reconnected" else: "player.identified",
@@ -271,9 +276,11 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
   relay.send(guest, RoomMessage(
     kind: Welcome, participant: guest.id, token: guest.token
   ))
-  let room = relay.room(guest.room)
   if room != nil:
-    relay.publish(room)
+    if room.phase == Lobby and renamed:
+      relay.changed(room)
+    else:
+      relay.publish(room)
     if room.phase != Lobby:
       guest.recovering = room.controls(guest.id)
       relay.send(guest, RoomMessage(

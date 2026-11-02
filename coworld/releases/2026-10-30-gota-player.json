@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-30",
+  "version": "2026.10.30.2",
+  "coworld_id": "cow_44328332-7bb5-428a-8967-d3228cccbceb",
+  "canonical": true,
+  "windy_commit": "891e08ff090719620c4e6a3e4940461e6b26150d",
+  "changes": [
+    "Browser clipboard paste support from Windy #204.",
+    "Persisted player names in multiplayer setup, match config and replay metadata.",
+    "Profile button limited to multiplayer, multiplayer battle setup and Settings.",
+    "Complete bare server addresses and show connection failures and timeouts."
+  ],
+  "scope": "Updated web player only; game host images and league settings unchanged.",
+  "player_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_44328332-7bb5-428a-8967-d3228cccbceb/sha256%3A048c972520a6b3176230bf8dfb733a075d229cfb1b4579d21e666091fdc3b709/index.html?v=2",
+  "server_link": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_44328332-7bb5-428a-8967-d3228cccbceb/sha256%3A048c972520a6b3176230bf8dfb733a075d229cfb1b4579d21e666091fdc3b709/index.html?v=2&server=ws%3A%2F%2Fandres-macbook-pro.tail0f4a29.ts.net%3A9911%2Fws",
+  "certification": {
+    "coworld_id": "cow_44328332-7bb5-428a-8967-d3228cccbceb",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-da576b174d49",
+    "certification_job_id": "cec53cee-4bc2-43d7-88c8-fb2f7450f744",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-10-30T22:03:35.880097Z"
+  },
+  "hosted_smoke_matches_passed": 5,
+  "cdn_sha256": {
+    "index.html": "5de3a9b35b82386d4573120cd1bcec7106c23efbdc70d09321fbb997fa6b082d",
+    "gota.js": "f2bed4879117f7e7c3a221cbd865d019721cfe19688f8decbac831ca58a74bc2",
+    "gota.wasm": "36a0e0b7272f0bc76cf7b5f7897f37f576de1afaf7d2f816d3639dafbce2df18",
+    "gota.data": "92eef2e13ee64e75271afcb6819732a80f22689dfa39524b7e85df5648c34aaa",
+    "loading-logo.png": "77f67493b682daea39a06ca3542e8671a28e14625c5fd9dac7130046be9cb80a"
+  }
+}

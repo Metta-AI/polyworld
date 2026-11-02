@@ -123,6 +123,21 @@ proc lobbyButton*(
   )
   interaction == Released
 
+proc playerButton*(
+  sk: Silky, window: Window, name: string, enabled = true
+): bool =
+  ## Opens the player profile from the top-right corner of a menu.
+  let
+    view = window.size.vec2 / sk.uiScale
+    label = if name.len == 0: "Player name" else: name
+  sk.lobbyButton(
+    sk.fittedLabel(label, 180, "LobbyBody"),
+    vec2(view.x - 264, 16),
+    240,
+    "character",
+    enabled = enabled
+  )
+
 proc lobbyInput*(
     sk: Silky, window: Window, id: string, value: var string,
     at: Vec2, width: float32

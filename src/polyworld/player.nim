@@ -7,7 +7,7 @@
 import
   std/times,
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis, inputs, stackpanels
+  actioncam, chrome, displays, gameuis, inputs, stackpanels
 
 const
   TransportHeight* = 80.0'f32
@@ -25,7 +25,8 @@ const
   TransportControlsWidth =
     12 + (IconSize + IconGap) * 10 + (GroupGap - IconGap) * 3
   TransportMinWidth* =
-    TransportControlsWidth + 80 + GroupGap + IconSize + 16 + TickLabelW
+    TransportControlsWidth + 80 + GroupGap + IconSize * 2 + IconGap +
+      16 + TickLabelW
   SpeedIcons = ["speed_1x", "speed_2x", "speed_4x", "speed_16x"]
   GlyphColor = rgbx(226, 230, 239, 255)
   GlyphActive = rgbx(235, 216, 154, 255)
@@ -36,7 +37,7 @@ type
     controls*: array[5, GameUiPanel]
     loop*: GameUiPanel
     speeds*: array[4, GameUiPanel]
-    scrub*, recorded*, scrubHit*, camera*, stats*, tick*: GameUiPanel
+    scrub*, recorded*, scrubHit*, camera*, fullscreen*, stats*, tick*: GameUiPanel
 
   Player* = object
     playing*: bool
@@ -224,6 +225,7 @@ proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
   ## Reserves fixed controls at both ends, then fills the timeline between.
   var trailing = panel.stack(RightToLeft, vec2(0, IconY))
   let tick = trailing.takeColumn(TickLabelW, 16)
+  result.fullscreen = trailing.take(vec2(IconSize), IconGap)
   result.camera = trailing.take(vec2(IconSize), GroupGap)
   if showStats:
     result.stats = trailing.take(vec2(IconSize), IconGap)
@@ -296,6 +298,33 @@ proc clicked(
     if keyboardAliases: window.mousePressed(MouseLeft)
     else: window.buttonPressed[MouseLeft]
   pressed and panel.contains(sk.mousePos)
+
+proc drawFullscreen(sk: Silky, panel: GameUiPanel, active: bool) =
+  ## Draws expanding or contracting corners without an extra atlas asset.
+  let
+    color = if active: GlyphActive else: GlyphColor
+    inset = 14.0'f
+    length = 14.0'f
+    thickness = 4.0'f
+  for y in 0 .. 1:
+    for x in 0 .. 1:
+      let
+        corner = panel.origin + vec2(
+          if x == 0: inset else: panel.size.x - inset - length,
+          if y == 0: inset else: panel.size.y - inset - length
+        )
+        right = (x == 1) xor active
+        bottom = (y == 1) xor active
+      sk.drawRect(
+        corner + vec2(0, if bottom: length - thickness else: 0),
+        vec2(length, thickness),
+        color
+      )
+      sk.drawRect(
+        corner + vec2(if right: length - thickness else: 0, 0),
+        vec2(thickness, length),
+        color
+      )
 
 proc drawTransport*(
     player: var Player,
@@ -384,6 +413,13 @@ proc drawTransport*(
   sk.drawIcon(actionBtn, "action_cam", actionCam.enabled)
   if window.clicked(sk, actionBtn, keyboardAliases):
     actionCam.toggle(followSelection)
+  let fullscreen = window.isFullscreen
+  sk.drawFullscreen(slots.fullscreen, fullscreen)
+  if window.clicked(sk, slots.fullscreen, keyboardAliases):
+    window.setFullscreen(not fullscreen)
+  if slots.fullscreen.contains(sk.mousePos):
+    sk.tooltipAnchor = rect(slots.fullscreen.origin, slots.fullscreen.size)
+    tooltip (if fullscreen: "Exit fullscreen" else: "Enter fullscreen")
   hudScratch.setLen(0)
   hudScratch.add "Tick "
   hudScratch.addHudInt(player.tick.int)

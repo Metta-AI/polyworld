@@ -10,18 +10,25 @@ weights or private VM memory. GotA is the first client integration.
 Install the repository's locked Nim dependencies, then run from the checkout:
 
 ```sh
-nim r tools/gameserver.nim --port 9911
+nim r tools/gameserver.nim --port 9911 --address 0.0.0.0
 nim r examples/gods_of_the_arena/gota.nim --server ws://127.0.0.1:9911/ws
 ```
 
 The relay defaults to `ws://127.0.0.1:8090/ws`. `BIND` and `PORT` change the
-listening address and port; `--port` overrides `PORT`. `GET /healthz` is a
+listening address and port; `--address` overrides `BIND` and `--port` overrides
+`PORT`. Use `--address 0.0.0.0` to accept connections on all IPv4 interfaces,
+including Tailscale. `GET /healthz` is a
 health check. Native and browser
 clients use Windy's WebSocket API. The server uses Mummy and one explicit room
 event loop. Mummy's workers pass bounded events into that loop.
 
 `--server` opens Multiplayer and connects automatically. Choose human and bot
 seats in the lobby. Without `--server`, GotA opens the main menu as usual.
+
+Set and remember your display name with `--player "Andre"` on native or
+`?player=Andre` in the web URL. Spaces in URLs use `%20`, for example
+`?player=Andre%20von%20Houck`. This skips the first-time name prompt.
+Numeric values still select a human seat, such as `--player:2` or `?player=2`.
 
 A normal graphical launch opens Single player, Multiplayer and Settings.
 Native builds also offer Exit to OS. Single player defaults to one human and

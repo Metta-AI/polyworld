@@ -57,7 +57,7 @@ One connected guest may own multiple seats or spectate.
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
 | `id` | `uint32` | Nonzero guest ID. |
-| `name` | `string` | Display name; ≤64 bytes. |
+| `name` | `string` | Display name; updates on reconnect outside matches; ≤64 bytes. |
 | `connected` | `uint32` | Connected = 1. |
 | `ready` | `uint32` | Ready = 1. |
 

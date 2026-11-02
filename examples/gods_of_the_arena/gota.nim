@@ -15,8 +15,13 @@ when defined(headless):
       outcome: run.world.outcome()
     ), run.world.totalXp())
 else:
-  import windy, game, graphics, frontend
+  import windy, polyworld/menus, game, graphics, frontend
   initializeOptions()
+  var preferences = readPreferences("Polyworld GotA")
+  if playerNameOverride.len > 0:
+    preferences.name = playerNameOverride
+    preferences.savePreferences("Polyworld GotA")
+  localPlayerName = preferences.name
   if options.botGroups.len > 0 or options.replayPath.len > 0:
     initializeMatch()
     runGraphics()

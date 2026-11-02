@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Polyworld replay</title>
+<title>Polyworld</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10131a;color:#eef;font:16px system-ui}
 canvas{display:block;width:100%;height:100%;outline:none}
@@ -17,11 +17,13 @@ canvas{display:block;width:100%;height:100%;outline:none}
 <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
 <div id="status" role="status">
 <!-- GAME_LOGO -->
-<p id="status-detail">Loading replay viewer…</p>
+<p id="status-detail">Loading game…</p>
 </div>
 <script>
 const statusElement = document.getElementById('status');
 const statusDetail = document.getElementById('status-detail');
+const replayUri = new URLSearchParams(location.hash.slice(1)).get('replay') ||
+  new URLSearchParams(location.search).get('replay');
 let failed = false, ready = false;
 function message(type, extra = {}) {
   if (window.parent !== window) window.parent.postMessage({src:'coworld-replay', type, ...extra}, '*');
@@ -32,7 +34,8 @@ function fail(reason) {
   const detail = String(reason?.message || reason);
   statusElement.hidden = false;
   statusElement.className = 'error';
-  statusDetail.textContent = 'Unable to play this replay.\n' + detail;
+  statusDetail.textContent = (replayUri ? 'Unable to play this replay.\n' :
+    'Unable to start the game.\n') + detail;
   message('error', {message: detail});
 }
 message('loading');
@@ -40,11 +43,11 @@ window.addEventListener('error', event => fail(event.error || event.message));
 window.addEventListener('unhandledrejection', event => fail(event.reason));
 var Module = {
   canvas: document.getElementById('canvas'),
-  arguments: ['--replay', '/episode.replay'],
+  arguments: replayUri ? ['--replay', '/episode.replay'] : [],
   print: text => console.info(text),
   printErr: text => { console.error(text); if (/Error|Exception|mismatch|fatal/i.test(text)) fail(text); },
   onAbort: fail,
-  onExit: code => { if (code) fail('The replay exited with code ' + code); },
+  onExit: code => { if (code) fail('The game exited with code ' + code); },
   polyworldFrame: (tick, mismatches) => {
     Module.replayTick = tick;
     if (mismatches) { fail('Replay simulation diverged at or before tick ' + tick); return; }
@@ -58,14 +61,12 @@ var Module = {
     }, 0);
   },
   preRun: [function() {
+    message('phase', {phase:'bundle_ready'});
+    if (!replayUri) return;
     addRunDependency('episode-replay');
     (async () => {
-      message('phase', {phase:'bundle_ready'});
-      const uri = new URLSearchParams(location.hash.slice(1)).get('replay') ||
-        new URLSearchParams(location.search).get('replay');
-      if (!uri) throw new Error('No replay was supplied. Open a completed episode replay.');
       message('phase', {phase:'replay_fetch_start'});
-      const response = await fetch(uri);
+      const response = await fetch(replayUri);
       if (!response.ok) throw new Error('Replay download failed (HTTP ' + response.status + ').');
       let bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.length > 64 * 1024 * 1024) throw new Error('Replay exceeds the 64 MiB limit.');

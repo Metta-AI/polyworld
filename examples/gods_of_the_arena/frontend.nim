@@ -1,7 +1,7 @@
 import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
-  polyworld/[chrome, connections, menus, roomclients, rooms, policies, viewers],
+  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, presets, replays
 
 const AppName = "Polyworld GotA"
@@ -42,6 +42,9 @@ proc runFrontend*() =
     chosenPolicy: LocalPolicy
     launchLocal, launchNetwork: bool
     homeFocus: int
+    playerName: string
+    editingPlayer: bool
+    connectRequested: bool
   try:
     preferences = readPreferences(AppName)
   except MenusError, IOError, OSError:
@@ -65,21 +68,30 @@ proc runFrontend*() =
     preferences.server = inviteServer
   if invite.len > 0:
     page = MultiplayerMenu
+    connectRequested = true
   if serverAddress.len > 0:
     preferences.server = serverAddress
     page = MultiplayerMenu
-    try:
-      connection = connect(
-        preferences.server,
-        preferences.name,
-        gotaIdentity()
-      )
-    except CatchableError as problem:
-      error = problem.msg
+    connectRequested = true
 
   while not window.closeRequested:
+    when not defined(emscripten):
+      window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
+    if connectRequested and preferences.name.len <= 64 and
+      validName(preferences.name):
+        connectRequested = false
+        try:
+          preferences.server = serverUrl(preferences.server)
+          preferences.savePreferences(AppName)
+          connection = connect(
+            preferences.server,
+            preferences.name,
+            gotaIdentity()
+          )
+        except CatchableError as problem:
+          error = problem.msg
     if connection != nil:
       connection.pump()
       let client = connection.client
@@ -155,6 +167,58 @@ proc runFrontend*() =
     window.onButtonPress = nil
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      let needsPlayerName = preferences.name.len > 64 or
+        not validName(preferences.name)
+      if editingPlayer or (page == MultiplayerMenu and needsPlayerName):
+          sk.textStyle = "Default"
+          discard sk.beginSettings(window)
+          sk.drawHomeBackground(window)
+          let
+            view = window.size.vec2 / sk.uiScale
+            at = (view - vec2(620, 260)) * 0.5'f
+            name = playerName.strip()
+            valid = name.len <= 64 and validName(name)
+          sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
+          sk.lobbyPanel(at, vec2(620, 260))
+          sk.drawLabel(if needsPlayerName: "Please enter your player name"
+            else: "Change your player name",
+            at + vec2(24, 20), vec2(572, 40),
+            sk.theme.defaultTextColor, "H1")
+          sk.menuInput(window, "newPlayerName", playerName,
+            at + vec2(24, 80), 572, 44)
+          if playerName.len > 0 and not valid:
+            sk.drawLabel("Enter a shorter name without line breaks.",
+              at + vec2(24, 128), vec2(572, 28),
+              sk.theme.disabledTextColor)
+          if sk.lobbyButton("Cancel", at + vec2(24, 188), 180) or
+            window.buttonPressed[KeyEscape]:
+              if needsPlayerName and page == MultiplayerMenu:
+                page = HomeMenu
+                connectRequested = false
+              editingPlayer = false
+              playerName = ""
+              error = ""
+          elif sk.lobbyButton(if needsPlayerName: "Continue" else: "Save",
+            at + vec2(396, 188), 200,
+            enabled = valid) or (valid and window.buttonPressed[KeyEnter]):
+              var updated = preferences
+              updated.name = name
+              try:
+                updated.savePreferences(AppName)
+                preferences = updated
+                editingPlayer = false
+                if connection != nil and connection.client.name != name:
+                  connection.client.name = name
+                  connection.reconnectAfter(0)
+                error = ""
+              except MenusError, IOError, OSError:
+                error = getCurrentExceptionMsg()
+          if error.len > 0:
+            sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
+          sk.endUi()
+          window.presentFrame(framePaceHz)
+          reportReplayFrame(0, 0)
+          return
       if page == HomeMenu:
         case sk.drawHome(window, homeFocus)
         of StayHome: discard
@@ -199,15 +263,19 @@ proc runFrontend*() =
             totalWidth = if layout.compact: 936.0'f else: 1450.0'f
           sk.lobbyPanel(p, vec2(totalWidth, 74))
           sk.lobbyLabel("Server", p + vec2(20, 16), 90, "LobbyBold")
+          let previousServer = preferences.server
           sk.lobbyInput(window, "server", preferences.server,
             p + vec2(112, 15), totalWidth - 470)
+          if preferences.server != previousServer:
+            preferences.savePreferences(AppName)
           if sk.lobbyButton(if connected: "Reconnect" else: "Connect",
             p + vec2(totalWidth - 340, 15), 160):
+              preferences.server = serverUrl(preferences.server)
+              preferences.savePreferences(AppName)
               connection.close()
               connection = connect(
                 preferences.server, preferences.name, gotaIdentity()
               )
-              preferences.savePreferences(AppName)
               prepared = nil
               preparedRevision = 0
               viewedRevision = 0
@@ -267,8 +335,14 @@ proc runFrontend*() =
                 lobbyUi.scroll = 0
           if matches.len == 0:
             sk.lobbyLabel(if connected: "No rooms found. Create one to begin."
-              else: "Connect to a server to browse rooms.",
+              elif error.len > 0: error
+              else: connection.status(),
               list + vec2(12, 200), layout.leftWidth - 68, tint = LobbyMuted)
+            if not connected:
+              sk.lobbyLabel("Plain server: ws://host:port/ws",
+                list + vec2(12, 240), layout.leftWidth - 68, tint = LobbyMuted)
+              sk.lobbyLabel("wss:// requires a server with TLS enabled.",
+                list + vec2(12, 278), layout.leftWidth - 68, tint = LobbyMuted)
           sk.lobbyLabel($matches.len & " rooms", list + vec2(0, 554), 300)
           if sk.lobbyButton("Previous", list + vec2(430, 550), 150,
             enabled = lobbyUi.roomPage > 0):
@@ -350,7 +424,9 @@ proc runFrontend*() =
               mine = not online or seat.owner == client.participant
               human = if online: seat.name == "Human" else: i == humanSeat
             var
-              name = if empty: "Add player" elif human: "You"
+              name = if empty: "Add player"
+                elif human:
+                  if preferences.name.len > 0: preferences.name else: "Player"
                 elif online: seat.name else: localPolicies[i].name
               controller = if empty: "Empty slot" elif human: "HUMAN" else: "BOT"
             if online and not empty:
@@ -573,6 +649,12 @@ proc runFrontend*() =
             page = HomeMenu
       except CatchableError as problem:
         error = problem.msg
+      if page in {MultiplayerMenu, LobbyMenu, SettingsMenu} and
+        lobbyUi.selectedSeat == -1 and
+        sk.playerButton(window, preferences.name,
+          page != LobbyMenu or connection.client.snapshot.phase == rooms.Lobby):
+          playerName = preferences.name
+          editingPlayer = true
       if error.len > 0:
         sk.lobbyLabel(error, vec2(24, 0), 1400, tint = rgbx(245, 151, 139, 255))
       sk.textStyle = "Default"

@@ -115,7 +115,8 @@ exchange()
 doAssert first.snapshot.seats[3].owner == 0
 for seat in 0 ..< 10:
   clients[seat mod 3].send(RoomMessage(
-    kind: ClaimSeat, seat: uint32(seat), name: "Seat " & $seat
+    kind: ClaimSeat, seat: uint32(seat),
+    name: if seat < 2: "Human" else: "Seat " & $seat
   ))
 exchange()
 for client in clients:
@@ -124,6 +125,9 @@ for client in clients:
     if seat >= 2 and client.snapshot.seats[seat].owner == client.participant:
       sources[seat] = base
   let session = prepareNetworkMatch(client, sources)
+  doAssert session.game.config.players[0].name == first.name
+  doAssert session.game.config.players[1].name == second.name
+  doAssert session.game.config.players[2].name == "Seat 2"
   sessions.add session
   for seat, vm in session.game.heroVms:
     doAssert (vm != nil) ==
@@ -180,6 +184,10 @@ for iteration in 0 ..< 600:
       ))
       if seat == 0:
         doAssert session.game.sendChat(0, 1, "Across clients") == 1
+    if iteration == 101:
+      doAssert session.game.submitAction(ReplayAction(
+        heroId: hero.id, kind: ActionStop
+      ))
     session.flushSubmissions()
   exchange()
   relay.advance(now)
@@ -212,6 +220,8 @@ replay.replayPlayer = initReplayPlayer(data)
 for tick in 0 ..< data.hashes.len:
   replay.tickWorld(nil)
 doAssert replay.hashCheck.mismatches == 0
+doAssert replay.config.players[0].name == first.name
+doAssert replay.config.players[1].name == second.name
 for session in sessions:
   doAssert session.game.recorder.data.actions == data.actions
   doAssert session.game.recorder.data.hashes == data.hashes

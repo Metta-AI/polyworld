@@ -2,7 +2,7 @@ bassy 0.1.0 https://github.com/treeform/bassy a9effcaab13abc9dfe42d7658cf87ee478
 curly 1.1.1 https://github.com/guzba/curly 29558e2d2b76244a2c65fea08e9f4efff16c1997
 libcurl 1.0.0 https://github.com/Araq/libcurl eecbfc31e17ae2f09f0b6d2aaefcfb970c7d2be4
 fixxy 0.1.0 https://github.com/treeform/fixxy 05e5446dffb70093056cebb0c57721a60deaf52a
-silky 0.2.0 https://github.com/treeform/silky 3c5dd562924c044bfd4417331f82132fa0a0afdb
+silky 0.2.0 https://github.com/treeform/silky 6d19780e53f4acdc19fdf497a01b82c3da083147
 pixie 6.1.0 https://github.com/treeform/pixie 30bb510877f02cbf9643e4f904e33d1c90f7910f
 vmath 3.0.0 https://github.com/treeform/vmath bc260143102153b76328783e1c76c96e52c52a4b
 chroma 1.0.0 https://github.com/treeform/chroma 08b0d65590221bb964544fd9badf29a146b9091a
@@ -14,7 +14,7 @@ spacy 0.0.4 https://github.com/treeform/spacy 5d77384202a7b4377423310b94e75ef987
 pathy 0.0.2 https://github.com/treeform/pathy d8cbb2af4876842069ab54530fad114692f873f4
 crunchy 0.1.11 https://github.com/guzba/crunchy 98eb6526982bb8aae8eec6e8781f4539fa19e049
 shady 0.1.5 https://github.com/treeform/shady c899f7cd17dbe7021d6e3aa2908e6de6549c47f1
-windy 0.5.0 https://github.com/treeform/windy bbe05ecf214130f0f575bcd6d9b70f5dc94ecd94
+windy 0.5.0 https://github.com/treeform/windy 891e08ff090719620c4e6a3e4940461e6b26150d
 opengl 1.2.9 https://github.com/nim-lang/opengl 8e2e098f82dc5eefd874488c37b5830233cd18f4
 urlly 1.1.1 https://github.com/treeform/urlly 99784779f05649df25fd9c33003d8ef6de027345
 ws 0.6.0 https://github.com/treeform/ws c9c0c7b51e2e83cc9305a895a0b144a297b4bea8

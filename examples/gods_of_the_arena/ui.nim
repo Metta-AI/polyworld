@@ -15,7 +15,8 @@ const
   IconLarge = 128.0'f32
   BadgeSmall = 16.0'f
   BadgeLarge = 64.0'f32
-  AbilityKeys = ["Q", "W", "E", "R", "F", "G"]
+  AbilityInputs = [AbilityOneInput, AbilityTwoInput, AbilityThreeInput,
+    AbilityFourInput, ItemOneInput, ItemTwoInput]
   ScoreIcons = ["tower", "kills", "deaths"]
   CooldownFill = rgbx(8, 10, 16, 180)
   IconTint = rgbx(245, 230, 190, 255)
@@ -784,8 +785,7 @@ proc drawHeroPortrait(
       selectedIds,
       followSelection,
       hero.id,
-      window.buttonDown[KeyLeftShift] or
-        window.buttonDown[KeyRightShift]
+      window.actionDown(ShiftInput)
     )
     if options.playerSlot > 0 and
         not run.replayMode and
@@ -1185,8 +1185,7 @@ proc drawUi*(
             if window.hudClicked(sk, well):
               armedItem = -1
               armedAbility = -1
-              if clickedUpgrade or window.buttonDown[KeyLeftShift] or
-                window.buttonDown[KeyRightShift]:
+              if clickedUpgrade or window.actionDown(ShiftInput):
                   queueLevelAbility(selection.id, slot.ord.int32)
                   armedAbility = -1
               else:
@@ -1230,7 +1229,7 @@ proc drawUi*(
   if playerHero:
     sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
     sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
-    sk.drawLabel("SHOP  B", inventory.shop.origin + vec2(28, 0),
+    sk.drawLabel("SHOP  " & ShopInput.actionLabel, inventory.shop.origin + vec2(28, 0),
       inventory.shop.size - vec2(28, 0), rgbx(247, 221, 143, 255), "Small")
     if window.hudClicked(sk, inventory.shop):
       shopOpen = true
@@ -1279,7 +1278,7 @@ proc drawUi*(
       let count = selection.abilityPoints
       writeInt(hudScratch, count)
       hudScratch.add(if count == 1: " ability point" else: " ability points")
-      hudScratch.add " | Shift + Q/W/E/R to learn"
+      hudScratch.add " | " & ShiftInput.actionLabel & " + ability to learn"
       sk.drawLabel(
         hudScratch,
         hpBar.origin - vec2(0, 26),
@@ -1458,7 +1457,7 @@ proc drawUi*(
         if selection.inventory[slot] != NoItem and
           selection.inventory[slot].itemSpec.kind == Consumable:
             sk.drawItemCount(well, selection.itemCounts[slot])
-      sk.drawAbilityKey(well, AbilityKeys[i])
+      sk.drawAbilityKey(well, AbilityInputs[i].actionLabel)
 
   if inventoryHero.id != 0:
     for slot in 0 ..< InventorySlots:
@@ -1562,7 +1561,7 @@ proc drawUi*(
         let previousStyle = sk.textStyle
         sk.textStyle = "Small"
         sk.tooltipAnchor = rect(basic.origin, basic.size)
-        tooltip("Attack move")
+        tooltip("Attack move (" & AttackMoveInput.actionLabel & ")")
         sk.textStyle = previousStyle
       if selection.kind == SelectedHero and selection.id != 0:
         for slot in HeroAbilitySlot:
@@ -1573,7 +1572,7 @@ proc drawUi*(
               selection.abilityLevels[slot],
               well,
               chrome.layout.size,
-              AbilityKeys[slot.ord]
+              AbilityInputs[slot.ord].actionLabel
             )
         for slot in 0 .. 1:
           let
@@ -1581,7 +1580,7 @@ proc drawUi*(
             item = selection.inventory[slot]
           if item != NoItem and sk.hovered(well):
             sk.drawItemTooltip(item, well, chrome.layout.size,
-              AbilityKeys[slot + 4])
+              AbilityInputs[slot + 4].actionLabel)
       if inventoryHero.id != 0:
         for slot in 0 ..< InventorySlots:
           let
@@ -1589,7 +1588,7 @@ proc drawUi*(
             item = inventoryHero.inventory[slot]
           if item != NoItem and sk.hovered(well):
             sk.drawItemTooltip(item, well, chrome.layout.size,
-              if slot < 2: AbilityKeys[slot + 4] else: "")
+              if slot < 2: AbilityInputs[slot + 4].actionLabel else: "")
 
 proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
   ## Presents readable statistics above the HUD at every window width.
