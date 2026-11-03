@@ -1,0 +1,516 @@
+{
+  "date": "2026-11-03",
+  "version": "2026.11.3.2",
+  "coworld_id": "cow_181358e7-0980-4425-b501-f29a942ca827",
+  "canonical": true,
+  "code_commit": "cdd89eb8a2aba2fff53a4f79e9d0d7b58fdbd516",
+  "art_commit": "3ff6833a2e936ebe78f59e8b7569bffb9ae6e477",
+  "gameplay_version": 76,
+  "changes": [
+    "Auto/custom UI scaling with keyboard shortcuts and snapped scale values.",
+    "Multiplayer, battle setup and settings panels use available screen height.",
+    "Room browsing uses a Silky scrollbar instead of pagination.",
+    "Multiplayer reconnects to the remembered nonempty server address.",
+    "GotA confines the visible mouse in focused native macOS fullscreen.",
+    "Recorded lobby asset provenance and updated the pinned art revision."
+  ],
+  "scope": "Current simulator and web player. League settings unchanged.",
+  "release_correction": "Initial 2026.11.3.1 reused a version-75 host with a version-76 viewer. Browser verification caught the mismatch. 2026.11.3.2 rebuilds the simulator from the same code as the viewer; no historical replay support was added.",
+  "certification": {
+    "coworld_id": "cow_181358e7-0980-4425-b501-f29a942ca827",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-a98aacd5bfdb",
+    "certification_job_id": "4c0f306d-8d36-49f6-964f-c21aea29b64c",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-11-03T20:07:37.965350Z"
+  },
+  "hosted_smoke_matches_passed": 5,
+  "validation": [
+    "Nim check passed.",
+    "Full tests passed, including multiplayer and replay hashes.",
+    "Native and WASM builds passed.",
+    "GitHub CI passed on Linux, macOS and Windows.",
+    "Local Linux container certification passed all 10 steps.",
+    "Container-generated full match replayed in the native client: 4637 actions, matching hashes.",
+    "Deployed files matched the tested local bundle.",
+    "Deployed main menu and current-version hosted replay rendered in the browser."
+  ],
+  "ci_url": "https://github.com/Metta-AI/polyworld/actions/runs/41707339887",
+  "player_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_181358e7-0980-4425-b501-f29a942ca827/sha256%3Abe1c624cae868a282f761521546be6c6b9d1cacc55aac782a1a3df792e61c173/index.html?v=2",
+  "cdn_sha256": {
+    "index.html": "5de3a9b35b82386d4573120cd1bcec7106c23efbdc70d09321fbb997fa6b082d",
+    "gota.js": "bcab0bf9018c8cf69ba61e757bb995f4cc3d8819357f1bca4ec97cf498f4c9e1",
+    "gota.wasm": "c9042ceb2198aa7fc80f51eeb460d5b7f4f34f603744b2030788803985c86ed1",
+    "gota.data": "92eef2e13ee64e75271afcb6819732a80f22689dfa39524b7e85df5648c34aaa",
+    "loading-logo.png": "77f67493b682daea39a06ca3542e8671a28e14625c5fd9dac7130046be9cb80a"
+  },
+  "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "round_id": "round_83ec1a8f-f53b-4d4d-9152-d59f83023663",
+  "round_number": 2524,
+  "round_status": "completed",
+  "round_completed_at": "2026-11-03T20:12:37.272224Z",
+  "episodes_completed": 24,
+  "episode_errors": [],
+  "league_settings_unchanged": true,
+  "student_ladder_unchanged": true,
+  "initial_round": {
+    "number": 2523,
+    "id": "round_4c2f3b94-c083-443f-b230-6440f0687b10",
+    "episodes_completed": 24,
+    "note": "Completed on initial viewer-only release before correcting the host version."
+  },
+  "episodes": [
+    {
+      "id": "ereq_c1227f6e-9750-4962-9dd6-04a23495516a",
+      "episode_id": "41714841-c879-457d-92ea-ffbc2dc7ad9f",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/9775c37a-7e36-42cc-8eb0-390ddf9cf0fa.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_69583015-e519-41fb-af22-8fd3eda6bcd0",
+      "episode_id": "9c363fda-7c6b-4144-8c1c-7b858331e790",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/3c71fd02-76b5-4989-ab1e-9fdab44c2970.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "ereq_042e26b5-1957-4380-bfb5-126120e98d7d",
+      "episode_id": "e8ff1643-8c37-4571-807f-9527cce10b90",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/b912b46c-4127-49bb-bbc0-74763bd20a50.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_4733e2f1-f6fe-41ac-8e8d-664b2aef7ff7",
+      "episode_id": "06fa85b8-694a-4405-a782-8e8bfb8188e2",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/c53bf937-4c78-4901-849f-b9f9d2df4441.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_1f419098-9a26-446f-95ec-a0e52b2e8600",
+      "episode_id": "3f1da95e-aea1-4bbf-a70c-acdce1155e94",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/52c69eda-49d9-455a-93c1-2b2101e063ac.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_e4566389-a169-4157-a7aa-89b704d63a6e",
+      "episode_id": "8fd3ef29-f43a-4d60-a43a-3a060662bb74",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/02b1a323-1d60-41b4-801c-397312d952c7.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_122e790f-7ee8-4f2c-8096-7d6d48d433d9",
+      "episode_id": "c863c9fd-5867-402e-8583-e2050f1099e3",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/4fddc03f-e26f-4d3c-9df4-aa00d08e8fb2.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_7ffda2dd-0383-4bec-9b56-d72221e2cdf8",
+      "episode_id": "c46706bf-d1ae-4e2e-a044-066a289653ca",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/55f55dd7-04a9-4a3e-98da-89d460dd63e7.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_ff456e57-a765-49b3-b544-d435c27d52f5",
+      "episode_id": "fe81c2c6-057c-470b-8c0a-38e76c10b13a",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/6da21602-d7af-4a20-9627-c879bd0e7bb0.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "ereq_ef110288-bf09-4c58-b1f9-e78a708f5993",
+      "episode_id": "c6f7f8d7-8936-40b4-9585-bfaed42a1006",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/db57cc43-c020-4300-afee-3faf4774f8f3.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_f97cbf99-a860-4b13-869f-0deecc667846",
+      "episode_id": "9371ecd0-1f0b-4b1f-9e25-be3ed3bf152a",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/595d0ffc-012c-467c-a6d2-0f76d2ba7f7b.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_72fd5b9e-5b3f-4073-9a84-7057843dac7f",
+      "episode_id": "1a83fb3d-07b0-4f3a-8681-f70eb1e3c7ee",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/9bb618b4-05ae-4833-8934-c4ca4c98d970.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "ereq_6b0d624e-9cc4-41b4-8129-fd4508d87275",
+      "episode_id": "a9987965-8237-4958-b93e-0e25e5c5b7c8",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/18f35071-103f-4a16-ba20-561a8860662b.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_8b76743b-198c-4545-823b-6228120b65e0",
+      "episode_id": "5f130278-47ad-4907-a2be-e6a3e5c51481",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/ed490427-4d74-4149-8979-5ee3db595c4d.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_505b116f-7b97-40a4-80b5-852e7c4a06f2",
+      "episode_id": "f56ef748-5a63-47a7-98c2-291b049f5423",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/1fb4be06-1cf3-4f69-b1da-89651badf3e1.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_3b1fb647-1e40-4a7e-8fc4-0cf94be8f710",
+      "episode_id": "1af265a3-57a3-4e18-94ef-15546d35e34b",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/1124c507-f2d6-4758-9f1f-762d41b114fc.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_9734aba9-a7b3-453f-a515-47d6117d5976",
+      "episode_id": "6260e501-d112-4f2f-a4b2-6e7b7b52b2f0",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/8080705c-865d-48ee-b66c-5904ae57e223.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_463885c9-f4da-4762-be3e-e5bcbf41d628",
+      "episode_id": "c85e2403-9ebc-4270-aa74-804362a310ee",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/1513f8cf-3d2f-403b-ac7f-12b4845c76fc.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_44f119fe-ee62-49b0-b360-711940a532fd",
+      "episode_id": "82864f92-227c-48fd-be98-5106e39f2b1b",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/a2358048-a982-4e05-b7de-bcce53f5be14.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_9cc5147e-d2e5-4165-8769-075955fe6511",
+      "episode_id": "05e221d2-7f09-4308-aa80-d1ac56001b29",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/e95a3137-4891-4a62-ab24-174611a7d3ac.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_d40c36d4-493d-493c-800f-68f2d1cffc8b",
+      "episode_id": "518413db-0f47-44a2-9daf-14c69b0b240f",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/d5d39844-4925-4b13-a955-6e402d405863.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_7132b461-043c-4753-b0d8-de84a5a1def1",
+      "episode_id": "711e8290-7903-4ab1-9245-ba67cd3c9742",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/2183df8b-ecc8-4d92-8bd3-76c942e2a30f.replay",
+      "scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_6c50ee49-62df-4e3f-b4eb-3863d5da9a01",
+      "episode_id": "5220bfdd-5f5b-4451-b916-d046817fe703",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/dc6a9819-dc94-4a41-9a26-7f85f220bf77.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "ereq_ed31ae90-832e-465d-a7c3-eed4cc9c6f9b",
+      "episode_id": "0a5be897-a276-4b88-88e3-31f8f9f074ba",
+      "replay_url": "https://softmax-public.s3.amazonaws.com/replays/23e33357-8494-46ef-9f3b-4726a0804c8b.replay",
+      "scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}
