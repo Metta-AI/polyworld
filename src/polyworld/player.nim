@@ -201,7 +201,7 @@ proc shouldTick*(
   ## Returns whether one more simulation tick belongs in this frame.
   ## Paused seeks run until they land so single-tick steps stay exact.
   if player.reachedEnd:
-    if player.repeating and player.timelineEnd > 0:
+    if player.playing and player.repeating and player.timelineEnd > 0:
       player.seekTo(0, automatic = true)
       return false
     player.playing = false

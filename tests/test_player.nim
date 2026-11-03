@@ -70,6 +70,44 @@ block:
   doAssert p.restoreTick == 0
   doAssert p.playing
 
+echo "Testing paused replay endpoints stay paused with or without repeat"
+for repeating in [false, true]:
+  var p = initPlayer(
+    live = false,
+    durationTicks = 24,
+    playing = false,
+    repeating = repeating
+  )
+  p.sync(24, 24, true)
+  p.startFrame(1.0, 24)
+  doAssert not p.shouldTick(0)
+  doAssert not p.playing
+  doAssert p.takeRestore() == -1
+  doAssert p.targetTick == -1
+  p.sync(23, 24, false)
+  p.stepForward()
+  doAssert p.shouldTick(0)
+  p.sync(24, 24, true)
+  doAssert not p.shouldTick(0)
+  doAssert not p.playing
+  doAssert p.takeRestore() == -1
+  doAssert p.targetTick == -1
+  p.stepForward()
+  doAssert not p.shouldTick(0)
+  doAssert not p.playing
+  doAssert p.takeRestore() == -1
+  p.stepBack()
+  doAssert p.takeRestore() == 23
+  p.sync(0, 24, false)
+  doAssert p.shouldTick(0)
+  p.sync(23, 24, false)
+  doAssert not p.shouldTick(0)
+  doAssert not p.playing
+  p.sync(24, 24, true)
+  p.play()
+  doAssert p.playing
+  doAssert p.takeRestore() == 0
+
 echo "Testing realtime ticks keep an accumulator across frames"
 block:
   var p = initPlayer(live = true, durationTicks = 100)
