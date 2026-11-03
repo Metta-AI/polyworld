@@ -27,6 +27,8 @@ type
     musicVolume*: int = 100
     fxVolume*: int = 100
     uiVolume*: int = 100
+    uiScaleMode*: UiScaleMode
+    uiScalePercent*: int = 100
   LocalPolicy* = object
     name*, bytes*: string
 
@@ -128,6 +130,7 @@ proc readPreferences*(app: string): Preferences =
   result.musicVolume = clamp(result.musicVolume, 0, 100)
   result.fxVolume = clamp(result.fxVolume, 0, 100)
   result.uiVolume = clamp(result.uiVolume, 0, 100)
+  result.uiScalePercent = clamp(result.uiScalePercent, 25, 400)
   if result.name.len > 64:
     result.name.setLen(64)
 
@@ -135,15 +138,60 @@ proc savePreferences*(preferences: Preferences, app: string) =
   ## Saves ordinary preferences without bot data or reconnect secrets.
   setConfig(app, "settings.json", preferences.toJson())
 
-proc applyPreferences*(preferences: Preferences, window: Window) =
+proc applyPreferences*(
+  preferences: Preferences,
+  window: Window,
+  configureDisplay = true
+) =
   ## Applies shared presentation settings to the existing window.
   inputBindings = preferences.bindings
-  when defined(emscripten):
-    window.setFullscreen(preferences.fullscreen)
-  else:
-    window.configureWindow(preferences.windowMode, preferences.resolution)
+  chrome.uiScaleMode = preferences.uiScaleMode
+  chrome.uiScalePercent = preferences.uiScalePercent
+  if configureDisplay:
+    when defined(emscripten):
+      window.setFullscreen(preferences.fullscreen)
+    else:
+      window.configureWindow(preferences.windowMode, preferences.resolution)
   framePaceHz = preferences.fps
   interpolateVisuals = preferences.interpolation
+
+proc customScale(preferences: var Preferences, percent: int) =
+  ## Selects a fixed scale without changing other window settings.
+  preferences.uiScaleMode = CustomUiScale
+  preferences.uiScalePercent = clamp(percent, 25, 400)
+  chrome.uiScaleMode = preferences.uiScaleMode
+  chrome.uiScalePercent = preferences.uiScalePercent
+
+proc scaleModifier*(window: Window): bool =
+  ## Recognizes the browser-style shortcut modifier on each platform.
+  window.buttonDown[KeyLeftControl] or window.buttonDown[KeyRightControl] or
+    window.buttonDown[KeyLeftSuper] or window.buttonDown[KeyRightSuper]
+
+proc scaleKey*(
+  window: Window,
+  button: Button,
+  preferences: var Preferences,
+  currentScale: float32,
+  app: string
+): bool =
+  ## Handles browser-style scale shortcuts and saves the explicit choice.
+  if bindingCapture or not window.scaleModifier or
+    button notin {KeyEqual, KeyMinus, Key0}:
+      return false
+  let percent =
+    if preferences.uiScaleMode == AutoUiScale:
+      int(currentScale / uiScaleReference * 100 + 0.5'f)
+    else:
+      preferences.uiScalePercent
+  case button
+  of KeyEqual:
+    preferences.customScale(percent + 10)
+  of KeyMinus:
+    preferences.customScale(percent - 10)
+  else:
+    preferences.customScale(100)
+  preferences.savePreferences(app)
+  true
 
 proc selectPolicy*(): LocalPolicy =
   ## Reads a local policy into process memory without uploading it anywhere.
@@ -232,8 +280,8 @@ proc menuInput*(
 
 proc beginMenu*(sk: Silky, window: Window, title, subtitle: string): Vec2 =
   ## Starts a shared menu frame scaled to fit smaller windows.
-  sk.uiScale = max(0.7'f, min(window.size.x.float32 / 1150,
-    window.size.y.float32 / 880))
+  sk.uiScale = selectedUiScale(max(0.7'f, min(window.size.x.float32 / 1150,
+    window.size.y.float32 / 880)), 1080.0'f / 880)
   sk.beginUi(window, window.size)
   sk.mousePos = window.mousePos.vec2 / sk.uiScale
   sk.clearScreen(rgbx(20, 29, 27, 255))
@@ -246,22 +294,24 @@ proc beginMenu*(sk: Silky, window: Window, title, subtitle: string): Vec2 =
 proc beginSettings*(
     sk: Silky, window: Window, headerHeight = 0.0'f
 ): Vec2 =
-  ## Centers the shared settings panel at a readable scale.
-  sk.uiScale = max(0.1'f, min(
+  ## Places the shared settings page below its heading at a readable scale.
+  sk.uiScale = selectedUiScale(max(0.1'f, min(
     window.size.x.float32 / 800,
     window.size.y.float32 / (540 + headerHeight)
-  ))
+  )), 1080.0'f / (540 + headerHeight))
   sk.beginUi(window, window.size)
   sk.clearScreen(rgbx(0, 0, 0, 255))
-  result = (window.size.vec2 / sk.uiScale - vec2(720, 440)) * 0.5'f
-  result.y += headerHeight / 2
+  result = vec2(
+    (window.size.x.float32 / sk.uiScale - 720) / 2,
+    50 + headerHeight
+  )
 
 proc beginOverlay*(sk: Silky, window: Window, size: Vec2): Vec2 =
   ## Centers a modal over the rendered game without clearing its framebuffer.
-  sk.uiScale = max(0.1'f, min(
+  sk.uiScale = selectedUiScale(max(0.1'f, min(
     window.size.x.float32 / 1000,
     window.size.y.float32 / 800
-  ))
+  )), 1080.0'f / 800)
   sk.beginUi(window, window.size)
   sk.textStyle = "Default"
   let view = window.size.vec2 / sk.uiScale
@@ -272,7 +322,8 @@ proc bindingsPanel(
     sk: Silky,
     window: Window,
     preferences: var Preferences,
-    origin: Vec2
+    origin: Vec2,
+    height: float32
 ) =
   ## Edits two bindings per action using the existing Silky buttons.
   let capturing = bindingCapture
@@ -294,7 +345,7 @@ proc bindingsPanel(
     else: "Click a binding to change it. Conflicting bindings are cleared.",
     origin + vec2(0, 49), vec2(720, 34), sk.theme.defaultTextColor
   )
-  frame "Control bindings", origin + vec2(0, 90), vec2(720, 304):
+  frame "Control bindings", origin + vec2(0, 90), vec2(720, height - 136):
     sk.startCurrentChildren()
     let listOrigin = sk.at
     for action in InputAction:
@@ -311,24 +362,30 @@ proc bindingsPanel(
           captureAction = action
           captureSlot = slot
           bindingCapture = true
-  sk.at = origin + vec2(500, 408)
+  sk.at = origin + vec2(500, height - 32)
   button "Reset bindings", not capturing:
     preferences.bindings = DefaultBindings
 
-proc volumeSlider(
+proc percentageSlider(
   sk: Silky,
   window: Window,
   caption: string,
   volume: var int,
-  origin: Vec2
+  origin: Vec2,
+  minimum = 0,
+  maximum = 100,
+  scaleStops = false
 ) =
-  ## Edits a saved volume percentage with the standard Silky slider.
+  ## Edits a saved percentage with the standard Silky slider.
   sk.drawLabel(caption, origin, vec2(210, 36), sk.theme.defaultTextColor)
   sk.pushLayout(
     origin + vec2(210, 0),
     vec2(420 + sk.theme.padding.float32 * 3, 36)
   )
-  scrubber("volume" & caption, volume, 0, 100)
+  let previous = volume
+  scrubber("percentage" & caption, volume, minimum, maximum)
+  if scaleStops and volume != previous:
+    volume = snapUiScalePercent(volume)
   sk.popLayout()
   sk.drawLabel(
     $volume & "%",
@@ -339,7 +396,7 @@ proc volumeSlider(
 
 proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
-    app: string, origin: Vec2, title = "Settings"
+    app: string, origin: Vec2, title = "Settings", height = 440.0'f
 ): bool =
   ## Edits preferences with the existing Silky theme and widgets.
   when defined(emscripten):
@@ -351,7 +408,7 @@ proc settingsPanel*(
     "window.9patch",
     sk.theme.windowPatch,
     origin - vec2(24),
-    vec2(768, 488)
+    vec2(768, height + 48)
   )
   if title.len > 0:
     sk.drawLabel(title, origin, vec2(720, 40),
@@ -386,16 +443,16 @@ proc settingsPanel*(
   of SoundSettings:
     sk.at = origin + vec2(0, 64)
     checkBox "Mute all sound", preferences.soundMuted
-    sk.volumeSlider(
+    sk.percentageSlider(
       window, "Main", preferences.mainVolume, origin + vec2(0, 120)
     )
-    sk.volumeSlider(
+    sk.percentageSlider(
       window, "Music", preferences.musicVolume, origin + vec2(0, 176)
     )
-    sk.volumeSlider(
+    sk.percentageSlider(
       window, "FX", preferences.fxVolume, origin + vec2(0, 232)
     )
-    sk.volumeSlider(
+    sk.percentageSlider(
       window, "UI", preferences.uiVolume, origin + vec2(0, 288)
     )
     sk.drawLabel(
@@ -405,7 +462,7 @@ proc settingsPanel*(
       sk.theme.disabledTextColor
     )
   of ControlsSettings:
-    sk.bindingsPanel(window, preferences, origin)
+    sk.bindingsPanel(window, preferences, origin, height)
     inputBindings = preferences.bindings
   of NetworkingSettings:
     sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),
@@ -459,9 +516,56 @@ proc settingsPanel*(
     dropDown preferences.edgeScrolling,
       [NoEdgeScroll, FullscreenEdgeScroll, AlwaysEdgeScroll]
     sk.popLayout()
-    if preferences != previous:
-      preferences.applyPreferences(window)
-  sk.at = origin + vec2(0, 408)
+    sk.drawLabel("UI scaling", origin + vec2(0, 292), vec2(210, 36),
+      sk.theme.defaultTextColor)
+    sk.pushLayout(
+      origin + vec2(210, 292),
+      vec2(180 + sk.theme.padding.float32 * 3, 36)
+    )
+    dropDown preferences.uiScaleMode, [AutoUiScale, CustomUiScale]
+    sk.popLayout()
+    let percent =
+      if previous.uiScaleMode == AutoUiScale:
+        int(sk.uiScale / uiScaleReference * 100 + 0.5'f)
+      else:
+        preferences.uiScalePercent
+    if preferences.uiScaleMode == CustomUiScale and
+      previous.uiScaleMode == AutoUiScale:
+        preferences.customScale(percent)
+    sk.at = origin + vec2(420, 292)
+    button "-", percent > 25:
+      preferences.customScale(percent - 10)
+    sk.at = origin + vec2(480, 292)
+    button $percent & "%":
+      preferences.customScale(100)
+    sk.at = origin + vec2(600, 292)
+    button "+", percent < 400:
+      preferences.customScale(percent + 10)
+    if preferences.uiScaleMode == CustomUiScale:
+      sk.percentageSlider(
+        window, "Scale", preferences.uiScalePercent,
+        origin + vec2(0, 344), 25, 400, true
+      )
+    else:
+      sk.drawLabel(
+        "Ctrl/Cmd + / - to resize, Ctrl/Cmd 0 for 100%.",
+        origin + vec2(0, 344),
+        vec2(720, 36),
+        sk.theme.disabledTextColor
+      )
+    let scaleChanged = chrome.uiScaleMode != preferences.uiScaleMode or
+      chrome.uiScalePercent != preferences.uiScalePercent
+    if (preferences != previous or scaleChanged) and
+      not (scaleChanged and window.buttonDown[MouseLeft]):
+        # Resize after releasing the slider so its track stays under the mouse.
+        preferences.applyPreferences(
+          window,
+          preferences.fullscreen != previous.fullscreen or
+            preferences.windowMode != previous.windowMode or
+            preferences.resolution != previous.resolution
+        )
+        preferences.savePreferences(app)
+  sk.at = origin + vec2(0, height - 32)
   button "Save and Back", not bindingCapture:
     preferences.savePreferences(app)
     result = true

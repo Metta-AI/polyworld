@@ -47,3 +47,16 @@ through Windy's single fullscreen API: an OS fullscreen Space on macOS and
 a monitor-sized borderless window on Windows. It does not expose a separate
 exclusive display mode. Browser builds only expose the fullscreen control,
 since the browser manages window size and display resolution.
+
+Display also provides Auto or Custom UI scaling. Auto follows the window
+size. Custom keeps a fixed scale from 25% to 400%, including after resizing
+or entering fullscreen. The minus and plus buttons adjust by 10 percentage
+points, and clicking the percentage resets to 100%. The slider appears in
+Custom mode and applies on release. It snaps to tenths (such as 1.1x and
+1.2x), with quarter and three-quarter stops such as 1.25x and 1.75x.
+
+Use Command on Mac or Ctrl elsewhere with `+` or `-` to resize the UI,
+or `0` to reset to 100%. These shortcuts work in menus and matches, switch
+to Custom, and save the choice locally. Choose Auto to resume automatic
+scaling. The shortcuts can also shrink the UI if a custom scale is too large
+for the window.

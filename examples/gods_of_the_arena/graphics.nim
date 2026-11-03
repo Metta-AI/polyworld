@@ -4,7 +4,7 @@ import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
-  aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors,
+  aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -254,6 +254,12 @@ proc initializeGraphics*() =
       options.vsync,
       msaa = msaa4x
     )
+  window.onFocusChange = proc() =
+    ## Releases confinement immediately when switching to another app.
+    window.updateCursorConfinement()
+  window.onCloseRequest = proc() =
+    ## Restores the pointer before closing the game window.
+    releaseCursorConfinement()
 proc runGraphics*(
     network: NetworkMatch = nil, connection: Connection = nil
 ): bool {.discardable.} =
@@ -281,6 +287,8 @@ proc runGraphics*(
   except CatchableError as error:
     saveError = error.msg
   inputBindings = preferences.bindings
+  chrome.uiScaleMode = preferences.uiScaleMode
+  chrome.uiScalePercent = preferences.uiScalePercent
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     amplitude = 2.8'f
@@ -1221,6 +1229,8 @@ proc runGraphics*(
   window.onButtonPress = proc(button: Button) =
     if bindingCapture:
       return
+    if window.scaleKey(button, preferences, sk.uiScale, "Polyworld GotA"):
+      return
     if MenuInput.matches(button):
       if quitToMenu:
         return
@@ -1692,8 +1702,10 @@ proc runGraphics*(
     let
       delta = window.mouseDelta.vec2
       zoom = window.scrollDelta.y +
-        (if window.actionDown(ZoomInInput): dt * 30 else: 0) -
-        (if window.actionDown(ZoomOutInput): dt * 30 else: 0)
+        (if not window.scaleModifier and window.actionDown(ZoomInInput):
+          dt * 30 else: 0) -
+        (if not window.scaleModifier and window.actionDown(ZoomOutInput):
+          dt * 30 else: 0)
     if playerMode():
       if not overUi and zoom != 0:
         cancelCameraEase(cameraEase)
@@ -2439,6 +2451,7 @@ proc runGraphics*(
     # Exclude loading and the requested simulation seek from frame captures.
     startTrace()
   window.onFrame = proc() =
+    window.updateCursorConfinement()
     when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
       if profileWarmup == ProfileWarmupFrames:
         startGameProfile()

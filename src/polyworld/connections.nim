@@ -38,6 +38,12 @@ proc serverUrl*(address: string): string =
     url.path = "/ws"
   $url
 
+proc connecting*(connection: Connection): bool =
+  ## Reports an in-progress socket connection or identity handshake.
+  connection != nil and not connection.closed and
+    (connection.opening or
+      (connection.client.connected and not connection.client.welcomed))
+
 proc status*(connection: Connection): string =
   ## Returns the current connection progress or transport failure.
   if connection == nil:

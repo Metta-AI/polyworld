@@ -69,10 +69,10 @@ proc drawHomeBackground*(sk: Silky, window: Window) =
 
 proc drawHome*(sk: Silky, window: Window, focus: var int): HomeAction =
   ## Draws the centered arena menu with pointer and keyboard navigation.
-  sk.uiScale = max(0.1'f, min(
+  sk.uiScale = selectedUiScale(max(0.1'f, min(
     window.size.x.float32 / 720,
     window.size.y.float32 / HomeSize.y
-  ))
+  )), 1080.0'f / HomeSize.y)
   sk.beginUi(window, window.size)
   sk.mousePos = window.mousePos.vec2 / sk.uiScale
   let

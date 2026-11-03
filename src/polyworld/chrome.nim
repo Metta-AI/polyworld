@@ -45,6 +45,9 @@ const
   FpsStdSize = vec2(148, 22)
 
 type
+  UiScaleMode* = enum
+    AutoUiScale = "Auto"
+    CustomUiScale = "Custom"
   SparkStyle* = enum
     Linear, Stepped
   SparkSample* = object
@@ -52,6 +55,9 @@ type
     value*: int64
 
 var
+  uiScaleMode*: UiScaleMode
+  uiScalePercent* = 100
+  uiScaleReference* = 1.0'f
   hudScratch*: string
   debugMenuOpen* = false
   debugNetwork = false
@@ -336,6 +342,24 @@ proc fitUiScale*(windowSize, contentSize: Vec2): float32 =
       need.x <= layoutSize.x and need.y <= layoutSize.y
   )
 
+proc snapUiScalePercent*(percent: int): int =
+  ## Snaps to tenths plus quarter and three-quarter scale stops.
+  let value = clamp(percent, 25, 400)
+  result = clamp(((value + 5) div 10) * 10, 25, 400)
+  for fraction in [25, 75]:
+    let candidate = (value div 100) * 100 + fraction
+    if candidate <= 400 and abs(candidate - value) < abs(result - value):
+      result = candidate
+
+proc selectedUiScale*(automatic: float32, reference = 1.0'f): float32 =
+  ## Keeps custom scaling fixed when the window or fullscreen mode changes.
+  uiScaleReference = reference
+  case uiScaleMode
+  of AutoUiScale:
+    automatic
+  of CustomUiScale:
+    reference * clamp(uiScalePercent, 25, 400).float32 / 100
+
 proc gameUiScale*(windowSize: Vec2): float32 =
   ## Uses the same crisp HUD breakpoints for every game window.
   result = fitUiScale(
@@ -349,6 +373,7 @@ proc gameUiScale*(windowSize: Vec2): float32 =
   if windowSize.x >= HudDoubleScaleSize.x and
     windowSize.y >= HudDoubleScaleSize.y:
       result = max(result, 2.0'f)
+  result = selectedUiScale(result)
 
 proc gameUiScale*(window: Window): float32 =
   ## Uses the shared HUD breakpoints for the current drawable size.

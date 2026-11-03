@@ -2,7 +2,7 @@ import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
-  content, controls, game, graphics, homes, lobbies, multiplayer, presets, replays
+  content, controls, game, graphics, homes, lobbies, multiplayer, pointers, presets, replays
 
 const AppName = "Polyworld GotA"
 
@@ -85,11 +85,20 @@ proc runFrontend*() =
         try:
           preferences.server = serverUrl(preferences.server)
           preferences.savePreferences(AppName)
+          connection.close()
           connection = connect(
             preferences.server,
             preferences.name,
             gotaIdentity()
           )
+          prepared = nil
+          preparedRevision = 0
+          viewedRevision = 0
+          viewedPayload = ""
+          configPending = false
+          multiplayerHuman = -1
+          networkPolicies = default(array[HeroClassCount, LocalPolicy])
+          error = ""
         except CatchableError as problem:
           error = problem.msg
     if connection != nil:
@@ -164,9 +173,14 @@ proc runFrontend*() =
       run = nil
       continue
 
-    window.onButtonPress = nil
+    window.onButtonPress = proc(button: Button) =
+      ## Adjusts UI scale with the same shortcuts as a browser.
+      discard window.scaleKey(
+        button, preferences, sk.uiScale, AppName
+      )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      window.updateCursorConfinement()
       let needsPlayerName = preferences.name.len > 64 or
         not validName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):
@@ -228,6 +242,9 @@ proc runFrontend*() =
           lobbyUi.selectedSeat = -1
         of PlayMultiplayer:
           page = MultiplayerMenu
+          connectRequested = preferences.server.strip().len > 0 and
+            not connection.connecting() and
+            (connection == nil or not connection.client.connected)
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
         of OpenSettings: page = SettingsMenu
@@ -270,25 +287,12 @@ proc runFrontend*() =
             preferences.savePreferences(AppName)
           if sk.lobbyButton(if connected: "Reconnect" else: "Connect",
             p + vec2(totalWidth - 340, 15), 160):
-              preferences.server = serverUrl(preferences.server)
-              preferences.savePreferences(AppName)
-              connection.close()
-              connection = connect(
-                preferences.server, preferences.name, gotaIdentity()
-              )
-              prepared = nil
-              preparedRevision = 0
-              viewedRevision = 0
-              viewedPayload = ""
-              configPending = false
-              multiplayerHuman = -1
-              networkPolicies = default(array[HeroClassCount, LocalPolicy])
-              error = ""
+              connectRequested = true
           sk.lobbyIcon("status", p + vec2(totalWidth - 156, 23), 24,
             if connected: rgbx(130, 215, 110, 255) else: LobbyMuted)
           sk.lobbyLabel(if connected: "Connected" else: "Offline",
             p + vec2(totalWidth - 122, 16), 116)
-          sk.lobbyPanel(layout.left, vec2(layout.leftWidth, 622))
+          sk.lobbyPanel(layout.left, vec2(layout.leftWidth, layout.panelHeight))
           let list = layout.left + vec2(22)
           sk.lobbyIcon("units", list + vec2(0, 8), 38)
           sk.lobbyLabel("PUBLIC ROOMS", list + vec2(50, 0), 500,
@@ -311,17 +315,23 @@ proc runFrontend*() =
             for i, room in connection.client.listings:
               if lobbyUi.search.toLowerAscii() in room.name.toLowerAscii():
                 matches.add i
-          lobbyUi.roomPage = min(lobbyUi.roomPage,
-            max(0, (matches.len - 1) div 5))
-          for row in 0 ..< 5:
-            let index = lobbyUi.roomPage * 5 + row
-            if index >= matches.len:
-              break
+          let
+            rowsAt = list + vec2(0, 184)
+            rowsSize = vec2(layout.leftWidth - 44, layout.panelHeight - 268)
+            contentSize = vec2(rowsSize.x, matches.len.float32 * 68)
+          if lobbyUi.roomScroll == nil:
+            lobbyUi.roomScroll = FrameState()
+          lobbyUi.roomListOverflow = contentSize.y > rowsSize.y
+          sk.frameScrollbars(window, lobbyUi.roomScroll,
+            rect(rowsAt, rowsSize), contentSize, vec2(1))
+          sk.pushClipRect(rect(rowsAt, rowsSize - vec2(14, 0)))
+          let rowsOrigin = rowsAt - lobbyUi.roomScroll.scrollPos
+          for row in 0 ..< matches.len:
             let
-              room = connection.client.listings[matches[index]]
-              point = list + vec2(0, 184 + row.float32 * 68)
+              room = connection.client.listings[matches[row]]
+              point = rowsOrigin + vec2(0, row.float32 * 68)
               watching = room.phase != rooms.Lobby or room.occupied == room.seats
-            sk.lobbyPanel(point, vec2(layout.leftWidth - 44, 60), true)
+            sk.lobbyPanel(point, vec2(rowsSize.x - 16, 60), true)
             sk.lobbyLabel(room.name, point + vec2(12, 10), 365, "LobbyBold")
             sk.lobbyLabel($room.occupied & " / " & $room.seats,
               point + vec2(390, 10), 130)
@@ -330,9 +340,10 @@ proc runFrontend*() =
             sk.lobbyLabel(if room.phase != rooms.Lobby: $room.phase
               elif watching: "Full" else: "Open", point + vec2(570, 10), 120)
             if sk.lobbyButton(if watching: "Watch" else: "Join",
-              point + vec2(layout.leftWidth - 184, 8), 128, "arrow_right"):
+              point + vec2(rowsSize.x - 156, 8), 128, "arrow_right"):
                 connection.client.send(RoomMessage(kind: JoinRoom, room: room.id))
                 lobbyUi.scroll = 0
+          sk.popClipRect()
           if matches.len == 0:
             sk.lobbyLabel(if connected: "No rooms found. Create one to begin."
               elif error.len > 0: error
@@ -343,16 +354,9 @@ proc runFrontend*() =
                 list + vec2(12, 240), layout.leftWidth - 68, tint = LobbyMuted)
               sk.lobbyLabel("wss:// requires a server with TLS enabled.",
                 list + vec2(12, 278), layout.leftWidth - 68, tint = LobbyMuted)
-          sk.lobbyLabel($matches.len & " rooms", list + vec2(0, 554), 300)
-          if sk.lobbyButton("Previous", list + vec2(430, 550), 150,
-            enabled = lobbyUi.roomPage > 0):
-              dec lobbyUi.roomPage
-          sk.lobbyLabel($(lobbyUi.roomPage + 1) & " / " &
-            $max(1, (matches.len + 4) div 5), list + vec2(600, 552), 100)
-          if sk.lobbyButton("Next", list + vec2(layout.leftWidth - 194, 550),
-            150, enabled = (lobbyUi.roomPage + 1) * 5 < matches.len):
-              inc lobbyUi.roomPage
-          sk.lobbyPanel(layout.right, vec2(layout.rightWidth, 622))
+          sk.lobbyLabel($matches.len & " rooms",
+            list + vec2(0, layout.panelHeight - 68), 300)
+          sk.lobbyPanel(layout.right, vec2(layout.rightWidth, layout.panelHeight))
           let
             create = layout.right + vec2(22)
             width = layout.rightWidth - 44
@@ -386,7 +390,7 @@ proc runFrontend*() =
           sk.lobbyLabel("Invite link or room code", create + vec2(0, 410), width)
           sk.lobbyInput(window, "inviteRoom", invite,
             create + vec2(0, 456), width)
-          if sk.lobbyButton("Join Room", create + vec2(0, 550), width,
+          if sk.lobbyButton("Join Room", create + vec2(0, layout.panelHeight - 72), width,
             "arrow_right", connected and invite.strip().len > 0):
               if invite.contains("?"):
                 let parsed = parseUri(invite)
@@ -449,7 +453,7 @@ proc runFrontend*() =
               editable and (mine or empty) and not modal):
                 lobbyUi.selectedSeat = i
           let
-            fill = layout.left + vec2(22, 548)
+            fill = layout.left + vec2(22, layout.panelHeight - 164)
             botWidth = 216.0'f
           sk.lobbyLabel("Fill empty slots", fill, 210, "LobbyBold")
           var botNames: seq[string]
@@ -500,11 +504,12 @@ proc runFrontend*() =
           sk.lobbyLabel(if online: "Other players keep control of their seats."
             else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
             fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
-          if sk.configPanel(window, lobbyUi, config, layout.right, layout.rightWidth,
+          if sk.configPanel(window, lobbyUi, config, layout.right,
+            layout.rightWidth, layout.panelHeight,
             owner and editable and not modal and not configPending):
               configDirty = online
           if online:
-            let info = layout.left + vec2(22, 640)
+            let info = layout.left + vec2(22, layout.panelHeight - 72)
             if sk.lobbyButton("Participants", info, 190, "units", not modal):
               lobbyUi.selectedSeat = -2
             sk.lobbyLabel(snapshot.name, info + vec2(208, 0), 400,
@@ -568,7 +573,7 @@ proc runFrontend*() =
                 launchLocal = true
             sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
               else: "Playing seat " & $(humanSeat + 1),
-              layout.left + vec2(22, 638), 800, tint = LobbyMuted)
+              layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
           let selectedSeat = lobbyUi.selectedSeat
           let choice =
             if modal: sk.seatPicker(window, lobbyUi, bots)
@@ -645,7 +650,11 @@ proc runFrontend*() =
               lobbyUi.selectedSeat = -1
             sk.popLayer()
         of SettingsMenu:
-          if sk.settingsPanel(window, preferences, AppName, origin, ""):
+          let height = max(440.0'f,
+            window.size.y.float32 / sk.uiScale - origin.y - 50)
+          if sk.settingsPanel(
+            window, preferences, AppName, origin, "", height
+          ):
             page = HomeMenu
       except CatchableError as problem:
         error = problem.msg

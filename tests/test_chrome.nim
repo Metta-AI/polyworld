@@ -26,6 +26,34 @@ block:
   doAssert fitUiScale(vec2(400, 300), vec2(1800, 630)) == 0.25'f32
   doAssert fitUiScale(vec2(5000, 3000), vec2(1800, 630)) == 2.5'f32
 
+echo "Testing custom UI scaling stays fixed across viewport sizes"
+block:
+  uiScaleMode = CustomUiScale
+  uiScalePercent = 125
+  for size in [vec2(1280, 720), vec2(1920, 1080), vec2(3840, 2160)]:
+    doAssert gameUiScale(size) == 1.25'f
+  doAssert selectedUiScale(0.8'f) == 1.25'f
+  doAssert selectedUiScale(0.8'f, 2.0'f) == 2.5'f
+  uiScalePercent = 0
+  doAssert selectedUiScale(1) == 0.25'f
+  uiScalePercent = 999
+  doAssert selectedUiScale(1) == 4.0'f
+  uiScaleMode = AutoUiScale
+  uiScalePercent = 100
+  doAssert selectedUiScale(0.8'f) == 0.8'f
+
+echo "Testing tenths and quarter-step UI scale snapping"
+block:
+  for (input, expected) in [
+    (0, 25), (25, 25), (29, 30), (73, 75), (76, 75),
+    (118, 120), (123, 125), (125, 125), (128, 130),
+    (173, 175), (278, 280), (999, 400)
+  ]:
+    doAssert snapUiScalePercent(input) == expected
+  for percent in 25 .. 400:
+    let snapped = snapUiScalePercent(percent)
+    doAssert snapped mod 10 == 0 or snapped mod 100 in [25, 75]
+
 echo "Testing shared game UI resolution breakpoints"
 block:
   for (size, expected) in [

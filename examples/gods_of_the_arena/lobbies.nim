@@ -1,6 +1,6 @@
 import
   std/[math, strutils],
-  chroma, pixie, silky, vmath, windy,
+  bumpy, chroma, pixie, silky, vmath, windy,
   polyworld/[assets, chrome, menus],
   homes, presets, generation/[maps, tiles]
 
@@ -17,12 +17,14 @@ type
     Unique = "Unique", Team = "Team", Open = "Open"
   LobbyLayout* = object
     origin*, left*, right*, footer*, primary*: Vec2
-    leftWidth*, rightWidth*: float32
+    leftWidth*, rightWidth*, panelHeight*: float32
     compact*: bool
   LobbyUi* = object
     scroll*: float32
     search*: string
-    roomPage*, participantPage*: int
+    participantPage*: int
+    roomScroll*: FrameState
+    roomListOverflow*: bool
     selectedSeat*: int = -1
     selectedBot*: string = "Base bot"
     configPage*: int
@@ -185,28 +187,45 @@ proc beginLobby*(
   ## Fits landscape layouts and stacks panels with scrolling in tall windows.
   result.compact = window.size.x.float32 / window.size.y.float32 < 1.3
   let canvas = if result.compact: vec2(1000, 1722) else: LobbyCanvas
-  sk.uiScale = max(0.1'f, min(
+  sk.uiScale = selectedUiScale(max(0.1'f, min(
     window.size.x.float32 / canvas.x,
     if result.compact: window.size.x.float32 / canvas.x
     else: window.size.y.float32 / canvas.y
-  ))
+  )), if result.compact: 1920.0'f / canvas.x else: 1080.0'f / canvas.y)
   sk.beginUi(window, window.size)
   sk.textStyle = "LobbyBody"
-  let view = window.size.vec2 / sk.uiScale
-  ui.scroll = clamp(ui.scroll + window.scrollDelta.y * ScrollSpeed.float32,
-    0.0'f, max(0.0'f, canvas.y - view.y))
+  let
+    view = window.size.vec2 / sk.uiScale
+    height = max(canvas.y, view.y)
+    top = if multiplayer: 238.0'f else: 150.0'f
+    leftWidth = if result.compact: 936.0'f else: 930.0'f
+    panelHeight = max(
+      if multiplayer: 622.0'f else: LobbyPanelHeight,
+      if result.compact: (height - top - 24 - 110) / 2
+      else: height - top - 110
+    )
+    roomList = rect(
+      (view.x - canvas.x) / 2 + 54,
+      444 - ui.scroll,
+      leftWidth - 44,
+      panelHeight - 268
+    )
+    scrollingRooms = multiplayer and ui.roomListOverflow and
+      overlaps(sk.mousePos, roomList)
+  if not scrollingRooms:
+    ui.scroll += window.scrollDelta.y * ScrollSpeed.float32
+  ui.scroll = clamp(ui.scroll, 0.0'f, max(0.0'f, canvas.y - view.y))
   result.origin = vec2((view.x - canvas.x) / 2, -ui.scroll)
   sk.drawHomeBackground(window)
   sk.lobbyTitle(title, "battle", result.origin + vec2(canvas.x / 2, 72))
-  let top = if multiplayer: 238.0'f else: 150.0'f
   result.left = result.origin + vec2(32, top)
   result.leftWidth = if result.compact: 936 else: 930
   result.rightWidth = if result.compact: 936 else: 500
+  result.panelHeight = panelHeight
   result.right =
-    if result.compact: result.origin + vec2(32, top + 738)
+    if result.compact: result.left + vec2(0, panelHeight + 24)
     else: result.origin + vec2(982, top)
-  result.footer = result.origin + vec2(32,
-    if result.compact: 1632.0'f else: 890.0'f)
+  result.footer = vec2(result.left.x, result.right.y + panelHeight + 30)
   result.primary = vec2(
     result.right.x + result.rightWidth - 250,
     result.footer.y
@@ -231,11 +250,11 @@ proc drawMapPreview(sk: Silky, ui: var LobbyUi, config: MapConfig, at: Vec2) =
 
 proc configPanel*(
     sk: Silky, window: Window, ui: var LobbyUi, config: var GotaConfig,
-    at: Vec2, width: float32, enabled: bool
+    at: Vec2, width, height: float32, enabled: bool
 ): bool =
   ## Edits typed match controls without exposing the serialized room payload.
   let before = config
-  sk.lobbyPanel(at, vec2(width, LobbyPanelHeight))
+  sk.lobbyPanel(at, vec2(width, height))
   let
     p = at + vec2(22)
     fieldWidth = width - 44
@@ -312,19 +331,19 @@ proc configPanel*(
         config.mapPreset = defaultConfig()
   if sk.lobbyButton(
     if ui.configPage == 1: "Back to match settings" else: "Map generation",
-    p + vec2(0, 574), fieldWidth, "terrain"
+    p + vec2(0, height - 138), fieldWidth, "terrain"
   ):
     ui.configPage = if ui.configPage == 1: 0 else: 1
   if sk.lobbyButton(
     if ui.configPage == 2: "Back to match settings" else: "Advanced settings",
-    p + vec2(0, 622), fieldWidth, "settings"
+    p + vec2(0, height - 90), fieldWidth, "settings"
   ):
     ui.configPage = if ui.configPage == 2: 0 else: 2
   result = config != before
 
 proc rosterPanel*(sk: Silky, layout: LobbyLayout) =
   ## Draws the team headings over the ten-seat grid.
-  sk.lobbyPanel(layout.left, vec2(layout.leftWidth, LobbyPanelHeight))
+  sk.lobbyPanel(layout.left, vec2(layout.leftWidth, layout.panelHeight))
   sk.lobbyIcon("tower", layout.left + vec2(24, 24), 36, LobbyRed)
   sk.lobbyLabel("RED TEAM", layout.left + vec2(70, 22), 280,
     "LobbyHeading", LobbyRed)
