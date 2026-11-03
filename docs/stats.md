@@ -74,11 +74,11 @@ For viewer screenshots, build with `-d:takeScreenshot` and set
 ## GotA replay events
 
 GotA can emit a typed per-tick log when compiled with `-d:replayEvents`.
-`examples/gods_of_the_arena/tools/replay_extractor.nims` enables that flag
+`games/gods_of_the_arena/tools/replay_extractor.nims` enables that flag
 and `headless` automatically for the extractor:
 
 ```sh
-nim r examples/gods_of_the_arena/tools/replay_extractor.nim
+nim r games/gods_of_the_arena/tools/replay_extractor.nim
 ```
 
 The extractor is a short, top-level script intended for agents to copy and
@@ -91,7 +91,7 @@ It verifies each recorded hash and fails on incompatible or incomplete
 replays.
 
 Records are flat value structs from
-`examples/gods_of_the_arena/events.nim`, with enums and fixed-width numbers.
+`games/gods_of_the_arena/events.nim`, with enums and fixed-width numbers.
 The simulation does not format strings or write log files. This is an
 in-memory binary representation, not a separate binary file format.
 

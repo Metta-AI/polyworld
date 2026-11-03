@@ -3,11 +3,11 @@ import
   jsony
 
 when defined(benchGota):
-  import ../examples/gods_of_the_arena/[game, replays, sim]
+  import ../games/gods_of_the_arena/[game, replays, sim]
 elif defined(benchLvd):
-  import ../examples/light_vs_dark/[game, replays, sim]
+  import ../games/light_vs_dark/[game, replays, sim]
 else:
-  import ../examples/call_to_adventure/[content, game, replays, sim]
+  import ../games/call_to_adventure/[content, game, replays, sim]
 
 when not defined(statsBaseline):
   import polyworld/metrics

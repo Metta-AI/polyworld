@@ -178,7 +178,7 @@ while players are allied; an alliance itself never triggers victory.
 ## Simulation and replay integration
 
 Put the relationship types and transition procedures in
-`examples/light_vs_dark/diplomacies.nim`. Keep one flat sequence of pair
+`games/light_vs_dark/diplomacies.nim`. Keep one flat sequence of pair
 records, with a canonical unordered-pair index. Do not create a fixed-size
 team array or a class hierarchy. Validate allocation sizes at the boundary.
 

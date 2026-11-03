@@ -2,17 +2,17 @@ import
   std/[os, strutils, tempfiles],
   bassy,
   polyworld/[cli, mailboxes]
-import ../examples/call_to_adventure/bots as ctaBots
-import ../examples/call_to_adventure/content as ctaContent
-import ../examples/call_to_adventure/sim as ctaSim
-import ../examples/gods_of_the_arena/bots as gotaBots
-import ../examples/gods_of_the_arena/maps as gotaMaps
-import ../examples/gods_of_the_arena/replays as gotaReplays
-import ../examples/gods_of_the_arena/sim as gotaSim
-import ../examples/light_vs_dark/bots as lvdBots
-import ../examples/light_vs_dark/content as lvdContent
-import ../examples/light_vs_dark/maps as lvdMaps
-import ../examples/light_vs_dark/sim as lvdSim
+import ../games/call_to_adventure/bots as ctaBots
+import ../games/call_to_adventure/content as ctaContent
+import ../games/call_to_adventure/sim as ctaSim
+import ../games/gods_of_the_arena/bots as gotaBots
+import ../games/gods_of_the_arena/maps as gotaMaps
+import ../games/gods_of_the_arena/replays as gotaReplays
+import ../games/gods_of_the_arena/sim as gotaSim
+import ../games/light_vs_dark/bots as lvdBots
+import ../games/light_vs_dark/content as lvdContent
+import ../games/light_vs_dark/maps as lvdMaps
+import ../games/light_vs_dark/sim as lvdSim
 
 const Program = """
 sent = sendChat(mailboxSelf(), "private hello")

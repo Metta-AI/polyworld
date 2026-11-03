@@ -1,6 +1,6 @@
 # Gameserver packets
 
-Outer protocol **3**. [GotA payloads](../examples/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
+Outer protocol **3**. [GotA payloads](../games/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
 
 One binary WebSocket message per packet at `/ws`. Fields are in wire order,
 little endian, without padding. `string` and `seq[T]` have a `uint32` length

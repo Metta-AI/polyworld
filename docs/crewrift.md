@@ -4,16 +4,16 @@ Run from the Polyworld repository root, with the usual dependencies and sibling
 `polyworld_art` checkout:
 
 ```sh
-nim r examples/crewrift/crewrift.nim
+nim r games/crewrift/crewrift.nim
 ```
 
 The default match has eight players, with one human and seven local bots. Roles
 are random. To choose a role or watch the bots:
 
 ```sh
-nim r examples/crewrift/crewrift.nim --role:imp
-nim r examples/crewrift/crewrift.nim --role:crew
-nim r examples/crewrift/crewrift.nim --spectate --seed:17
+nim r games/crewrift/crewrift.nim --role:imp
+nim r games/crewrift/crewrift.nim --role:crew
+nim r games/crewrift/crewrift.nim --spectate --seed:17
 ```
 
 | Control | Action |
@@ -111,7 +111,7 @@ To regenerate the floor and markers after editing the Blender source, run:
 This copies the supplied model into the sibling art checkout and writes the
 extracted triangles and source marker positions to `crewrift/navigation.json`.
 The generated map metadata, tile mask, and blocked connections are embedded
-at compilation. `examples/crewrift/data/map1-audit.json` records the model hash,
+at compilation. `games/crewrift/data/map1-audit.json` records the model hash,
 probe dimensions, every candidate tile's result, and blocking mesh names.
 Append `-- --probes=tmp/crewrift-tile-audit.blend` to the import command to save
 a Blender scene with a wire box for every tested tile. Green boxes are kept,
@@ -122,11 +122,11 @@ faces, and boxes fully enclosed by solid meshes before auditing the ship.
 Input recordings can be viewed graphically or verified without graphics:
 
 ```sh
-nim r examples/crewrift/crewrift.nim --record:tmp/crewrift.json
-nim r examples/crewrift/crewrift.nim --replay:tmp/crewrift.json
-nim r -d:headless examples/crewrift/crewrift.nim --record:tmp/crewrift.json
-nim r -d:headless examples/crewrift/crewrift.nim --replay:tmp/crewrift.json
-nim r -d:headless tests/test_crewrift.nim
+nim r games/crewrift/crewrift.nim --record:tmp/crewrift.json
+nim r games/crewrift/crewrift.nim --replay:tmp/crewrift.json
+nim r -d:headless games/crewrift/crewrift.nim --record:tmp/crewrift.json
+nim r -d:headless games/crewrift/crewrift.nim --replay:tmp/crewrift.json
+nim r -d:headless games/crewrift/tests/test_sim.nim
 ```
 
 `--players:8` through `--players:16` set the roster. `--ticks:N` bounds active
@@ -142,5 +142,5 @@ and vote using nearby evidence. They run without an API key or external service.
 
 The rule code, task assignment code, and Croatoan metadata and masks were ported
 from the local `coworld-crewrift` checkout. Its MIT license is preserved in
-`examples/crewrift/LICENSE`. The masks and metadata are embedded at compilation,
+`games/crewrift/LICENSE`. The masks and metadata are embedded at compilation,
 so running this example does not require the original Crewrift checkout.

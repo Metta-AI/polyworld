@@ -147,7 +147,7 @@ proc episode(
         # A reference player's setup picks the class and deck, then the
         # fixture, then the reference player's play.
         let
-          reference = readFile(Root / "examples/awm/players" /
+          reference = readFile(Root / "games/awm/players" /
             (if slot mod 2 == 0: "archer.bas" else: "warrior.bas"))
           setupStart = reference.find("IF selectingClass THEN")
           setupEnd = reference.find("END IF\n", setupStart) + "END IF\n".len
@@ -420,7 +420,7 @@ print "PACKAGE-PASSED"
 if "gota".selected:
   let
     library = readFile(Root /
-      "examples/gods_of_the_arena/neural/policies/david.bas").split(
+      "games/gods_of_the_arena/neural/policies/david.bas").split(
         "' Example policy.")[0]
     source = library & "nnStep()\nprint \"DAVID-PASSED\"\n"
     packed = zipFixture([("policy.bas", source),
@@ -443,7 +443,7 @@ res = nn_david("model.bin", state, data)
 if "gota".selected:
   let
     library = readFile(Root /
-      "examples/gods_of_the_arena/neural/policies/andre.bas").split(
+      "games/gods_of_the_arena/neural/policies/andre.bas").split(
         "' Example policy.")[0]
     source = library & """
 dim f(40)

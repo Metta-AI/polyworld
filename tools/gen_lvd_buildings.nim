@@ -2,7 +2,7 @@ import
   std/[math, os],
   chroma, opengl, pixie, vmath, windy,
   polyworld/[assets, groves, quadterrain, shadows, toon],
-  ../examples/light_vs_dark/[assets, buildings, content, factions, sim]
+  ../games/light_vs_dark/[assets, buildings, content, factions, sim]
 
 const
   RenderSize = 512

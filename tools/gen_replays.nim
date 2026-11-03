@@ -24,7 +24,7 @@ proc generate(name, directory: string, seats, ticks: int) =
   ## Checks two independent recordings and verifies every playback tick.
   let
     output = Root / "tmp/replays"
-    source = "examples" / directory
+    source = "games" / directory
     binary = output / (name & ExeExt)
     replay = output / (name & ".replay")
     repeated = output / (name & "-repeat.replay")

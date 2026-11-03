@@ -34,15 +34,15 @@ Replay game version is now 23 because monster IDs, spawning and tuning
 changed. Older replays cannot reproduce this simulation and are rejected.
 
 Validation: the full headless suite passes. The standalone
-`tests/test_cta_characters.nim` loads all 20 characters, checks equipment,
+`games/call_to_adventure/tests/test_characters.nim` loads all 20 characters, checks equipment,
 grounding and animated bounds, and checks the browser asset declaration
 for missing files and the excluded legacy character assets.
 
 To build and play from the repository root:
 
 ```sh
-nim c --out:tmp/cta-play/cta examples/call_to_adventure/cta.nim
-tmp/cta-play/cta --player --bot examples/call_to_adventure/players/base.bas:3 --play=false
+nim c --out:tmp/cta-play/cta games/call_to_adventure/cta.nim
+tmp/cta-play/cta --player --bot games/call_to_adventure/players/base.bas:3 --play=false
 ```
 
 Space starts or pauses. Right-click walks, attacks an enemy or picks up loot.

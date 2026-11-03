@@ -3,7 +3,7 @@ import
   bumpy, pixie, silky, vmath,
   maps, tiles
 
-from ../../examples/gods_of_the_arena/content import CreepsPerBarracks
+from ../../games/gods_of_the_arena/content import CreepsPerBarracks
 
 const
   ExperimentDir = currentSourcePath().parentDir

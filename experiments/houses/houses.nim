@@ -14,7 +14,7 @@ import
   std/math,
   opengl, vmath, windy,
   polyworld/[noises, pathing, quadterrain, shadows, toon],
-  ../../examples/heartleaf/[decor, houses, houseview]
+  ../../games/heartleaf/[decor, houses, houseview]
 
 const
   LabSide = 40'i32

@@ -56,10 +56,21 @@ Heartleaf and AWM assets are not part of this migration.
 From the repository root, launch a game with its bundled baseline agents:
 
 ```sh
-nim r examples/gods_of_the_arena/gota.nim --bot examples/gods_of_the_arena/players/base.bas:10
-nim r examples/light_vs_dark/lvd.nim --bot examples/light_vs_dark/players/base.bas:2
-nim r examples/call_to_adventure/cta.nim --bot examples/call_to_adventure/players/base.bas:4
+nim r games/gods_of_the_arena/gota.nim --bot games/gods_of_the_arena/players/base.bas:10
+nim r games/light_vs_dark/lvd.nim --bot games/light_vs_dark/players/base.bas:2
+nim r games/call_to_adventure/cta.nim --bot games/call_to_adventure/players/base.bas:4
 ```
 
 Use `-d:headless` to run without a window, `--record PATH` to save a match,
 and `--replay PATH` to watch it. Build a browser client with `-d:emscripten`.
+
+Game-specific tests live in `games/<game>/tests/`; shared engine and
+cross-game tests live in `tests/`. Run commands from the repository root:
+
+```sh
+nim r tests/tests.nim
+nim r games/gods_of_the_arena/tests/tests.nim
+```
+
+The root suite includes the game tests. CI also runs `tests/all.nim` for
+recording determinism and the focused integration checks.

@@ -11,7 +11,7 @@ Install the repository's locked Nim dependencies, then run from the checkout:
 
 ```sh
 nim r tools/gameserver.nim --port 9911 --address 0.0.0.0
-nim r examples/gods_of_the_arena/gota.nim --server ws://127.0.0.1:9911/ws
+nim r games/gods_of_the_arena/gota.nim --server ws://127.0.0.1:9911/ws
 ```
 
 The relay defaults to `ws://127.0.0.1:8090/ws`. `BIND` and `PORT` change the
@@ -39,11 +39,11 @@ Explicit `--bot`, `--replay`, headless and Coworld runs bypass the menu.
 For the browser build, with Emscripten installed:
 
 ```sh
-nim c -d:emscripten examples/gods_of_the_arena/gota.nim
+nim c -d:emscripten games/gods_of_the_arena/gota.nim
 python3 -m http.server 8776 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:8776/examples/gods_of_the_arena/emscripten/gota.html`.
+Open `http://127.0.0.1:8776/games/gods_of_the_arena/emscripten/gota.html`.
 The bundled base policy is in the data bundle. The file picker reads local
 `.bas` or policy `.zip` files into WASM memory. It does not upload their bytes.
 An HTTPS game page needs a `wss://` relay.
@@ -167,7 +167,7 @@ shows game-owned payload validation and tick application; the relay imports
 none of it.
 
 Focused regressions are `tests/test_rooms.nim` and
-`tests/test_gota_multiplayer.nim`. `tests/manual_gota_network.nim` supplies a
+`games/gods_of_the_arena/tests/test_multiplayer.nim`. `games/gods_of_the_arena/tests/manual_network.nim` supplies a
 native Windy client that owns five base bots and can play against a browser
 client. Its `GOTA_ROOM`, `GOTA_SEAT_START`, `GOTA_SEAT_COUNT`, `GOTA_NAME` and
 `GOTA_SERVER` environment variables configure a local transport check.

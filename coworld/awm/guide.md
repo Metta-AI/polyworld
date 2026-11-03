@@ -19,8 +19,8 @@ Start with a bundled player, which lists the game's values and calls:
 class precons, and `players/archer_warrior.bas` an Archer deck with Warrior
 cards. They play
 alike and differ only in their setup.
-The same source is available under `examples/awm/src/core/bots.nim`, and the
-cards are in `examples/awm/src/baseset.nim` and `examples/awm/README.md`.
+The same source is available under `games/awm/src/core/bots.nim`, and the
+cards are in `games/awm/src/baseset.nim` and `games/awm/README.md`.
 
 ## Class and deck selection
 

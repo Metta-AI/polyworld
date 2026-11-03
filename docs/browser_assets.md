@@ -109,9 +109,9 @@ Run from the repository root:
 ```sh
 nim check tests/tests.nim
 nim r tests/tests.nim
-nim c -d:emscripten examples/gods_of_the_arena/gota.nim
-nim c -d:emscripten examples/light_vs_dark/lvd.nim
-nim c -d:emscripten examples/call_to_adventure/cta.nim
+nim c -d:emscripten games/gods_of_the_arena/gota.nim
+nim c -d:emscripten games/light_vs_dark/lvd.nim
+nim c -d:emscripten games/call_to_adventure/cta.nim
 nim r tests/manual_assetpacks.nim
 ```
 

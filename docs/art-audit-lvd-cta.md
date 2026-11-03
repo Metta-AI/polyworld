@@ -9,8 +9,8 @@ restricted art from this audit remains selected by CtA. The table below
 records the original audit; see the [character integration](cta-chargen.md)
 and [terrain mapping](cta-terrain.md) for the current setup.
 
-Audit date: 2026-09-22. Scope: the current `examples/light_vs_dark` and
-`examples/call_to_adventure` games, their native renderers, browser asset
+Audit date: 2026-09-22. Scope: the current `games/light_vs_dark` and
+`games/call_to_adventure` games, their native renderers, browser asset
 declarations, and dependencies in the sibling `polyworld_data` repository.
 GotA's existing audit and unrelated games, experiments, and old worktrees are
 outside this inventory.
@@ -121,15 +121,15 @@ manifests. No game builds or fresh browser bundles were produced for this audit.
 
 Primary code evidence:
 
-- [LvD declarations](../examples/light_vs_dark/assets.nim) and
-  [renderer](../examples/light_vs_dark/graphics.nim).
-- [CtA declarations](../examples/call_to_adventure/assets.nim),
-  [content mappings](../examples/call_to_adventure/content.nim), and
-  [renderer](../examples/call_to_adventure/graphics.nim).
+- [LvD declarations](../games/light_vs_dark/assets.nim) and
+  [renderer](../games/light_vs_dark/graphics.nim).
+- [CtA declarations](../games/call_to_adventure/assets.nim),
+  [content mappings](../games/call_to_adventure/content.nim), and
+  [renderer](../games/call_to_adventure/graphics.nim).
 - [Shared asset declarations](../src/polyworld/assets.nim),
   [terrain initialization](../src/polyworld/quadterrain.nim), and
   [HUD loading](../src/polyworld/viewers.nim).
-- [GotA's current cleared selection](../examples/gods_of_the_arena/assets.nim)
+- [GotA's current cleared selection](../games/gods_of_the_arena/assets.nim)
   and [license record](../../polyworld_data/licenses/gota.md).
 
 Asset identities and source-license mappings come from the checked-in

@@ -3,9 +3,9 @@
 import
   vmath,
   polyworld/[chrome, gameuis, player, stackpanels],
-  ../examples/gods_of_the_arena/layouts as gota,
-  ../examples/light_vs_dark/layouts as lvd,
-  ../examples/call_to_adventure/layouts as cta
+  ../games/gods_of_the_arena/layouts as gota,
+  ../games/light_vs_dark/layouts as lvd,
+  ../games/call_to_adventure/layouts as cta
 
 proc checkPanels(parent: GameUiPanel, children: openArray[GameUiPanel]) =
   ## Checks that non-overlapping children draw and hit inside their parent.

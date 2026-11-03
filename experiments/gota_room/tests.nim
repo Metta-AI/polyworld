@@ -1,6 +1,6 @@
 import
   polyworld/pathing,
-  ../../examples/gods_of_the_arena/[content, controls, game, maps, sim]
+  ../../games/gods_of_the_arena/[content, controls, game, maps, sim]
 
 run = newTestGame(Arcanist)
 doAssert mapTiles() == 28

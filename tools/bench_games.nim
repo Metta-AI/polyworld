@@ -20,18 +20,18 @@ const
   Benches = [
     GameBench(
       name: "Light vs Dark",
-      source: "examples/light_vs_dark/lvd.nim",
-      bot: "examples/light_vs_dark/players/base.bas:2"
+      source: "games/light_vs_dark/lvd.nim",
+      bot: "games/light_vs_dark/players/base.bas:2"
     ),
     GameBench(
       name: "Gods of the Arena",
-      source: "examples/gods_of_the_arena/gota.nim",
-      bot: "examples/gods_of_the_arena/players/base.bas:10"
+      source: "games/gods_of_the_arena/gota.nim",
+      bot: "games/gods_of_the_arena/players/base.bas:10"
     ),
     GameBench(
       name: "Call to Adventure",
-      source: "examples/call_to_adventure/cta.nim",
-      bot: "examples/call_to_adventure/players/base.bas:4"
+      source: "games/call_to_adventure/cta.nim",
+      bot: "games/call_to_adventure/players/base.bas:4"
     )
   ]
 

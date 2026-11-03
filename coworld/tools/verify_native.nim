@@ -8,7 +8,7 @@ proc main() =
   let logs = Root / "tmp/coworld/checks"
   createDir(logs)
   for game in Games:
-    let source = "examples" / game.directory / (game.name & ".nim")
+    let source = "games" / game.directory / (game.name & ".nim")
     for mode in ["desktop", "headless", "coworld"]:
       var args = @["nim", "check", "--hints:on"]
       if mode != "desktop":
@@ -23,7 +23,7 @@ proc main() =
     run(
       ["nim", "r", "-d:headless", "-d:" & game.recording,
         "tests/test_recordings.nim",
-        "--bot:examples/" & game.directory & "/players/base.bas:" &
+        "--bot:games/" & game.directory & "/players/base.bas:" &
           $game.seats],
       logs / (game.name & "-recording.log")
     )

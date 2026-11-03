@@ -3,13 +3,13 @@
 import
   std/[hashes, os, strformat, strutils]
 
-proc setupEmscripten*(exampleDir: string, game = "") =
+proc setupEmscripten*(gameDir: string, game = "") =
   ## Configures the wasm backend and writes the bundle next to the game.
   when defined(emscripten):
     let
-      repoDir = exampleDir / ".." / ".."
+      repoDir = gameDir / ".." / ".."
       dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
-      outputDir = exampleDir / "emscripten"
+      outputDir = gameDir / "emscripten"
       shellTemplate = repoDir / "src" / "polyworld" /
         (if defined(replayViewer): "replay.html" else: "emscripten.html")
       shellFile = outputDir / "shell.html"
@@ -33,7 +33,7 @@ proc setupEmscripten*(exampleDir: string, game = "") =
       exec quoteShell(getCurrentCompilerExe()) & " c --hints:off" & options &
         " --nimcache:" & quoteShell(cache / "nimcache") &
         " -o:" & quoteShell(packer) & " " &
-        quoteShell(exampleDir / "pack_assets.nim")
+        quoteShell(gameDir / "pack_assets.nim")
       exec quoteShell(packer) & " " & quoteShell(dataDir) &
         " " & quoteShell(cache)
       let
@@ -49,7 +49,7 @@ proc setupEmscripten*(exampleDir: string, game = "") =
     if game == "gota":
       for bot in ["base", "rusher", "puller", "jev"]:
         preload.add " --preload-file " & quoteShell(
-          exampleDir / "players" / (bot & ".bas") &
+          gameDir / "players" / (bot & ".bas") &
           "@/policies/gota/" & bot & ".bas")
       switch("passL", "-s EXPORTED_FUNCTIONS=" &
         "_main,_malloc,_free,_windy_websocket_open_callback," &

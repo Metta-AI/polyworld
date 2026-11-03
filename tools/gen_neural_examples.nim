@@ -3,7 +3,7 @@ import
   ../tests/neuralfixtures
 
 const Policies = currentSourcePath().parentDir.parentDir /
-  "examples/gods_of_the_arena/neural/policies"
+  "games/gods_of_the_arena/neural/policies"
 
 proc main() =
   ## Generates reproducible packages containing only sparse synthetic weights.

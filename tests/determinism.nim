@@ -3,24 +3,24 @@
 import
   std/[os, osproc, tempfiles],
   polyworld/[cli, tapes]
-import ../examples/gods_of_the_arena/bots as gotaBots
-import ../examples/gods_of_the_arena/maps as gotaMaps
-import ../examples/gods_of_the_arena/replays as gotaReplays
-import ../examples/gods_of_the_arena/sim as gotaSim
-import ../examples/call_to_adventure/bots as ctaBots
-import ../examples/call_to_adventure/content as ctaContent
-import ../examples/call_to_adventure/replays as ctaReplays
-import ../examples/call_to_adventure/sim as ctaSim
-import ../examples/light_vs_dark/bots as lvdBots
-import ../examples/light_vs_dark/content as lvdContent
-import ../examples/light_vs_dark/maps as lvdMaps
-import ../examples/light_vs_dark/replays as lvdReplays
-import ../examples/light_vs_dark/sim as lvdSim
-import ../examples/heartleaf/bots as hlfBots
-import ../examples/heartleaf/content as hlfContent
-import ../examples/heartleaf/maps as hlfMaps
-import ../examples/heartleaf/replays as hlfReplays
-import ../examples/heartleaf/sim as hlfSim
+import ../games/gods_of_the_arena/bots as gotaBots
+import ../games/gods_of_the_arena/maps as gotaMaps
+import ../games/gods_of_the_arena/replays as gotaReplays
+import ../games/gods_of_the_arena/sim as gotaSim
+import ../games/call_to_adventure/bots as ctaBots
+import ../games/call_to_adventure/content as ctaContent
+import ../games/call_to_adventure/replays as ctaReplays
+import ../games/call_to_adventure/sim as ctaSim
+import ../games/light_vs_dark/bots as lvdBots
+import ../games/light_vs_dark/content as lvdContent
+import ../games/light_vs_dark/maps as lvdMaps
+import ../games/light_vs_dark/replays as lvdReplays
+import ../games/light_vs_dark/sim as lvdSim
+import ../games/heartleaf/bots as hlfBots
+import ../games/heartleaf/content as hlfContent
+import ../games/heartleaf/maps as hlfMaps
+import ../games/heartleaf/replays as hlfReplays
+import ../games/heartleaf/sim as hlfSim
 
 const
   Root = currentSourcePath().parentDir.parentDir
@@ -35,7 +35,7 @@ proc recordGota(): string =
     gotaMaps.generateMap(Seed), 600, 10, false, gotaReplays.ReplayData()
   )
   gotaBots.loadBots(game, [BotGroup(
-    path: Root / "examples/gods_of_the_arena/players/base.bas", count: 10
+    path: Root / "games/gods_of_the_arena/players/base.bas", count: 10
   )])
   game.recorder = gotaReplays.initReplayRecorder(
     gotaSim.currentSetup(game, GotaTicks)
@@ -56,7 +56,7 @@ proc recordCta(): string =
   ## Records a short live expedition through the normal hero decision slots.
   let game = ctaSim.newGame(Seed, SmokeTicks)
   ctaBots.loadBots(game, [BotGroup(
-    path: Root / "examples/call_to_adventure/players/base.bas", count: 4
+    path: Root / "games/call_to_adventure/players/base.bas", count: 4
   )])
   game.recorder = ctaReplays.initReplayRecorder(game.world.setup)
   for tick in 0 ..< SmokeTicks:
@@ -76,7 +76,7 @@ proc recordLvd(): string =
   let
     map = lvdMaps.generateMap(Seed)
     game = lvdSim.newGame(map, SmokeTicks)
-    source = readFile(Root / "examples/light_vs_dark/players/base.bas")
+    source = readFile(Root / "games/light_vs_dark/players/base.bas")
   lvdBots.loadBots(game, [source, source])
   game.recorder = lvdReplays.initReplayRecorder(lvdReplays.Setup(
     mapSeed: Seed,
@@ -112,7 +112,7 @@ proc recordHeartleaf(): string =
   let
     map = hlfMaps.generateMap(Seed)
     game = hlfSim.newGame(map, 1)
-    source = readFile(Root / "examples/heartleaf/players/base.bas")
+    source = readFile(Root / "games/heartleaf/players/base.bas")
   var sources: array[hlfContent.VillagerCount, string]
   for entry in sources.mitems:
     entry = source

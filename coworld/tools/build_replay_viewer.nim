@@ -45,9 +45,9 @@ proc main() =
   createDir(output)
   run([
     "nim", "c", "-d:emscripten", "-d:replayViewer",
-    "examples" / directory / (game & ".nim")
+    "games" / directory / (game & ".nim")
   ])
-  let source = Root / "examples" / directory / "emscripten"
+  let source = Root / "games" / directory / "emscripten"
   for suffix in ["js", "wasm", "data"]:
     copyFile(source / (game & "." & suffix), output / (game & "." & suffix))
   copyFile(source / (game & ".html"), output / "index.html")

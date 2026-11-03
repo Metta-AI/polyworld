@@ -2,7 +2,7 @@ import
   std/math,
   bassy,
   polyworld/[policies, tensors],
-  ../examples/gods_of_the_arena/neural/[common, richard, david, andre, fly],
+  ../games/gods_of_the_arena/neural/[common, richard, david, andre, fly],
   neuralfixtures, tensorfixtures
 
 proc rejected(action: proc() {.closure.}): bool =

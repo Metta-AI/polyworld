@@ -2,7 +2,7 @@ import
   std/os,
   chroma, gltf, opengl, pixie, vmath, windy,
   polyworld/[characters, chargen, shadows],
-  ../examples/light_vs_dark/[appearances, assets, content]
+  ../games/light_vs_dark/[appearances, assets, content]
 
 const RenderSize = 512
 

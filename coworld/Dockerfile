@@ -13,10 +13,10 @@ ENV POLYWORLD_DEPS=/src/deps
 RUN nim r --hints:off coworld/tools/sync_dependencies.nim
 COPY config.nims config.nims
 COPY src src
-COPY examples examples
+COPY games games
 ARG GAME
 ARG ENTRY
-RUN nim c -d:coworld -d:lto --nimcache:/tmp/nimcache -o:/out/game examples/${GAME}/${ENTRY}.nim
+RUN nim c -d:coworld -d:lto --nimcache:/tmp/nimcache -o:/out/game games/${GAME}/${ENTRY}.nim
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4t64 ca-certificates \

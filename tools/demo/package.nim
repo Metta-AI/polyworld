@@ -19,7 +19,7 @@ proc package(destination, release: string) =
   var page = readFile(Root / "tools/demo/index.html")
   for game in Games:
     let
-      source = Root / "examples" / game.directory
+      source = Root / "games" / game.directory
       bundle = source / "emscripten"
       target = destination / "releases" / release / game.name
     var javascript = readFile(bundle / (game.name & ".js"))
@@ -37,7 +37,7 @@ proc package(destination, release: string) =
     copyFile(bundle / "loading-logo.png", target / "loading-logo.png")
     copyFile(source / "players/base.bas", target / "base.bas")
     let
-      oldUrl = "../../examples/" & game.directory & "/emscripten/" &
+      oldUrl = "../../games/" & game.directory & "/emscripten/" &
         game.name & ".html?bot=../players/base.bas:" & $game.seats
       newUrl = "../releases/" & release & "/" & game.name & "/" &
         game.name & ".html?bot=base.bas:" & $game.seats

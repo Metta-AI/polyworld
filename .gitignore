@@ -25,19 +25,19 @@ nimcache
 *.atlas.png
 experiments/terrain/quadterrain_shot.png
 experiments/characters/characters_shot.png
-examples/gods_of_the_arena/gota_shot.png
-examples/gods_of_the_arena/emscripten/
-examples/gods_of_the_arena/profiles/
+games/gods_of_the_arena/gota_shot.png
+games/gods_of_the_arena/emscripten/
+games/gods_of_the_arena/profiles/
 # Generated hero reports belong in polyworld-buff or tmp.
-examples/gods_of_the_arena/tools/hero_stats.html
-examples/gods_of_the_arena/tools/hero_assets/
-examples/call_to_adventure/shot.png
-examples/call_to_adventure/emscripten/
-examples/light_vs_dark/*.png
-examples/light_vs_dark/emscripten/
-examples/light_vs_dark/profiles/
-examples/heartleaf/*.png
-examples/heartleaf/emscripten/
+games/gods_of_the_arena/tools/hero_stats.html
+games/gods_of_the_arena/tools/hero_assets/
+games/call_to_adventure/shot.png
+games/call_to_adventure/emscripten/
+games/light_vs_dark/*.png
+games/light_vs_dark/emscripten/
+games/light_vs_dark/profiles/
+games/heartleaf/*.png
+games/heartleaf/emscripten/
 tmp/
 experiments/modular_chars/modular_chars_shot.png
 
@@ -52,8 +52,8 @@ coworld/**/__pycache__/
 __pycache__/
 
 # Crewrift art belongs in the sibling art repository.
-examples/crewrift/**/*.glb
-examples/crewrift/**/*.blend*
-examples/crewrift/*_shot.png
-examples/crewrift/emscripten/
-examples/crewrift/profiles/
+games/crewrift/**/*.glb
+games/crewrift/**/*.blend*
+games/crewrift/*_shot.png
+games/crewrift/emscripten/
+games/crewrift/profiles/

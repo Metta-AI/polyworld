@@ -144,7 +144,7 @@ proc main() =
     "nim",
     ["c", "--hints:off", "--nimcache:tmp/heartleaf-town/cache-layers",
       "-d:takeScreenshot", "-d:sceneCapture", "--out:" & binary,
-      "examples/heartleaf/heartleaf.nim"],
+      "games/heartleaf/heartleaf.nim"],
     environment
   )
   for layer in Layers:
@@ -153,7 +153,7 @@ proc main() =
     environment["SCREENSHOT_PATH"] = output / (layer.file & "-3d.png")
     execute(
       binary,
-      ["--bot", "examples/heartleaf/players/base.bas:9", "--seek-tick",
+      ["--bot", "games/heartleaf/players/base.bas:9", "--seek-tick",
         "1500", "--play=false", "--windowSize", "1122x1402"],
       environment,
       output / (layer.name & ".log")

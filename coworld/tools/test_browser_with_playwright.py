@@ -13,7 +13,7 @@ GAMES = {'gota': ('gods_of_the_arena', 18680), 'lvd': ('light_vs_dark', 28800),
 def probe_url(base, game, replay):
     """Point a test iframe at a static viewer and a public replay file."""
     directory = GAMES[game][0]
-    viewer = f'{base}/examples/{directory}/emscripten/{game}.html'
+    viewer = f'{base}/games/{directory}/emscripten/{game}.html'
     if replay:
         viewer += '#replay=' + quote(base + '/tmp/coworld/' + replay, safe='')
     return base + '/coworld/tools/replay_probe.html?viewer=' + quote(viewer, safe='')
@@ -94,7 +94,7 @@ def check_director(base, executable, output, games, layout_only=False):
         page.on('pageerror', lambda error: errors.append(str(error)))
         for game in ([] if layout_only else games):
             directory = GAMES[game][0]
-            url = (f'{base}/examples/{directory}/emscripten/{game}.html'
+            url = (f'{base}/games/{directory}/emscripten/{game}.html'
                    '?replay=../replays/demo.replay&speed=16')
             page.goto(url)
             page.wait_for_function('typeof Module !== "undefined" && '
@@ -166,7 +166,7 @@ def check_director(base, executable, output, games, layout_only=False):
         for game in games:
             directory = GAMES[game][0]
             frames.append(f'<iframe title="{game}" style="flex:1;width:0;'
-                          f'height:100%;border:0" src="{base}/examples/{directory}'
+                          f'height:100%;border:0" src="{base}/games/{directory}'
                           f'/emscripten/{game}.html?replay=../replays/demo.replay'
                           '&speed=4"></iframe>')
         layout_page = output / 'columns.html'

@@ -35,6 +35,6 @@ jobs:
       - name: Run release tests and all-game determinism
         run: nim r -d:release -d:bassyNativeStrict -d:replayEvents tests/all.nim
       - name: Test lockstep training API
-        run: nim r -d:release -d:headless -d:bassyNativeStrict tests/test_gota_lockstep.nim
+        run: nim r -d:release -d:headless -d:bassyNativeStrict games/gods_of_the_arena/tests/test_lockstep.nim
       - name: Check neural converters
-        run: python tests/test_neural_converters.py
+        run: python games/gods_of_the_arena/tests/test_neural_converters.py

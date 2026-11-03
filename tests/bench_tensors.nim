@@ -2,7 +2,7 @@ import
   std/[monotimes, times],
   bassy,
   polyworld/tensors,
-  ../examples/gods_of_the_arena/neural/[common, richard, david, andre, fly],
+  ../games/gods_of_the_arena/neural/[common, richard, david, andre, fly],
   neuralfixtures, tensorfixtures
 
 proc measure(name: string, iterations: int,

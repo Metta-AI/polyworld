@@ -5,7 +5,7 @@ import
   std/[os, strformat, strutils],
   chroma, pixie,
   polyworld/pathing,
-  ../examples/gods_of_the_arena/maps
+  ../games/gods_of_the_arena/maps
 
 const PixelScale = 5
 

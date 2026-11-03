@@ -1,7 +1,7 @@
 import
   std/strutils,
   zippy, zippy/crc,
-  ../examples/gods_of_the_arena/neural/[common, fly]
+  ../games/gods_of_the_arena/neural/[common, fly]
 
 proc word16(bytes: var string, value: int) =
   ## Writes a synthetic ZIP header field.

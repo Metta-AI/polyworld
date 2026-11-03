@@ -10,7 +10,7 @@ import bpy
 
 ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT.parent / "polyworld_art" / "crewrift"
-DATA = ROOT / "examples" / "crewrift" / "data"
+DATA = ROOT / "games" / "crewrift" / "data"
 STEP = 8
 WIDTH = 1235
 HEIGHT = 659

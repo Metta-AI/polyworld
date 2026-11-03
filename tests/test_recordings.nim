@@ -10,13 +10,13 @@ when not defined(recordHlf):
   import polyworld/metrics
 
 when defined(recordGota):
-  import ../examples/gods_of_the_arena/[game, replays, sim]
+  import ../games/gods_of_the_arena/[game, replays, sim]
 elif defined(recordHlf):
-  import ../examples/heartleaf/[game, replays, sim]
+  import ../games/heartleaf/[game, replays, sim]
 elif defined(recordLvd):
-  import ../examples/light_vs_dark/[game, replays, sim]
+  import ../games/light_vs_dark/[game, replays, sim]
 else:
-  import ../examples/call_to_adventure/[content, game, replays, sim]
+  import ../games/call_to_adventure/[content, game, replays, sim]
 
 when defined(recordGota):
   initializeOptions()

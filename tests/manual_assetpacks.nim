@@ -2,9 +2,9 @@ import
   std/[os, strformat],
   gltf,
   polyworld/assets,
-  ../examples/call_to_adventure/assets as ctaAssets,
-  ../examples/gods_of_the_arena/assets as gotaAssets,
-  ../examples/light_vs_dark/assets as lvdAssets
+  ../games/call_to_adventure/assets as ctaAssets,
+  ../games/gods_of_the_arena/assets as gotaAssets,
+  ../games/light_vs_dark/assets as lvdAssets
 
 proc compareNodes(original, packed: Node, originalRoot, packedRoot: Node): int =
   ## Checks transforms, selected geometry, palette pixels, and posed skinning.

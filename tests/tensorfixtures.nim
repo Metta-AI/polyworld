@@ -2,10 +2,10 @@ import
   std/[os, strutils],
   jsony,
   polyworld/[policies, tensors],
-  ../examples/gods_of_the_arena/neural/common
+  ../games/gods_of_the_arena/neural/common
 
 const TensorLibraries* = currentSourcePath().parentDir.parentDir /
-  "examples/gods_of_the_arena/neural/tensors"
+  "games/gods_of_the_arena/neural/tensors"
 
 type
   Entry = object

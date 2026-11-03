@@ -2,7 +2,7 @@
 # Builds AWM's static replay viewer into OUTPUT, like
 # coworld/tools/build_replay_viewer.nim does for the other games: pinned
 # dependencies, the pinned art revision, and index.html beside the bundle.
-# AWM stages its own browser assets with examples/awm/tools/build_web.sh.
+# AWM stages its own browser assets with games/awm/tools/build_web.sh.
 set -euo pipefail
 output="${1:?Usage: build_replay_viewer.sh OUTPUT}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -27,11 +27,11 @@ fi
 
 build="$root/tmp/coworld/awm-replay-viewer"
 AWM_WEB_DIR="$build" POLYWORLD_REPO="$root" \
-  "$root/examples/awm/tools/build_web.sh" -d:replayViewer
+  "$root/games/awm/tools/build_web.sh" -d:replayViewer
 rm -rf "$output"
 mkdir -p "$output"
 for suffix in js wasm data; do
   cp "$build/awm.$suffix" "$output/awm.$suffix"
 done
 cp "$build/awm.html" "$output/index.html"
-cp "$root/examples/awm/web/loading/awm-logo.svg" "$output/loading-logo.svg"
+cp "$root/games/awm/web/loading/awm-logo.svg" "$output/loading-logo.svg"

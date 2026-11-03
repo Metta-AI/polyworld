@@ -53,8 +53,8 @@ For a local run, set `COGAME_LLM_MODEL` to an available OpenRouter model and
 configure either the sidecar or a local API key. Then, from the repository:
 
 ```sh
-nim r -d:headless examples/light_vs_dark/lvd.nim \
-  --bot:examples/inference/chat.bas:2 --ticks=100 \
+nim r -d:headless games/light_vs_dark/lvd.nim \
+  --bot:games/inference/chat.bas:2 --ticks=100 \
   --llm-mode:barrier --headless-tick-rate:24
 ```
 
@@ -133,7 +133,7 @@ outstanding transfer before freeing its worker. Host environment controls:
 | `COGAME_ORACLE` | enabled | `off` disables JEV helpers independently. |
 | `COGAME_ORACLE_MODEL` | `typesafe/jev-1.13` | Model for `/v1/systemone`. |
 
-`examples/inference/chat.bas` and `request.bas` demonstrate text and raw JSON.
+`games/inference/chat.bas` and `request.bas` demonstrate text and raw JSON.
 Native installations need libcurl with asynchronous DNS support. The hosted
 Docker image installs libcurl and CA certificates. Browser builds expose the
 same function names but remote inference reports unavailable.
@@ -193,7 +193,7 @@ empty, or invalid `answers`. It does not stay pending. JEV uses the same
 `oracleProbability(id, key$, label$)` return thousandths. Missing values are
 -1. Use `llmResponse$` to inspect the original response. There are at most
 64 questions, 16 criteria per question, 256 state writes, 4096 state nodes,
-16 notes, and 32 KiB of serialized draft JSON. `examples/inference/jev.bas`
+16 notes, and 32 KiB of serialized draft JSON. `games/inference/jev.bas`
 demonstrates noul and choice questions.
 
 The current platform [System One contract][systemone] includes `/v1/systemone`
@@ -228,7 +228,7 @@ response to verify the same BASIC script without additional paid requests.
 
 ## GotA strategy bot
 
-`examples/gods_of_the_arena/players/jev.bas` is a playable strategy example.
+`games/gods_of_the_arena/players/jev.bas` is a playable strategy example.
 Every 15 simulation seconds, each hero sends JEV a text situation report:
 the estimated early/mid/late game stage, elapsed time, class and role, health,
 mana, level, gold, deaths, position, current plan, god health, home threats,
@@ -254,9 +254,9 @@ policy's item, spell, or combat tactics.
 With a sidecar exposing `/v1/systemone`, or configured direct access:
 
 ```sh
-nim r -d:headless examples/gods_of_the_arena/gota.nim \
-  --bot:examples/gods_of_the_arena/players/jev.bas:1 \
-  --bot:examples/gods_of_the_arena/players/base.bas:9 \
+nim r -d:headless games/gods_of_the_arena/gota.nim \
+  --bot:games/gods_of_the_arena/players/jev.bas:1 \
+  --bot:games/gods_of_the_arena/players/base.bas:9 \
   --ticks=1440 --llm-mode=barrier --headless-tick-rate=24
 ```
 
@@ -269,6 +269,6 @@ strategy and lane to that player's log.
 The [mailbox API](mailboxes.md) provides communication with routing defined
 by each game. GotA supports global, team, and DM chat; LvD supports global
 and DM chat; CTA supports global chat within 16 tiles on the same level.
-For GotA and LvD, `examples/inference/mailbox_llm.bas` reads a DM, asks an
+For GotA and LvD, `games/inference/mailbox_llm.bas` reads a DM, asks an
 LLM for a text reply, and sends that reply to the original sender. The
 player's unread messages stay queued while its LLM request is pending.
