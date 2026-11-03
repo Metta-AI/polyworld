@@ -2,11 +2,7 @@ import
   std/[math, os, strutils],
   chroma, gltf, vmath,
   polyworld/[assets, characters, chargen, common],
-<<<<<<< Updated upstream
   ../[appearances, assets, content],
-=======
-  ../[attackclips, assets, content],
->>>>>>> Stashed changes
   ../../../tools/posedbounds
 
 proc vertex(
@@ -113,7 +109,6 @@ proc checkCharacter(
   ## Checks production outfits, merged drawing and animations for one recipe.
   let
     inventory = manifest.presetManifest(preset)
-<<<<<<< Updated upstream
     file = model.file
   var
     armed = false
@@ -123,17 +118,9 @@ proc checkCharacter(
   let merged = model.mergedMeshes[0]
   doAssert merged.mesh.primitives.len in 1 .. 2
   doAssert merged.skin.joints.len > 0
-=======
-    file = readPresetCharacter(ChargenLibrary, manifest, preset, CharacterClips)
-    model = loadCharacterModel(file, height)
-  var
-    armed = false
-    held: seq[string]
->>>>>>> Stashed changes
   for category in inventory.categories:
     if category.key == "Right hand":
       for item in category.items:
-        held.add item.nodes
         if item.files.len > 0:
           armed = true
     if category.key in ["Eyes", "Mouth", "Brow"]:
@@ -141,7 +128,6 @@ proc checkCharacter(
         for name in item.nodes:
           doAssert name in model.unlitParts, preset.name & " " & name
   doAssert armed, preset.name & " is missing its weapon."
-<<<<<<< Updated upstream
   for owner in file.root.walkNodes:
     if not owner.visible or owner.mesh == nil:
       continue
@@ -155,15 +141,6 @@ proc checkCharacter(
   file.root.activeClips = @[model.clipIndex("Idle_Loop")]
   file.root.animTime = 0
   file.root.updateAnimation(0)
-=======
-  if clips[2] in AuthoredClips:
-    discard model.addAttackClip(clips[2], clips[0], held)
-  if skin.len > 0:
-    partNodes(file.root).applySkin(
-      inventory, color(skin[0], skin[1], skin[2], 1)
-    )
-  model.fitCharacterHeight(height, model.clipIndex("Idle_Loop"))
->>>>>>> Stashed changes
   file.root.updateTransforms(model.baseTransform)
   let standing = posedBounds(file.root, visibleOnly = true)
   doAssert abs(standing.min.y) < 0.001, preset.name & " is not grounded."

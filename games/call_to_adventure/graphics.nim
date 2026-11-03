@@ -14,11 +14,7 @@ import
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
     terrainsurfaces, viewers, visions, worldbars, worldtexts],
-<<<<<<< Updated upstream
-  appearances, assets, content, maps, sim, game, replays, ui, controls
-=======
-  attackclips, assets, content, maps, sim, game, replays, ui, controls
->>>>>>> Stashed changes
+  appearances, assets, attackclips, content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -313,51 +309,10 @@ proc runGraphics*() =
     selectionOutline = initSelectionOutline()
     models: CharacterModels
   profileBlock "models":
-<<<<<<< Updated upstream
     models = loadCharacterModels()
   let
     heroModels = models.heroes
     monsterModels = models.monsters
-=======
-    let
-      library = readManifest(ChargenLibrary)
-      roster = readCharacterRoster()
-
-    proc loadPresetModel(preset: Preset, height: float32): CharacterModel =
-      ## Assembles existing equipment and preserves the authored face colors.
-      result = loadCharacterModel(
-        readPresetCharacter(ChargenLibrary, library, preset, CharacterClips),
-        height
-      )
-      result.fitCharacterHeight(height, result.clipIndex("Idle_Loop"))
-      for category in library.presetManifest(preset).categories:
-        if category.key in ["Eyes", "Mouth", "Brow"]:
-          for item in category.items:
-            result.unlitParts.add item.nodes
-
-    for class in HeroClass:
-      let preset = library.namedPreset(HeroPresets[class])
-      heroModels[class] = loadPresetModel(preset, HeroTargetHeight)
-      let clips = class.heroClips()
-      if clips[2] in AuthoredClips:
-        var held: seq[string]
-        for category in library.presetManifest(preset).categories:
-          if category.key == "Right hand":
-            for item in category.items:
-              held.add item.nodes
-        discard heroModels[class].addAttackClip(clips[2], clips[0], held)
-    for species in Species:
-      let
-        entry = roster.mobs[species.ord]
-        model = loadPresetModel(
-          entry.preset, HeroTargetHeight * RankScales[species.monsterRank]
-        )
-        rgb = entry.skinRgb
-      partNodes(model.file.root).applySkin(
-        library.presetManifest(entry.preset), color(rgb[0], rgb[1], rgb[2], 1)
-      )
-      monsterModels[species] = model
->>>>>>> Stashed changes
   drawSplash(sk, window, splash.name)
 
   var
@@ -383,12 +338,8 @@ proc runGraphics*() =
     monsterDeath[species] = model.clipIndex(DeathClip)
 
   var
-<<<<<<< Updated upstream
     visuals: seq[ActorVisual]
-=======
-    visuals: seq[HeroVisual]
     corpses: seq[Corpse]
->>>>>>> Stashed changes
     previousActorPositions: Table[int32, Vec3]
     previousActorFacings: Table[int32, float32]
     renderAlpha = 1.0'f32
@@ -1596,7 +1547,7 @@ proc runGraphics*() =
         let visibleFrom = selectedViewLevel()
 
         profileBlock "prepare character poses":
-          visuals.setLen(run.world.actors.len)
+          visuals.setLen(run.world.actors.len + corpses.len)
           for slot in 0 ..< run.world.actors.len:
             visuals[slot].visible = false
             let actor = run.world.actors[slot]
@@ -1622,13 +1573,15 @@ proc runGraphics*() =
                 else:
                   if hero: heroIdle[actor.heroClass]
                   else: monsterIdle[actor.species]
-<<<<<<< Updated upstream
             visuals[slot].angle = actorRenderFacing(actor)
             if visuals[slot].clip != wantedClip:
               visuals[slot].clip = wantedClip
               visuals[slot].animTime = 0
             if active:
               visuals[slot].animTime += dt * transport.speed.float32
+            if actor.busy and hero and
+              actor.heroClass.heroClips()[2] in AuthoredClips:
+                visuals[slot].animTime = attackClipTime(actor)
             scene.prepareCharacter(
               visuals[slot].pose,
               model,
@@ -1638,19 +1591,9 @@ proc runGraphics*() =
               visuals[slot].animTime
             )
             visuals[slot].visible = true
-=======
-              if visuals[slot].clip != wantedClip:
-                visuals[slot].clip = wantedClip
-                visuals[slot].animTime = 0
-              if active:
-                visuals[slot].animTime += dt * transport.speed.float32
-              if actor.busy and hero and
-                  actor.heroClass.heroClips()[2] in AuthoredClips:
-                visuals[slot].animTime = attackClipTime(actor)
-            drawCharacter(
-              scene, model, position, visuals[slot].angle,
-              visuals[slot].clip, visuals[slot].animTime)
-          for corpse in corpses:
+          for i, corpse in corpses:
+            let slot = run.world.actors.len + i
+            visuals[slot].visible = false
             if int(corpse.home.level) < visibleFrom:
               continue
             if corpse.kind == MonsterActor and
@@ -1670,10 +1613,15 @@ proc runGraphics*() =
                 0, 1)
               depth = if hero: 0'f32 else: CorpseSinkDepth * sinking
             # Death plays once and holds its last frame.
-            drawCharacter(
-              scene, model, corpse.position - vec3(0, depth, 0), corpse.angle,
-              clip, min(ticks / TickRate.float32, model.clipDuration(clip)))
->>>>>>> Stashed changes
+            scene.prepareCharacter(
+              visuals[slot].pose,
+              model,
+              corpse.position - vec3(0, depth, 0),
+              corpse.angle,
+              clip,
+              min(ticks / TickRate.float32, model.clipDuration(clip))
+            )
+            visuals[slot].visible = true
 
         proc drawWorldActors() =
           ## Reuses each actor's pose for shadows, color and outlines.

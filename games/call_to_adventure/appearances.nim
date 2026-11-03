@@ -1,7 +1,7 @@
 import
   chroma,
   polyworld/[characters, chargen],
-  assets, content
+  assets, attackclips, content
 
 type
   CharacterModels* = object
@@ -27,9 +27,17 @@ proc loadCharacterModels*(): CharacterModels =
           result.unlitParts.add item.nodes
 
   for class in HeroClass:
-    let model = loadPresetModel(
-      library.namedPreset(HeroPresets[class]), HeroTargetHeight
-    )
+    let
+      preset = library.namedPreset(HeroPresets[class])
+      model = loadPresetModel(preset, HeroTargetHeight)
+      clips = class.heroClips()
+    if clips[2] in AuthoredClips:
+      var held: seq[string]
+      for category in library.presetManifest(preset).categories:
+        if category.key == "Right hand":
+          for item in category.items:
+            held.add item.nodes
+      discard model.addAttackClip(clips[2], clips[0], held)
     discard model.mergeCharacterParts()
     result.heroes[class] = model
   for species in Species:

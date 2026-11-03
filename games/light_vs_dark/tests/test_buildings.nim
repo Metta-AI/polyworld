@@ -96,14 +96,19 @@ doAssert art.offsets[StablesBuilding][WallsStage].x > 0.1'f
 echo "LvD construction stages passed"
 
 echo "Checking owner trims across completed and construction models"
-for owner in 0'i32 ..< PlayerCount:
+var ownerArt = art
+for faction in ownerArt.factions:
+  doAssert ownerArt.factionPacks[faction] == art.pack
+  # Distinct packs test owner routing without loading GPU textures.
+  ownerArt.factionPacks[faction] = PropPack()
+for owner in 0'i32 ..< ownerArt.factions.len.int32:
   for state in [BuildingComplete, BuildingUnderConstruction]:
     let
       structure = Building(
         kind: TownHallBuilding, owner: owner, state: state
       )
-      parts = art.buildingParts(structure, vec3(0))
-    doAssert parts[0].pack == art.factionPacks[art.factions[owner]]
-    doAssert parts[0].pack != art.pack
-doAssert art.buildingPack(-1) == art.pack
-doAssert art.buildingPack(0) != art.buildingPack(1)
+      parts = ownerArt.buildingParts(structure, vec3(0))
+    doAssert parts[0].pack == ownerArt.factionPacks[ownerArt.factions[owner]]
+    doAssert parts[0].pack != ownerArt.pack
+doAssert ownerArt.buildingPack(-1) == ownerArt.pack
+doAssert ownerArt.buildingPack(0) != ownerArt.buildingPack(1)
