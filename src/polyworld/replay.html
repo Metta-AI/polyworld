@@ -20,6 +20,7 @@ canvas{display:block;width:100%;height:100%;outline:none}
 <p id="status-detail">Loading replay viewer…</p>
 </div>
 <script>
+const MaxReplayBytes = 64 * 1024 * 1024;
 const statusElement = document.getElementById('status');
 const statusDetail = document.getElementById('status-detail');
 let failed = false, ready = false;
@@ -34,6 +35,36 @@ function fail(reason) {
   statusElement.className = 'error';
   statusDetail.textContent = 'Unable to play this replay.\n' + detail;
   message('error', {message: detail});
+}
+// Reads either downloaded or decompressed bytes without retaining excess data.
+async function readReplayStream(stream) {
+  if (!stream) return new Uint8Array();
+  const reader = stream.getReader();
+  let bytes = new Uint8Array(), size = 0;
+  try {
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      const required = size + value.length;
+      if (required > MaxReplayBytes) {
+        await reader.cancel();
+        throw new Error('Replay exceeds the 64 MiB limit.');
+      }
+      if (required > bytes.length) {
+        const capacity = Math.min(
+          MaxReplayBytes, Math.max(required, bytes.length * 2, 16384)
+        );
+        const grown = new Uint8Array(capacity);
+        grown.set(bytes.subarray(0, size));
+        bytes = grown;
+      }
+      bytes.set(value, size);
+      size = required;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return bytes.subarray(0, size);
 }
 message('loading');
 window.addEventListener('error', event => fail(event.error || event.message));
@@ -67,8 +98,7 @@ var Module = {
       message('phase', {phase:'replay_fetch_start'});
       const response = await fetch(uri);
       if (!response.ok) throw new Error('Replay download failed (HTTP ' + response.status + ').');
-      let bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length > 64 * 1024 * 1024) throw new Error('Replay exceeds the 64 MiB limit.');
+      let bytes = await readReplayStream(response.body);
       const downloaded = bytes.length;
       const gzip = bytes[0] === 31 && bytes[1] === 139;
       const zlib = (bytes[0] & 15) === 8 && (bytes[0] >> 4) <= 7 &&
@@ -76,16 +106,7 @@ var Module = {
       const compressed = gzip || zlib;
       if (compressed) {
         const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(gzip ? 'gzip' : 'deflate'));
-        const reader = stream.getReader(), chunks = [];
-        let size = 0;
-        while (true) {
-          const {done, value} = await reader.read();
-          if (done) break;
-          size += value.length;
-          if (size > 64 * 1024 * 1024) { await reader.cancel(); throw new Error('Replay exceeds the 64 MiB limit.'); }
-          chunks.push(value);
-        }
-        bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
+        bytes = await readReplayStream(stream);
       }
       if (!bytes.length) throw new Error('The replay file is empty.');
       FS.mkdirTree('/tmp');
