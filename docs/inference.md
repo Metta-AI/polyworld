@@ -162,9 +162,9 @@ A spend cutoff lasts for the episode; a rate ceiling clears over time. Keep a
 valid fallback action when a call fails. Simulation-tick spacing alone does
 not enforce a wall-clock request rate in an unrestricted-speed match.
 
-[spend]: https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#track-your-spend-and-spend-limit
-[rates]: https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#stay-under-the-request-ceiling
-[systemone]: https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#system-one-models-jev
+[spend]: https://github.com/softmax-universe/softmax/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#track-your-spend-and-spend-limit
+[rates]: https://github.com/softmax-universe/softmax/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#stay-under-the-request-ceiling
+[systemone]: https://github.com/softmax-universe/softmax/blob/main/packages/coworld/src/coworld/docs/HOSTED_LLM.md#system-one-models-jev
 
 ## JEV structured judgments
 

@@ -13,9 +13,9 @@ XP minus a fixed time penalty used different scoring.
 
 | Repository | Purpose | Required? |
 | --- | --- | --- |
-| [Metta-AI/polyworld](https://github.com/Metta-AI/polyworld) | Nim runner and game source | Yes |
-| [Metta-AI/polyworld_art](https://github.com/Metta-AI/polyworld_art) | Report fonts, logo, icons, and game assets | Yes |
-| [Metta-AI/polyworld-buff](https://github.com/Metta-AI/polyworld-buff) | Published GotA standings | Only for publishing |
+| [softmax-universe/polyworld](https://github.com/softmax-universe/polyworld) | Nim runner and game source | Yes |
+| [softmax-universe/polyworld_art](https://github.com/softmax-universe/polyworld_art) | Report fonts, logo, icons, and game assets | Yes |
+| [softmax-universe/polyworld-buff](https://github.com/softmax-universe/polyworld-buff) | Published GotA standings | Only for publishing |
 
 Use a GitHub account that can clone these repositories and a Softmax account
 that can read the GotA league and submit experience requests. Hosted games use
@@ -74,8 +74,8 @@ Run this block from the directory where you want that workspace:
 mkdir gota-workspace
 cd gota-workspace
 git lfs install
-git clone https://github.com/Metta-AI/polyworld.git
-git clone https://github.com/Metta-AI/polyworld_art.git
+git clone https://github.com/softmax-universe/polyworld.git
+git clone https://github.com/softmax-universe/polyworld_art.git
 git -C polyworld_art lfs pull
 nimby create
 nimby install polyworld/polyworld.nimble
@@ -101,7 +101,7 @@ softmax status
 ```
 
 Complete the browser login with the account that will run the tournament.
-The [Softmax CLI](https://github.com/Metta-AI/metta/tree/main/packages/softmax-cli)
+The [Softmax CLI](https://github.com/softmax-universe/softmax/tree/main/packages/softmax-cli)
 stores credentials in `~/.softmax/credentials.yaml`. The Nim runner reads that
 file directly using a small parser for the CLI-generated format: two-space
 indented mappings and single-line values, with optional quotes. General YAML
@@ -245,7 +245,7 @@ Abandoned `.tmp` files are ignored. Summaries, CSV exports, and HTML are derived
 Clone the site beside the other repositories, from the `polyworld` root:
 
 ```sh
-git clone https://github.com/Metta-AI/polyworld-buff.git ../polyworld-buff
+git clone https://github.com/softmax-universe/polyworld-buff.git ../polyworld-buff
 ```
 
 If that checkout already exists, use it instead of cloning again. Before

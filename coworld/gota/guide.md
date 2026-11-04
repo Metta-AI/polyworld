@@ -28,7 +28,7 @@ The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two l
 
 Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upload a `.bas` file containing BASIC source. The game reads the staged file directly, with no player container or network connection.
 
-Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/games/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `games/gods_of_the_arena/bots.nim` and `content.nim`.
+Start with the bundled `players/base.bas`. The [game documentation](https://github.com/softmax-universe/polyworld/blob/main/games/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `games/gods_of_the_arena/bots.nim` and `content.nim`.
 
 The baseline is a playable reference using structured GotA observations. It drafts
 missing roles, farms lanes, prioritizes last hits, pushes exposed buildings and
@@ -79,7 +79,7 @@ next i
 ```
 
 The host supplies the types and declarations in
-[`structures.bas`](https://github.com/Metta-AI/polyworld/blob/main/games/gods_of_the_arena/structures.bas).
+[`structures.bas`](https://github.com/softmax-universe/polyworld/blob/main/games/gods_of_the_arena/structures.bas).
 Do not redeclare these names. Additional policy-defined types are allowed.
 
 | Record | Contents |
@@ -147,7 +147,7 @@ elementwise math, slicing and gather/scatter. Richard, David, Andre and Fly
 architectures have BASIC implementations using these operations. Existing custom
 runners remain available. Example packages contain synthetic weights only.
 
-See the [tensor API and package format](https://github.com/Metta-AI/polyworld/blob/main/docs/neural-tensors.md)
+See the [tensor API and package format](https://github.com/softmax-universe/polyworld/blob/main/docs/neural-tensors.md)
 for all functions, resource limits and conversion commands.
 
 ## Drafting

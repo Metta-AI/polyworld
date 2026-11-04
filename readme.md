@@ -39,7 +39,7 @@ repository:
 
 ```sh
 git lfs install
-git clone --depth 1 git@github.com:Metta-AI/polyworld_art.git ../polyworld_art
+git clone --depth 1 git@github.com:softmax-universe/polyworld_art.git ../polyworld_art
 git -C ../polyworld_art lfs pull
 ```
 
