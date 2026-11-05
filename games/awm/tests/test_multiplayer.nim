@@ -149,6 +149,47 @@ suite "Multiplayer battlefield geometry and framing":
       for material in 0 .. 4:
         check material in materials
 
+    test $count & " seats show mortar, not sky, through the paving joints":
+      # The paving is separate slabs with joints between them; under every
+      # point of a floor there must be an upward face at the joint bed, or
+      # the camera sees the sky through the joints.
+      var beds: seq[array[3, Vec2]]
+      for i in countup(0, mesh.vertices.len - 3, 3):
+        let v = mesh.vertices[i]
+        if abs(v.position.y - JointBedY) < 0.001 and v.normal.y > 0.99:
+          beds.add [vec2(v.position.x, v.position.z),
+            vec2(mesh.vertices[i + 1].position.x, mesh.vertices[i + 1].position.z),
+            vec2(mesh.vertices[i + 2].position.x, mesh.vertices[i + 2].position.z)]
+      proc covered(p: Vec2): bool =
+        for t in beds:
+          let
+            d1 = (p.x - t[1].x) * (t[0].y - t[1].y) - (t[0].x - t[1].x) * (p.y - t[1].y)
+            d2 = (p.x - t[2].x) * (t[1].y - t[2].y) - (t[1].x - t[2].x) * (p.y - t[2].y)
+            d3 = (p.x - t[0].x) * (t[2].y - t[0].y) - (t[2].x - t[0].x) * (p.y - t[0].y)
+            # A point on an edge two triangles share belongs to both.
+            e = 0.000001'f32
+          if not ((d1 < -e or d2 < -e or d3 < -e) and (d1 > e or d2 > e or d3 > e)):
+            return true
+      var bare = 0
+      let balcony = layout.balconies[0]
+      for r in 0 .. 24:
+        for s in 0 .. 24:
+          let
+            radial = layout.innerRadius + 0.2'f32 +
+              (layout.outerRadius - layout.innerRadius - 0.5'f32) * r.float32 / 24
+            angle = layout.balconyHalfAngle * 0.95'f32 * (s.float32 / 12 - 1)
+            world = rotateSeat(vec3(sin(angle) * radial, 0, cos(angle) * radial),
+              balcony.yaw)
+          if not covered(vec2(world.x, world.z)): inc bare
+      for r in 0 .. 12:
+        for s in 0 ..< 24:
+          let
+            radial = layout.centerRadius * 0.9'f32 * r.float32 / 12
+            angle = 2 * PI.float32 * s.float32 / 24
+          if not covered(vec2(sin(angle) * radial, cos(angle) * radial)): inc bare
+      check beds.len > 0
+      check bare == 0
+
     test $count & " seats stay fully framed in landscape and portrait":
       for aspect in [0.45'f32, 0.75'f32, 1.0'f32, 1.6'f32, 2.4'f32]:
         let

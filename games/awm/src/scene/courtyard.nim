@@ -431,6 +431,29 @@ proc arcCourse(m: var CourtyardMesh, rng: var Rand, inner, outer,
     m.arcSlab(inner, outer, a, b, bottom, top,
       color * rng.rand(0.87 .. 1.09).float32, bevel)
 
+const
+  JointBedY* = -0.06'f32
+    ## The dark bed under floating paving, just below its joints.
+  JointBedColor = Sandstone * 0.22'f32
+
+proc jointBed(m: var CourtyardMesh, inner, outer, startAngle, endAngle: float32,
+    segments: int) =
+  ## A flat, finely divided upward face under a floating paving: through its
+  ## joints the camera sees dark mortar instead of the sky below the island.
+  ## Unlike an arcSlab its edges follow the arc, so it stays under the paving.
+  for i in 0 ..< segments:
+    let
+      a = startAngle + (endAngle - startAngle) * i.float32 / segments.float32
+      b = startAngle + (endAngle - startAngle) * (i + 1).float32 /
+        segments.float32
+      innerA = vec3(sin(a) * inner, JointBedY, cos(a) * inner)
+      innerB = vec3(sin(b) * inner, JointBedY, cos(b) * inner)
+      outerA = vec3(sin(a) * outer, JointBedY, cos(a) * outer)
+      outerB = vec3(sin(b) * outer, JointBedY, cos(b) * outer)
+    # Inner, outer, outer, inner winds the face upward. At the center of a
+    # disc (inner 0) the second triangle is degenerate and is skipped.
+    m.quad(innerA, outerA, outerB, innerB, JointBedColor)
+
 proc appendTurned(m: var CourtyardMesh, piece: CourtyardMesh, yaw: float32) =
   for source in piece.vertices:
     var vertex = source
@@ -450,6 +473,8 @@ proc buildMultiplayerCourtyardMesh*(layout: MultiplayerLayout): CourtyardMesh =
     middle = (inner + outer) * 0.5'f32
 
   # Small circular dais: separate concentric paving courses and a worn compass.
+  # Its rim covers the bed's edge.
+  result.jointBed(0, centerRadius - 0.10'f32, 0, Tau, 96)
   for course in 0 ..< 4:
     let
       r0 = max(0.045'f32, course.float32 * centerRadius / 4)
@@ -496,6 +521,9 @@ proc buildMultiplayerCourtyardMesh*(layout: MultiplayerLayout): CourtyardMesh =
 
   for balcony in layout.balconies:
     var piece: CourtyardMesh
+    # The edging, the parapet and the end slabs hide the bed's edges.
+    let bedEnd = halfAngle - 0.03'f32 / inner
+    piece.jointBed(inner + 0.05'f32, outer - 0.10'f32, -bedEnd, bedEnd, 64)
     # Five independently tessellated floor courses expand with the ring.
     # Staggered joints continue over the fascia below the playable surface.
     for course in 0 ..< 5:

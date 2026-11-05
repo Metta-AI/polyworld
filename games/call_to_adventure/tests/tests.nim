@@ -4,6 +4,7 @@
 import
   test_maps,
   test_nav,
-  test_sim
+  test_sim,
+  test_skillbar
 
 echo "Game tests passed"

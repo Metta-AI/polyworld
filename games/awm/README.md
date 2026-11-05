@@ -185,6 +185,12 @@ asset download progress, then shows preparation until the first game frame
 is ready. Loading assets are staged separately from the game pack so they
 can appear immediately. Source mappings are in `web/loading/README.md`.
 
+Card illustrations are staged already cropped to the card's 546 × 417 art
+window (`tools/stage_card_art.nim`), the size the game draws them at, so the
+game pack stays near 31 MB instead of carrying the full-size originals.
+`tests/test_assets.nim` checks each staged image draws exactly as its
+original.
+
 With Playwright and Chrome available, run `node tests/test_hero_select.cjs`
 against the server to check hero and button selection, keyboard shortcuts,
 duel/multiplayer, portrait/Retina layouts, and loader progress/error states.

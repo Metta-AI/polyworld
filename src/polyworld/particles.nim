@@ -65,6 +65,8 @@ type
     travelTime: float32
     endTime: float32
     seed: uint32
+    anchor: int32
+      ## What the effect travels with, or 0; see `followParticleAnchors`.
 
   ParticleSystem* = object
     program: ParticleProgram
@@ -162,6 +164,24 @@ proc effectParticleCount(kind: ParticleEffectKind): int =
     12
   of HealingAura, ManaAura, PoisonAura:
     48
+  of BloomSeed:
+    24
+  of BloomPetals:
+    56
+  of RootLeaves:
+    36
+  of SolarOrb:
+    48
+  of SolarFlames:
+    112
+  of MendingAura:
+    40
+  of BladeFlame:
+    24
+  of FireWave:
+    160
+  of HeatEmbers:
+    40
 
 proc effectLifetime(
     kind: ParticleEffectKind,
@@ -187,8 +207,20 @@ proc effectLifetime(
     travelTime
   of LeafBurst:
     0.6'f
-  of HealingAura, ManaAura, PoisonAura:
+  of BloomSeed, SolarOrb:
+    travelTime + 0.1'f32
+  of BloomPetals, RootLeaves:
+    1.8'f32
+  of SolarFlames:
+    1.65'f32
+  of HealingAura, ManaAura, PoisonAura, MendingAura:
     1.75'f32
+  of BladeFlame:
+    0.5'f32
+  of FireWave:
+    0.55'f32
+  of HeatEmbers:
+    1.25'f32
 
 proc addParticleEffect(
     system: var ParticleSystem,
@@ -196,7 +228,8 @@ proc addParticleEffect(
     origin,
     target: Vec3,
     travelTime,
-    delay: float32
+    delay: float32,
+    anchor = 0'i32
 ) =
   ## Adds one effect while keeping the presentation queue bounded.
   if system.effects.len >= MaximumParticleEffects:
@@ -209,7 +242,8 @@ proc addParticleEffect(
     startTime: startTime,
     travelTime: max(travelTime, 0.05'f32),
     endTime: startTime + kind.effectLifetime(travelTime),
-    seed: system.nextSeed
+    seed: system.nextSeed,
+    anchor: anchor
   )
   inc system.nextSeed
 
@@ -217,16 +251,45 @@ proc emitParticleBurst*(
     system: var ParticleSystem,
     kind: ParticleEffectKind,
     position: Vec3,
-    delay = 0.0'f32
+    delay = 0.0'f32,
+    anchor = 0'i32
 ) =
-  ## Emits one stationary burst now or after a short presentation delay.
+  ## Emits one burst now or after a short presentation delay. It stays
+  ## where it was emitted unless it has an anchor to follow.
   system.addParticleEffect(
     kind,
     position,
     position,
     0.05'f32,
+    delay,
+    anchor
+  )
+
+proc emitParticleSpan*(
+    system: var ParticleSystem,
+    kind: ParticleEffectKind,
+    origin,
+    target: Vec3,
+    delay = 0.0'f32
+) =
+  ## Emits one effect that spreads between two points without travelling.
+  system.addParticleEffect(
+    kind,
+    origin,
+    target,
+    0.05'f32,
     delay
   )
+
+proc emitParticleFlight*(
+    system: var ParticleSystem,
+    kind: ParticleEffectKind,
+    origin, target: Vec3,
+    travelTime: float32
+) =
+  ## A travelling visual whose impact is emitted by the simulation event.
+  system.addParticleEffect(kind, origin, target,
+    max(travelTime, 0.05'f32), 0.0'f32)
 
 proc emitParticleProjectile*(
     system: var ParticleSystem,
@@ -246,6 +309,21 @@ proc emitParticleProjectile*(
     0.0'f32
   )
   system.emitParticleBurst(impact, target, duration)
+
+proc followParticleAnchors*(
+    system: var ParticleSystem,
+    place: proc(anchor: int32, position: var Vec3): bool
+) =
+  ## Moves every anchored effect to where `place` puts its anchor now, so
+  ## it travels with whatever it was emitted on. An anchor `place` no
+  ## longer finds leaves its effects where they last were.
+  for effect in system.effects.mitems:
+    if effect.anchor == 0:
+      continue
+    var position = effect.origin
+    if place(effect.anchor, position):
+      effect.target += position - effect.origin
+      effect.origin = position
 
 proc advanceParticles*(system: var ParticleSystem, delta: float32) =
   ## Advances presentation time and removes every finished effect.
@@ -369,7 +447,8 @@ proc drawParticles*(
       visibilityOrigin
     ):
       continue
-    if effect.kind in {ArrowWake, LeafBolt, LeafBurst}:
+    if effect.kind in
+        {ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves}:
       glBlendFuncSeparate(
         GL_SRC_ALPHA,
         GL_ONE_MINUS_SRC_ALPHA,
