@@ -1,5 +1,6 @@
 ## Reproducible native VFX gallery, using the same renderer as the game.
 ## nim c -r --out:build/render-vfx tools/render_vfx.nim [--sequence]
+## Writes to build/vfx-gallery (ignored), never into polyworld_art.
 import std/[os, strformat]
 import opengl, pixie, vmath, windy
 import ../src/core/core, ../src/paths, ../src/vfx/vfxrenderer
@@ -21,8 +22,7 @@ const
 let
   root = currentSourcePath().parentDir.parentDir
   artwork = artworkRoot()
-  output = artwork / "vfx/previews"
-  frames = root / "build/vfx-gallery"
+  output = root / "build/vfx-gallery"
   sequence = "--sequence" in commandLineParams()
   window = newWindow("AWM — VFX review", ivec2(Width, Height))
 window.makeContextCurrent()
@@ -36,7 +36,6 @@ let
 font.size = 29
 font.paint.color = parseHtmlColor("#e9c99b")
 createDir(output)
-if sequence: createDir(frames)
 
 for frame in 0 .. (if sequence: 74 else: 0):
   pollEvents()
@@ -67,7 +66,7 @@ for frame in 0 .. (if sequence: 74 else: 0):
       x = (i mod Columns) * CellWidth + 22
       y = (i div Columns) * CellHeight + 25
     shot.fillText(font, name, translate(vec2(x.float32, y.float32)))
-  shot.writeFile(if sequence: frames / &"frame-{frame:04}.png"
+  shot.writeFile(if sequence: output / &"frame-{frame:04}.png"
     else: output / "warrior-and-ooze.png")
   window.swapBuffers()
-echo "VFX gallery: ", (if sequence: frames else: output / "warrior-and-ooze.png")
+echo "VFX gallery: ", (if sequence: output else: output / "warrior-and-ooze.png")

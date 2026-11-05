@@ -1,13 +1,14 @@
 ## Regenerate standalone card previews without opening the game.
 ## Run from the AWM project root (games/awm):
-## nim c -r --out:/tmp/awm-render-cards tools/render_cards.nim
+## nim c -r --out:build/render-cards tools/render_cards.nim
+## Writes to build/card-previews (ignored), never into polyworld_art.
 import std/[os, strutils]
 import pixie
 import ../src/core/core, ../src/core/cardset, ../src/ui/cardfaces, ../src/paths
 
 let
   root = artworkRoot() / "cards"
-  outputDir = root / "previews"
+  outputDir = currentSourcePath().parentDir.parentDir / "build/card-previews"
 initCardAssets()
 createDir(outputDir)
 
