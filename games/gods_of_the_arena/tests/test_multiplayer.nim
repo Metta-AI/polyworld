@@ -155,7 +155,9 @@ for iteration in 0 ..< 600:
     first.lost()
     disconnectedTick = relay.rooms[0].tick
   if iteration in 41 .. 49:
-    doAssert relay.rooms[0].tick == disconnectedTick
+    doAssert relay.rooms[0].tick > disconnectedTick,
+      "A disconnected controller must not stall the shared timeline"
+    doAssert relay.rooms[0].phase == Playing
   if iteration == 50:
     first.opened()
   if iteration == 80:
@@ -194,7 +196,13 @@ for iteration in 0 ..< 600:
   exchange()
   advanceClients()
   if relay.rooms[0].phase == rooms.Ended:
-    break
+    # Completion stops production, not lagging client playback.
+    var allFinished = true
+    for session in sessions:
+      if not session.finished:
+        allFinished = false
+    if allFinished:
+      break
   doAssert relay.rooms[0].phase != Desynced, relay.rooms[0].detail
 for session in sessions:
   doAssert session.finished

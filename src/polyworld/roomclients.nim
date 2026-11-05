@@ -223,5 +223,10 @@ proc appliedTick*(client: RoomClient, tick: uint32) =
   client.applied = tick
   if client.welcomed:
     client.send(RoomMessage(kind: AppliedTick, match: client.match, tick: tick))
-  if client.packets.len == 0 and client.serverTick > client.applied:
+  # A consumed push window is not proof that the relay is at this tick: asset
+  # loading or a slow client may have let it advance beyond the bounded push.
+  # Probe once on progress, not on empty takeTick calls or CaughtUp replies.
+  if client.packets.len == 0 and
+      (client.snapshot.phase in {Playing, Waiting} or
+        (client.snapshot.phase == Ended and client.serverTick > client.applied)):
     client.requestHistory()

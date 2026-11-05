@@ -75,16 +75,17 @@ exactly once and never advances without a packet. The server checks seat
 ownership and envelope bounds. Each game checks its own payload semantics.
 
 Hash checking cannot be disabled. All controlling clients must agree before
-startup. Every simulated second, the server waits for all controller hashes
-before producing the next tick. Missing hashes pause progress. A differing
-hash stops the match and reports the tick and hash values. Final states must
-also agree. Historical hash checkpoints are retained, so a late spectator's
-reports are checked against the same history. GotA's network digest includes
+startup. During play, clients report a hash every simulated second. The first
+report for a match/tick establishes its historical hash; subsequent reports
+compare against that same checkpoint. Missing or late hashes never delay ticks.
+A differing hash stops the match and reports the tick and hash values. The first
+controller completion ends tick production; later final reports are compared
+asynchronously too. Historical checkpoints remain available to late clients. GotA's network digest includes
 its immutable game configuration and its normal replay state digest.
 
-A disconnected controller pauses the room indefinitely. Reconnection restores
+Slow or disconnected controllers do not pause the room. Reconnection restores
 the same participant, seats, unacknowledged command sequences and local VMs.
-Missing packets are replayed before resuming. Outstanding hash and completion
+The returning client replays missing packets while the room keeps running. Outstanding hash and completion
 reports are retransmitted. This supports connection interruptions while the
 original application remains open, not browser refreshes or process restarts.
 No substitute bots, state repair or silent desync recovery are performed.
@@ -117,7 +118,7 @@ Escape opens Return to game, Pause/Resume match, Settings and Quit to main menu.
 Opening it alone leaves the match running. Offline pause stops local simulation.
 In multiplayer any controlling participant may pause or resume the room;
 spectators cannot. The server stops emitting ticks, preserves pending commands
-and retains mandatory hash barriers. Reconnection does not clear a pause.
+and continues checking arriving hashes. Reconnection does not clear a pause.
 
 Settings remain local and are persisted. A live controller quitting explicitly
 aborts the match for everyone before leaving the room. Spectators can leave
@@ -135,7 +136,8 @@ History is limited to 128 MiB per room, 512 MiB across rooms, and
 345,600 ticks per room. Transport credit is 512 KiB per participant, released
 by receipt acknowledgements. Incoming
 traffic is limited to 256 KiB per second per identified client. Catch-up sends
-16 ticks per batch. A controller more than six ticks behind pauses production.
+16 ticks per batch. Clients more than 16 ticks behind pull history instead of
+receiving unbounded live ticks; they never pause production.
 Inactive connections are closed after 15 seconds and can reconnect. There is
 no timeout that removes a disconnected controller from an active match.
 
@@ -166,7 +168,7 @@ widgets, settings storage and local policy selection. GotA's `multiplayer.nim`
 shows game-owned payload validation and tick application; the relay imports
 none of it.
 
-Focused regressions are `tests/test_rooms.nim` and
+Focused regressions are `tests/test_relay_async_hashes.nim`, `tests/test_rooms.nim` and
 `games/gods_of_the_arena/tests/test_multiplayer.nim`. `games/gods_of_the_arena/tests/manual_network.nim` supplies a
 native Windy client that owns five base bots and can play against a browser
 client. Its `GOTA_ROOM`, `GOTA_SEAT_START`, `GOTA_SEAT_COUNT`, `GOTA_NAME` and
@@ -195,7 +197,7 @@ while preserving packet order. Reset clears the settings; already queued
 packets finish their scheduled delay. RTT includes that delay and client
 turnaround. Timestamps and echoes travel in ordinary packets, without ping
 messages or comparisons between client and server clocks. State hashes
-remain mandatory even when simulated lag makes the match wait.
+remain mandatory, but simulated lag delays verification rather than the match.
 
 The complete headless suite and CI suite pass, including deterministic replay
 checks. The native graphical, headless, Coworld check and WASM builds pass.

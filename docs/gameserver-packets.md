@@ -142,7 +142,10 @@ Return compatible public rooms.
 
 ## 4. CreateRoom — Client → server
 
-Create a room with opaque game setup.
+Create a room with opaque game setup. The relay assigns a six-character uppercase
+A–Z/0–9 invitation code using OS randomness and bounded collision retries.
+Unlisted invitations are not authentication; private reconnect tokens remain
+separate 24-byte secrets. Existing longer room IDs remain joinable exactly.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -154,7 +157,9 @@ Create a room with opaque game setup.
 
 ## 5. JoinRoom — Client → server
 
-Join by room ID; joins during a match are spectators.
+Join by room ID; joins during a match are spectators. Lookup is exact-first;
+only six-character alphanumeric invitations fall back to uppercase. Longer
+legacy IDs and reconnect tokens are never case-folded.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -172,7 +177,7 @@ Replace the local room snapshot after lobby changes or reconnection.
 | `revision` | `uint32` | Setup/roster revision. |
 | `phase` | `uint32` | RoomPhase value. |
 | `tickRate` | `uint32` | Simulation ticks/second. |
-| `flag` | `uint32` | Explicit pause = 1; otherwise 0. Not room visibility. |
+| `flag` | `uint32` | In Lobby: public visibility (1 public, 0 unlisted). In match phases: explicit pause. |
 | `payload` | `string` | Opaque setup; ≤65,536 bytes. |
 | `participants` | `seq[Participant]` | At most 64. |
 | `seats` | `seq[Seat]` | At most 64; array index is seat ID. |
@@ -186,7 +191,7 @@ Owner changes lobby settings; clears readiness and increments revision.
 | `name` | `string` | Room name; ≤96 bytes. |
 | `flag` | `uint32` | Public = 1, unlisted = 0. |
 | `tickRate` | `uint32` | 1–120 ticks/second. |
-| `number` | `uint32` | Seat count must remain unchanged. |
+| `number` | `uint32` | 1–64 seats; shrinking cannot remove another participant's seat. |
 | `payload` | `string` | Opaque setup; ≤65,536 bytes. |
 
 ## 8. ClaimSeat — Client → server
@@ -200,7 +205,9 @@ Claim an empty lobby seat or rename your own seat.
 
 ## 9. ReleaseSeat — Client → server
 
-Release your lobby seat; an already empty seat is accepted.
+Release your lobby seat; an already empty seat is accepted. In Galcon only,
+the host may also release a foreign bot seat (seat name is not `Human`),
+without removing its participant or their other seats.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -208,7 +215,9 @@ Release your lobby seat; an already empty seat is accepted.
 
 ## 10. Ready — Client → server
 
-Confirm the current setup is loaded and report its initial state hash.
+Only a current controller may confirm the loaded setup and initial state hash.
+Roster-only edits retain visible ready intent, but Start requires a new Ready
+confirmation for the current revision; newcomers are never auto-readied.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -217,7 +226,9 @@ Confirm the current setup is loaded and report its initial state hash.
 
 ## 11. StartMatch — Client → server
 
-Owner starts once all seats are owned and all controllers are connected, ready and hash-matched.
+Owner starts once all controllers are connected, ready for the current revision
+and hash-matched, with at least one controller. Galcon may leave potential seats
+empty; other adapters retain the dense-roster requirement.
 
 | Body | Size |
 | --- | --- |
@@ -284,7 +295,7 @@ End a catch-up batch; does not authorize skipping ticks.
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
 | `tick` | `uint32` | Last tick in this batch. |
-| `number` | `uint32` | Current server tick; request another batch if behind. |
+| `number` | `uint32` | Current playback edge (final tick when completed); request another batch if behind. |
 
 ## 19. ReportHash — Client → server
 
@@ -292,8 +303,8 @@ Compare state at tick 0 and every simulation-second boundary; mismatches stop th
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
-| `tick` | `uint32` | Multiple of tickRate; not ahead of server or backward for sender. |
-| `hash` | `uint64` | Game digest; next tick waits for every controller to agree. |
+| `tick` | `uint32` | Multiple of tickRate; not ahead of server. Older retransmissions compare against their own historical checkpoint. |
+| `hash` | `uint64` | Game digest; first report sets the historical checkpoint, later reports compare without waiting. |
 
 ## 20. MatchStatus — Server → client
 
@@ -303,7 +314,7 @@ Publish running, waiting, completed or failed state.
 | --- | --- | --- |
 | `flag` | `uint32` | Explicit pause = 1, otherwise 0; other waits can still apply. |
 | `phase` | `uint32` | RoomPhase value. |
-| `tick` | `uint32` | Latest emitted tick. |
+| `tick` | `uint32` | Latest emitted tick while active; actual final tick when completed. |
 | `detail` | `string` | Status or failure explanation; ≤4,096 bytes. |
 
 ## 21. LeaveRoom — Client → server
@@ -332,7 +343,7 @@ Owner reopens an ended/failed room and clears history, pause and readiness.
 
 ## 24. FinishMatch — Client → server
 
-Report the final state; all controllers must agree before the match ends.
+Report the final state; the first controller report ends tick production. Later reports must match the retained final tick and hash.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -377,7 +388,21 @@ A controller pauses or resumes the current match; spectators cannot.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
-| `flag` | `uint32` | 1 pauses new ticks; 0 resumes only when connection and hash barriers also pass. |
+| `flag` | `uint32` | 1 pauses new ticks; 0 resumes without waiting for client progress or hashes. |
+
+## 30. ResizeRoom — Client → server
+
+Uses the same body and owner/lobby validation as ConfigureRoom. When tick rate
+and opaque payload are unchanged, preserves controlling participants' ready
+intent while incrementing revision. For Galcon JSON setups, a change only to
+integer `players` matching `number` is also roster-only. Other payload changes
+invalidate readiness. Every controller must confirm the resulting revision
+before StartMatch. Name-only changes use the same operation; preserve visibility
+from the Lobby RoomState flag.
+
+Spectator membership changes publish snapshots without changing setup revision.
+Seat changes and controller renames require new revision-bound proofs even when
+ready intent is retained.
 
 ## Shared rules
 
@@ -387,9 +412,9 @@ A controller pauses or resumes the current match; spectators cannot.
 | Match validation | SubmitCommand, AppliedTick, Catchup, ReportHash, FinishMatch, AbortMatch and PauseMatch require the current header match ID. |
 | Delivery | Consecutive per socket; resets on reconnect. Pre-identification failures can use delivery 0. |
 | Commands | Sequence spans all seats of one participant and survives reconnect. Gaps, zero or altered retransmissions fail. |
-| Hash barrier | Mandatory at startup, every simulated second and finish. Missing controller hashes wait indefinitely; mismatches stop visibly. No state repair. |
+| Hash verification | Startup readiness must agree. During play, first report sets the checkpoint; later reports for the same match/tick compare asynchronously. Missing hashes do not pause; mismatches stop visibly. No state repair. |
 | Spectator hashes | Compared with retained checkpoints; mismatch stops the room, but absent spectator reports do not block it. |
-| Disconnect / lag | Missing controller or controller more than six ticks behind pauses production. Reconnect retains seats and requires catch-up. |
+| Disconnect / lag | Missing or lagging controllers do not pause production. Reconnect retains seats; slow clients pull bounded catch-up batches. |
 | Explicit pause | Already-emitted ticks still execute. Pending commands stay on the next tick. Resume resets the clock deadline; no time catch-up burst. |
 | Quit | Live controller sends AbortMatch then LeaveRoom. Spectator sends LeaveRoom. No simulated winner is invented. |
 | Recovery | Same live client reconnects with its private token and VMs intact. Browser reload/process restart recovery is unsupported. |
