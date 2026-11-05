@@ -96,29 +96,30 @@ relay.flush()
 doAssert room.tick == 2 and decode(room.history[1]).commands.len == 0
 let token = relay.guest(first).token
 relay.disconnect(1)
-doAssert room.phase == Waiting
-relay.receive(3, RoomMessage(kind: Keepalive), 500)
-relay.advance(500)
-doAssert room.tick == 2
+doAssert room.phase == Playing
+relay.receive(3, RoomMessage(kind: Keepalive), 0.15)
+relay.advance(0.15)
+doAssert room.tick == 3
 relay.receive(1, RoomMessage(
   kind: Hello, identity: GameIdentity(game: "test-chess", gameplay: 7, protocol: 1),
   name: "Restored", token: token
-), 500)
+), 0.15)
 relay.flush()
 doAssert relay.guest(first).connection == 1
 relay.send(1, RoomMessage(kind: Catchup, match: room.match, tick: 0))
 relay.send(1, RoomMessage(kind: AppliedTick, match: room.match, tick: 2))
-# The other client timed out during the prolonged pause and must also return.
+# The other client may also reconnect while ticks continue.
+relay.disconnect(2)
 relay.receive(2, RoomMessage(
   kind: Hello, identity: GameIdentity(game: "test-chess", gameplay: 7, protocol: 1),
   name: "Restored", token: relay.guest(second).token
-), 500)
+), 0.15)
 relay.flush()
 relay.send(2, RoomMessage(kind: AppliedTick, match: room.match, tick: 2))
 relay.advance(0.2)
 relay.flush()
 doAssert room.phase == Playing
-for tick in 3'u32 .. 24'u32:
+for tick in room.tick + 1 .. 24'u32:
   relay.advance(float64(tick) / 10.0)
   relay.flush()
   for connection in 1 .. 2:
@@ -166,7 +167,7 @@ relay.flush()
 relay.expectError(4, RoomMessage(kind: JoinRoom, room: race.id))
 echo "Room protocol, ordering, reconnect, empty ticks and desync checks passed"
 
-# A missing hash blocks the timeline even when packet acknowledgements arrive.
+# A missing hash never blocks the timeline.
 relay.send(3, RoomMessage(kind: AppliedTick, match: race.match, tick: 1))
 for tick in 2'u32 .. 60'u32:
   relay.advance(float64(tick) / 10)
@@ -177,7 +178,7 @@ for tick in 2'u32 .. 60'u32:
 doAssert race.tick == 60
 relay.advance(6.1)
 relay.flush()
-doAssert race.tick == 60 and race.phase == Waiting
+doAssert race.tick == 61 and race.phase == Playing
 relay.send(3, RoomMessage(
   kind: ReportHash, match: race.match, tick: 60, hash: 123
 ))
@@ -215,7 +216,7 @@ for sequence in 1 .. MaxCommandsPerTick + 1:
   ))
 doAssert race.phase == Desynced
 
-echo "Mandatory startup, missing, historical and final hash checks passed"
+echo "Startup, asynchronous historical and final hash checks passed"
 
 relay = Relay()
 discard relay.connect(1, "test-puzzle")
@@ -283,7 +284,7 @@ doAssert relay.guest(hashRoom.owner).name == "Restored"
 doAssert hashRoom.seats == lobbySeats
 doAssert hashRoom.revision == lobbyRevision + 1
 
-# Pause freezes the server timeline while still enforcing hash barriers.
+# Explicit pause freezes the timeline; hash comparisons remain asynchronous.
 relay = Relay()
 let pauseOwner = relay.connect(1, "pause-test")
 discard relay.connect(2, "pause-test")
@@ -314,13 +315,13 @@ relay.send(1, RoomMessage(
 relay.advance(2)
 relay.flush()
 doAssert pausedRoom.tick == 1
-# Unpausing cannot bypass a missing mandatory hash.
+# Unpausing resumes without waiting for a missing hash.
 relay.send(1, RoomMessage(
   kind: PauseMatch, match: pausedRoom.match, flag: false
 ))
 relay.advance(3)
 relay.flush()
-doAssert pausedRoom.tick == 1 and pausedRoom.phase == Waiting
+doAssert pausedRoom.tick == 1 and pausedRoom.phase == Playing
 relay.send(1, RoomMessage(
   kind: ReportHash, match: pausedRoom.match, tick: 1, hash: 11
 ))
@@ -395,4 +396,4 @@ except RoomsError:
   rejectedPause = true
 doAssert rejectedPause
 
-echo "Pause, resume, reconnect and mandatory hash barriers passed"
+echo "Pause, resume, reconnect and asynchronous hash checks passed"

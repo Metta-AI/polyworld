@@ -95,9 +95,9 @@ suite "Generic relay lobby seat resize":
       room = relay.rooms[0]
     relay.send(2, RoomMessage(kind: ReleaseSeat, seat: 1))
     relay.send(1, RoomMessage(kind: ClaimSeat, seat: 2, name: "Host bot"))
-    for connection in 1 .. 2:
-      relay.send(connection, RoomMessage(kind: Ready,
-        revision: room.revision, hash: 42))
+    relay.send(1, RoomMessage(kind: Ready,
+      revision: room.revision, hash: 42))
+    check not relay.guest(2).ready
     let before = relay.state(room)
     relay.send(1, configure(1))
     check room.seats == @[before.seats[0]]

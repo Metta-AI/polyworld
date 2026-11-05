@@ -19,7 +19,7 @@ type
     ConfigureRoom, ClaimSeat, ReleaseSeat, Ready, StartMatch, BeginMatch,
     SubmitCommand, CommandAck, TickPacket, AppliedTick, Catchup, CaughtUp,
     ReportHash, MatchStatus, LeaveRoom, KickParticipant, ReturnLobby,
-    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch
+    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch, ResizeRoom
   GameIdentity* = object
     game*: string
     gameplay*, protocol*: uint32
@@ -154,7 +154,7 @@ proc encode*(message: RoomMessage): string =
   of Welcome:
     result.put32(message.participant)
     result.putString(message.token)
-  of CreateRoom, ConfigureRoom:
+  of CreateRoom, ConfigureRoom, ResizeRoom:
     result.putString(message.name)
     result.put32(uint32(message.flag))
     result.put32(message.tickRate)
@@ -272,7 +272,7 @@ proc decode*(bytes: string): RoomMessage =
   of Welcome:
     result.participant = reader.get32()
     result.token = reader.getString(64)
-  of CreateRoom, ConfigureRoom:
+  of CreateRoom, ConfigureRoom, ResizeRoom:
     result.name = reader.getString(96)
     let flag = reader.get32()
     if flag > 1:
