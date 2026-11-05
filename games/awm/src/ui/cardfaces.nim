@@ -164,6 +164,19 @@ proc fitFaceText*(runs: openArray[TextRun], box: Rect,
     bottom = min(CardFaceHeight.float32, ceil(ink.y + ink.h) + 2)
   result.ink = Rect(x: left, y: top, w: right - left, h: bottom - top)
 
+proc cropToArtWindow*(source: Image): Image =
+  ## An illustration scaled to cover the face's art window and centered in
+  ## it. A source already the window's size comes back unchanged, so art the
+  ## browser build stages pre-cropped (tools/stage_card_art.nim) draws
+  ## exactly as the full-size original does.
+  let scaleFactor = max(ArtWidth.float32 / source.width.float32,
+    ArtHeight.float32 / source.height.float32)
+  result = newImage(ArtWidth, ArtHeight)
+  let
+    x = (ArtWidth.float32 - source.width.float32 * scaleFactor) / 2
+    y = (ArtHeight.float32 - source.height.float32 * scaleFactor) / 2
+  result.draw(source, translate(vec2(x, y)) * scale(vec2(scaleFactor)))
+
 proc cardArt(relativePath: string): Image =
   ## A card's illustration, scaled once to the window it is drawn into and
   ## kept at that size. The source art is several times larger than the
@@ -176,14 +189,7 @@ proc cardArt(relativePath: string): Image =
         readImage(assetsRoot / relativePath)
       else:
         readImage(assetsRoot / "art/unknown.svg")
-    let
-      scaleFactor = max(ArtWidth.float32 / source.width.float32,
-        ArtHeight.float32 / source.height.float32)
-      crop = newImage(ArtWidth, ArtHeight)
-      x = (ArtWidth.float32 - source.width.float32 * scaleFactor) / 2
-      y = (ArtHeight.float32 - source.height.float32 * scaleFactor) / 2
-    crop.draw(source, translate(vec2(x, y)) * scale(vec2(scaleFactor)))
-    assetImages[key] = crop
+    assetImages[key] = cropToArtWindow(source)
   assetImages[key]
 
 proc cardArtImage*(card: Card): Image =

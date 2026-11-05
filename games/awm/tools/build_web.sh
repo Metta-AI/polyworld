@@ -67,9 +67,14 @@ done
 cp -R "$art_dir/themes/main" "$art_stage/themes/"
 cp -R "$art_dir/ui" "$art_stage/"
 cp "$art_dir"/icons/*.png "$art_stage/icons/"
-for directory in art fonts frames icons; do
+for directory in fonts frames icons; do
   cp -R "$art_dir/awm/cards/$directory" "$art_stage/awm/cards/"
 done
+# The game crops every illustration to the card's art window when it loads
+# it; stage them cropped already, so the download holds only what is drawn.
+(cd "$project_dir" && "$nim_command" r --hints:off \
+  --out:"$web_dir/stage_card_art" tools/stage_card_art.nim \
+  "$art_dir/awm/cards/art" "$art_stage/awm/cards/art")
 cp -R "$art_dir/awm/vfx/textures" "$art_stage/awm/vfx/"
 cp -R "$art_dir/awm/ui/hud" "$art_stage/awm/ui/"
 cp -R "$art_dir/awm/battlefield/textures" "$art_stage/awm/battlefield/"
