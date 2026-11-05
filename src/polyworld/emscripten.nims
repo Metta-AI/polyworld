@@ -46,11 +46,13 @@ proc setupEmscripten*(gameDir: string, game = "") =
         $hash(logoData) & "\" " &
         "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
-    if game == "gota":
-      for bot in ["base", "rusher", "puller", "jev"]:
+    if game in ["gota", "lvd"]:
+      let bots = if game == "gota": @["base", "rusher", "puller", "jev"]
+        else: @["base"]
+      for bot in bots:
         preload.add " --preload-file " & quoteShell(
           gameDir / "players" / (bot & ".bas") &
-          "@/policies/gota/" & bot & ".bas")
+          "@/policies/" & game & "/" & bot & ".bas")
       switch("passL", "-s EXPORTED_FUNCTIONS=" &
         "_main,_malloc,_free,_windy_websocket_open_callback," &
         "_windy_websocket_message_callback,_windy_websocket_error_callback," &

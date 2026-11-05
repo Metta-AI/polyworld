@@ -304,7 +304,7 @@ proc observedAt(index: int32): Observed =
     return Observed(owner: -1)
   snapshot[index]
 
-proc sendChat*(
+proc deliverChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Routes global broadcasts and direct messages between players.
@@ -321,6 +321,20 @@ proc sendChat*(
         continue
     if game.inboxes[recipient].push(id, text):
       inc result
+
+proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
+  ## Networked mailboxes receive only authoritative relay deliveries.
+  if not game.networked:
+    return game.deliverChat(sender, target, text)
+  if sender notin 0 ..< game.inboxes.len or target < -2 or target == -1 or
+    target >= game.inboxes.len or text.len > MaxChatBytes or
+    game.chatSubmissions.len >= 4096:
+      return 0
+  var copy = newString(text.len)
+  for i, ch in text: copy[i] = ch
+  game.chatSubmissions.add ChatSubmission(player: int32(sender),
+    target: int32(target), text: copy)
+  1
 
 proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1): Host =
   ## Builds the complete world-query and command interface for one player.

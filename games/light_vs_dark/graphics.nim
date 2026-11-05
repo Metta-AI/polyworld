@@ -11,15 +11,16 @@ import
   std/[math, os, strformat, strutils, tables, times, unicode],
   chroma, fixxy, opengl, pixie, vmath, windy, silky,
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
-    inputs, lighting, particles, particleshaders, pathing, player, profiles,
+    inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
-    viewers, visions, worldbars, worldtexts],
-  appearances, assets, buildings, content, factions, groves, symbols,
+    viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays],
+  appearances, assets, buildings, content, factions, groves, symbols, treeorders,
   sim, maps,
   game,
   replays,
   ui,
-  controls
+  controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
+  networkpresentation, shortcutsettings, unitselection
 
 const
   DefaultCameraDistance = 17.0'f
@@ -34,6 +35,8 @@ const
     ## Pointer travel that turns a click into a box select.
 
 type
+  MatchMenuPage = enum
+    HiddenMatchMenu, PauseMenu, MatchSettings
   GraphicsError = object of CatchableError
   SeekCheckpoint = object
     world: World
@@ -60,15 +63,11 @@ var
   selectionPressPosition = vec2(0)
   selectionStarted = false
   selectionAdditive = false
+  lineGesture: LineGesture
+  rightOrderStarted = false
   groupCameraScale = 1.0'f32
   seekCheckpoints: seq[SeekCheckpoint]
-  transport* = initPlayer(
-    live = not run.replayMode,
-    durationTicks = run.maximumTicks,
-    playing = not options.pauseOnStart,
-    speed = options.speed,
-    repeating = true
-  )
+  transport*: player.Player
   placedEditCount = 0
   placedBuildingKey = ""
   sceneDirty = false
@@ -81,8 +80,33 @@ var
   outlinePose: CharacterPose
   terrainVisionTick = int32.low
   terrainVisionMode = int32.low
+  terrainReady = false
+  shortcutState: ShortcutState
+  shortcutHeldButtons, shortcutFrameButtons: set[Button]
 
 ## Presentation helpers
+
+proc cancelGameplayGestures() =
+  ## Menu input must not leave a half-finished battlefield gesture behind.
+  shortcutState.cancelShortcut()
+  selectionStarted = false
+  selectionAdditive = false
+  panning = false
+  minimapPanning = false
+  rightOrderStarted = false
+  lineGesture.cancelLine()
+
+proc attackMinimapArea*(layout: GameUiLayout): GameUiPanel =
+  ## Use the same stacked map rectangle as the HUD, not its clock/buttons.
+  layout.panel(GameUiRegion.TopRight, PanelMinimap).minimapPanels().map
+
+proc attackMinimapTile*(layout: GameUiLayout, mouse: Vec2, side: int32): Tile2 =
+  let area = attackMinimapArea(layout)
+  if not area.contains(mouse) or side <= 0:
+    return NoTile
+  let relative = (mouse - area.origin) / area.size
+  tile2(clamp(int32(relative.x * side.float32), 0, side - 1),
+    clamp(int32(relative.y * side.float32), 0, side - 1))
 
 proc mapHalf(): float32 =
   ## Returns the map's world-space radius for drawing and camera bounds.
@@ -98,7 +122,7 @@ proc addHudIcons(builder: AtlasBuilder, factions: openArray[Faction]) =
         GraphicsError,
         "The UI atlas is too small for unit symbols."
       )
-  for player in 0'i32 ..< int32(min(run.world.players.len, FactionFiles.len)):
+  for player in 0'i32 ..< int32(min(factions.len, FactionFiles.len)):
     for kind in BuildingKind:
       if kind == GoldMineBuilding and player != LightPlayer:
         continue
@@ -169,6 +193,32 @@ proc buildingCentre(structure: Building): Vec3 =
       structure.footprint.depth.float32 * 0.5'f - mapHalf()
   vec3(x, surfaceHeight(x, z), z)
 
+proc initialCameraTarget*(world: World, playerSlot, selectedId: int32): Vec3 =
+  ## Frames a human's opening selection once, after terrain is available.
+  ## Spectators start at the map centre and retain the action camera.
+  if playerSlot > 0:
+    let half = world.map.side.float32 / 2
+    for unit in world.units:
+      if unit.id == selectedId and unit.owner == playerSlot - 1 and
+          unit.state notin {UnitDying, UnitInMine}:
+        let
+          x = toFloat32(unit.body.pos.x) - half
+          z = toFloat32(unit.body.pos.y) - half
+        return vec3(x, surfaceHeight(x, z), z)
+    for preferred in [selectedId, NoEntity]:
+      for structure in world.buildings:
+        if structure.owner != playerSlot - 1 or structure.state == BuildingDying:
+          continue
+        if (preferred != NoEntity and structure.id == preferred) or
+            (preferred == NoEntity and structure.kind == TownHallBuilding):
+          let
+            x = structure.origin.x.float32 +
+              structure.footprint.width.float32 / 2 - half
+            z = structure.origin.y.float32 +
+              structure.footprint.depth.float32 / 2 - half
+          return vec3(x, surfaceHeight(x, z), z)
+  vec3(0, surfaceHeight(0, 0), 0)
+
 proc isSelected*(id: int32): bool =
   ## Returns whether one entity belongs to the RTS selection set.
   for candidate in selectedIds:
@@ -189,27 +239,86 @@ proc shownBuilding*(structure: Building): bool =
     return true
   run.world.buildingVisible(viewMode - 1, structure)
 
-proc runGraphics*() =
-  ## Runs the native or Emscripten spectator.
+proc buildUiAtlas(factions: openArray[Faction]): AtlasBuilder =
+  result = newHudAtlas(4096)
+  addHudIcons(result, factions)
+  result.addDefaultFonts()
+  result.addLobbyFonts()
+  result.addHomeAssets()
+  result.addFont(DefaultFontPath, "WorldName", 32.0)
+
+proc initializeGraphics*() =
+  ## Creates one application window without constructing a hidden match.
+  if window != nil: return
+  let builder = buildUiAtlas(factionOrder(DefaultSeed.int64))
+  builder.write(AtlasPath)
+  (window, sk) = initGameWindow(WindowTitle, AtlasPath,
+    gameWindowSize(options.windowWidth, options.windowHeight),
+    options.vsync, msaa = msaa4x)
+
+proc runGraphics*(network: NetworkMatch = nil,
+    connection: Connection = nil): bool {.discardable.} =
+  ## Owns match resources; the application window survives returning home.
+  initializeGraphics()
+  window.onFrame = nil
+  window.onButtonPress = nil
+  window.onButtonRelease = nil
+  shortcutState.resetShortcut()
+  shortcutHeldButtons = {}
+  shortcutFrameButtons = {}
+  endShortcutEditing()
+  hudNetwork = network
+  defer: hudNetwork = nil
   startGameProfile()
+  var
+    leaveMatch, quitToMenu, leaveRequested: bool
+    matchMenu = HiddenMatchMenu
+    preferences = readLvdPreferences()
+    saveError: string
+  preferences.applyPreferences(window)
+  let previousBindings = customBindingsEnabled
+  customBindingsEnabled = true
+  bindingCapture = false
+  defer:
+    customBindingsEnabled = previousBindings
+    bindingCapture = false
+  viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
+  primaryId = NoEntity
+  lineGesture.cancelLine()
+  rightOrderStarted = false
+  selectedIds.setLen(0)
+  seekCheckpoints.setLen(0)
+  previousUnitPositions.clear()
+  previousUnitFacings.clear()
+  unitPoses.setLen(0)
+  terrainVisionTick = int32.low
+  terrainVisionMode = int32.low
+  pendingBuild = -1
+  attackMoveArmed = false
+  selectionStarted = false
+  panning = false
+  minimapPanning = false
+  followSelection = false
+  cameraDistance = DefaultCameraDistance
+  cameraTarget = vec3(0)
+  placedEditCount = 0
+  placedBuildingKey = ""
+  framesSinceRebake = 0
+  frameAlpha = 0
+  clearPlayerCommands()
+  transport = initPlayer(live = not run.replayMode,
+    durationTicks = run.maximumTicks, playing = not options.pauseOnStart,
+    speed = options.speed,
+    repeating = network == nil and (run.replayMode or options.playerSlot == 0))
   let order = factionOrder(run.mapSeed.int64)
   var playerFactions = newSeq[Faction](run.world.players.len)
   for player in 0 ..< run.world.players.len:
     playerFactions[player] = order[Faction(player mod FactionFiles.len)]
-  profileBlock "atlas":
-    let builder = newHudAtlas(4096)
-    addHudIcons(builder, playerFactions)
-    builder.addDefaultFonts()
-    builder.addFont(DefaultFontPath, "WorldName", 32.0)
-    builder.write(AtlasPath)
-  profileBlock "window":
-    (window, sk) = initGameWindow(
-      WindowTitle,
-      AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight),
-      options.vsync,
-      msaa = msaa4x
-    )
+  let builder = buildUiAtlas(playerFactions)
+  sk.builder = builder
+  sk.image = builder.atlasImage
+  sk.atlas = builder.atlas
+  sk.uploadAtlas()
   if options.playerSlot > 0 and not run.replayMode:
     let player = options.playerSlot - 1
     for unit in run.world.units:
@@ -221,10 +330,13 @@ proc runGraphics*() =
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
-    initTerrain(
-      NoTrees, GeneratedTerrain, NoRocks, LvdTerrainTiles,
-      settings = LvdTerrainAssets
-    )
+    clearProps()
+    if not terrainReady:
+      initTerrain(
+        NoTrees, GeneratedTerrain, NoRocks, LvdTerrainTiles,
+        settings = LvdTerrainAssets
+      )
+      terrainReady = true
     setTileMaterial(
       RockTile.int,
       LvdRockSurface,
@@ -273,7 +385,12 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   setEnvironmentPalette(scene.toon)
+  var attackMarkSettings = clickMarkSettings()
+  attackMarkSettings.startColor = vec4(1.0, 0.16, 0.12, 0.95)
+  attackMarkSettings.endColor = vec4(0.9, 0.04, 0.02, 0.0)
+  attackMarkSettings.edgeColor = vec4(1.0, 0.35, 0.25, 1.0)
   var
+    attackClickMarks = initClickMarks(attackMarkSettings)
     particles = initParticleSystem()
     clickMarks = initClickMarks()
     worldShapes = initShapeRenderer()
@@ -361,7 +478,8 @@ proc runGraphics*() =
   proc liveWalkable(layer, x, z: int): bool {.nimcall.} =
     ## Supplies current blockers when the optional movement grid is visible.
     layer == 0 and run.world.tileOpen(int32(x), int32(z))
-  cameraTarget = vec3(0, 0, 0)
+  cameraTarget = initialCameraTarget(run.world,
+    if run.replayMode: 0'i32 else: options.playerSlot, primaryId)
   var
     viewingDt = 0.0'f
     viewingSeeking = false
@@ -416,7 +534,7 @@ proc runGraphics*() =
     particles.clearParticles()
     while run.world.tick < wanted:
       advanceGame()
-      captureCheckpoint()
+      if network == nil: captureCheckpoint()
 
   ## Camera and input
 
@@ -725,29 +843,33 @@ proc runGraphics*() =
 
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
+    if not window.focused:
+      shortcutState.resetShortcut()
+      shortcutHeldButtons = {}
+    if matchMenu != HiddenMatchMenu:
+      cancelGameplayGestures()
+      return
     pruneSelection()
-    updateMinimapCamera(
-      window,
-      sk.mousePos,
-      cameraTarget,
-      minimapPanning,
-      followSelection
-    )
+    if attackMoveArmed:
+      minimapPanning = false
+    else:
+      updateMinimapCamera(
+        window, sk.mousePos, cameraTarget, minimapPanning, followSelection
+      )
     if minimapPanning:
       actionCam.takeManual()
     let overUi = mouseOverUi(window, sk.mousePos)
     if window.buttonPressed[KeyA] and
-        (window.buttonDown[KeyLeftControl] or
-          window.buttonDown[KeyRightControl]):
+        window.actionDown(ControlInput):
+      attackMoveArmed = false
       selectAllUnits()
-    elif window.mousePressed(MouseLeft) and not overUi:
+    elif window.mousePressed(MouseLeft) and not overUi and not attackMoveArmed:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
-        window.buttonDown[KeyLeftShift] or
-        window.buttonDown[KeyRightShift]
+        window.actionDown(ShiftInput)
     if window.mousePressed(MouseMiddle) and
-        (not overUi or window.buttonPressed[MouseMiddleKey]):
+        (not overUi or window.keyboardPanPressed()):
       panning = true
     if not window.mouseDown(MouseMiddle):
       panning = false
@@ -823,7 +945,23 @@ proc runGraphics*() =
       clearSelection()
 
   proc updateWorldSelection(viewProjection: Mat4) =
-    ## Applies click, shift-click, or box selection on left release.
+    ## Windy raises DoubleClick on the second left press, not its release.
+    if window.buttonPressed[DoubleClick]:
+      # Consume the second release even when a modal/HUD/command owns input.
+      selectionStarted = false
+      if matchMenu != HiddenMatchMenu or not transport.playing or
+          mouseOverUi(window, sk.mousePos) or pendingBuild >= 0 or
+          attackMoveArmed or bindingCapture:
+        return
+      let owner =
+        if playerMode(): options.playerSlot - 1
+        elif viewMode > 0: viewMode - 1
+        else: -1'i32
+      let ids = run.world.matchingUnitIds(pickEntity(viewProjection), owner)
+      if ids.len > 0:
+        selectBox(ids, window.actionDown(ShiftInput))
+        # The consumed press must not collapse back to a single selection.
+        return
     if not window.mouseReleased(MouseLeft):
       return
     if not selectionStarted:
@@ -867,7 +1005,8 @@ proc runGraphics*() =
     for id in selectedIds:
       if id.isUnitId and run.world.hasUnit(id):
         let unit = run.world.units[run.world.unitIndex(id)]
-        if unit.owner == player and unit.kind == PeonUnit:
+        if unit.owner == player and unit.kind == PeonUnit and unit.hp > 0 and
+            unit.state notin {UnitDying, UnitInMine}:
           queueBuild(player, id, pendingBuild, x, y)
           pendingBuild = -1
           return
@@ -877,7 +1016,7 @@ proc runGraphics*() =
     let xz = tileCentreXZ(tile2(x, y))
     vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
 
-  proc issueSelectedMove(player, x, y: int32): bool =
+  proc issueSelectedMove(player, x, y: int32, append = false): bool =
     ## Moves every selected owned unit, or rallies a selected building.
     if not run.world.map.inGrid(x, y) or not run.world.terrainOpen(x, y):
       return false
@@ -885,25 +1024,116 @@ proc runGraphics*() =
       if id.isUnitId and run.world.unitOwner(id) == player:
         if run.world.hasUnit(id):
           let unit = run.world.units[run.world.unitIndex(id)]
-          if unit.state == UnitInMine:
+          if unit.hp <= 0 or unit.state == UnitDying or
+              (unit.state == UnitInMine and not append):
             continue
-        if attackMoveArmed:
-          queueAttackMove(player, id, x, y)
-        else:
-          queueMove(player, id, x, y)
+        queueMove(player, id, x, y, append = append)
         result = true
     if not result:
       for id in selectedIds:
         if id.isBuildingId and run.world.buildingOwner(id) == player:
           queueSetRally(player, id, x, y)
+          result = true
 
   proc updatePlayerOrder(viewProjection: Mat4) =
-    ## Turns a right-click into move, attack, harvest, or rally.
+    ## A + primary targets an enemy or attack-moves combat-capable units.
+    ## Keep arming through secondary press for the line-order gesture adapter.
     if not playerMode():
+      lineGesture.cancelLine()
+      rightOrderStarted = false
       return
-    if not window.mousePressed(MouseRight):
+    let
+      rightOrder = window.mouseReleased(MouseRight)
+      attackClick = attackMoveArmed and window.mousePressed(MouseLeft)
+      player = options.playerSlot - 1
+      inside = window.mousePos.x >= 0 and window.mousePos.y >= 0 and
+        window.mousePos.x < window.size.x and window.mousePos.y < window.size.y
+      overUi = mouseOverUi(window, sk.mousePos)
+      onMinimap = attackMinimapTile(currentLayout(window), sk.mousePos,
+        run.world.map.side) != NoTile and not window.buttonDown[KeyTab]
+    if window.mousePressed(MouseRight):
+      rightOrderStarted = inside and (not overUi or onMinimap)
+      if rightOrderStarted and not overUi and not onMinimap and pendingBuild < 0:
+        let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
+          viewProjection, cameraTarget.y)
+        lineGesture.beginLine(run.world, player, selectedIds,
+          linePoint(ground.x + mapHalf(), ground.z + mapHalf()),
+          linePoint(window.mousePos.x, window.mousePos.y), attackMoveArmed)
+    if lineGesture.active:
+      if not inside or not window.focused or pendingBuild >= 0:
+        lineGesture.cancelLine()
+        rightOrderStarted = false
+      else:
+        let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
+          viewProjection, cameraTarget.y)
+        # A drawn preview is a promise: release commits its exact snapshot,
+        # rather than reallocating slots after the simulation advanced.
+        if not rightOrder or not lineGesture.dragging:
+          lineGesture.updateLine(run.world, selectedIds,
+            linePoint(ground.x + mapHalf(), ground.z + mapHalf()),
+            linePoint(window.mousePos.x, window.mousePos.y))
+        if not lineGesture.active:
+          rightOrderStarted = false
+        elif rightOrder:
+          let wasAttack = lineGesture.attackMove
+          let targets = lineGesture.targets
+          let outcome = lineGesture.releaseLine(run.world, selectedIds,
+            inside = inside and not overUi,
+            append = window.actionDown(ShiftInput))
+          if outcome != LineClick:
+            rightOrderStarted = false
+            if outcome == LineCommitted:
+              for target in targets:
+                if wasAttack:
+                  attackClickMarks.emitClickMark(clickTilePoint(target.tile.x.int32,
+                    target.tile.y.int32))
+                else:
+                  clickMarks.emitClickMark(clickTilePoint(target.tile.x.int32,
+                    target.tile.y.int32))
+              attackMoveArmed = false
+            return
+        elif not window.mouseDown(MouseRight):
+          lineGesture.cancelLine()
+          rightOrderStarted = false
+    if not rightOrder and not attackClick:
+      return
+    if rightOrder:
+      if not rightOrderStarted or not inside: return
+      rightOrderStarted = false
+      attackMoveArmed = false
+    # Minimap orders must precede generic HUD rejection. Tab owns its overlay.
+    let mini = attackMinimapTile(currentLayout(window), sk.mousePos,
+      run.world.map.side)
+    if mini != NoTile and not window.buttonDown[KeyTab]:
+      if attackClick and not rightOrder:
+        selectionStarted = false
+        minimapPanning = false
+        if run.world.queueArmedAttackMove(player, selectedIds,
+            mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+          attackClickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
+      elif pendingBuild < 0 and issueSelectedMove(player, mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+        clickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
       return
     if mouseOverUi(window, sk.mousePos):
+      return
+    if attackClick and not rightOrder:
+      selectionStarted = false
+      let picked = pickEntity(viewProjection)
+      if picked != NoEntity:
+        if run.world.queueSelectedAttack(player, selectedIds, picked,
+            append = window.actionDown(ShiftInput)):
+          attackMoveArmed = false
+          if run.world.hasUnit(picked):
+            attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(picked)]))
+          elif run.world.hasBuilding(picked):
+            attackClickMarks.emitClickMark(buildingCentre(run.world.buildings[run.world.buildingIndex(picked)]))
+        # Friendly/neutral/invalid entity clicks never become ground orders.
+        return
+      let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
+        viewProjection, cameraTarget.y)
+      let tile = groundTile(ground, mapHalf(), run.world.map.side)
+      if run.world.queueArmedAttackMove(player, selectedIds, tile[0], tile[1], append = window.actionDown(ShiftInput)):
+        attackClickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
       return
     if pendingBuild >= 0:
       let origin = buildGhostOrigin(viewProjection)
@@ -916,7 +1146,6 @@ proc runGraphics*() =
         clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
       return
     let
-      player = options.playerSlot - 1
       picked = pickEntity(viewProjection)
       ground = pickGroundPoint(
         window.mousePos.vec2,
@@ -925,7 +1154,10 @@ proc runGraphics*() =
         cameraTarget.y
       )
       tile = groundTile(ground, mapHalf(), run.world.map.side)
-      tree = run.world.map.tileIndex(tile[0], tile[1])
+      tree = grove.pickHarvestTree(
+        scenery, run.world.treeWood, window.mousePos.vec2, window.size.vec2,
+        viewProjection, cameraTarget.y
+      )
       under = structureAtTile(tile[0], tile[1])
       target =
         if under != NoEntity:
@@ -935,44 +1167,55 @@ proc runGraphics*() =
     if target != NoEntity:
       if run.world.hasBuilding(target):
         let structure = run.world.buildings[run.world.buildingIndex(target)]
+        if structure.owner == player and structure.state == BuildingUnderConstruction:
+          for id in run.world.eligibleLineUnits(player, selectedIds):
+            let unit = run.world.units[run.world.unitIndex(id)]
+            if unit.kind == PeonUnit:
+              queueBuild(player, id, structure.kind.ord.int32,
+                structure.origin.x.int32, structure.origin.y.int32)
+              clickMarks.emitClickMark(buildingCentre(structure))
+              return
+          return
         if structure.kind == GoldMineBuilding:
           var harvested = false
           for id in selectedIds:
             if id.isUnitId and run.world.hasUnit(id):
               let unit = run.world.units[run.world.unitIndex(id)]
               if unit.owner == player and unit.kind == PeonUnit:
-                queueHarvest(player, id, target, 0)
+                queueHarvest(player, id, target, 0, append = window.actionDown(ShiftInput))
                 harvested = true
           if harvested:
             clickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
         if structure.owner != player:
-          for id in selectedIds:
-            if id.isUnitId and run.world.unitOwner(id) == player:
-              queueAttack(player, id, target)
+          if run.world.queueSelectedAttack(player, selectedIds, target,
+              append = window.actionDown(ShiftInput)):
+            attackClickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
       elif run.world.hasUnit(target) and
           run.world.unitOwner(target) != player:
-        for id in selectedIds:
-          if id.isUnitId and run.world.unitOwner(id) == player:
-            queueAttack(player, id, target)
+        if run.world.queueSelectedAttack(player, selectedIds, target,
+            append = window.actionDown(ShiftInput)):
+          attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
         attackMoveArmed = false
         return
-    if run.world.treeWood[tree] > 0:
+    if tree >= 0:
       var harvested = false
       for id in selectedIds:
         if id.isUnitId and run.world.hasUnit(id):
           let unit = run.world.units[run.world.unitIndex(id)]
           if unit.owner == player and unit.kind == PeonUnit:
-            queueHarvest(player, id, tree, 1)
+            queueHarvest(player, id, tree, 1, append = window.actionDown(ShiftInput))
             harvested = true
       if harvested:
-        clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
+        clickMarks.emitClickMark(clickTilePoint(
+          tree mod run.world.map.side, tree div run.world.map.side
+        ))
         attackMoveArmed = false
         return
-    if issueSelectedMove(player, tile[0], tile[1]):
+    if issueSelectedMove(player, tile[0], tile[1], append = window.actionDown(ShiftInput)):
       clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
     attackMoveArmed = false
 
@@ -1292,17 +1535,18 @@ proc runGraphics*() =
     lastFrameTime = epochTime()
   const Step = 1.0'f32 / float32(TickRate)
 
-  proc advanceRenderedMatch() =
+  proc advanceRenderedMatch(packet = RoomMessage()) =
     ## Advances one tick and converts its combat transitions into particles.
     var oldUnitCooldowns: Table[int32, int32]
     for unit in run.world.units:
       oldUnitCooldowns[unit.id] = unit.cooldown
     let towerTargets = expectedTowerTargets()
     captureUnitPoses()
-    advanceGame()
+    if network == nil: advanceGame()
+    else: network.applyPacket(packet)
     feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
-    captureCheckpoint()
+    if network == nil: captureCheckpoint()
 
   when defined(takeScreenshot):
     applyScreenshotCamera(cameraDistance)
@@ -1341,6 +1585,7 @@ proc runGraphics*() =
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
+    networkPresentation: NetworkPresentation
 
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
@@ -1355,39 +1600,74 @@ proc runGraphics*() =
         cameraSeekSerial = transport.seekSerial
       sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
+      let gameplayBindings = inputBindings
+      inputBindings = maskShortcutBindings(gameplayBindings,
+        shortcutHeldButtons + shortcutFrameButtons)
       profileBlock "camera":
         updateCamera(dt)
+      inputBindings = gameplayBindings
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
       transport.sync(run.world.tick, recorded, run.world.over)
-      let restoreTick = transport.takeRestore()
-      if restoreTick >= 0:
-        restoreTo(restoreTick)
-        transport.sync(run.world.tick, recorded, run.world.over)
-      feedLvdActions(observeTick = true)
-      transport.startFrame(dt, TickRate)
-      let frameStart = epochTime()
-      run.historyPlayback = transport.inHistory
-      profileBlock "simulate":
-        while transport.shouldTick(frameStart):
-          if atLiveTickCap(run.world.tick, run.maximumTicks, transport.live):
-            break
-          run.historyPlayback = transport.inHistory
-          advanceRenderedMatch()
-          let recordedNow =
-            if run.recorder != nil: int32(run.recorder.data.hashes.len)
-            else: int32(run.replayPlayer.data.hashes.len)
-          transport.sync(run.world.tick, recordedNow, run.world.over)
+      if network != nil:
+        connection.stats.tickRate = int(TickRate)
+        connection.pump()
+        if quitToMenu:
+          if network.client.snapshot.room.len == 0:
+            leaveMatch = true
+          elif not leaveRequested and network.client.snapshot.phase in {rooms.Ended, Desynced}:
+            network.client.send(RoomMessage(kind: LeaveRoom))
+            leaveRequested = true
+        transport.playing = not network.finished and network.client.snapshot.phase == rooms.Playing
+        transport.speedIndex = 0
+        run.historyPlayback = false
+        networkPresentation.startFrame(dt)
+        try:
+          network.flushSubmissions()
+          var packet: RoomMessage
+          let started = epochTime()
+          while not network.finished and connection.takeTick(packet, int(TickRate)):
+            advanceRenderedMatch(packet)
+            inc connection.stats.playedTicks
+            networkPresentation.appliedTick()
+            if epochTime() - started > 0.012: break
+        except RoomsError as error:
+          network.abort(error.msg)
+        connection.pump()
+        transport.sync(run.world.tick, run.world.tick, run.world.over)
+      else:
+        let restoreTick = transport.takeRestore()
+        if restoreTick >= 0:
+          restoreTo(restoreTick)
+          transport.sync(run.world.tick, recorded, run.world.over)
+        feedLvdActions(observeTick = true)
+        transport.startFrame(dt, TickRate)
+        let frameStart = epochTime()
+        run.historyPlayback = transport.inHistory
+        profileBlock "simulate":
+          while transport.shouldTick(frameStart):
+            if atLiveTickCap(run.world.tick, run.maximumTicks, transport.live):
+              break
+            run.historyPlayback = transport.inHistory
+            advanceRenderedMatch()
+            let recordedNow =
+              if run.recorder != nil: int32(run.recorder.data.hashes.len)
+              else: int32(run.replayPlayer.data.hashes.len)
+            transport.sync(run.world.tick, recordedNow, run.world.over)
       let active = simulationActive(transport)
       frameAlpha =
-        if active:
+        if network != nil:
+          networkPresentation.frameAlpha(
+            connection.playback, connection.stats, networkTime(), int(TickRate))
+        elif active:
           clamp(transport.accumulator / Step, 0.0'f32, 1.0'f32)
         else:
           0.0'f32
       if active:
         particles.advanceParticles(dt)
         clickMarks.advanceClickMarks(dt)
+        attackClickMarks.advanceClickMarks(dt)
       inc framesSinceRebake
       if run.world.terrainEdits.len != placedEditCount or
           buildingKey() != placedBuildingKey:
@@ -1415,8 +1695,16 @@ proc runGraphics*() =
         cameraForward = normalize(cameraTarget - cameraEye)
         barCameraRight = normalize(cross(cameraForward, vec3(0, 1, 0)))
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
-      updateWorldSelection(viewProjection)
-      updatePlayerOrder(viewProjection)
+      inputBindings = maskShortcutBindings(gameplayBindings,
+        shortcutHeldButtons + shortcutFrameButtons)
+      if matchMenu == HiddenMatchMenu:
+        updateWorldSelection(viewProjection)
+        updatePlayerOrder(viewProjection)
+      else:
+        lineGesture.cancelLine()
+        rightOrderStarted = false
+      inputBindings = gameplayBindings
+      shortcutFrameButtons = {}
       profileBlock "drawWorld":
         # Match GotA's short palette fades and fixed light direction.
         scene.toon.setArenaHour(
@@ -1484,6 +1772,24 @@ proc runGraphics*() =
           cameraForward
         )
         clickMarks.drawClickMarks(viewProjection)
+        attackClickMarks.drawClickMarks(viewProjection)
+        if lineGesture.active and lineGesture.dragging:
+          worldShapes.clear()
+          let color = if lineGesture.attackMove: rgbx(255, 72, 65, 210)
+            else: rgbx(80, 245, 145, 210)
+          var strokePoints: seq[Vec3]
+          for point in lineGesture.stroke:
+            let x = point.x.float32 - mapHalf()
+            let z = point.y.float32 - mapHalf()
+            strokePoints.add vec3(x, surfaceHeight(x,z) + 0.10'f32, z)
+          worldShapes.addPolyline(strokePoints, color, 0.035'f32)
+          for target in lineGesture.targets:
+            let point = target.destinationPoint()
+            let x = point.x.float32 - mapHalf()
+            let z = point.y.float32 - mapHalf()
+            worldShapes.addCircle(vec3(x, surfaceHeight(x,z) + 0.14'f32, z),
+              0.30'f32, color)
+          worldShapes.draw(viewProjection)
         if showPaths:
           worldShapes.clear()
           for unit in run.world.units:
@@ -1521,27 +1827,101 @@ proc runGraphics*() =
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
         sk.beginUi(window, window.size)
-        drawUi(
-          sk,
-          window,
-          transport,
-          cameraTarget,
-          cameraDistance,
-          viewMode,
-          primaryId,
-          selectedIds,
-          followSelection,
-          actionCam,
-          teamColors
-        )
-        drawSelectionBox(
-          sk,
-          window,
-          selectionPressPosition,
-          selectionStarted
-        )
+        let beforeHud = transport
+        if matchMenu == HiddenMatchMenu:
+          drawUi(
+            sk,
+            window,
+            transport,
+            cameraTarget,
+            cameraDistance,
+            viewMode,
+            primaryId,
+            selectedIds,
+            followSelection,
+            actionCam,
+            teamColors,
+            if connection != nil: connection.stats else: nil
+          )
+          if attackMoveArmed:
+            if pendingBuild >= 0:
+              attackMoveArmed = false
+            else:
+              let at = vec2(max(12.0'f, window.size.x.float32 / sk.uiScale / 2 - 220), 78)
+              sk.drawRect(at, vec2(440, 40), rgbx(40, 8, 8, 225))
+              sk.menuLabel("ATTACK: click or right-drag / Shift queues / Esc cancels", at + vec2(8, 4), 424)
+          drawSelectionBox(
+            sk,
+            window,
+            selectionPressPosition,
+            selectionStarted
+          )
+        if network != nil: transport = beforeHud
+        if matchMenu != HiddenMatchMenu:
+          sk.pushLayer(PopupsLayer)
+          let view = window.size.vec2 / sk.uiScale
+          sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 170))
+          let origin = (view - vec2(if matchMenu == MatchSettings: 720 else: 464,
+            if matchMenu == MatchSettings: 700 else: 440)) * 0.5'f
+          sk.lobbyPanel(origin - vec2(24),
+            vec2(if matchMenu == MatchSettings: 768 else: 512,
+              if matchMenu == MatchSettings: 748 else: 488))
+          try:
+            if quitToMenu:
+              sk.menuLabel("Leaving match...", origin, 464)
+            elif matchMenu == MatchSettings:
+              if sk.lvdSettingsPanel(window, preferences, "Polyworld LvD", origin):
+                matchMenu = PauseMenu
+            else:
+              let paused = if network == nil: not transport.playing
+                else: network.client.snapshot.flag
+              let activeMatch = network == nil or
+                network.client.snapshot.phase in {rooms.Playing, Waiting}
+              var controller = network == nil
+              if network != nil:
+                for seat in network.client.snapshot.seats:
+                  if seat.owner == network.client.participant: controller = true
+              sk.menuLabel(if matchResultsVisible(): "Match ended"
+                elif paused: "Match paused" else: "Match running", origin, 464)
+              if sk.lobbyButton(if matchResultsVisible(): "View results" else: "Return to game",
+                origin + vec2(0, 52), 464):
+                matchMenu = HiddenMatchMenu
+              if sk.lobbyButton(if paused: "Resume match" else: "Pause match",
+                origin + vec2(0, 108), 464,
+                enabled = controller and activeMatch and not matchResultsVisible()):
+                if network == nil: transport.togglePlay()
+                else:
+                  network.client.send(RoomMessage(kind: PauseMatch,
+                    match: network.client.match, flag: not paused))
+              if sk.lobbyButton("Settings", origin + vec2(0, 164), 464):
+                matchMenu = MatchSettings
+              if network == nil or network.client.snapshot.phase in {rooms.Ended, Desynced, Lobby}:
+                if sk.lobbyButton(if network == nil: "Return to Home" else: "Return to lobby",
+                  origin + vec2(0, 220), 464):
+                  leaveMatch = returnToMatchLobby(network)
+              if network != nil and sk.lobbyButton("Quit to main menu",
+                origin + vec2(0, if activeMatch: 220 else: 276), 464):
+                quitToMenu = true
+                if network == nil: leaveMatch = true
+                elif controller and activeMatch:
+                  network.abort("Match ended by a player quitting to the main menu")
+                else:
+                  network.client.send(RoomMessage(kind: LeaveRoom))
+                  leaveRequested = true
+              sk.menuLabel(if network == nil: "Use Pause match to stop the game."
+                else: "Quitting as a player ends the match for everyone.",
+                origin + vec2(0, 332), 464)
+              sk.menuLabel("Drag: select group / Shift: add / Ctrl+A: all units",
+                origin + vec2(0, 368), 464)
+              sk.menuLabel("Right drag: formation / A: attack / Shift: queue",
+                origin + vec2(0, 404), 464)
+          except CatchableError as error:
+            saveError = error.msg
+          if saveError.len > 0: sk.menuLabel(saveError, origin + vec2(0, 340), 464)
+          sk.popLayer()
         sk.endUi()
-        drawStatsOverlay(sk, window, teamColors)
+        if matchMenu == HiddenMatchMenu:
+          drawStatsOverlay(sk, window, teamColors)
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -1560,17 +1940,63 @@ proc runGraphics*() =
         window.closeRequested = true
 
   window.onButtonPress = proc(button: Button) =
-    case button
-    of KeySpace: transport.handleKey(button)
-    of KeyC: actionCam.toggle(followSelection)
-    of KeyT: scene.toggleShading()
-    of KeyE: showTiles = not showTiles
-    of KeyF1, KeyF2:
-      discard handleChromeKey(button)
-    of KeyV:
-      if not playerMode():
-        viewMode = (viewMode + 1) mod int32(run.world.players.len + 1)
-    of KeyX:
+    if bindingCapture: return
+    if button in {MouseLeft, MouseRight, MouseMiddle}:
+      shortcutState.cancelShortcut()
+    let key = shortcutKey(button)
+    if key != '\0':
+      let matched = shortcutState.pressShortcut(currentShortcuts, key, epochTime(),
+        gameplay = matchMenu == HiddenMatchMenu and playerMode(),
+        modified = window.scaleModifier or window.actionDown(ControlInput) or
+          window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt])
+      if matched.consumed:
+        shortcutHeldButtons.incl button
+        shortcutFrameButtons.incl button
+        if matched.action >= 0 and run.world.performShortcut(options.playerSlot - 1,
+            selectedIds, ShortcutAction(matched.action)):
+          selectionStarted = false
+          minimapPanning = false
+          lineGesture.cancelLine()
+          rightOrderStarted = false
+        return
+    if window.scaleKey(button, preferences, sk.uiScale, "Polyworld LvD"): return
+    if MenuInput.matches(button):
+      if lineGesture.active:
+        lineGesture.cancelLine()
+        rightOrderStarted = false
+        attackMoveArmed = false
+        return
+      rightOrderStarted = false
+      if matchMenu == HiddenMatchMenu and (pendingBuild >= 0 or attackMoveArmed):
+        pendingBuild = -1
+        attackMoveArmed = false
+        return
+      matchMenu = if matchMenu == HiddenMatchMenu: PauseMenu
+        elif matchMenu == MatchSettings: PauseMenu else: HiddenMatchMenu
+      if matchMenu != HiddenMatchMenu:
+        cancelGameplayGestures()
+      return
+    if FullscreenInput.matches(button):
+      window.setFullscreen(not window.isFullscreen)
+      return
+    if handleChromeKey(button): return
+    if matchMenu != HiddenMatchMenu: return
+    if window.scaleModifier or window.actionDown(ControlInput) or
+        window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt]:
+      return
+    if AttackMoveInput.matches(button) and not window.actionDown(ControlInput) and
+        not window.scaleModifier:
+      if playerMode() and run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
+        selectionStarted = false
+        minimapPanning = false
+      return
+    if PauseInput.matches(button):
+      if network == nil: transport.togglePlay()
+    elif CameraInput.matches(button): actionCam.toggle(followSelection)
+    elif ShadingInput.matches(button): scene.toggleShading()
+    elif StopInput.matches(button):
+      lineGesture.cancelLine()
+      rightOrderStarted = false
       if playerMode():
         let player = options.playerSlot - 1
         for id in selectedIds:
@@ -1579,21 +2005,29 @@ proc runGraphics*() =
             queueCancel(player, id)
         pendingBuild = -1
         attackMoveArmed = false
-    of KeyEscape:
-      if playerMode() and pendingBuild >= 0:
-        pendingBuild = -1
-      else:
-        when not defined(emscripten):
-          window.closeRequested = true
-    else: discard
+    elif button == KeyE: showTiles = not showTiles
+    elif button == KeyV and not playerMode():
+      viewMode = (viewMode + 1) mod int32(run.world.players.len + 1)
 
-  while not window.closeRequested:
+  window.onButtonRelease = proc(button: Button) =
+    shortcutState.releaseShortcut(shortcutKey(button))
+    shortcutHeldButtons.excl button
+
+  while not window.closeRequested and not leaveMatch:
     pollEvents()
     waitForDisplay()
+  window.onFrame = nil
+  window.onButtonPress = nil
+  clearPlayerCommands()
+  window.onButtonRelease = nil
+  shortcutState.resetShortcut()
+  endShortcutEditing()
   saveRecording()
   clickMarks.closeClickMarks()
+  attackClickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
   worldBarRenderer.closeWorldBarRenderer()
   selectionOutline.closeSelectionOutline()
   particles.closeParticles()
   finishGameProfile()
+  result = quitToMenu

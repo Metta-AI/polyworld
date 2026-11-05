@@ -8,6 +8,13 @@ import
   test_maps,
   test_players,
   test_replays,
-  test_sim
+  test_sim,
+  test_backend_config,
+  test_multiplayer_backend,
+  test_relay_backend,
+  test_order_queue,
+  test_order_queue_network,
+  test_wood_congestion,
+  test_worker_passing
 
 echo "Game tests passed"

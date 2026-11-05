@@ -24,6 +24,7 @@ type
     first: int32
     second: int32
     third: int32
+    append: bool
 
 var
   pending: seq[PlayerCommand]
@@ -32,39 +33,49 @@ var
   attackMoveArmed*: bool
     ## Next ground click is an attack-move.
 
-proc queueMove*(player, unitId, x, y: int32) =
+proc clearPlayerCommands*() =
+  ## Prevent menu transitions from carrying stale orders into another world.
+  pending.setLen(0)
+  pendingBuild = -1
+  attackMoveArmed = false
+
+proc queueMove*(player, unitId, x, y: int32, append = false) =
   ## Queues a move for one owned unit.
   pending.add PlayerCommand(
     kind: CommandMove,
+    append: append,
     player: player,
     entityId: unitId,
     first: x,
     second: y
   )
 
-proc queueAttackMove*(player, unitId, x, y: int32) =
+proc queueAttackMove*(player, unitId, x, y: int32, append = false) =
   ## Queues an attack-move for one owned unit.
   pending.add PlayerCommand(
     kind: CommandAttackMove,
+    append: append,
     player: player,
     entityId: unitId,
     first: x,
     second: y
   )
 
-proc queueAttack*(player, unitId, targetId: int32) =
+proc queueAttack*(player, unitId, targetId: int32, append = false) =
   ## Queues an attack on one enemy.
   pending.add PlayerCommand(
     kind: CommandAttack,
+    append: append,
     player: player,
     entityId: unitId,
     first: targetId
   )
 
-proc queueHarvest*(player, unitId, target, isTree: int32) =
+proc queueHarvest*(player, unitId, target, isTree: int32, append = false) =
   ## Queues a harvest on a mine or tree.
   pending.add PlayerCommand(
     kind: CommandHarvest,
+    append: append,
     player: player,
     entityId: unitId,
     first: target,
@@ -114,20 +125,22 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
   case command.kind
   of CommandMove:
     game.applyMove(
-      command.player, command.entityId, command.first, command.second
+      command.player, command.entityId, command.first, command.second,
+      append = command.append
     )
   of CommandAttackMove:
     game.applyAttackMove(
-      command.player, command.entityId, command.first, command.second
+      command.player, command.entityId, command.first, command.second,
+      append = command.append
     )
   of CommandAttack:
-    game.applyAttack(command.player, command.entityId, command.first)
+    game.applyAttack(command.player, command.entityId, command.first, command.append)
   of CommandHarvest:
     game.applyHarvest(
       command.player,
       command.entityId,
       command.first,
-      command.second
+      command.second, command.append
     )
   of CommandBuild:
     game.applyBuild(

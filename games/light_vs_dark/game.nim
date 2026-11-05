@@ -7,12 +7,13 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, metrics, profiles, tapes, timings],
+  polyworld/[cli, controllers, metrics, profiles, rooms, tapes, timings],
   content,
   maps as mapgen,
   sim,
   bots,
   controls,
+  presets, multiplayer,
   replays
 
 when defined(coworld):
@@ -60,11 +61,17 @@ when defined(coworld):
     )
     diplomacy.validate()
 
+var
+  serverAddress* = "ws://127.0.0.1:8090/ws"
+  playerNameOverride*: string
+
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
   echo """
 Light vs Dark, a small real-time strategy match between any number of BASIC overlords.
 
+  --server URL     Multiplayer relay (default ws://127.0.0.1:8090/ws).
+  --player NAME    Set the menu player display name.
   --bot PATH[:N]   Add N players using one BASIC program (default N=1).
   --player         Add a human player in slot 1.
   --player:N       Insert a human in slot N (one-based).
@@ -106,11 +113,25 @@ proc parseGameOptions(
   let arguments = commandLineParams()
   var index = 0
   while index < arguments.len:
-    let argument = arguments[index]
-    if result.takeCommonFlag(arguments, index, argument):
+    var argument = arguments[index]
+    if argument == "--player" and index + 1 < arguments.len and
+      not arguments[index + 1].startsWith("--"):
+        argument = "--player=" & arguments.argumentValue(index, "--player")
+    if argument.startsWith("--player=") and
+      not argument[9 .. ^1].allCharsInSet({'0' .. '9'}):
+        let name = argument[9 .. ^1].strip()
+        if name.len > 64 or not name.validName:
+          fail("--player requires a nonempty name of at most 64 bytes")
+        playerNameOverride = name
+    elif result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
+      of "--server":
+        serverAddress = arguments.argumentValue(index, "--server")
+        if not serverAddress.startsWith("ws://") and
+          not serverAddress.startsWith("wss://"):
+            fail("--server requires a ws:// or wss:// URL")
       of "--war-grace-seconds":
         diplomacy.warGraceSeconds = parsePositiveInt32(
           arguments.argumentValue(index, argument), argument
@@ -151,28 +172,43 @@ proc parseGameOptions(
         fail("unknown argument: " & argument)
     inc index
   let count = result.botGroups.botCount + int(result.playerSlot > 0)
-  result.validateGameOptions(count, "supply at least one --bot or --player")
-  if result.replayPath.len == 0:
+  if count > 0 or result.replayPath.len > 0:
+    result.validateGameOptions(count, "supply at least one --bot or --player")
+  if result.replayPath.len == 0 and count > 0:
     settings.validate(count)
     diplomacy.validate()
     if result.viewMode > count:
       fail("--view names a player outside the roster")
 
-var diplomacySettings* = DiplomacySettings()
+var
+  diplomacySettings* = DiplomacySettings()
+  mapSettings* = MapSettings()
+  options* = GameOptions(seed: DefaultSeed, maximumTicks: DefaultDurationTicks,
+    seconds: DefaultMinutes * 60, speed: 1)
+  run*: Game
+  optionsInitialized = false
 
-var mapSettings* =
-  when defined(coworld): hostedMapSettings(diplomacySettings)
-  else: MapSettings()
-
-var options* =
+proc initializeOptions*() =
+  ## Menu startup parses options without constructing terrain or policy VMs.
+  if optionsInitialized:
+    return
   when defined(coworld):
-    coworldOptions(0)
+    mapSettings = hostedMapSettings(diplomacySettings)
+    options = coworldOptions(0)
   else:
-    parseGameOptions(mapSettings, diplomacySettings)
+    options = parseGameOptions(mapSettings, diplomacySettings)
+  optionsInitialized = true
 
-var run*: Game
-
-block:
+proc initializeMatch*() =
+  ## CLI and replay worlds are allocated only when explicitly requested.
+  if run != nil:
+    return
+  initializeOptions()
+  clearPlayerCommands()
+  let count = options.botGroups.botCount + int(options.playerSlot > 0)
+  options.validateGameOptions(count, "supply at least one --bot or --player")
+  if options.replayPath.len == 0:
+    mapSettings.validate(count)
   startGameProfile()
   var
     mapSeed = options.seed
@@ -248,6 +284,19 @@ block:
         localGameConfig(options, playerCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
+proc initializeLocalMatch*(config: LvdConfig, sources: openArray[string]) =
+  ## Menu-selected local policies use exactly the same setup as relay games.
+  let fresh = newLocalMatch(config, sources)
+  run = fresh
+  mapSettings = config.mapSettings
+  diplomacySettings = config.diplomacySettings
+  options.seed = config.seed
+  options.maximumTicks = config.maxTicks
+  options.seconds = config.maxTicks div TickRate
+  options.playerSlot = config.playerSlot
+  options.replayPath = ""
+  optionsInitialized = true
+
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
   if run.historyPlayback:
@@ -307,6 +356,7 @@ proc describeResult*(): string =
 
 proc runHeadless*() =
   ## Runs fixed simulation ticks with optional pacing and request barriers.
+  initializeMatch()
   startGameProfile()
   defer:
     finishGameProfile()

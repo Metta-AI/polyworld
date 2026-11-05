@@ -2,7 +2,7 @@
 
 import
   vmath,
-  polyworld/[gameuis, stackpanels]
+  polyworld/[gameuis, rooms, stackpanels]
 
 const
   PanelScore* = vec2(298, 156)
@@ -17,13 +17,24 @@ type
     views*: array[2, GameUiPanel]
 
   SelectionPanels* = object
-    portrait*, hp*, name*, details*: GameUiPanel
+    portrait*, hp*, name*, details*, cargo*: GameUiPanel
     units*: array[9, GameUiPanel]
 
   BuildPanels* = object
     tabs*: array[3, GameUiPanel]
     contents*: GameUiPanel
     slots*: array[8, GameUiPanel]
+
+proc showPlaybackControls*(replayMode: bool, playerSlot: int32,
+    participant = 0'u32, seats: openArray[Seat] = []): bool =
+  ## Recorded replays always have transport. A live human or any owned
+  ## network seat (including bots) is a controller, not a watch client.
+  if replayMode: return true
+  if playerSlot > 0: return false
+  if participant != 0:
+    for seat in seats:
+      if seat.owner == participant: return false
+  true
 
 proc resourcePanels*(panel: GameUiPanel): array[3, GameUiPanel] =
   ## Places three equal resource cells across the top ribbon.
@@ -42,7 +53,7 @@ proc minimapPanels*(panel: GameUiPanel): MinimapPanels =
   for i in countdown(result.views.high, 0):
     result.views[i] = buttons.take(vec2(32), 11)
 
-proc selectionPanels*(panel: GameUiPanel): SelectionPanels =
+proc selectionPanels*(panel: GameUiPanel, workerCargo = false): SelectionPanels =
   ## Separates the main selection column from the three-by-three unit grid.
   var columns = panel.stack(LeftToRight, vec2(14))
   var portrait = columns.takeColumn(136, 12).stack(TopToBottom)
@@ -51,7 +62,12 @@ proc selectionPanels*(panel: GameUiPanel): SelectionPanels =
   result.hp = portrait.take(vec2(128, 23), 3)
   result.name = portrait.take(vec2(128, 22))
   result.details = columns.takeRest()
-  stackGrid(result.details, vec2(56), 3, vec2(10, 8), result.units)
+  if workerCargo:
+    var rows = result.details.stack(TopToBottom)
+    result.cargo = rows.takeRow(52, 5)
+    stackGrid(rows.takeRest(), vec2(44), 3, vec2(10, 4), result.units)
+  else:
+    stackGrid(result.details, vec2(56), 3, vec2(10, 8), result.units)
 
 proc buildPanels*(panel: GameUiPanel): BuildPanels =
   ## Stacks command tabs over two rows of four build or train buttons.

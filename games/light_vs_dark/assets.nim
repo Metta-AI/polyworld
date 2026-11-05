@@ -6,6 +6,11 @@ import
 
 const
   LogoPath* = DataRoot & "/themes/lvd/lvd_logo.png"
+  MenuRoot* = DataRoot & "/themes/lvd/menu/"
+  MenuImages* = [
+    "background", "logo", "button-single-player", "button-multiplayer",
+    "button-settings", "button-exit"
+  ]
   UnitSymbolsPath* = DataRoot & "/themes/lvd/unit-symbols.png"
   LvdTerrainTiles* = ["crypt-rock-1", "courtyard-stone-1"]
   LvdRockSurface* = SurfaceNames.len.float32
@@ -164,6 +169,8 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by either faction.
   result = hudAssets(LogoPath)
+  for name in MenuImages:
+    result.add fileAsset(MenuRoot & name & ".png")
   for path in ["LICENSE", "licenses/lvd.md",
       "terrain/lvd_buildings/license.md",
       "fonts/OFL-Rubik.txt", "fonts/OFL-OverpassMono.txt",

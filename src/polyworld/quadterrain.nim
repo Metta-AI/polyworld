@@ -2323,6 +2323,11 @@ proc uploadTerrainVisibility*(
       nil
     )
     visibilitySize = size
+  # Fog has one byte per tile; map widths need not be multiples of four.
+  # Preserve the caller's pixel-store state for subsequent image uploads.
+  var unpackAlignment: GLint
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, unpackAlignment.addr)
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
   glTexSubImage2D(
     GL_TEXTURE_2D,
     0,
@@ -2334,6 +2339,7 @@ proc uploadTerrainVisibility*(
     GL_UNSIGNED_BYTE,
     unsafeAddr values[0]
   )
+  glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlignment)
   glBindTexture(GL_TEXTURE_2D, 0)
 
 proc uploadAmbientOcclusion*(

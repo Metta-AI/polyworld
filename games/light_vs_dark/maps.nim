@@ -228,6 +228,11 @@ proc placeNodes(seed: int32, players: int, settings: MapSettings): MapData =
     side += side mod 2
   raise newException(LvdError, "Could not place separated spawn zones.")
 
+proc generatedMapSide*(seed: int32, players: int, settings: MapSettings): int32 =
+  ## Runs the exact seeded placement/growth pass without allocating cell grids.
+  ## Keep sizing shared with generateMap, including expansion placement retries.
+  placeNodes(seed, players, settings).side
+
 proc mapProblem*(map: MapData): string =
   ## Checks footprints, opening space, resources, and connected approaches.
   if map.side < 1 or map.side > MaximumMapSide or map.hallOrigin.len == 0:

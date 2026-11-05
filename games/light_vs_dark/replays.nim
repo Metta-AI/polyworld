@@ -13,10 +13,10 @@ export fixxy
 
 const
   ReplayGame* = "light_vs_dark"
-  ReplayFormatVersion* = 5'u16
+  ReplayFormatVersion* = 6'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 23'u16
+  ReplayGameVersion* = 26'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -61,6 +61,8 @@ type
     tick*: uint32
     playerId*: int32
     kind*: uint8
+    append*: bool
+      ## Append to a unit FIFO; only move, attack-move, attack and harvest.
     offset*: FixedVec2
       ## Movement and ground aim offsets from the named tile center.
     entityId*: int32
@@ -106,6 +108,9 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
   if recorder == nil:
     return
+  if action.append and action.kind notin
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest}:
+    fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:
@@ -124,7 +129,8 @@ proc recordAction*(
     first = 0'i32,
     second = 0'i32,
     third = 0'i32,
-    offset = FixedVec2Zero
+    offset = FixedVec2Zero,
+    append = false
 ) =
   ## Records one accepted command without any bot implementation detail.
   recorder.record ReplayAction(
@@ -135,7 +141,8 @@ proc recordAction*(
     first: first,
     second: second,
     third: third,
-    offset: offset
+    offset: offset,
+    append: append
   )
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
@@ -177,8 +184,11 @@ proc validateSetup(setup: Setup) =
         player.startY == setup.players[other].startY:
           fail("replay setup starts multiple players on one tile")
 
-proc validateAction(action: ReplayAction, setup: Setup) =
+proc validateAction*(action: ReplayAction, setup: Setup) =
   ## Validates one command's kind, ownership range, and payload bounds.
+  if action.append and action.kind notin
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest}:
+    fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
   if action.kind == 0 or action.kind > ActionKindHigh:

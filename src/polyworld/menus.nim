@@ -31,8 +31,26 @@ type
     uiScalePercent*: int = 100
   LocalPolicy* = object
     name*, bytes*: string
+  ControlBinding* = object
+    ## One visible action, in the game's preferred order and terminology.
+    action*: InputAction
+    label*: string
+  ControlProfile* = object
+    ## Presentation and reset defaults; runtime bindings remain shared.
+    actions*: seq[ControlBinding]
+    defaults*: InputBindings
+  ControlExtension* = object
+    ## Optional game-owned rows; the shared menu knows no game actions.
+    draw*: proc(sk: Silky, window: Window, origin: Vec2)
+    capturing*: proc(): bool
 
 const
+  DefaultControlProfile* = block:
+    var profile = ControlProfile(defaults: DefaultBindings)
+    for action in InputAction:
+      profile.actions.add ControlBinding(action: action, label: $action)
+    profile
+
   MenuInk* = rgbx(222, 231, 228, 255)
   MenuMuted* = rgbx(137, 158, 150, 255)
   MenuAccent* = rgbx(184, 215, 139, 255)
@@ -318,16 +336,25 @@ proc beginOverlay*(sk: Silky, window: Window, size: Vec2): Vec2 =
   sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
   result = (view - size) * 0.5'f
 
+proc resetBindings*(
+    preferences: var Preferences, controls = DefaultControlProfile
+) =
+  ## Resets this game's bindings without changing other preferences.
+  preferences.bindings = controls.defaults
+
 proc bindingsPanel(
     sk: Silky,
     window: Window,
     preferences: var Preferences,
     origin: Vec2,
-    height: float32
+    height: float32,
+    controls: ControlProfile,
+    extension: ControlExtension
 ) =
   ## Edits two bindings per action using the existing Silky buttons.
   let capturing = bindingCapture
-  if capturing:
+  let extensionCapturing = extension.capturing != nil and extension.capturing()
+  if capturing and not extensionCapturing:
     for key in Button:
       if key in {ButtonUnknown, DoubleClick, TripleClick, QuadrupleClick}:
         continue
@@ -348,9 +375,11 @@ proc bindingsPanel(
   frame "Control bindings", origin + vec2(0, 90), vec2(720, height - 136):
     sk.startCurrentChildren()
     let listOrigin = sk.at
-    for action in InputAction:
-      let row = listOrigin + vec2(0, action.ord.float32 * 38)
-      sk.drawLabel($action, row, vec2(295, 36), sk.theme.defaultTextColor)
+    for i, control in controls.actions:
+      let
+        action = control.action
+        row = listOrigin + vec2(0, i.float32 * 38)
+      sk.drawLabel(control.label, row, vec2(295, 36), sk.theme.defaultTextColor)
       for slot in 0 .. 1:
         sk.at = row + vec2((300 + slot * 190).float32, 0)
         let label =
@@ -362,9 +391,11 @@ proc bindingsPanel(
           captureAction = action
           captureSlot = slot
           bindingCapture = true
+    if extension.draw != nil:
+      extension.draw(sk, window, listOrigin + vec2(0, controls.actions.len.float32 * 38 + 12))
   sk.at = origin + vec2(500, height - 32)
   button "Reset bindings", not capturing:
-    preferences.bindings = DefaultBindings
+    preferences.resetBindings(controls)
 
 proc percentageSlider(
   sk: Silky,
@@ -396,7 +427,9 @@ proc percentageSlider(
 
 proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
-    app: string, origin: Vec2, title = "Settings", height = 440.0'f
+    app: string, origin: Vec2, title = "Settings", height = 440.0'f,
+    controls = DefaultControlProfile,
+    extension = ControlExtension()
 ): bool =
   ## Edits preferences with the existing Silky theme and widgets.
   when defined(emscripten):
@@ -462,7 +495,7 @@ proc settingsPanel*(
       sk.theme.disabledTextColor
     )
   of ControlsSettings:
-    sk.bindingsPanel(window, preferences, origin, height)
+    sk.bindingsPanel(window, preferences, origin, height, controls, extension)
     inputBindings = preferences.bindings
   of NetworkingSettings:
     sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),

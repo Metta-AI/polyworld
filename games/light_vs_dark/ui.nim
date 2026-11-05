@@ -1,11 +1,12 @@
 ## Light vs Dark Silky HUD.
 
 import
-  std/strformat,
+  std/[strformat, monotimes],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels],
-  assets, content, sim, game, controls, layouts, symbols, maps, factions
+    stackpanels, networks, rooms, roomclients],
+  assets, content, sim, game, controls, layouts, symbols, maps, factions, tooltips, multiplayer,
+  hudpresentation
 
 const
   ResourceColors = [
@@ -32,7 +33,11 @@ const
   CommandTabH = 28.0'f32
   CommandTabLift = 4.0'f32
 
-var commandTab = 0
+var
+  commandTab = 0
+  commandHover: TooltipHover
+  hudNetwork*: NetworkMatch
+    ## Set for the lifetime of the current graphical network match.
 
 type
   HudChrome = object
@@ -114,15 +119,30 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   )
   result.build = layout.panel(GameUiRegion.BottomRight, PanelBuild)
 
+proc playbackControlsVisible*(): bool =
+  ## Match ownership, not recorded history, determines the viewer HUD.
+  if run == nil: return false
+  if hudNetwork != nil and hudNetwork.client != nil:
+    return showPlaybackControls(run.replayMode, options.playerSlot,
+      hudNetwork.client.participant, hudNetwork.client.snapshot.seats)
+  showPlaybackControls(run.replayMode, options.playerSlot)
+
 proc currentLayout*(window: Window): GameUiLayout =
   ## Returns the nine-region HUD layout in Silky layout space.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
       gameUiScale(window),
-    TransportHeight
+    if playbackControlsVisible(): TransportHeight else: 0.0'f32
   )
 
 var statsState: StatsState
+
+proc matchResultsVisible*(): bool =
+  ## Read the displayed world, including tick-limited and relay-ended matches.
+  if run == nil or run.world == nil: return false
+  run.world.over or (run.maximumTicks > 0 and run.world.tick >= run.maximumTicks) or
+    (hudNetwork != nil and hudNetwork.client != nil and
+      hudNetwork.client.snapshot.phase in {rooms.Ended, rooms.Desynced})
 
 proc currentMetrics(slot: int, complete: bool): MetricRow =
   ## Combines authoritative totals with live or original replay telemetry.
@@ -136,7 +156,7 @@ proc currentMetrics(slot: int, complete: bool): MetricRow =
       run.replayData.metrics, slot, run.world.tick, complete
     )
 
-proc currentStats(
+proc currentStats*(
   teamColors: openArray[ColorRGBX] = []
 ): StatsTable =
   ## Adapts the actual roster and outcome to the shared table.
@@ -159,8 +179,39 @@ proc currentStats(
       metrics: currentMetrics(slot, result.complete)
     )
 
+proc matchResultHeadline*(): string =
+  ## Only declare a victory/draw when the simulation actually resolved one.
+  if run.world.over:
+    if run.world.winner < 0: return "Draw"
+    return describeResult()
+  if run.maximumTicks > 0 and run.world.tick >= run.maximumTicks:
+    return "Time limit reached"
+  "Match interrupted"
+
+proc returnToMatchLobby*(network: NetworkMatch): bool =
+  ## Back to Home locally; network return keeps both room and socket intact.
+  ## Only the room owner may request a new lobby revision on the relay.
+  if network == nil: return true
+  let client = network.client
+  if client.snapshot.phase notin {rooms.Ended, Desynced, Lobby}: return false
+  if client.participant == client.snapshot.participant and
+      client.snapshot.phase in {rooms.Ended, Desynced}:
+    client.send(RoomMessage(kind: ReturnLobby))
+    client.error = ""
+  true
+
+proc resultsLayout*(layout: GameUiLayout, table: StatsTable):
+    tuple[viewport: GameUiLayout, headline: GameUiPanel] =
+  ## Reserve headline space even when the roster fills the scrolling card.
+  result.viewport = layout
+  result.viewport.margin = max(layout.margin, 64)
+  let panel = statsLayout(result.viewport, table).panel
+  result.headline = GameUiPanel(origin: panel.origin - vec2(0, 52),
+    size: vec2(panel.size.x, 40))
+
 proc statsContains(window: Window, mouse: Vec2): bool =
   ## Tests the overlay before allowing input through to the existing HUD.
+  if matchResultsVisible(): return true
   if not statsState.visible(window.tabHeld):
     return false
   statsState.mouseOverStats(window, currentLayout(window),
@@ -451,11 +502,13 @@ proc drawUi*(
     selectedIds: var seq[int32],
     followSelection: var bool,
     actionCam: var ActionCam,
-    teamColors: openArray[ColorRGBX]
+    teamColors: openArray[ColorRGBX],
+    networkStats: NetworkStats = nil
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let table = currentStats(teamColors)
   statsState.syncDirector(actionCam, table, window.tabHeld)
+  statsState.automatic = statsState.automatic or matchResultsVisible()
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
@@ -467,7 +520,6 @@ proc drawUi*(
     light = run.world.players[commandPlayer(viewMode)]
     resources = resourcePanel.resourcePanels()
     minimap = minimapPanel.minimapPanels()
-    selection = selectionPanel.selectionPanels()
     build = buildPanel.buildPanels()
 
   for i, label in ["TOWERS", "KILLS", "DEATHS"]:
@@ -628,6 +680,7 @@ proc drawUi*(
     portraitName = "NO SELECTION"
     portraitOwner = -1'i32
     portraitTint = rgbx(255, 255, 255, 255)
+    portraitWorker: Unit
   if portraitId == NoEntity:
     for id in selectedIds:
       if (id.isUnitId and run.world.hasUnit(id)) or
@@ -642,6 +695,7 @@ proc drawUi*(
     portraitMax = unitOf(unit.owner, unit.kind).hp
     portraitName = unit.kind.unitName()
     portraitOwner = unit.owner
+    if unit.kind == PeonUnit: portraitWorker = unit
   elif portraitId != NoEntity and run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
       run.world.buildingIndex(portraitId)
@@ -659,6 +713,7 @@ proc drawUi*(
     portraitName = players[portraitOwner].displayName(portraitOwner) &
       "'s " & portraitName
   let
+    selection = selectionPanel.selectionPanels(portraitWorker != nil)
     selectPortrait = selection.portrait
     selectBar = selection.hp
     selectName = selection.name
@@ -684,6 +739,7 @@ proc drawUi*(
     rgbx(226, 230, 239, 255),
     "Small"
   )
+  sk.drawWorkerCargo(selection.cargo, portraitWorker)
   var
     shown = 0
     clickedId = NoEntity
@@ -698,12 +754,12 @@ proc drawUi*(
     sk.drawPortrait(
       slot,
       unitSymbolKey(unit.kind),
-      SelectionIcon,
+      min(SelectionIcon, slot.size.x - WellPad * 2),
       teamColors[unit.owner]
     )
     sk.drawBar(
       slot.origin + vec2(WellPad, slot.size.y - GridBarH),
-      vec2(SelectionIcon, GridBarH),
+      vec2(min(SelectionIcon, slot.size.x - WellPad * 2), GridBarH),
       unit.hp.float32,
       unitOf(unit.owner, unit.kind).hp.float32,
       teamColors[unit.owner]
@@ -763,6 +819,11 @@ proc drawUi*(
             rgbx(238, 216, 120, 255)
           )
 
+  var
+    hoveredTarget = NoTooltipTarget
+    hoveredAnchor: GameUiPanel
+    hoveredIcon = ""
+    hoveredTint = rgbx(255, 255, 255, 255)
   for i, label in CommandTabs:
     let
       selected = commandTab == i
@@ -801,33 +862,35 @@ proc drawUi*(
           kind = BuildingKind(index)
           stats = BuildingTable[kind]
           player = commandPlayer(viewMode)
-        sk.drawPortrait(
+        sk.drawBuildPortrait(
           slot,
           buildingPortraitKey(player, kind),
-          IconSmall,
-          commandPortraitColor(run.world.canBuild(player, kind))
+          run.world.canBuild(player, kind)
         )
         sk.drawSlotCosts(slot, stats.gold, stats.wood)
         if options.playerSlot > 0 and
             not run.replayMode and
             window.hudClicked(sk, slot):
           pendingBuild = int32(kind.ord)
+        if sk.hovered(slot):
+          hoveredTarget = buildingTooltipTarget(kind, player)
+          hoveredAnchor = slot
+          hoveredIcon = buildingPortraitKey(player, kind)
   elif commandTab == 1:
     for kind in UnitKind:
       let
         slot = build.slots[kind.ord]
         player = commandPlayer(viewMode)
         stats = unitOf(player, kind)
-      sk.drawPortrait(
+      sk.drawTrainPortrait(
         slot,
         unitSymbolKey(kind),
-        IconSmall,
-        commandPortraitColor(
-          canShowTrain(player, primaryId, kind),
-          teamColors[player]
-        )
+        teamColors[player],
+        canShowTrain(player, primaryId, kind),
+        run.world.trainingQueueCount(player, primaryId, kind)
       )
-      sk.drawSlotCosts(slot, stats.gold, stats.wood)
+      if sk.hovered(slot):
+        sk.drawTrainCosts(slot, stats.gold, stats.wood)
       if options.playerSlot > 0 and
           not run.replayMode and
           window.hudClicked(sk, slot):
@@ -835,6 +898,11 @@ proc drawUi*(
         if primaryId.isBuildingId and
             run.world.buildingOwner(primaryId) == player:
           queueTrain(player, primaryId, int32(kind.ord))
+      if sk.hovered(slot):
+        hoveredTarget = unitTooltipTarget(kind, player)
+        hoveredAnchor = slot
+        hoveredIcon = unitSymbolKey(kind)
+        hoveredTint = teamColors[player]
   else:
     sk.drawLabel(
       "No upgrades",
@@ -845,24 +913,16 @@ proc drawUi*(
       CenterAlign
     )
 
-  transport.drawTransport(
-    sk,
-    window,
-    chrome.layout.transportPanel,
-    actionCam,
-    followSelection,
-    addr statsState.toggled
-  )
-
-  if run.world.over:
-    sk.drawLabel(
-      describeResult(),
-      vec2(0, chrome.layout.gameAreaSize.y * 0.5'f32 - 40),
-      vec2(chrome.layout.size.x, 40),
-      rgbx(240, 226, 180, 255),
-      "H1",
-      CenterAlign
+  if playbackControlsVisible():
+    transport.drawTransport(
+      sk,
+      window,
+      chrome.layout.transportPanel,
+      actionCam,
+      followSelection,
+      addr statsState.toggled
     )
+
 
   if run.hashCheck.mismatches > 0:
     sk.drawError(
@@ -870,8 +930,14 @@ proc drawUi*(
       &"REPLAY DIVERGED - {run.hashCheck.mismatches} mismatches, " &
         &"first at tick {run.hashCheck.firstTick}"
     )
-  sk.drawDebugMenu(window)
+  sk.drawDebugMenu(window, network = networkStats)
   statsState.syncDirector(actionCam, table, window.tabHeld)
+  statsState.automatic = statsState.automatic or matchResultsVisible()
+  if window.statsContains(sk.mousePos) or mouseOverDebugMenu(sk.mousePos):
+    hoveredTarget = NoTooltipTarget
+  discard sk.drawCommandTooltip(commandHover, hoveredTarget, hoveredAnchor,
+    chrome.layout.size, getMonoTime().ticks.float64 / 1_000_000_000.0,
+    hoveredIcon, hoveredTint)
 
 proc drawStatsOverlay*(
   sk: Silky,
@@ -879,6 +945,25 @@ proc drawStatsOverlay*(
   teamColors: openArray[ColorRGBX]
 ) =
   ## Presents readable statistics above the HUD at every window width.
+  if matchResultsVisible():
+    let
+      scale = sk.uiScale
+      mouse = sk.mousePos
+      table = currentStats(teamColors)
+      layout = resultsLayout(statsViewport(currentLayout(window), scale), table)
+    statsState.automatic = true
+    sk.uiScale = statsScale(scale)
+    sk.beginUi(window, window.size)
+    sk.drawRect(layout.headline.origin - vec2(8, 4),
+      layout.headline.size + vec2(16, 8), rgbx(16, 18, 26, 240))
+    sk.drawLabel(sk.fittedLabel(matchResultHeadline(), layout.headline.size.x, "H1"),
+      layout.headline.origin, layout.headline.size,
+      rgbx(240, 226, 180, 255), "H1", CenterAlign)
+    sk.drawStats(window, layout.viewport, statsState, table, run.history)
+    sk.endUi()
+    sk.uiScale = scale
+    sk.mousePos = mouse
+    return
   sk.drawStatsOverlay(
     window,
     currentLayout(window),

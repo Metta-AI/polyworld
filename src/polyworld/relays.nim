@@ -460,9 +460,15 @@ proc receive*(
   of ConfigureRoom:
     if guest.id != room.owner or room.phase != Lobby:
       reject("Only the lobby owner can change settings")
-    if message.number != uint32(room.seats.len) or
+    if message.number notin 1'u32 .. uint32(MaxSeats) or
       message.tickRate notin 1'u32 .. 120'u32 or not message.name.validName:
         reject("Invalid room settings")
+    # Validate the entire removed tail before changing settings or assignments.
+    for index in int(message.number) ..< room.seats.len:
+      let owner = room.seats[index].owner
+      if owner != 0 and owner != guest.id:
+        reject("Cannot remove a seat owned by another participant")
+    room.seats.setLen(int(message.number))
     room.name = message.name
     room.payload = message.payload
     room.public = message.flag
