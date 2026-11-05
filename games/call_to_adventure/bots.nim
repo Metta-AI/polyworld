@@ -203,15 +203,15 @@ proc buildHeroHost(heroId: int32, llm: LlmClient = nil, policySlot = -1): Host =
     discard arguments
     let actor = activeGame.world.actors[activeHeroSlot]
     if actor.heroClass != ClericClass or
-        actor.cooldowns[int(HealingBloom)] != 0 or
-        actor.mana < Abilities[HealingBloom].manaCost:
+        actor.cooldowns[int(Bloom)] != 0 or
+        actor.mana < Abilities[Bloom].manaCost:
       return 0
     var worstFraction = 70'i32
     for slot in 0 ..< PartySize:
       let target = activeGame.world.actors[slot]
       if not target.alive or target.home.level != actor.home.level or
           tileDistance(actor.home, target.home) >
-            int32(Abilities[HealingBloom].rangeTiles):
+            int32(Abilities[Bloom].rangeTiles):
         continue
       let fraction =
         int32(target.hp) * 100 div int32(target.maxHp)

@@ -36,7 +36,11 @@ const
   ]
   BowShotClip* = "Bow_Shoot"
   StaffCastClip* = "Staff_Cast"
-  AuthoredClips* = [BowShotClip, StaffCastClip]
+  BlazingSlashClip* = "Blazing_Slash"
+  TauntRoarClip* = "Taunt_Roar"
+  HammerSlamClip* = "Hammer_Slam"
+  AuthoredClips* = [BowShotClip, StaffCastClip, BlazingSlashClip, TauntRoarClip,
+    HammerSlamClip]
     ## Not in the library: the renderer poses these on the hero's own rig.
   MeleeClips = ["Sword_Idle", "Jog_Fwd_Loop", "Sword_Attack"]
   RangedClips = ["Pistol_Idle_Loop", "Jog_Fwd_Loop", "Pistol_Shoot"]
@@ -45,6 +49,7 @@ const
     "Spell_Simple_Idle_Loop", "Jog_Fwd_Loop", "Spell_Simple_Shoot"
   ]
   StaffClips = ["Spell_Simple_Idle_Loop", "Jog_Fwd_Loop", StaffCastClip]
+  DruidClips = ["Spell_Simple_Idle_Loop", "Jog_Fwd_Loop", HammerSlamClip]
 
 type
   MobPreset* = object
@@ -54,16 +59,33 @@ type
   CharacterRoster* = object
     mobs*: seq[MobPreset]
 
+const
+  SwarmShedParts = ["Hair", "Headgear", "Chest", "Belt", "Foot"]
+    ## What the swarm leaves off its family runt's outfit.
+
+proc swarmPreset(runt: MobPreset, species: Species): MobPreset =
+  ## Dresses a swarm species as its family's runt stripped to its skin and
+  ## shorts: the same family color and weapon on a barer, smaller body.
+  result = runt
+  result.preset.name = SpeciesNames[species]
+  for part in result.preset.parts.mitems:
+    if part.category in SwarmShedParts:
+      part.item = "None"
+
 proc readCharacterRoster*(): CharacterRoster =
   ## Reads the approved recipes and verifies their simulation species order.
+  ## The roster holds the sixteen pack species; the swarm is derived here.
   try:
     result = readFile(RosterPath).fromJson(CharacterRoster)
   except IOError, JsonError:
     raise newException(
       ChargenError, "Cannot read CTA roster: " & getCurrentExceptionMsg()
     )
-  if result.mobs.len != SpeciesNames.len:
+  if result.mobs.len != BoneMiteSpecies.ord:
     raise newException(ChargenError, "CTA roster must contain 16 monsters.")
+  for family in MonsterFamily:
+    let runt = result.mobs[familySpecies(family, RuntRank).ord]
+    result.mobs.add runt.swarmPreset(familySpecies(family, SwarmRank))
   for species in Species:
     let entry = result.mobs[species.ord]
     if entry.preset.name != SpeciesNames[species]:
@@ -80,7 +102,7 @@ proc heroClips*(class: HeroClass): array[3, string] =
   of FighterClass: MeleeClips
   of RogueClass: BowClips
   of WizardClass: StaffClips
-  of ClericClass: MagicClips
+  of ClericClass: DruidClips
 
 proc speciesClips*(species: Species): array[3, string] =
   ## Matches each monster's existing weapon to its animation style.

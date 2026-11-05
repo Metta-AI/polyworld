@@ -12,9 +12,10 @@ import
   chroma, fixxy, opengl, pixie, silky, vmath, windy,
   polyworld/[actioncam, assets, characters, clickmarks, common, inputs,
     particles, particleshaders, chrome, pathing, player, profiles,
-    quadterrain, rtscameras, selectionoutlines, shadows, shapes, tapes,
-    terrainsurfaces, viewers, visions, worldbars, worldtexts],
-  appearances, assets, attackclips, content, maps, sim, game, replays, ui, controls
+    quadterrain, rtscameras, screenocclusions, selectionoutlines, shadows,
+    shapes, tapes, terrainsurfaces, viewers, visions, worldbars, worldtexts],
+  abilityfx, appearances, attackclips, assets, content, maps, sim, game,
+  replays, ui, controls, isocam
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -23,8 +24,34 @@ const
   CameraDistanceScale = 1.75'f32
     ## Pulls every camera mode back so spectators see more of the dungeon.
   DefaultCameraDistance = 13.0'f * CameraDistanceScale
-  ArenaCameraDistance = 17.0'f32
-    ## Frames the whole 10x10 arena room, walls included.
+  ArenaFrameMargin = 1.06'f32
+    ## Breathing room around the arena room in its fixed shot.
+  ArenaFrameTop = 2.3'f32
+    ## Heads and name labels by the far wall stay in the arena shot.
+  PanPixelScale = 0.05'f32
+    ## Ground units a drag moves the camera per screen pixel.
+  BodyCutaway = TerrainCutaway(
+    towardEye: isoBack(),
+    rise: 0.85,
+    halfWidth: 0.95,
+    halfHeight: 1.35,
+    clearance: 0.3
+  )
+    ## The hole cut through walls in front of a body: centered on its chest,
+    ## a little wider and taller than the body itself on screen.
+  DungeonOcclusion = ScreenOcclusionSettings(
+    enabled: true,
+    radius: 1.2,
+    intensity: 3.0,
+    bias: 0.08,
+    tint: vec3(0.10, 0.10, 0.16),
+    sharpness: 15.4,
+    bodyOcclusion: 0.25
+  )
+    ## Soft contact shadows where walls meet floors and under bodies: AWM's
+    ## SSAO, a little tighter and lighter. Bodies keep a quarter of their own.
+    ## CTA_SSAO=0 or F8 turns it off; CTA_SSAO_RADIUS, _INTENSITY and _BIAS
+    ## override these.
   AtlasPath = TmpRoot & "/cta.atlas.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10
@@ -38,6 +65,8 @@ const
     ## How long a fallen monster lies still before it sinks away.
   CorpseSinkTicks = TickRate * 3 div 2
   CorpseSinkDepth = 1.0'f32
+  RunFadeSeconds = 0.15'f32
+    ## How long a body takes to ease into a run or back out of one.
 
 type
   ActorVisual = object
@@ -47,6 +76,9 @@ type
     clip: int
     visible: bool
     pose: CharacterPose
+    gait: Gait
+    fadeLeft: float32     ## game seconds left of a run fade
+    fadeFrom: seq[Mat4]   ## the joints that fade eases out of
 
   Corpse = object
     ## An actor the simulation removed when it fell. The client keeps its
@@ -57,6 +89,8 @@ type
     position: Vec3
     angle: float32
     tick: int32       ## the tick it fell on
+    visible: bool
+    pose: CharacterPose
 
   SeekCheckpoint = object
     ## Captures all authoritative state needed for an exact replay seek.
@@ -147,6 +181,34 @@ proc travelYaw(fromPos, toPos: Vec3, fallback: float32): float32 =
     fallback
   else:
     arctan2(dx, dz)
+
+proc startRunFade(visual: var ActorVisual) =
+  ## Keeps the pose on show for the next ones to ease out of. A fade cut
+  ## short starts from where it had got to, since its blend is on show.
+  if visual.pose.toon.meshCount > 0:
+    visual.fadeFrom = visual.pose.toon.meshes[0].joints
+    visual.fadeLeft = RunFadeSeconds
+
+proc easeRunFade(visual: var ActorVisual, dt: float32) =
+  ## Blends a freshly prepared pose with the one it replaced. Characters
+  ## pose one clip at a time, so the fade works on the finished joints. They
+  ## are local to the mesh, so it doesn't matter how far the body has moved.
+  if visual.fadeLeft <= 0:
+    return
+  visual.fadeLeft -= dt
+  let weight = smoothstep(0'f32, 1'f32, 1 - visual.fadeLeft / RunFadeSeconds)
+  template joints: untyped = visual.pose.toon.meshes[0].joints
+  if weight >= 1 or visual.fadeFrom.len != joints.len:
+    visual.fadeLeft = 0
+    return
+  for joint in 0 ..< joints.len:
+    for column in 0 .. 3:
+      for row in 0 .. 3:
+        joints[joint][column, row] = mix(
+          visual.fadeFrom[joint][column, row],
+          joints[joint][column, row],
+          weight
+        )
 
 proc actorPathColor(actor: Actor): ColorRGBX =
   ## Returns a stable debug color for one actor's followed path.
@@ -305,8 +367,11 @@ proc runGraphics*() =
       run.config.players
     )
     worldShapes = initShapeRenderer()
+    abilityShapes = initShapeRenderer()
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
+    occlusion = initScreenOcclusion(
+      screenOcclusionSettings("CTA_SSAO", DungeonOcclusion))
     models: CharacterModels
   profileBlock "models":
     models = loadCharacterModels()
@@ -320,6 +385,12 @@ proc runGraphics*() =
     monsterIdle, monsterRun, monsterAttack: array[Species, int]
     heroDeath: array[HeroClass, int]
     monsterDeath: array[Species, int]
+    heroSpell: array[HeroClass, int]
+    monsterSpell: array[Species, int]
+    heroBeats: array[HeroClass, ClipBeats]
+    fighterSlash, fighterRoar: int
+    monsterBeats: array[Species, ClipBeats]
+  let spellBeats = clipBeats(SpellClip)
   for class in HeroClass:
     let
       model = heroModels[class]
@@ -328,6 +399,10 @@ proc runGraphics*() =
     heroRun[class] = model.clipIndex(clips[1])
     heroAttack[class] = model.clipIndex(clips[2])
     heroDeath[class] = model.clipIndex(DeathClip)
+    heroSpell[class] = model.clipIndex(SpellClip)
+    heroBeats[class] = clipBeats(clips[2])
+  fighterSlash = heroModels[FighterClass].clipIndex(BlazingSlashClip)
+  fighterRoar = heroModels[FighterClass].clipIndex(TauntRoarClip)
   for species in Species:
     let
       model = monsterModels[species]
@@ -336,10 +411,14 @@ proc runGraphics*() =
     monsterRun[species] = model.clipIndex(clips[1])
     monsterAttack[species] = model.clipIndex(clips[2])
     monsterDeath[species] = model.clipIndex(DeathClip)
+    monsterSpell[species] = model.clipIndex(SpellClip)
+    monsterBeats[species] = clipBeats(clips[2])
 
   var
     visuals: seq[ActorVisual]
     corpses: seq[Corpse]
+    lifted: seq[LiftedLoot]
+      ## Items picked up in the last moment, still rising off the floor.
     previousActorPositions: Table[int32, Vec3]
     previousActorFacings: Table[int32, float32]
     renderAlpha = 1.0'f32
@@ -389,20 +468,212 @@ proc runGraphics*() =
       previous = previousActorFacings.getOrDefault(actor.id, current)
     previous + shortestTurn(previous, current) * renderAlpha
 
-  proc attackClipTime(actor: Actor): float32 =
-    ## Times an authored attack clip off the ability rather than the wall
-    ## clock: the wind-up fills the windup ticks and the blow lands on the
-    ## tick the hit does, so the whole clip plays however short the swing.
+  proc actorGroundSpeed(actor: Actor): float32 =
+    ## World units per game second of the step being interpolated, which is
+    ## how fast the body on screen is moving, pushes and slides included.
     let
-      spec = Abilities[actor.action]
-      ticks = max(float32(actor.actionTicks - 1) + renderAlpha, 0)
-      windup = max(spec.windupTicks.float32, 1)
-      recover = max(spec.recoverTicks.float32, 1)
-    if ticks < windup:
-      AttackImpactTime * ticks / windup
-    else:
-      AttackImpactTime + (AttackClipDuration - AttackImpactTime) *
-        min((ticks - windup) / recover, 1)
+      current = renderPosition(actor)
+      step = current - previousActorPositions.getOrDefault(actor.id, current)
+    length(vec2(step.x, step.z)) * TickRate.float32
+
+  proc attackClipTime(actor: Actor, clip: int, model: CharacterModel,
+      beats: ClipBeats): float32 =
+    ## Times an attack clip off the ability's phases rather than the wall
+    ## clock, library clips and authored ones alike, so the clip's blow
+    ## lands on the tick the hit does however long the swing.
+    attackClipTime(actor.action, beats, model.clipDuration(clip),
+      actor.actionTime(renderAlpha))
+
+  proc addAbilityTells(visibleFrom: int) =
+    ## Marks every visible skill still winding up with its one gizmo: a
+    ## circle round its target or the shape of its area, and an arrow from
+    ## its caster.
+    for slot in 0 ..< run.world.actors.len:
+      let actor = run.world.actors[slot]
+      if not actor.alive or not actor.busy or
+          int(actor.home.level) < visibleFrom:
+        continue
+      if actor.kind == MonsterActor and not selectedVisible(actor.home):
+        continue
+      let time = actor.actionTime(renderAlpha)
+      if not actor.action.telegraphed(time):
+        continue
+      let spec = Abilities[actor.action]
+      var tell = Telegraph(
+        side: actor.sideOf,
+        targeting: spec.targeting,
+        progress: time / spec.anticipationTicks.float32,
+        caster: actorRenderPosition(actor)
+      )
+      case spec.targeting
+      of AreaTarget:
+        tell.shape = spec.shape
+        tell.center = tileFeet(actor.aim)
+        tell.reach = spec.radiusTiles.float32 + 0.5'f32
+        if spec.shape == LineArea:
+          tell.center = tileFeet(
+            run.world.lineEnd(spec, actor.home, actor.aim))
+      of SingleTarget:
+        # A target that has fallen or left the floor keeps its marker where
+        # it stood as the wind-up began.
+        tell.center = tileFeet(actor.aim)
+        tell.reach = actor.markerRadius
+        let targetSlot = run.world.actorSlot(actor.target)
+        if targetSlot >= 0 and run.world.actors[targetSlot].alive and
+            run.world.actors[targetSlot].home.level == actor.home.level:
+          let target = run.world.actors[targetSlot]
+          tell.center = actorRenderPosition(target)
+          tell.reach = target.markerRadius
+      abilityShapes.addTelegraph(tell)
+
+  proc addWarriorEffects(visibleFrom: int, right, up: Vec3) =
+    ## Status-driven, interpolated effects also remain correct during seeks.
+    let clock = (run.world.tick.float32 + renderAlpha) / TickRate.float32
+    for actor in run.world.actors:
+      if not actor.alive or int(actor.home.level) < visibleFrom or
+          not selectedVisible(actor.home): continue
+      let center = actorRenderPosition(actor)
+      if actor.kind == MonsterActor and actor.tauntTicks > 0:
+        let
+          height = HeroTargetHeight * RankScales[actor.species.monsterRank]
+          anchor = center + vec3(0, height + 0.65'f32 + sin(clock * 8) * 0.045'f32, 0)
+          fade = min(1.0'f32, actor.tauntTicks.float32 / 6)
+        # Four bent strokes: the angry red popped-vein mark.
+        for sx in [-1.0'f32, 1.0'f32]:
+          for sy in [-1.0'f32, 1.0'f32]:
+            let
+              x = right * sx
+              y = up * sy
+              a = anchor + x * 0.07'f32 + y * 0.26'f32
+              b = anchor + x * 0.07'f32 + y * 0.10'f32
+              c = anchor + x * 0.26'f32 + y * 0.10'f32
+            for layer in 0 ..< 2:
+              let
+                w = if layer == 0: 0.055'f32 else: 0.025'f32
+                ink = if layer == 0: rgbx(135, 3, 10, uint8(210 * fade))
+                  else: rgbx(255, 48, 43, uint8(254 * fade))
+              abilityShapes.addQuad(a - x*w, a + x*w, b + x*w, b - x*w, ink)
+              abilityShapes.addQuad(b - y*w, b + y*w, c + y*w, c - y*w, ink)
+      if actor.heatTicks > 0:
+        let fade = min(1.0'f32, actor.heatTicks.float32 / 12)
+        # Fill the whole footprint, retaining the original waving border.
+        for band in 0 ..< 24:
+          let
+            inner = band.float32 / 24
+            outer = (band + 1).float32 / 24
+            edgeFade = min(1.0'f32, (1 - inner) * 6)
+            pulse = 0.94'f32 + 0.06'f32 * sin(clock * 2.8'f32)
+            ink = rgbx(255, 142, 22, uint8(62 * edgeFade * fade * pulse))
+          for segment in 0 ..< 80:
+            let
+              a = segment.float32 * 2 * PI.float32 / 80
+              b = (segment + 1).float32 * 2 * PI.float32 / 80
+            proc groundPoint(angle, fraction: float32): Vec3 =
+              let wave = sin(angle * 5 - clock * 2.8'f32) * 0.10'f32 +
+                sin(angle * 9 + clock * 1.7'f32) * 0.045'f32
+              let radius = (2.05'f32 + wave) * fraction
+              center + vec3(cos(angle) * radius, 0.10'f32, sin(angle) * radius)
+            abilityShapes.addQuad(groundPoint(a, inner), groundPoint(b, inner),
+              groundPoint(b, outer), groundPoint(a, outer), ink)
+        for band in 0 ..< 16:
+          let v = band.float32 / 16
+          for segment in 0 ..< 80:
+            let
+              a = segment.float32 * 2 * PI.float32 / 80
+              b = (segment + 1).float32 * 2 * PI.float32 / 80
+            proc point(angle, level: float32): Vec3 =
+              let
+                wave = sin(angle * 5 - clock * 2.8'f32) * 0.10'f32 +
+                  sin(angle * 9 + clock * 1.7'f32) * 0.045'f32
+                radius = 2.05'f32 + wave + level * 0.25'f32
+                lift = 0.07'f32 + level * (0.65'f32 + sin(angle * 4 - clock * 3) * 0.18'f32)
+              center + vec3(cos(angle) * radius, lift, sin(angle) * radius)
+            let ink = rgbx(255, uint8(95 + 65 * (1 - v)), 22,
+              uint8(36 * sin((v + 0.03'f32) * PI.float32) * fade))
+            abilityShapes.addQuad(point(a, v), point(b, v),
+              point(b, v + 1.0'f32/16), point(a, v + 1.0'f32/16), ink)
+      if actor.kind == HeroActor and actor.heroClass == FighterClass and
+          actor.busy and actor.action == BlazingBlade:
+        let
+          time = actor.actionTime(renderAlpha)
+          spec = Abilities[BlazingBlade]
+          beats = clipBeats(BlazingSlashClip)
+          duration = heroModels[FighterClass].clipDuration(fighterSlash)
+          angle = actorRenderFacing(actor)
+        # Molten ribbon follows the measured sword, with a white-hot edge.
+        if time >= spec.anticipationTicks.float32:
+          for step in 0 ..< 28:
+            let
+              t0 = max(spec.anticipationTicks.float32, time - 6 + step.float32 * 6 / 28)
+              t1 = min(spec.impactTicks.float32, t0 + 6.0'f32/28)
+            if t0 >= t1: continue
+            proc bladeAtTime(t: float32): tuple[root, tip: Vec3] =
+              let
+                motion = BlazingBlade.bodyMotion(t)
+                body = translate(center + heading(angle) * motion.pull +
+                  vec3(0, motion.lift, 0)) * rotateY(angle + motion.twist)
+                blade = models.blazingBlade.bladeAt(
+                  attackClipTime(BlazingBlade, beats, duration, t) / duration)
+              (body * blade.root, body * blade.tip)
+            let
+              a = bladeAtTime(t0)
+              b = bladeAtTime(t1)
+              fade = max(0.0'f32, 1 - (time - t1) / 6)
+            for layer in 0 ..< 3:
+              let
+                inner = [0.20'f32, 0.52'f32, 0.83'f32][layer]
+                outer = [1.22'f32, 1.12'f32, 1.02'f32][layer]
+                ink = [rgbx(255, 48, 4, uint8(85 * fade)),
+                  rgbx(255, 142, 12, uint8(150 * fade)),
+                  rgbx(255, 236, 150, uint8(230 * fade))][layer]
+              abilityShapes.addQuad(mix(a.root, a.tip, inner),
+                mix(b.root, b.tip, inner), mix(b.root, b.tip, outer),
+                mix(a.root, a.tip, outer), ink)
+
+  proc addVines(visibleFrom: int) =
+    ## Draws Entangle's vines, and how tightly they hold whoever stands in
+    ## them.
+    let
+      now = run.world.tick.float32 - 1 + renderAlpha
+      clock = now / TickRate.float32
+    for patch in run.world.vines:
+      if int(patch.center.level) >= visibleFrom and
+          selectedVisible(patch.center):
+        abilityShapes.addVinePatch(patch, now, clock)
+    for actor in run.world.actors:
+      if not actor.alive or actor.entangledTicks == 0 or
+          int(actor.home.level) < visibleFrom or
+          not selectedVisible(actor.home):
+        continue
+      let scale =
+        if actor.kind == HeroActor: 1.0'f32
+        else: RankScales[actor.species.monsterRank]
+      abilityShapes.addVineWrap(actorRenderPosition(actor), scale,
+        actor.entangledTicks.float32 / VineRootTicks.float32)
+
+  proc addDruidEffects(visibleFrom: int, right, up: Vec3) =
+    ## Sunlight gathers in a rotating corona before the orb is loosed.
+    for actor in run.world.actors:
+      if not actor.alive or actor.kind != HeroActor or
+          actor.heroClass != ClericClass or not actor.busy or
+          int(actor.home.level) < visibleFrom or
+          not selectedVisible(actor.home): continue
+      let
+        time = actor.actionTime(renderAlpha)
+        spec = Abilities[actor.action]
+      if actor.action == SunOrb and time < spec.anticipationTicks.float32:
+        let
+          charge = time / spec.anticipationTicks.float32
+          center = actorRenderPosition(actor) + vec3(0, 1.25'f32, 0)
+        for ray in 0 ..< 10:
+          let
+            angle = ray.float32 * TAU.float32 / 10 + time * 0.06'f32
+            axis = right * cos(angle) + up * sin(angle)
+            side = up * cos(angle) - right * sin(angle)
+            near = center + axis * (0.18'f32 + charge * 0.12'f32)
+            tip = center + axis * (0.28'f32 + charge * 0.22'f32)
+          abilityShapes.addTriangle(near - side * 0.018'f32,
+            near + side * 0.018'f32, tip, rgbx(255, 204, 84, uint8(130 * charge)))
 
   type
     ActorParticleState = object
@@ -417,7 +688,12 @@ proc runGraphics*() =
       angle: float32
       origin: Vec3
       targetFound: bool
+      targetId: int32
       targetPosition: Vec3
+      aim: TileRef
+      victims: seq[Vec3]
+      heatTicks: int16
+      scorched: seq[Vec3]
   proc captureParticleActors(): seq[ActorParticleState] =
     ## Captures flat pre-tick combat data without retaining simulation refs.
     for actor in run.world.actors:
@@ -434,107 +710,171 @@ proc runGraphics*() =
         home: actor.home,
         position: position,
         angle: previousActorFacings.getOrDefault(actor.id, actorYaw(actor)),
-        origin: position + vec3(0, 0.82'f32, 0)
+        origin: position + vec3(0, 0.82'f32, 0),
+        heatTicks: actor.heatTicks
       )
+      for victim in run.world.scorched(run.world.actorSlot(actor.id)):
+        state.scorched.add renderPosition(run.world.actors[victim]) +
+          vec3(0, 0.72'f32, 0)
       let targetSlot = run.world.actorSlot(actor.target)
       if targetSlot >= 0 and run.world.actors[targetSlot].alive:
         state.targetFound = true
+        state.targetId = actor.target
         state.targetPosition = renderPosition(
           run.world.actors[targetSlot]
         ) + vec3(0, 0.72'f32, 0)
+      if actor.busy:
+        state.aim = actor.aim
+        if actor.actionTicks + 1 == Abilities[actor.action].impactTicks:
+          for victim in run.world.victims(run.world.actorSlot(actor.id)):
+            state.victims.add renderPosition(run.world.actors[victim]) +
+              vec3(0, 0.72'f32, 0)
       result.add state
 
-  proc emitActorAttack(state: ActorParticleState) =
-    ## Converts one CTA ability impact into its matching game effect.
-    if not state.targetFound:
+  proc launchMissile(state: ActorParticleState) =
+    ## Looses a shot or a lob as its release begins, so it flies the rest
+    ## of the release and bursts on the tick the hit lands.
+    let
+      spec = Abilities[state.action]
+      look = AbilityLooks[state.action]
+    var goal = state.targetPosition
+    if spec.shape == LineArea and spec.radiusTiles > 0:
+      goal = tileFeet(run.world.lineEnd(spec, state.home, state.aim)) +
+        vec3(0, 0.72'f32, 0)
+    elif spec.radiusTiles > 0:
+      goal = tileFeet(state.aim) + vec3(0, 0.72'f32, 0)
+    elif not state.targetFound:
       return
-    let travel = clamp(
-      (state.targetPosition - state.origin).length / 13.0'f32,
-      0.1'f32,
-      0.5'f32
-    )
-    if state.kind == MonsterActor:
-      if Species(state.class).monsterRank == CasterRank:
-        particles.emitParticleProjectile(
-          MagicBolt,
-          MagicBurst,
-          state.origin,
-          state.targetPosition,
-          travel
-        )
-      else:
-        particles.emitParticleBurst(
-          CombatSparks,
-          state.targetPosition
-        )
-      return
-    case state.action
-    of MeteorStrike:
-      particles.emitParticleProjectile(
-        Fireball,
-        FireBurst,
-        state.origin,
-        state.targetPosition,
-        travel
-      )
-    of FrostLance, SunOrb:
-      particles.emitParticleProjectile(
-        MagicBolt,
-        MagicBurst,
-        state.origin,
-        state.targetPosition,
-        travel
-      )
-    of VerdantArrow:
-      particles.emitParticleProjectile(
-        ArrowWake,
-        CombatSparks,
-        state.origin,
-        state.targetPosition,
-        travel
-      )
-    of FirebrandSword, MoltenFist, VenomDagger, SolarHammer,
-        IronFlail, BlazingBlade, VoidBlade, GaleSlash:
-      particles.emitParticleBurst(
-        CombatSparks,
-        state.targetPosition
-      )
-    of LightningStorm, ArcaneMeteor, ShadowComet, CosmicFlare:
-      particles.emitParticleProjectile(
-        MagicBolt,
-        MagicBurst,
-        state.origin,
-        state.targetPosition,
-        travel
-      )
-    of FirePhoenix:
-      particles.emitParticleProjectile(
-        Fireball,
-        FireBurst,
-        state.origin,
-        state.targetPosition,
-        travel
-      )
+    let flight = max(float32(spec.releaseTicks - 1), 1) / TickRate.float32
+    if state.action == SunOrb:
+      goal = tileFeet(state.aim) + vec3(0, 0.06'f32, 0)
+      # Decide which ground to burn only when the orb actually arrives.
+      particles.emitParticleFlight(look.missile, state.origin, goal, flight)
     else:
-      discard
+      particles.emitParticleProjectile(look.missile, look.burst,
+        state.origin, goal, flight)
+
+  proc launchVolley(state: ActorParticleState, ticks: int16) =
+    ## Climbs a volley out of the bow over the first half of the release,
+    ## then brings every arrow down across the area to land with the hit.
+    let
+      spec = Abilities[state.action]
+      look = AbilityLooks[state.action]
+      climb = spec.releaseTicks div 2
+      middle = tileFeet(state.aim)
+      reach = spec.radiusTiles.float32 + 0.5'f32
+    for index in 0 ..< VolleyArrows:
+      let
+        spot = volleySpot(index) * reach
+        sky = middle + vec3(spot.x, VolleyHeight, spot.y)
+      if ticks == spec.anticipationTicks + 1:
+        # Nothing is struck up there, so the climb ends in its own trail.
+        particles.emitParticleProjectile(
+          look.missile, look.missile, state.origin, sky,
+          float32(climb) / TickRate.float32)
+      elif ticks == spec.anticipationTicks + 1 + climb:
+        particles.emitParticleProjectile(
+          look.missile, look.burst, sky,
+          middle + vec3(spot.x, 0.1'f32, spot.y),
+          float32(spec.releaseTicks - climb - 1) / TickRate.float32)
+
+  proc igniteBlade(state: ActorParticleState, ticks: int16) =
+    ## Lights the Fighter's sword where it will be over the coming tick,
+    ## which the frames then play out. The flames outlive the blade's
+    ## passing, so as it sweeps they leave its arc burning in the air.
+    if HeroClass(state.class) != FighterClass:
+      return
+    let
+      beats = clipBeats(BlazingSlashClip)
+      duration = models.heroes[FighterClass].clipDuration(
+        models.heroes[FighterClass].clipIndex(BlazingSlashClip))
+      steps = BlazingBlade.bladeFlames((ticks - 1).float32)
+    for step in 0 ..< steps:
+      let
+        part = step.float32 / steps.float32
+        time = (ticks - 1).float32 + part
+        motion = BlazingBlade.bodyMotion(time)
+        body = translate(state.position +
+          heading(state.angle) * motion.pull + vec3(0, motion.lift, 0)) *
+          rotateY(state.angle + motion.twist)
+        blade = models.blazingBlade.bladeAt(
+          attackClipTime(BlazingBlade, beats, duration, time) / duration)
+      particles.emitParticleSpan(BladeFlame, body * blade.root,
+        body * blade.tip, part / TickRate.float32)
 
   proc emitTickParticles(oldActors: seq[ActorParticleState]) =
-    ## Emits action impacts and all actual hit-point restoration once.
+    ## Emits each missile as it leaves, each blow as it lands, and all
+    ## actual hit-point restoration, once.
+    var blooming: seq[int32]
+    for source in oldActors:
+      if source.action == Bloom and source.targetFound and
+          source.actionTicks + 1 == Abilities[Bloom].impactTicks:
+        blooming.add source.targetId
     for old in oldActors:
       let slot = run.world.actorSlot(old.id)
       if slot >= 0 and
           run.world.actors[slot].hp > old.hp:
         particles.emitParticleBurst(
-          HealingAura,
-          renderPosition(run.world.actors[slot])
+          (if old.id in blooming: BloomPetals else: MendingAura),
+          renderPosition(run.world.actors[slot]),
+          anchor = old.id
         )
+      for victim in old.scorched:
+        particles.emitParticleBurst(CombatSparks, victim)
       if old.action == NoAbility:
         continue
-      let spec = Abilities[old.action]
-      if old.actionTicks + 1 != spec.windupTicks or
-          spec.damage <= 0:
-        continue
-      emitActorAttack(old)
+      let
+        spec = Abilities[old.action]
+        look = AbilityLooks[old.action]
+        ticks = old.actionTicks + 1
+      if old.action == Bloom:
+        if ticks == spec.anticipationTicks + 1 and old.targetFound:
+          particles.emitParticleFlight(BloomSeed,
+            old.origin, old.targetPosition,
+            max(1.0'f32, spec.releaseTicks.float32 - 1) / TickRate.float32)
+      if old.action == SunOrb and ticks == spec.impactTicks:
+        var fueledByVines = false
+        for patch in run.world.vines:
+          if (patch.holding(run.world.tick) or patch.burned > 0) and
+              not patch.gone(run.world.tick) and patch.orbLandsIn(old.aim):
+            fueledByVines = true
+            break
+        if not fueledByVines:
+          let middle = tileFeet(old.aim) + vec3(0, 0.06'f32, 0)
+          particles.emitParticleSpan(SolarFlames, middle,
+            middle + vec3(SunOrbGroundFlameRadius, 0, 0))
+        # Ignited patches each emit one full-area fire below; no extra
+        # orb-centered fire is layered onto a vine landing.
+      if old.action == BlazingBlade and ticks == spec.anticipationTicks + 1:
+        # Aim from the same tiles and use the same radius as inCone.
+        let direction = tileFeet(old.aim) - tileFeet(old.home)
+        if length(direction) > 0.001'f32:
+          let origin = old.position + vec3(0, 0.45'f32, 0)
+          particles.emitParticleSpan(FireWave, origin, origin +
+            normalize(direction) * (spec.radiusTiles.float32 + 0.5'f32))
+      if old.action.burning(ticks.float32 - 1) and old.kind == HeroActor:
+        igniteBlade(old, ticks)
+      if look.delivery == VolleyDelivery:
+        launchVolley(old, ticks)
+      elif look.delivery in Projectiles and
+          ticks == spec.anticipationTicks + 1:
+        launchMissile(old)
+      # A missile bursts where it ends, which for a line is past its victims.
+      if ticks == spec.impactTicks and not look.plain and
+          spec.damage > 0 and
+          (look.delivery notin Projectiles or spec.shape == LineArea):
+        for victim in old.victims:
+          particles.emitParticleBurst(look.burst, victim)
+    for patch in run.world.vines:
+      if patch.sprouted == run.world.tick:
+        particles.emitParticleBurst(RootLeaves, tileFeet(patch.center))
+    # Consumed vines fuel a rising bed of flame over the whole patch.
+    # The patch itself chars and disappears on the simulation's burn clock.
+    for patch in run.world.vines:
+      if patch.burned == run.world.tick:
+        let middle = tileFeet(patch.center) + vec3(0, 0.06'f32, 0)
+        particles.emitParticleSpan(SolarFlames, middle,
+          middle + vec3(vineReach(), 0, 0))
 
   proc collectCorpses(oldActors: seq[ActorParticleState]) =
     ## Keeps a body for everyone who fell this tick, and lets monster
@@ -558,11 +898,25 @@ proc runGraphics*() =
         inc kept
     corpses.setLen(kept)
 
+  proc collectLifted(oldItems: seq[Item]) =
+    ## Keeps every item picked up this tick on screen while it rises away.
+    lifted.add run.world.pickedUp(oldItems)
+    var kept = 0
+    for loot in lifted:
+      if float32(run.world.tick - loot.tick) < PickupLiftTicks:
+        lifted[kept] = loot
+        inc kept
+    lifted.setLen(kept)
+
   proc advanceTracked() =
-    ## Advances one tick outside the frame loop, still keeping bodies.
-    let oldActors = captureParticleActors()
+    ## Advances one tick outside the frame loop, still keeping bodies and
+    ## the loot rising away.
+    let
+      oldActors = captureParticleActors()
+      oldItems = run.world.items
     advanceGame()
     collectCorpses(oldActors)
+    collectLifted(oldItems)
 
   var
     cameraDistance = DefaultCameraDistance
@@ -660,6 +1014,12 @@ proc runGraphics*() =
         corpses[kept] = corpse
         inc kept
     corpses.setLen(kept)
+    kept = 0
+    for loot in lifted:
+      if loot.tick <= run.world.tick:
+        lifted[kept] = loot
+        inc kept
+    lifted.setLen(kept)
     renderAlpha = 1
     while run.world.tick < target:
       advanceTracked()
@@ -790,11 +1150,33 @@ proc runGraphics*() =
       room.z.float32 + room.depth.float32 / 2 - HalfGrid
     )
 
+  proc arenaFrameDistance(): float32 =
+    ## Returns the zoom that fits the arena room, its walls and the slab
+    ## under them between the top and bottom HUD plates.
+    let
+      room = run.dungeon.rooms[ArenaLevel][0]
+      floorY = arenaCenter().y
+      band = window.hudFreeBand()
+    isoFitDistance(
+      vec3(
+        room.x.float32 - 1 - HalfGrid,
+        floorY - SlabSteps.float32 / 8,
+        room.z.float32 - 1 - HalfGrid
+      ),
+      vec3(
+        (room.x + room.width).float32 + 1 - HalfGrid,
+        floorY + ArenaFrameTop,
+        (room.z + room.depth).float32 + 1 - HalfGrid
+      ),
+      window.size.x.float32 / max(window.size.y.float32, 1),
+      band.free
+    ) * ArenaFrameMargin
+
   if run.world.isArena and not playerMode():
     # The arena room fits in one fixed shot, so hold it instead of chasing.
     actionCam.enabled = false
     cameraTarget = arenaCenter()
-    cameraDistance = ArenaCameraDistance
+    cameraDistance = arenaFrameDistance()
 
   proc selectedCenter(): Vec3 =
     ## Returns the midpoint of all selected living heroes.
@@ -848,6 +1230,30 @@ proc runGraphics*() =
       if subject.owner >= 0:
         heroes.add subject
     actionCam.director.refresh(heroes)
+
+  proc updateCutaways(visibleFrom: int) =
+    ## Cuts walls, pillars and higher slabs out of the line of sight to
+    ## every shown hero and the monsters they are fighting. The low
+    ## isometric angle would otherwise bury a corridor behind its near wall.
+    var
+      cuts: seq[Vec4]
+      targets: seq[int32]
+    for slot in 0 ..< min(PartySize, run.world.actors.len):
+      let hero = run.world.actors[slot]
+      if hero.alive and int(hero.home.level) >= visibleFrom:
+        let feet = actorRenderPosition(hero)
+        cuts.add vec4(feet.x, feet.y, feet.z, 1)
+        if hero.target != 0:
+          targets.add hero.target
+    for actor in run.world.actors:
+      if cuts.len >= TerrainCutawaySlots:
+        break
+      if actor.kind == MonsterActor and actor.alive and
+          actor.id in targets and int(actor.home.level) >= visibleFrom and
+          selectedVisible(actor.home):
+        let feet = actorRenderPosition(actor)
+        cuts.add vec4(feet.x, feet.y, feet.z, 1)
+    setTerrainCutaways(BodyCutaway, cuts)
 
   proc updateTerrainVision(level: int32) =
     ## Uploads softened party vision and explored memory for one floor.
@@ -1047,56 +1453,63 @@ proc runGraphics*() =
       )
 
   proc playerHeroFrame(): Vec3 =
-    ## Returns the look-at that frames the human hero over the HUD.
+    ## Returns the look-at that frames the human hero. The projection's
+    ## HUD lift already raises it above the ability bar.
     if playerSlot < 0 or playerSlot >= run.world.actors.len:
       return cameraTarget
     let actor = run.world.actors[playerSlot]
     if not actor.alive:
       return cameraTarget
-    rtsFollowFrame(
-      actorRenderPosition(actor) + vec3(0, 0.85'f32, 0),
-      cameraDistance
+    actorRenderPosition(actor) + vec3(0, 0.85'f32, 0)
+
+  proc addLootIcon(kind: LootKind, tile: TileRef, rise, alpha: float32) =
+    ## Draws one loot icon over its tile, raised and faded as given.
+    let
+      ability = LootAbilities[kind]
+      key =
+        if ability != NoAbility:
+          "ability_" & AbilityIconFiles[ability]
+        else:
+          case kind
+          of GoldPile: "gold"
+          of Gemstone: "crystal"
+          of Chalice: "chalice"
+          of Idol: "idol"
+          of Crown: "crown"
+          else: "bounty"
+      tint =
+        case kind
+        of Chalice: rgbx(217, 209, 140, 255)
+        of Idol: rgbx(158, 122, 82, 255)
+        of Crown: rgbx(255, 199, 71, 255)
+        else: rgbx(255, 255, 255, 255)
+      entry = sk.atlas.entries[key]
+      anchor = tileCenter(int(tile.level), int(tile.x), int(tile.z)) +
+        vec3(0, 0.4'f + rise, 0)
+    worldBarRenderer.addBillboardQuad(
+      anchor,
+      vec2(-0.36'f),
+      vec2(0.72'f),
+      rgbx(tint.r, tint.g, tint.b, uint8(tint.a.float32 * alpha)),
+      vec2(entry.x.float32, entry.y.float32) / sk.atlas.size.float32,
+      vec2(entry.width.float32, entry.height.float32) /
+        sk.atlas.size.float32,
+      textureMode = ColorTexture
     )
 
   proc addLootIcons(visibleFrom: int) =
-    ## Draws existing loot icons in place of the former footman placeholder.
+    ## Draws the loot on the floor, and what was just picked up rising off
+    ## it and fading away.
     for item in run.world.items:
       if item.carrier != 0 or int(item.tile.level) < visibleFrom or
         not selectedVisible(item.tile):
           continue
-      let
-        ability = LootAbilities[item.kind]
-        key =
-          if ability != NoAbility:
-            "ability_" & AbilityIconFiles[ability]
-          else:
-            case item.kind
-            of GoldPile: "gold"
-            of Gemstone: "crystal"
-            of Chalice: "chalice"
-            of Idol: "idol"
-            of Crown: "crown"
-            else: "bounty"
-        tint =
-          case item.kind
-          of Chalice: rgbx(217, 209, 140, 255)
-          of Idol: rgbx(158, 122, 82, 255)
-          of Crown: rgbx(255, 199, 71, 255)
-          else: rgbx(255, 255, 255, 255)
-        entry = sk.atlas.entries[key]
-        anchor = tileCenter(
-          int(item.tile.level), int(item.tile.x), int(item.tile.z)
-        ) + vec3(0, 0.4'f, 0)
-      worldBarRenderer.addBillboardQuad(
-        anchor,
-        vec2(-0.36'f),
-        vec2(0.72'f),
-        tint,
-        vec2(entry.x.float32, entry.y.float32) / sk.atlas.size.float32,
-        vec2(entry.width.float32, entry.height.float32) /
-          sk.atlas.size.float32,
-        textureMode = ColorTexture
-      )
+      addLootIcon(item.kind, item.tile, 0, 1)
+    for loot in lifted:
+      if int(loot.tile.level) < visibleFrom or not selectedVisible(loot.tile):
+        continue
+      let time = float32(run.world.tick - loot.tick) + renderAlpha
+      addLootIcon(loot.kind, loot.tile, rise(time), fade(time))
 
   proc drawWorldBars(
       viewProjection: Mat4,
@@ -1257,6 +1670,8 @@ proc runGraphics*() =
         actionCam.toggle(followSelection)
     of KeyT:
       scene.toggleShading()
+    of KeyF8:
+      occlusion.settings.enabled = not occlusion.settings.enabled
     of KeyF, KeyG:
       if playerMode() and
           playerSlot >= 0 and
@@ -1322,6 +1737,81 @@ proc runGraphics*() =
     if run.replayMode and existsEnv("REPLAY_TICK"):
       transport.seekTo(int32(getEnv("REPLAY_TICK").parseInt))
       cameraTarget = partyCenter()
+    if existsEnv("WARRIOR_VFX_PREVIEW"):
+      # Deterministic render-only fixture; never part of a normal game.
+      let preview = getEnv("WARRIOR_VFX_PREVIEW")
+      for actor in run.world.actors.mitems:
+        if actor.kind == MonsterActor:
+          if preview == "taunt": actor.tauntTicks = TauntTicks
+        elif actor.heroClass == FighterClass:
+          actor.action = NoAbility
+          if preview == "heat": actor.heatTicks = HeatTicks
+          if preview == "blade":
+            actor.action = BlazingBlade
+            actor.actionTicks = Abilities[BlazingBlade].impactTicks - 1
+      if preview == "blade":
+        for state in captureParticleActors():
+          if state.kind == HeroActor and HeroClass(state.class) == FighterClass:
+            particles.emitParticleSpan(FireWave, state.position + vec3(0, 0.45'f32, 0),
+              state.position + vec3(0, 0.45'f32, 0) + heading(state.angle) *
+                (Abilities[BlazingBlade].radiusTiles.float32 + 0.5'f32))
+            for tick in 12'i16 .. 14'i16:
+              igniteBlade(state, tick)
+              particles.advanceParticles(SimulationStep)
+    if existsEnv("DRUID_VFX_PREVIEW"):
+      let
+        preview = getEnv("DRUID_VFX_PREVIEW")
+        sampleTime = if existsEnv("DRUID_VFX_TIME"):
+          max(0.0'f32, getEnv("DRUID_VFX_TIME").parseFloat.float32)
+          else: 0.3'f32
+      for actor in run.world.actors:
+        if actor.kind != HeroActor or actor.heroClass != ClericClass: continue
+        let center = renderPosition(actor)
+        if preview == "bloom":
+          actor.action = Bloom
+          actor.target = actor.id
+          actor.actionTicks = Abilities[Bloom].impactTicks + 1 +
+            min(Abilities[Bloom].recoverTicks - 1, int16(sampleTime * TickRate.float32))
+          if sampleTime * TickRate.float32 >= Abilities[Bloom].recoverTicks.float32:
+            actor.action = NoAbility
+          particles.emitParticleBurst(BloomPetals, center, anchor = actor.id)
+          particles.advanceParticles(sampleTime)
+        elif preview == "entangle":
+          run.world.tick = max(2, int32(sampleTime * TickRate.float32) + 2)
+          run.world.vines.add VinePatch(side: HeroActor, center: actor.home,
+            sprouted: 1)
+          actor.entangledTicks = min(VineRootTicks, int16(sampleTime * TickRate.float32))
+          particles.emitParticleBurst(RootLeaves, center)
+          particles.advanceParticles(sampleTime)
+        elif preview in ["sun", "sunconsume"]:
+          var patchCenter = actor.home
+          patchCenter.x -= 3
+          var aim = patchCenter
+          aim.z -= 1 # Land near the edge, so patch-centered fire is clear.
+          let
+            goal = tileFeet(aim) + vec3(0, 0.06'f32, 0)
+            flight = (Abilities[SunOrb].releaseTicks.float32 - 1) / TickRate.float32
+          particles.emitParticleFlight(SolarOrb,
+            center + vec3(0, 0.82'f32, 0), goal, flight)
+          if preview == "sunconsume":
+            run.world.tick = 100 + int32(sampleTime * TickRate.float32)
+            let burnTick = 100 + int32(Abilities[SunOrb].releaseTicks - 1)
+            let patch = VinePatch(side: HeroActor, center: patchCenter, sprouted: 90,
+              burned: (if run.world.tick >= burnTick: burnTick else: 0),
+              burnedFrom: aim)
+            if not patch.gone(run.world.tick): run.world.vines.add patch
+            let middle = tileFeet(patchCenter) + vec3(0, 0.06'f32, 0)
+            particles.emitParticleSpan(SolarFlames, middle,
+              middle + vec3(vineReach(), 0, 0), flight)
+          else:
+            particles.emitParticleSpan(SolarFlames, goal,
+              goal + vec3(SunOrbGroundFlameRadius, 0, 0), flight)
+          particles.advanceParticles(sampleTime)
+        elif preview == "sunburst":
+          let goal = center + vec3(0, 0.06'f32, 0)
+          particles.emitParticleSpan(SolarFlames, goal,
+            goal + vec3(SunOrbGroundFlameRadius, 0, 0))
+          particles.advanceParticles(sampleTime)
     if existsEnv("SELECT_ALL"):
       selectAllHeroes()
 
@@ -1370,12 +1860,15 @@ proc runGraphics*() =
           if atLiveTickCap(run.world.tick, options.maximumTicks, transport.live):
             break
           captureActorPositions()
-          let oldActors = captureParticleActors()
+          let
+            oldActors = captureParticleActors()
+            oldItems = run.world.items
           run.historyPlayback = transport.inHistory
           advanceGame()
           feedCtaActions(observeTick = true)
           emitTickParticles(oldActors)
           collectCorpses(oldActors)
+          collectLifted(oldItems)
           cacheSeekCheckpoint()
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
@@ -1431,14 +1924,16 @@ proc runGraphics*() =
             let delta = window.mousePos - lastMouse
             lastMouse = window.mousePos
             cancelCameraEase(cameraEase)
-            cameraTarget.x -= delta.x.float32 * 0.05'f32
-            cameraTarget.z -= delta.y.float32 * 0.05'f32
+            let pan = isoPan(
+              vec2(delta.x.float32, delta.y.float32), PanPixelScale)
+            cameraTarget.x -= pan.x
+            cameraTarget.z -= pan.y
             cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
             cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
           elif not minimapPanning and
               applyRtsPan(
                 cameraTarget,
-                rtsPanDir(window),
+                isoPan(rtsPanDir(window), 1),
                 dt,
                 cameraDistance,
                 HalfGrid
@@ -1457,14 +1952,16 @@ proc runGraphics*() =
             lastMouse = window.mousePos
             followSelection = false
             actionCam.takeManual()
-            cameraTarget.x -= delta.x.float32 * 0.05'f32
-            cameraTarget.z -= delta.y.float32 * 0.05'f32
+            let pan = isoPan(
+              vec2(delta.x.float32, delta.y.float32), PanPixelScale)
+            cameraTarget.x -= pan.x
+            cameraTarget.z -= pan.y
             cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
             cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
           if not minimapPanning and
               applyRtsPan(
                 cameraTarget,
-                rtsPanDir(window),
+                isoPan(rtsPanDir(window), 1),
                 dt,
                 cameraDistance,
                 HalfGrid
@@ -1478,7 +1975,10 @@ proc runGraphics*() =
               run.world.phase in {EscapedPhase, WipedPhase} or
                 transport.tick >= transport.timelineEnd,
               transport.repeating,
-              window.size.x.float32 / max(window.size.y.float32, 1)
+              window.size.x.float32 / max(window.size.y.float32, 1),
+              # The director's own lift assumes a north-facing perspective
+              # camera; the isometric projection lifts every mode instead.
+              lift = 0
             )
           else:
             let livingSelection = selectedLivingCount()
@@ -1515,13 +2015,12 @@ proc runGraphics*() =
               followSelection = false
 
       let
-        eye = rtsCameraEye(cameraTarget, cameraDistance)
-        view = lookAt(eye, cameraTarget, vec3(0, 1, 0))
-        projection = perspective(
-          45.0'f32,
-          window.size.x.float32 / window.size.y.float32,
-          0.1,
-          400.0
+        eye = isoEye(cameraTarget)
+        view = isoView(cameraTarget)
+        projection = isoProjection(
+          cameraDistance,
+          window.size.x.float32 / max(window.size.y.float32, 1),
+          window.hudFreeBand().lift
         )
         viewProjection = projection * view
         cameraForward = normalize(cameraTarget - eye)
@@ -1547,8 +2046,10 @@ proc runGraphics*() =
         let visibleFrom = selectedViewLevel()
 
         profileBlock "prepare character poses":
-          visuals.setLen(run.world.actors.len + corpses.len)
+          visuals.setLen(run.world.actors.len)
+          let gameDt = dt * transport.speed.float32
           for slot in 0 ..< run.world.actors.len:
+            let shown = visuals[slot].visible
             visuals[slot].visible = false
             let actor = run.world.actors[slot]
             if actor.id == 0 or not actor.alive:
@@ -1557,43 +2058,93 @@ proc runGraphics*() =
               continue
             if actor.kind == MonsterActor and not selectedVisible(actor.home):
               continue
+            if active:
+              visuals[slot].gait.track(actorGroundSpeed(actor), gameDt)
             let
               position = actorRenderPosition(actor)
               hero = actor.kind == HeroActor
               model =
                 if hero: heroModels[actor.heroClass]
                 else: monsterModels[actor.species]
+              delivery =
+                if actor.busy: AbilityLooks[actor.action].delivery
+                else: RiteDelivery
+              signature = hero and actor.busy and
+                actor.action in {BlazingBlade, Taunt} and
+                actor.heroClass == FighterClass
+              runClip =
+                if hero: heroRun[actor.heroClass]
+                else: monsterRun[actor.species]
+              stride =
+                if hero: models.heroStrides[actor.heroClass]
+                else: models.monsterStrides[actor.species]
               wantedClip =
-                if actor.busy:
+                if signature:
+                  if actor.action == Taunt: fighterRoar else: fighterSlash
+                elif actor.busy and delivery in Spells:
+                  if hero: heroSpell[actor.heroClass]
+                  else: monsterSpell[actor.species]
+                elif actor.busy and delivery != GrabDelivery:
                   if hero: heroAttack[actor.heroClass]
                   else: monsterAttack[actor.species]
-                elif actor.moving:
-                  if hero: heroRun[actor.heroClass]
-                  else: monsterRun[actor.species]
+                elif actor.moving and not actor.staggered and
+                    not actor.rooted and
+                    visuals[slot].gait.striding:
+                  runClip
                 else:
                   if hero: heroIdle[actor.heroClass]
                   else: monsterIdle[actor.species]
-            visuals[slot].angle = actorRenderFacing(actor)
+            var
+              place = position
+              angle = actorRenderFacing(actor)
+            if actor.busy:
+              # The body coils, lunges and sags on top of the clip.
+              let motion = actor.action.bodyMotion(
+                actor.actionTime(renderAlpha))
+              place += heading(angle) * motion.pull + vec3(0, motion.lift, 0)
+              angle += motion.twist
+            visuals[slot].angle = angle
             if visuals[slot].clip != wantedClip:
+              if shown and runClip in [visuals[slot].clip, wantedClip]:
+                visuals[slot].startRunFade()
               visuals[slot].clip = wantedClip
               visuals[slot].animTime = 0
             if active:
-              visuals[slot].animTime += dt * transport.speed.float32
-            if actor.busy and hero and
-              actor.heroClass.heroClips()[2] in AuthoredClips:
-                visuals[slot].animTime = attackClipTime(actor)
+              let rate =
+                if wantedClip == runClip:
+                  visuals[slot].gait.runRate(
+                    stride, model.clipDuration(runClip))
+                else:
+                  1'f32
+              visuals[slot].animTime += gameDt * rate
+            if actor.busy and delivery != GrabDelivery:
+              let beats =
+                if signature: clipBeats(TauntRoarClip)
+                elif delivery in Spells: spellBeats
+                elif hero: heroBeats[actor.heroClass]
+                else: monsterBeats[actor.species]
+              visuals[slot].animTime =
+                attackClipTime(actor, wantedClip, model, beats)
+            if hero:
+              # The arrow leaves the string on release and comes back with
+              # the next nock.
+              model.mergedMesh =
+                if actor.busy and
+                    actor.action.loosed(actor.actionTime(renderAlpha)):
+                  models.loosedMeshes[actor.heroClass]
+                else: 0
             scene.prepareCharacter(
               visuals[slot].pose,
               model,
-              position,
+              place,
               visuals[slot].angle,
               visuals[slot].clip,
               visuals[slot].animTime
             )
+            visuals[slot].easeRunFade(if active: gameDt else: 0'f32)
             visuals[slot].visible = true
-          for i, corpse in corpses:
-            let slot = run.world.actors.len + i
-            visuals[slot].visible = false
+          for corpse in corpses.mitems:
+            corpse.visible = false
             if int(corpse.home.level) < visibleFrom:
               continue
             if corpse.kind == MonsterActor and
@@ -1614,20 +2165,25 @@ proc runGraphics*() =
               depth = if hero: 0'f32 else: CorpseSinkDepth * sinking
             # Death plays once and holds its last frame.
             scene.prepareCharacter(
-              visuals[slot].pose,
+              corpse.pose,
               model,
               corpse.position - vec3(0, depth, 0),
               corpse.angle,
               clip,
               min(ticks / TickRate.float32, model.clipDuration(clip))
             )
-            visuals[slot].visible = true
+            corpse.visible = true
 
         proc drawWorldActors() =
           ## Reuses each actor's pose for shadows, color and outlines.
-          for visual in visuals.mitems:
+          for slot, visual in visuals.mpairs:
             if visual.visible:
-              scene.drawCharacter(visual.pose)
+              scene.drawCharacter(visual.pose,
+                if run.world.actors[slot].cloaked: CloakTint
+                else: color(1, 1, 1, 1))
+          for corpse in corpses.mitems:
+            if corpse.visible:
+              scene.drawCharacter(corpse.pose)
 
         if sunShadowsActive() and layerVertexRanges.len > visibleFrom:
           sunDepthPasses(window.size):
@@ -1650,6 +2206,7 @@ proc runGraphics*() =
             first = layerVertexRanges[visibleFrom].a
             last = layerVertexRanges[^1].b
           updateTerrainVision(int32(visibleFrom))
+          updateCutaways(visibleFrom)
           drawTerrainRange(
             viewProjection,
             first,
@@ -1657,9 +2214,31 @@ proc runGraphics*() =
             showTiles
           )
 
+        # Bodies drawn after the ground copy cast contact shadows but keep
+        # their own colors.
+        occlusion.captureGround(window.size)
         beginCharacters(scene, window, view, projection, eye)
         drawWorldActors()
         finishCharacters(scene)
+        # Only the opaque world is occluded: gizmos, particles, bars,
+        # outlines and the HUD draw after it at full brightness.
+        profileBlock "ambient occlusion":
+          occlusion.applyScreenOcclusion(window.size, projection)
+        abilityShapes.clear()
+        addAbilityTells(visibleFrom)
+        addWarriorEffects(visibleFrom, barCameraRight, barCameraUp)
+        addVines(visibleFrom)
+        addDruidEffects(visibleFrom, barCameraRight, barCameraUp)
+        abilityShapes.draw(viewProjection)
+        # Heals swirl round whoever they mend, wherever it walks.
+        particles.followParticleAnchors(
+          proc(anchor: int32, position: var Vec3): bool =
+            let slot = run.world.actorSlot(anchor)
+            if slot < 0 or not run.world.actors[slot].alive:
+              return false
+            position = actorRenderPosition(run.world.actors[slot])
+            true
+        )
         particles.drawParticles(
           viewProjection,
           barCameraRight,
@@ -1704,7 +2283,8 @@ proc runGraphics*() =
           selectedIds,
           followSelection,
           actionCam,
-          focusPlayerHero
+          focusPlayerHero,
+          renderAlpha
         )
         sk.endUi()
         drawStatsOverlay(sk, window)
@@ -1733,8 +2313,10 @@ proc runGraphics*() =
     saveRecording()
   clickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
+  abilityShapes.closeShapeRenderer()
   worldBarRenderer.closeWorldBarRenderer()
   selectionOutline.closeSelectionOutline()
+  occlusion.closeScreenOcclusion()
   particles.closeParticles()
   finishGameProfile()
   echo "run ended: ", run.world.phase, " with ", run.world.banked, " gold banked"

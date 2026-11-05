@@ -17,7 +17,16 @@ type ParticleEffectKind* = enum
   PoisonCapsule,
   PoisonBurst,
   LeafBolt,
-  LeafBurst
+  LeafBurst,
+  BladeFlame,
+    ## Flames licking off the straight run from origin to target.
+  FireWave,
+    ## A bounded forward flame front spanning a ninety-degree cone.
+  HeatEmbers,
+    ## Embers rising off a disc round the origin, as wide as the target is far.
+  BloomSeed, BloomPetals, RootLeaves, SolarOrb, SolarFlames,
+  MendingAura
+    ## A HealingAura held close round one body, under half as wide.
 
 var
   uParticleViewProjection*: Uniform[Mat4]
@@ -117,18 +126,18 @@ proc evaluateParticle(
     let
       birth = particleId * 0.0025'f
       age = elapsed - birth
-      lifetime = 0.42'f + particleRandom(state) * 0.34'f
+      lifetime = 0.22'f + particleRandom(state) * 0.18'f
     if age < 0.0'f or age >= lifetime:
       return
     var direction = particleDirection(state)
     direction.y = abs(direction.y) * 0.72'f + 0.28'f
     direction = safeParticleDirection(direction)
-    let speed = 2.6'f + particleRandom(state) * 3.6'f
+    let speed = 0.8'f + particleRandom(state) * 1.2'f
     velocity = direction * speed + vec3(0.0'f, -5.4'f * age, 0.0'f)
     position = uParticleOrigin + direction * speed * age +
       vec3(0.0'f, -2.7'f * age * age, 0.0'f)
     life = age / lifetime
-    size = 0.022'f * (0.75'f + particleRandom(state) * 0.7'f)
+    size = 0.018'f * (0.75'f + particleRandom(state) * 0.7'f)
     color = mix(
       vec4(1.0'f, 0.96'f, 0.48'f, 1.0'f),
       vec4(1.0'f, 0.16'f, 0.01'f, 0.0'f),
@@ -206,49 +215,165 @@ proc evaluateParticle(
     alive = 1.0'f
     return
 
+  if uParticleEffectKind == BloomSeed.ord.int32 or
+      uParticleEffectKind == BloomPetals.ord.int32 or
+      uParticleEffectKind == RootLeaves.ord.int32:
+    let
+      seedFlight = uParticleEffectKind == BloomSeed.ord.int32
+      roots = uParticleEffectKind == RootLeaves.ord.int32
+      travel = max(uParticleTravelTime, 0.05'f)
+      birth = particleId * 0.006'f
+      age = elapsed - birth
+      lifetime = 0.85'f + particleRandom(state) * 0.5'f
+    if age < 0.0'f or (not seedFlight and age >= lifetime) or
+        (seedFlight and elapsed > travel): return
+    let
+      progress = clamp(age / lifetime, 0.0'f, 1.0'f)
+      turn = particleId * 2.39996'f + age * 2.4'f
+      radius = (0.18'f + particleRandom(state) * 0.7'f) *
+        sin(progress * 3.14159265'f)
+      drift = vec3(cos(turn) * radius, 0.12'f + age * 0.85'f, sin(turn) * radius)
+    position = uParticleOrigin + drift
+    if roots:
+      position = uParticleOrigin + vec3(cos(turn) * radius * 1.7'f,
+        0.12'f + sin(progress * 3.14159265'f) * 0.7'f, sin(turn) * radius * 1.7'f)
+    if seedFlight:
+      let t = clamp(elapsed / travel, 0.0'f, 1.0'f)
+      position = mix(uParticleOrigin, uParticleTarget, t) +
+        vec3(cos(turn) * 0.13'f, sin(t * 3.14159265'f) * 0.65'f +
+          sin(turn) * 0.12'f, sin(turn) * 0.13'f)
+    velocity = vec3(cos(turn), 0.7'f, sin(turn))
+    life = progress
+    size = (0.065'f + particleRandom(state) * 0.045'f) *
+      (1.0'f - progress * 0.45'f)
+    let fade = sin(progress * 3.14159265'f) * 0.82'f
+    color = vec4(1.0'f, 0.75'f, 0.82'f, fade)
+    if particleRandom(state) < 0.3'f:
+      color = vec4(0.3'f, 0.78'f, 0.20'f, fade)
+    if roots:
+      color = vec4(0.35'f, 0.85'f, 0.24'f, fade)
+      size *= 0.7'f
+    if seedFlight: color = vec4(0.72'f, 1.0'f, 0.44'f, 0.65'f)
+    if not seedFlight and not roots and particleId < 8.0'f:
+      # The first petals open into a flower beneath the healed ally;
+      # the rest lift away. Both travel with the same actor anchor.
+      let turn = particleId * 6.2831853'f / 8.0'f
+      let grow = clamp(age / 0.18'f, 0.0'f, 1.0'f)
+      let opening = 1.0'f - (1.0'f - grow) * (1.0'f - grow)
+      position = uParticleOrigin + vec3(cos(turn) * 0.28'f * opening,
+        0.11'f, sin(turn) * 0.28'f * opening)
+      size = 0.12'f * opening
+      color = vec4(1.0'f, 0.74'f, 0.82'f,
+        0.62'f * clamp((lifetime - age) / 0.35'f, 0.0'f, 1.0'f))
+    alive = 1.0'f
+    return
+
+  if uParticleEffectKind == SolarOrb.ord.int32:
+    let
+      travel = max(uParticleTravelTime, 0.05'f)
+      progress = clamp(elapsed / travel, 0.0'f, 1.0'f)
+      turn = particleId * 2.39996'f + elapsed * 3.0'f
+      age = elapsed - particleRandom(state) * 0.055'f
+    if age < 0.0'f or elapsed > travel: return
+    let
+      t = max(0.0'f, progress - particleRandom(state) * 0.38'f)
+      radius = 0.10'f + particleRandom(state) * 0.12'f
+    position = mix(uParticleOrigin, uParticleTarget, t) +
+      vec3(cos(turn) * radius, sin(t * 3.14159265'f) * 1.1'f +
+        sin(turn) * radius, sin(turn) * radius)
+    size = 0.055'f + particleRandom(state) * 0.045'f
+    color = vec4(1.0'f, 0.52'f, 0.045'f, 0.24'f)
+    if particleId < 2.0'f:
+      position = mix(uParticleOrigin, uParticleTarget, progress) +
+        vec3(0.0'f, sin(progress * 3.14159265'f) * 1.1'f, 0.0'f)
+      size = 0.18'f + particleId * 0.14'f
+      color = vec4(1.0'f, 0.84'f, 0.32'f, 0.85'f - particleId * 0.55'f)
+    # The sun's rays orbit a distinct core, rather than reading as a
+    # plain golden missile. Camera-plane rays stay legible at board scale.
+    if particleId >= 2.0'f and particleId < 14.0'f:
+      let corona = (particleId - 2.0'f) * 6.2831853'f / 12.0'f + elapsed * 2.5'f
+      position = mix(uParticleOrigin, uParticleTarget, progress) +
+        vec3(0.0'f, sin(progress * 3.14159265'f) * 1.1'f, 0.0'f) +
+        (uParticleCameraRight * cos(corona) + uParticleCameraUp * sin(corona)) * 0.29'f
+      size = 0.027'f
+      color = vec4(1.0'f, 0.68'f, 0.16'f, 0.8'f)
+    life = progress
+    velocity = vec3(cos(turn), 0.5'f, sin(turn))
+    alive = 1.0'f
+    return
+
+  if uParticleEffectKind == SolarFlames.ord.int32:
+    # Each flame is born across a fixed footprint and moves upward only.
+    # Staggered births sustain a bed of fire instead of a radial blast.
+    let
+      birth = particleId * 0.007'f
+      age = elapsed - birth
+      lifetime = 0.48'f + particleRandom(state) * 0.36'f
+    if age < 0.0'f or age >= lifetime: return
+    let
+      progress = age / lifetime
+      angle = particleRandom(state) * 6.2831853'f
+      radius = sqrt(particleRandom(state)) * max(length(uParticleTarget - uParticleOrigin), 0.25'f)
+      width = 0.08'f + particleRandom(state) * 0.06'f
+      fade = sin(progress * 3.14159265'f)
+      sway = sin(age * 10.0'f + angle) * 0.045'f
+    size = width * (1.0'f - progress * 0.3'f)
+    position = uParticleOrigin + vec3(cos(angle) * radius + sway,
+      size * 4.6'f + age * 0.85'f, sin(angle) * radius)
+    velocity = vec3(0.0'f, 0.85'f, 0.0'f)
+    color = mix(vec4(1.0'f, 0.65'f, 0.075'f, fade * 0.30'f),
+      vec4(0.95'f, 0.09'f, 0.008'f, fade * 0.20'f), progress)
+    life = progress
+    alive = 1.0'f
+    return
+
   if uParticleEffectKind == HealingAura.ord.int32 or
-    uParticleEffectKind == ManaAura.ord.int32 or
-    uParticleEffectKind == PoisonAura.ord.int32:
-      let
-        birth = particleId * 0.008'f
-        age = elapsed - birth
-        lifetime = 0.9'f + particleRandom(state) * 0.45'f
-      if age < 0.0'f or age >= lifetime:
-        return
-      let
-        progress = age / lifetime
-        angle = particleRandom(state) * 6.28318530718'f + age * 4.2'f
-        radius = 0.28'f + particleRandom(state) * 0.62'f
-      position = uParticleOrigin + vec3(
-        cos(angle) * radius,
-        particleRandom(state) * 0.35'f + age * 1.25'f,
-        sin(angle) * radius
-      )
-      velocity = vec3(
-        -sin(angle) * radius * 4.2'f,
-        1.25'f,
-        cos(angle) * radius * 4.2'f
-      )
-      life = progress
-      size = mix(0.075'f, 0.025'f, progress) *
-        (0.75'f + particleRandom(state) * 0.55'f)
-      color = mix(
-        vec4(0.42'f, 1.0'f, 0.48'f, 0.95'f),
-        vec4(1.0'f, 0.88'f, 0.24'f, 0.0'f),
-        progress
-      )
-      if uParticleEffectKind == ManaAura.ord.int32:
-        color = mix(
-          vec4(0.25'f, 0.65'f, 1.0'f, 0.95'f),
-          vec4(0.75'f, 0.9'f, 1.0'f, 0.0'f), progress
-        )
-      elif uParticleEffectKind == PoisonAura.ord.int32:
-        color = mix(
-          vec4(0.65'f, 0.25'f, 0.95'f, 0.95'f),
-          vec4(0.18'f, 0.03'f, 0.28'f, 0.0'f), progress
-        )
-      alive = 1.0'f
+      uParticleEffectKind == ManaAura.ord.int32 or
+      uParticleEffectKind == PoisonAura.ord.int32 or
+      uParticleEffectKind == MendingAura.ord.int32:
+    let
+      birth = particleId * 0.008'f
+      age = elapsed - birth
+      lifetime = 0.9'f + particleRandom(state) * 0.45'f
+    if age < 0.0'f or age >= lifetime:
       return
+    var spread = 1.0'f
+    if uParticleEffectKind == MendingAura.ord.int32:
+      spread = 0.45'f
+    let
+      progress = age / lifetime
+      angle = particleRandom(state) * 6.28318530718'f + age * 4.2'f
+      radius = (0.28'f + particleRandom(state) * 0.62'f) * spread
+    position = uParticleOrigin + vec3(
+      cos(angle) * radius,
+      particleRandom(state) * 0.35'f + age * 1.25'f,
+      sin(angle) * radius
+    )
+    velocity = vec3(
+      -sin(angle) * radius * 4.2'f,
+      1.25'f,
+      cos(angle) * radius * 4.2'f
+    )
+    life = progress
+    size = mix(0.075'f, 0.025'f, progress) *
+      (0.75'f + particleRandom(state) * 0.55'f)
+    color = mix(
+      vec4(0.42'f, 1.0'f, 0.48'f, 0.95'f),
+      vec4(1.0'f, 0.88'f, 0.24'f, 0.0'f),
+      progress
+    )
+    if uParticleEffectKind == ManaAura.ord.int32:
+      color = mix(
+        vec4(0.25'f, 0.65'f, 1.0'f, 0.95'f),
+        vec4(0.75'f, 0.9'f, 1.0'f, 0.0'f), progress
+      )
+    elif uParticleEffectKind == PoisonAura.ord.int32:
+      color = mix(
+        vec4(0.65'f, 0.25'f, 0.95'f, 0.95'f),
+        vec4(0.18'f, 0.03'f, 0.28'f, 0.0'f), progress
+      )
+    alive = 1.0'f
+    return
 
   let
     travel: float32 = max(uParticleTravelTime, 0.05'f)
@@ -395,17 +520,114 @@ proc evaluateParticle(
     )
     alive = 1.0'f
 
+  if uParticleEffectKind == BladeFlame.ord.int32:
+    let
+      lifetime = 0.2'f + particleRandom(state) * 0.24'f
+      along = particleRandom(state)
+    if elapsed >= lifetime:
+      return
+    let
+      progress = elapsed / lifetime
+      climb = 0.9'f + particleRandom(state) * 1.5'f
+    position = mix(uParticleOrigin, uParticleTarget, along) +
+      particleDirection(state) * (0.02'f + progress * 0.1'f) +
+      vec3(0.0'f, climb * elapsed, 0.0'f)
+    velocity = vec3(0.0'f, climb, 0.0'f)
+    life = progress
+    size = mix(0.14'f, 0.025'f, progress) *
+      (0.7'f + particleRandom(state) * 0.7'f) *
+      mix(1.0'f, 0.6'f, along)
+    color = mix(
+      mix(
+        vec4(1.0'f, 0.72'f, 0.18'f, 0.23'f),
+        vec4(1.0'f, 0.22'f, 0.01'f, 0.18'f),
+        clamp(progress * 2.5'f, 0.0'f, 1.0'f)
+      ),
+      vec4(0.8'f, 0.03'f, 0.0'f, 0.0'f),
+      clamp((progress - 0.4'f) * 1.67'f, 0.0'f, 1.0'f)
+    )
+    alive = 1.0'f
+    return
+
+  if uParticleEffectKind == FireWave.ord.int32:
+    let
+      birth = particleRandom(state) * 0.035'f
+      age = elapsed - birth
+      lifetime = 0.32'f + particleRandom(state) * 0.15'f
+    if age < 0.0'f or age >= lifetime:
+      return
+    let
+      path = uParticleTarget - uParticleOrigin
+      reach = length(path)
+      forward = safeParticleDirection(path)
+      side = vec3(forward.z, 0.0'f, -forward.x)
+      angle = ((particleId + particleRandom(state)) / 160.0'f - 0.5'f) * 1.57079632679'f
+      outward = forward * cos(angle) + side * sin(angle)
+      travel = clamp(age / 0.125'f, 0.0'f, 1.0'f)
+      radius = max(0.0'f, reach * travel - particleRandom(state) * 0.38'f)
+      rise = particleRandom(state) * 0.48'f
+      progress = age / lifetime
+      fade = 1.0'f - smoothstep(0.28'f, 1.0'f, progress)
+    position = uParticleOrigin + outward * radius +
+      vec3(0.0'f, rise * sin(progress * 3.14159265'f), 0.0'f)
+    velocity = outward * 3.0'f + vec3(0.0'f, 1.8'f, 0.0'f)
+    life = progress
+    size = (0.10'f + particleRandom(state) * 0.08'f) * (1.0'f - progress * 0.55'f)
+    color = mix(vec4(1.0'f, 0.72'f, 0.12'f, 0.28'f * fade),
+      vec4(1.0'f, 0.075'f, 0.005'f, 0.12'f * fade), progress)
+    alive = 1.0'f
+    return
+
+  if uParticleEffectKind == HeatEmbers.ord.int32:
+    let
+      birth = particleId * 0.006'f
+      age = elapsed - birth
+      lifetime = 0.5'f + particleRandom(state) * 0.45'f
+    if age < 0.0'f or age >= lifetime:
+      return
+    let
+      angle = particleRandom(state) * 6.28318530718'f
+      radius = sqrt(particleRandom(state)) *
+        length(uParticleTarget - uParticleOrigin)
+      climb = 0.5'f + particleRandom(state) * 1.1'f
+      progress = age / lifetime
+    position = uParticleOrigin +
+      vec3(cos(angle) * radius, 0.06'f + climb * age, sin(angle) * radius)
+    velocity = vec3(0.0'f, climb, 0.0'f)
+    life = progress
+    size = mix(0.1'f, 0.025'f, progress) *
+      (0.7'f + particleRandom(state) * 0.6'f)
+    color = mix(
+      vec4(1.0'f, 0.62'f, 0.12'f, 0.9'f),
+      vec4(1.0'f, 0.1'f, 0.01'f, 0.0'f),
+      progress
+    )
+    alive = 1.0'f
+    return
+
 proc gameParticleVertex*(
     gl_Position: var Vec4,
     fragmentUv: var Vec2,
     fragmentColor: var Vec4,
     fragmentLife: var float32,
-    fragmentAlive: var float32
+    fragmentAlive: var float32,
+    fragmentBotanical: var float32,
+    fragmentFlame: var float32
 ) =
   ## Expands one GPU instance into a camera-facing particle quad.
   let
     vertexId = gl_VertexID
     particleId = gl_InstanceID.float32
+  # Pass the material family as a float varying; sharing the integer
+  # effect uniform across stages gives WebGL mismatched default precision.
+  fragmentBotanical = 0.0'f
+  fragmentFlame = 0.0'f
+  if uParticleEffectKind == SolarFlames.ord.int32:
+    fragmentFlame = 1.0'f
+  if uParticleEffectKind == BloomPetals.ord.int32 or
+      uParticleEffectKind == BloomSeed.ord.int32 or
+      uParticleEffectKind == RootLeaves.ord.int32:
+    fragmentBotanical = 1.0'f
   fragmentUv = vec2(
     (vertexId mod 2'i32).float32,
     (vertexId div 2'i32).float32
@@ -456,6 +678,28 @@ proc gameParticleVertex*(
       lengthScale = 7.0'f
     else:
       lengthScale = 1.0'f + length(velocity) * 0.1'f
+  if uParticleEffectKind == BloomPetals.ord.int32 or
+      uParticleEffectKind == BloomSeed.ord.int32 or
+      uParticleEffectKind == RootLeaves.ord.int32:
+    let spin = particleId * 2.39996'f + uParticleTime * 1.8'f
+    right = uParticleCameraRight * cos(spin) + uParticleCameraUp * sin(spin)
+    up = uParticleCameraUp * cos(spin) - uParticleCameraRight * sin(spin)
+    lengthScale = 1.6'f
+  if uParticleEffectKind == BloomPetals.ord.int32 and particleId < 8.0'f:
+    let turn = particleId * 6.2831853'f / 8.0'f
+    right = vec3(-sin(turn), 0.0'f, cos(turn))
+    up = vec3(cos(turn), 0.0'f, sin(turn))
+    lengthScale = 1.8'f
+  if uParticleEffectKind == SolarOrb.ord.int32 and
+      particleId >= 2.0'f and particleId < 14.0'f:
+    let elapsed = uParticleTime - uParticleStartTime
+    let turn = (particleId - 2.0'f) * 6.2831853'f / 12.0'f + elapsed * 2.5'f
+    right = uParticleCameraUp * cos(turn) - uParticleCameraRight * sin(turn)
+    up = uParticleCameraRight * cos(turn) + uParticleCameraUp * sin(turn)
+    lengthScale = 2.8'f
+  if uParticleEffectKind == SolarFlames.ord.int32:
+    up = vec3(0.0'f, 1.0'f, 0.0'f)
+    lengthScale = 2.3'f
   let worldPosition: Vec3 = position +
     right * corner.x * size +
     up * corner.y * size * lengthScale
@@ -466,6 +710,8 @@ proc gameParticleFragment*(
     fragmentColor: Vec4,
     fragmentLife: float32,
     fragmentAlive: float32,
+    fragmentBotanical: float32,
+    fragmentFlame: float32,
     fragColor: var Vec4
 ) =
   ## Draws a feathered particle with a bright center.
@@ -488,6 +734,27 @@ proc gameParticleFragment*(
         discardFragment()
       fragColor = vec4(fragmentColor.xyz + vec3(0.08'f, 0.12'f, 0.025'f) * vein, alpha)
       return
+  if fragmentFlame > 0.5'f:
+    let
+      p = fragmentUv * 2.0'f - 1.0'f
+      height = fragmentUv.y
+      bend = sin(height * 7.0'f - fragmentLife * 9.0'f) * height * 0.14'f
+      width = (1.0'f - height) * 0.72'f + 0.035'f
+      shape = 1.0'f - abs(p.x - bend) / width
+      feather = smoothstep(0.0'f, 0.32'f, shape) * sin(height * 3.14159265'f)
+      core = exp(-abs(p.x - bend) * 9.0'f) * (1.0'f - height)
+    if feather < 0.004'f: discardFragment()
+    fragColor = vec4(mix(fragmentColor.xyz, vec3(1.0'f, 0.86'f, 0.32'f), core * 0.6'f),
+      fragmentColor.w * feather)
+    return
+  if fragmentBotanical > 0.5'f:
+    let p = fragmentUv * 2.0'f - 1.0'f
+    let shape = 1.0'f - abs(p.x) - p.y * p.y
+    if shape < 0.0'f: discardFragment()
+    let vein = exp(-abs(p.x) * 28.0'f) * 0.22'f
+    fragColor = vec4(fragmentColor.xyz + vec3(vein),
+      fragmentColor.w * smoothstep(0.0'f, 0.16'f, shape))
+    return
   let
     point = fragmentUv * 2.0'f - 1.0'f
     radiusSquared = dot(point, point)

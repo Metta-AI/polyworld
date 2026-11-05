@@ -5,7 +5,7 @@ import
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player,
     rtscameras, stackpanels],
-  content, maps, sim, game, controls, layouts
+  content, maps, sim, game, controls, isocam, layouts, skillstate
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -13,6 +13,9 @@ const
   IconTiny = 16.0'f32
   IconSmall = 64.0'f32
   DividerColor = rgbx(94, 80, 56, 255)
+  ## Skill states laid over an icon. Silky blends premultiplied colors.
+  CooldownShade = rgbx(0, 0, 0, 178)
+  NoManaTint = rgbx(16, 42, 112, 140)
   ActionKeys = [
     "Q", "W", "E", "R", "F", "G"
   ]
@@ -112,6 +115,16 @@ proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
 
+proc hudFreeBand*(window: Window): tuple[lift, free: float32] =
+  ## The open screen band between the quest plate and the ability bar, as
+  ## the camera lift that centers the target in it and its height fraction.
+  let
+    chrome = currentChrome(window)
+    height = max(chrome.layout.size.y, 1)
+    top = (chrome.quest.origin.y + chrome.quest.size.y) / height
+    bottom = 1 - chrome.abilities.origin.y / height
+  (lift: (bottom - top) / 2, free: max(1 - top - bottom, 0.1'f32))
+
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
   ## Returns the square that bounds the circular minimap well.
   panel
@@ -171,6 +184,28 @@ proc healthColor(actor: Actor): ColorRGBX =
 proc abilityIconKey(ability: Ability): string =
   ## Returns the atlas name packed from one ability art file.
   "ability_" & AbilityIconFiles[ability]
+
+proc drawSkillIcon(
+    sk: Silky,
+    well: GameUiPanel,
+    ability: Ability,
+    actor: Actor,
+    renderAlpha: float32,
+    paysMana = true
+) =
+  ## Draws one skill bar icon under its state: tinted blue while the hero
+  ## cannot pay for it, and dimmed where its cooldown has yet to clear.
+  if ability == NoAbility:
+    sk.drawWellImage(well, "", iconSize = IconSmall)
+    return
+  sk.drawWellImage(well, abilityIconKey(ability), iconSize = IconSmall)
+  let
+    pos = well.origin + (well.size - vec2(IconSmall)) * 0.5'f32
+    left = actor.cooldownLeft(ability, renderAlpha)
+  if paysMana and actor.lacksMana(ability):
+    sk.drawRect(pos, vec2(IconSmall), NoManaTint)
+  if left > 0:
+    sk.drawClockShade(pos, IconSmall, 1 - left, CooldownShade)
 
 proc progressExperience(game: Game): int32 =
   ## Derives presentation-only party experience from expedition progress.
@@ -360,18 +395,41 @@ proc drawMinimapCamera(
     cameraTarget: Vec3,
     cameraDistance: float32
 ) =
-  ## Draws the fixed RTS camera's visible ground footprint.
+  ## Draws the isometric camera's visible ground footprint, a diamond on
+  ## the north-up map, clipped to the map square.
   let
     aspect = window.size.x.float32 / max(window.size.y.float32, 1)
-    viewport = minimapViewport(
-      cameraTarget,
-      cameraDistance,
-      aspect,
-      origin,
-      size,
-      HalfGrid
+    footprint = isoGroundFootprint(
+      isoViewProjection(
+        cameraTarget, cameraDistance, aspect, window.hudFreeBand().lift),
+      cameraTarget.y
     )
-  sk.drawCameraFrame(viewport, rgbx(238, 221, 168, 255))
+    white = sk.atlas.entries[WhiteTileKey]
+    uv = vec2(white.x.float32 + white.width.float32 / 2,
+      white.y.float32 + white.height.float32 / 2)
+    color = rgbx(238, 221, 168, 255)
+    thickness = 2.0'f32
+  var corners: array[4, Vec2]
+  for i, ground in footprint:
+    corners[i] = origin + (ground + vec2(HalfGrid)) / GridTiles.float32 * size
+  for i in 0 ..< 4:
+    let
+      first = corners[i]
+      last = corners[(i + 1) mod 4]
+      delta = last - first
+      length = delta.length
+    if length <= 0:
+      continue
+    let
+      offset = vec2(-delta.y, delta.x) * (thickness / (2 * length))
+      a = first - offset
+      b = first + offset
+      c = last + offset
+      d = last - offset
+    sk.drawTriangle(
+      [a, b, c], [uv, uv, uv], [color, color, color], origin, size)
+    sk.drawTriangle(
+      [a, c, d], [uv, uv, uv], [color, color, color], origin, size)
 
 proc drawUi*(
     sk: Silky,
@@ -383,7 +441,8 @@ proc drawUi*(
     selectedIds: var array[PartySize, bool],
     followSelection: var bool,
     actionCam: var ActionCam,
-    focusPlayerHero: var bool
+    focusPlayerHero: var bool,
+    renderAlpha: float32
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let table = currentStats()
@@ -712,22 +771,26 @@ proc drawUi*(
   )
   for index, slotPanel in abilities.slots:
     if index < 4:
-      sk.drawWellImage(
+      sk.drawSkillIcon(
         slotPanel,
-        abilityIconKey(HeroAbilities[selectedClass][index]),
-        iconSize = IconSmall
+        HeroAbilities[selectedClass][index],
+        selectedActor,
+        renderAlpha
       )
     else:
       let
         bag = index - 4
         itemId = selectedActor.inventory[bag]
         itemIndex = run.world.itemIndex(itemId)
-      var icon = ""
-      if itemIndex >= 0:
-        let ability = LootAbilities[run.world.items[itemIndex].kind]
-        if ability != NoAbility:
-          icon = abilityIconKey(ability)
-      sk.drawWellImage(slotPanel, icon, iconSize = IconSmall)
+        ability =
+          if itemIndex >= 0: LootAbilities[run.world.items[itemIndex].kind]
+          else: NoAbility
+      # Using an item neither checks nor charges mana, so its listed cost
+      # never holds it back: the blue would mark a mana potion unusable just
+      # when it is needed.
+      sk.drawSkillIcon(
+        slotPanel, ability, selectedActor, renderAlpha, paysMana = false
+      )
       if options.playerSlot > 0 and
           not run.replayMode and
           primaryId == options.playerSlot - 1:

@@ -40,7 +40,8 @@ proc usage() =
   echo "  --verbose               Print periodic headless summaries."
   echo "  --arena                 Debug fight in one 10x10 room."
   echo "  --hero:CLASS[,CLASS]    Arena party: wizard (the mage), rogue (the"
-  echo "                          archer), fighter, cleric; default mage,fighter."
+  echo "                          archer), fighter, cleric (the druid); default"
+  echo "                          mage,fighter."
   echo "  --monster:NAME[,NAME]   Arena monsters, cycled: dustling (default)..."
   echo "  --monsters:N            Arena monster count, 1 to 24 (default 10)."
   echo "Compile with -d:headless for command-line simulation."
@@ -71,16 +72,18 @@ proc heroName*(class: HeroClass): string =
 
 proc parseArenaHero(name: string): HeroClass =
   ## Reads a hero class by its plain name, in any case. The rogue, who
-  ## carries the bow, also answers to archer and ranger, and the wizard to
-  ## mage and arcanist.
+  ## carries the bow, also answers to archer and ranger, the wizard to mage
+  ## and arcanist, and the cleric to druid.
   if name.squashed in ["archer", "ranger"]:
     return RogueClass
   if name.squashed in ["mage", "arcanist"]:
     return WizardClass
+  if name.squashed == "druid":
+    return ClericClass
   for class in HeroClass:
     if class.heroName.squashed == name.squashed:
       return class
-  fail("unknown --hero " & name & "; use mage, archer, fighter or cleric")
+  fail("unknown --hero " & name & "; use mage, archer, fighter or druid")
 
 proc parseArenaMonster(name: string): Species =
   ## Reads a species by its display name, ignoring case, spaces and dashes.

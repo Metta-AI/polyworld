@@ -622,6 +622,42 @@ proc drawWellImage*(
   let inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
   sk.drawSprite(name, inner.origin, inner.size, color)
 
+proc squareEdge(center: Vec2, halfSize, turn: float32): Vec2 =
+  ## Returns where a clock hand, this share of a turn past 12 o'clock, meets
+  ## the edge of a square.
+  let
+    angle = turn * float32(TAU)
+    hand = vec2(sin(angle), -cos(angle))
+  center + hand * (halfSize / max(abs(hand.x), abs(hand.y)))
+
+proc drawClockShade*(
+    sk: Silky,
+    pos: Vec2,
+    size: float32,
+    turn: float32,
+    color: ColorRGBX
+) =
+  ## Shades the part of a square a clock hand has yet to sweep, clockwise
+  ## from 12 o'clock: all of it at turn 0 and none of it at turn 1. The fan
+  ## only needs the hand and the corners ahead of it to fill exactly that.
+  const Stops = [0.125'f32, 0.375, 0.625, 0.875, 1]
+  if turn >= 1:
+    return
+  let
+    white = sk.atlas.entries[WhiteTileKey]
+    uv = vec2(white.x.float32 + white.width.float32 / 2,
+      white.y.float32 + white.height.float32 / 2)
+    halfSize = size / 2
+    center = pos + vec2(halfSize)
+    hand = max(turn, 0)
+  var edge = squareEdge(center, halfSize, hand)
+  for stop in Stops:
+    if stop > hand:
+      let next = squareEdge(center, halfSize, stop)
+      sk.drawTriangle(
+        [center, edge, next], [uv, uv, uv], [color, color, color])
+      edge = next
+
 proc beginFrame*(
     sk: Silky,
     panel: GameUiPanel

@@ -175,6 +175,31 @@ var
   groundRing: Uniform[Vec4]
   groundRingShape: Uniform[Vec3]
   propTint: Uniform[Vec4]
+  terrainCutaways: Uniform[array[8, Vec4]]
+    ## One per actor kept in view: xyz its feet, w its size. A zero size
+    ## leaves the slot unused.
+  terrainCutawayView: Uniform[Vec4]
+    ## xyz points toward the eye; w is the body center's height above the
+    ## feet at size one.
+  terrainCutawayShape: Uniform[Vec4]
+    ## The screen-plane ellipse cut around a body at size one: x half its
+    ## width, y half its height, z how far in front of the body center a
+    ## surface must be to go. Zero w turns every cut off.
+
+const TerrainCutawaySlots* = 8
+  ## How many actors one terrain draw can cut a view to.
+
+type
+  TerrainCutaway* = object
+    ## How a fixed camera sees bodies through terrain: see setTerrainCutaways.
+    towardEye*: Vec3
+    rise*: float32
+      ## Body center above the feet.
+    halfWidth*, halfHeight*: float32
+      ## The hole's screen-plane ellipse around that center.
+    clearance*: float32
+      ## Surfaces nearer the body center than this stay, so the floor and
+      ## walls beside a body are not notched.
 
 proc texture(buffer: Uniform[Sampler2dArray], position: Vec3): Vec4 =
   ## Provides Shady with the texture-array builtin signature.
@@ -272,6 +297,28 @@ proc terrainFrag(
     shadowPos: Vec3
 ) =
   ## Height-blends textured tile materials and applies visibility fog.
+  # Cutaways: anything standing above an actor's floor and over its body on
+  # screen, nearer the eye, is dropped, so walls, pillars and higher slabs
+  # never hide who is fighting.
+  if terrainCutawayShape.w > 0.0:
+    let
+      view: Vec3 = terrainCutawayView.xyz
+      up: Vec3 = normalize(vec3(0.0, 1.0, 0.0) - view * view.y)
+    for i in 0 ..< 8:
+      let cut = terrainCutaways[i]
+      if cut.w > 0.0 and worldPos.y > cut.y + 0.1:
+        let
+          offset: Vec3 = worldPos -
+            vec3(cut.x, cut.y + terrainCutawayView.w * cut.w, cut.z)
+          along = dot(offset, view)
+          across: Vec3 = offset - view * along
+          upward = dot(across, up)
+          side = length(across - up * upward) /
+            (terrainCutawayShape.x * cut.w)
+          rise = upward / (terrainCutawayShape.y * cut.w)
+        if along > terrainCutawayShape.z * cut.w and
+            side * side + rise * rise < 1.0:
+          discardFragment()
   let
     tilePos = vec2(worldPos.x, worldPos.z)
     h = clamp(
@@ -945,6 +992,9 @@ var
   unboostedMaterialLocation: GLint
   groundMaskLocation, groundMaskEnabledLocation, groundLayersLocation: GLint
   groundRingLocation, groundRingShapeLocation: GLint
+  cutawaysLocation, cutawayViewLocation, cutawayShapeLocation: GLint
+  cutawayData: array[TerrainCutawaySlots, Vec4]
+  cutawayView, cutawayShape: Vec4
   visibilitySize = GridTiles
   visibilityOffsetLocation, visibilityScaleLocation: GLint
   terrainTextureArray, visibilityTexture, groundMaskTexture: GLuint
@@ -3694,6 +3744,15 @@ proc initTerrain*(
     terrainProgram,
     "groundRingShape"
   )
+  cutawaysLocation = glGetUniformLocation(terrainProgram, "terrainCutaways")
+  cutawayViewLocation = glGetUniformLocation(
+    terrainProgram,
+    "terrainCutawayView"
+  )
+  cutawayShapeLocation = glGetUniformLocation(
+    terrainProgram,
+    "terrainCutawayShape"
+  )
   visibilityOffsetLocation = glGetUniformLocation(
     terrainProgram,
     "visibilityOffset"
@@ -4230,6 +4289,41 @@ proc updateTerrainEdges*(walkable: PathWalkable) =
         mesh[offset].addr
       )
 
+proc setTerrainCutaways*(
+    shape: TerrainCutaway,
+    cuts: openArray[Vec4]
+) =
+  ## Keeps up to TerrainCutawaySlots bodies in view from a fixed camera.
+  ## Each cut is a body's feet (xyz) and size (w, scaling `shape`): terrain
+  ## above those feet that covers the body's ellipse on screen and sits
+  ## more than the clearance nearer the eye is not drawn. Lasts until the
+  ## next call; no cuts turns it off.
+  for i in 0 ..< TerrainCutawaySlots:
+    cutawayData[i] = if i < cuts.len: cuts[i] else: vec4(0)
+  cutawayView = vec4(normalize(shape.towardEye), shape.rise)
+  cutawayShape = vec4(
+    max(shape.halfWidth, 0.01'f32),
+    max(shape.halfHeight, 0.01'f32),
+    shape.clearance,
+    if cuts.len > 0: 1'f32 else: 0'f32
+  )
+
+proc setCutawayUniforms() =
+  ## Uploads the current cutaways to the bound terrain program.
+  glUniform4fv(
+    cutawaysLocation,
+    TerrainCutawaySlots.GLsizei,
+    cast[ptr float32](cutawayData.addr)
+  )
+  glUniform4f(
+    cutawayViewLocation,
+    cutawayView.x, cutawayView.y, cutawayView.z, cutawayView.w
+  )
+  glUniform4f(
+    cutawayShapeLocation,
+    cutawayShape.x, cutawayShape.y, cutawayShape.z, cutawayShape.w
+  )
+
 proc drawTerrainRange*(
     viewProjection: Mat4,
     firstVertex, vertexCount: int,
@@ -4256,6 +4350,7 @@ proc drawTerrainRange*(
   glUniform1f(heightBlendLocation, terrainHeightBlend)
   glUniform1f(visibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(visibilityScaleLocation, 1.0'f / visibilitySize.float32)
+  setCutawayUniforms()
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
@@ -4352,6 +4447,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false,
   glUniform1f(heightBlendLocation, terrainHeightBlend)
   glUniform1f(visibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(visibilityScaleLocation, 1.0'f / visibilitySize.float32)
+  setCutawayUniforms()
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)

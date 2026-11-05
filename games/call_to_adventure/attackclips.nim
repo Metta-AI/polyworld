@@ -1,5 +1,6 @@
 ## Attack clips the character library lacks, posed at load time on the
-## hero's own rig: the Ranger's bow shot and the Arcanist's staff cast.
+## hero's own rig: the Ranger's bow shot, the Arcanist's staff cast, the
+## Fighter's blazing slash and taunt, and the Druid's hammer slam.
 ##
 ## The library has no bow or staff clip. The stand-ins were a pistol recoil
 ## and a one-handed spell flick that leaves the staff hanging at the side,
@@ -14,6 +15,19 @@
 ## The staff cast: the staff rises and cocks far behind the head as the
 ## caster leans back, then whips forward over the target with a lunge while
 ## the orb hand flings back, overshoots low, and settles.
+##
+## The blazing slash: the sword comes back low past the right hip as the
+## body coils away, then whips flat across the front in one wide sweep that
+## ends far out on the left, so the blade draws its whole arc on the floor
+## of the view.
+##
+## The taunt: he hunches over, then rears back with his chest thrown open,
+## the sword flung out to one side and the off arm to the other, the widest
+## shape a body makes seen from above.
+##
+## The hammer slam: the staff goes up over the head and cocks far behind it
+## as the body rears back, then comes straight down over the top onto the
+## target with a lunge and a crouch, the orb hand flung back behind.
 ##
 ## Model space has +Z toward the target, +X on the hero's left and +Y up.
 ## Both props sit in the right hand.
@@ -31,10 +45,20 @@ const
     ## The renderer lands it on the hit tick.
   BowKeys = [0.0'f32, 0.2, 0.5, AttackImpactTime, 0.66, 0.82, 1.0]
   StaffKeys = [0.0'f32, 0.25, 0.5, AttackImpactTime, 0.75, 1.0]
+  SlashKeys = [0.0'f32, 0.2, 0.5, 0.55, AttackImpactTime, 0.75, 1.0]
+  RoarKeys = [0.0'f32, 0.5, AttackImpactTime, 0.8, 1.0]
+  SlamKeys = [0.0'f32, 0.25, 0.5, AttackImpactTime, 0.75, 1.0]
+  BladeSamples = 60
+  BladeRoot = 0.2'f32
+    ## How far up the blade its edge starts, past the hand and the guard.
   Up = vec3(0, 1, 0)
   Side = vec3(1, 0, 0)
 
 type
+  BladePose* = object
+    ## Where a held blade is at one moment of a clip, in the model's frame.
+    root*, tip*: Vec3
+
   Rig = object
     ## The skeleton the idle clip animates, with each bone's parent.
     bones: Table[string, Node]
@@ -280,6 +304,142 @@ proc staffPose(rig: Rig, key: int, staff: Vec3) =
   else:
     discard
 
+## The blazing slash
+
+proc heldTip(root: Node, held: openArray[string], bone: string): Vec3 =
+  ## Finds a held blade's point in the holding bone's own frame: whatever
+  ## of it lies farthest from the hand.
+  var points: seq[Vec3]
+  root.collectHeld(held, bone, points)
+  for vertex in points:
+    if length(vertex) > length(result):
+      result = vertex
+
+proc slashPose(rig: Rig, key: int, sword: Vec3) =
+  ## Poses one key of the slash over the idle stance. Keys run: ready, draw,
+  ## full coil, the sweep's middle, its end at the impact time, the
+  ## follow-through, ready. The sword stays nearly flat all the way round
+  ## and passes well clear of the body, which is what reads from above.
+  let wrist = rig.at("RightArm")
+  case key
+  of 1:
+    rig.stance(-0.5, 0.05, 0.05, 0.04)
+    rig.wield(wrist + vec3(-0.22, -0.2, -0.12),
+      vec3(-1, -0.2, -0.3), vec3(-0.9, 0.3, -0.6), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.2, -0.3, 0.3), vec3(1, -1, 0))
+  of 2:
+    rig.stance(-1.1, 0.1, 0.12, 0.1)
+    rig.wield(wrist + vec3(-0.34, -0.26, -0.34),
+      vec3(-1, -0.2, -0.3), vec3(-0.75, 0.22, -0.75), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.3, -0.2, 0.45), vec3(1, -1, 0))
+  of 3:
+    rig.stance(-0.1, -0.12, 0.16, -0.14)
+    rig.wield(wrist + vec3(-0.02, -0.16, 0.62),
+      vec3(-1, -0.6, 0), vec3(-0.08, 0.02, 1), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.42, -0.2, -0.1), vec3(1, -1, 0))
+  of 4:
+    rig.stance(1.0, -0.18, 0.16, -0.16)
+    rig.wield(wrist + vec3(0.52, -0.2, 0.34),
+      vec3(-0.2, -1, -0.2), vec3(0.92, 0.02, 0.4), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.3, -0.25, -0.34), vec3(1, -1, 0))
+  of 5:
+    rig.stance(1.15, -0.12, 0.12, -0.1)
+    rig.wield(wrist + vec3(0.46, -0.28, 0.18),
+      vec3(-0.2, -1, -0.2), vec3(0.95, -0.08, 0.1), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.22, -0.3, -0.3), vec3(1, -1, 0))
+  else:
+    discard
+
+proc roarPose(rig: Rig, key: int, sword: Vec3) =
+  ## Poses one key of the taunt over the idle stance. Keys run: ready, the
+  ## hunch, the roar at the impact time, its hold, ready.
+  case key
+  of 1:
+    rig.stance(0, -0.3, 0.14, 0)
+    rig.wield(rig.at("RightArm") + vec3(0.12, -0.34, 0.26),
+      vec3(-1, -0.4, 0), vec3(0.5, -0.5, 0.7), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(-0.12, -0.34, 0.26), vec3(1, -0.4, 0))
+  of 2:
+    rig.stance(0, 0.34, -0.02, 0.1)
+    rig.wield(rig.at("RightArm") + vec3(-0.44, 0.2, 0.04),
+      vec3(-0.4, -1, 0), vec3(-0.85, 0.5, 0.1), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.46, 0.2, 0.04), vec3(0.4, -1, 0))
+  of 3:
+    rig.stance(0, 0.26, 0, 0.08)
+    rig.wield(rig.at("RightArm") + vec3(-0.42, 0.14, 0.04),
+      vec3(-0.4, -1, 0), vec3(-0.9, 0.38, 0.1), sword)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.44, 0.14, 0.04), vec3(0.4, -1, 0))
+  else:
+    discard
+
+## The hammer slam
+
+proc slamPose(rig: Rig, key: int, staff: Vec3) =
+  ## Poses one key of the slam over the idle stance. Keys run: ready, raise,
+  ## full cock, the blow at the impact time, its hold, ready. The head goes
+  ## from far behind the caster, over the top, to the floor in front of it,
+  ## the longest stroke a staff makes seen from above.
+  case key
+  of 1:
+    rig.stance(0.15, 0.15, 0, 0)
+    rig.wield(
+      rig.at("RightArm") + vec3(-0.05, 0.5, -0.05),
+      vec3(-1, 0, 0), vec3(0, 1, -0.3), staff)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.3, -0.35, 0.1), vec3(1, 0, 0))
+  of 2:
+    rig.stance(0.1, 0.32, -0.06, 0.06)
+    rig.wield(
+      rig.at("RightArm") + vec3(0.05, 0.55, -0.25),
+      vec3(-1, 0.3, 0), vec3(0, 0.45, -1), staff)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.2, -0.1, 0.45), vec3(1, -1, 0))
+  of 3:
+    rig.stance(0, -0.38, 0.15, -0.14)
+    rig.wield(
+      rig.at("RightArm") + vec3(0.12, -0.22, 0.58),
+      vec3(-1, -0.5, 0), vec3(0, -0.6, 1), staff)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.35, -0.3, -0.35), vec3(0, -1, 0))
+  of 4:
+    rig.stance(0, -0.32, 0.13, -0.12)
+    rig.wield(
+      rig.at("RightArm") + vec3(0.12, -0.3, 0.52),
+      vec3(-1, -0.5, 0), vec3(0, -0.75, 1), staff)
+    rig.leftHand(rig.at("LeftArm") + vec3(0.32, -0.32, -0.3), vec3(0, -1, 0))
+  else:
+    discard
+
+proc measureBlade*(
+    model: CharacterModel, clip: int, held: openArray[string]
+): seq[BladePose] =
+  ## Follows a held blade through a clip, so the client can light it, and
+  ## the whole arc behind it, from nothing but the time into the clip.
+  let
+    root = model.file.root
+    tip = root.heldTip(held, "RightHand")
+    duration = model.clipDuration(clip)
+  var hand: Node
+  for node in root.walkNodes:
+    if node.name == "RightHand":
+      hand = node
+  root.activeClips.setLen(1)
+  root.activeClips[0] = clip
+  for sample in 0 ..< BladeSamples:
+    root.animTime = duration * sample.float32 / BladeSamples.float32
+    root.updateAnimation(0)
+    root.updateTransforms(model.baseTransform)
+    result.add BladePose(root: hand.mat * (tip * BladeRoot), tip: hand.mat * tip)
+
+proc bladeAt*(track: openArray[BladePose], fraction: float32): BladePose =
+  ## Where a blade measured by `measureBlade` is, a fraction of the way
+  ## through its clip.
+  let
+    place = clamp(fraction, 0, 1) * (track.len - 1).float32
+    first = min(place.int, track.len - 2)
+    blend = place - first.float32
+  BladePose(
+    root: mix(track[first].root, track[first + 1].root, blend),
+    tip: mix(track[first].tip, track[first + 1].tip, blend)
+  )
+
 ## Building
 
 proc addAttackClip*(
@@ -294,8 +454,15 @@ proc addAttackClip*(
   let
     root = model.file.root
     stance = root.animations[model.clipIndex(stanceClip)]
-    keys = if clip == BowShotClip: @BowKeys else: @StaffKeys
+    keys =
+      case clip
+      of BowShotClip: @BowKeys
+      of StaffCastClip: @StaffKeys
+      of TauntRoarClip: @RoarKeys
+      of HammerSlamClip: @SlamKeys
+      else: @SlashKeys
     staff = root.heldAxis(held, "RightHand")
+    sword = normalize(root.heldTip(held, "RightHand"))
   var rig: Rig
   rig.mapParents(root)
   for channel in stance.channels:
@@ -312,10 +479,12 @@ proc addAttackClip*(
   for key in 0 ..< keys.len:
     root.resetToBase()
     stance.applyClipAt(0)
-    if clip == BowShotClip:
-      rig.bowPose(key)
-    else:
-      rig.staffPose(key, staff)
+    case clip
+    of BowShotClip: rig.bowPose(key)
+    of StaffCastClip: rig.staffPose(key, staff)
+    of TauntRoarClip: rig.roarPose(key, sword)
+    of HammerSlamClip: rig.slamPose(key, staff)
+    else: rig.slashPose(key, sword)
     for channel in attack.channels:
       case channel.path
       of AnimTranslation: channel.valuesVec3.add channel.target.pos

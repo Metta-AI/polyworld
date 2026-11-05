@@ -113,8 +113,16 @@ proc checkCharacter(
   var
     armed = false
     originalDraws = 0
-  doAssert model.mergedMeshes.len == 1
+  # A bow also bakes the mesh it draws once the arrow has left the string.
+  doAssert model.mergedMeshes.len == (if BowShotClip in clips: 2 else: 1)
   doAssert model.mergedMesh == 0
+  if model.mergedMeshes.len == 2:
+    var full, loosed = 0
+    for primitive in model.mergedMeshes[0].mesh.primitives:
+      full += primitive.points.len
+    for primitive in model.mergedMeshes[1].mesh.primitives:
+      loosed += primitive.points.len
+    doAssert loosed < full, preset.name & " still holds the loosed arrow"
   let merged = model.mergedMeshes[0]
   doAssert merged.mesh.primitives.len in 1 .. 2
   doAssert merged.skin.joints.len > 0
@@ -191,7 +199,8 @@ block:
       species.speciesClips(),
       @(entry.skinRgb)
     )
-    doAssert entry.skinRgb == roster.mobs[species.ord div 4 * 4].skinRgb
+    doAssert entry.skinRgb == roster.mobs[
+      familySpecies(species.monsterFamily, RuntRank).ord].skinRgb
 
   echo "Shared CTA meshes retain independent prepared actor poses."
   let
