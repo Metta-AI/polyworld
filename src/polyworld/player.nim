@@ -44,9 +44,11 @@ type
     repeating*: bool
     speedIndex*: int
     live*: bool
+    streamed*: bool
+      ## Received ticks bound playback/seeks; an empty live buffer waits.
     tick*: int32
     recordedTicks*: int32
-      ## How far the in-memory tape has been simulated.
+      ## Simulated tape extent, or contiguous received extent for streams.
     durationTicks*: int32
       ## Configured match length. Live scrubber uses this until the game ends.
     over*: bool
@@ -119,7 +121,8 @@ proc seekTo*(player: var Player, tick: int32, play = true,
   ## then resimulate up to it.
   inc player.seekSerial
   player.automaticSeek = automatic
-  let wanted = clamp(tick, 0'i32, player.timelineEnd)
+  let wanted = clamp(tick, 0'i32,
+    if player.streamed: player.recordedTicks else: player.timelineEnd)
   if wanted < player.tick:
     player.restoreTick = wanted
   player.targetTick = wanted
@@ -132,7 +135,7 @@ proc skipToStart*(player: var Player) =
 
 proc skipToEnd*(player: var Player) =
   ## Jumps to the last timeline tick.
-  player.seekTo(player.timelineEnd)
+  player.seekTo(if player.streamed: player.recordedTicks else: player.timelineEnd)
 
 proc stepBack*(player: var Player) =
   ## Pauses and moves exactly one tick backward.
@@ -154,7 +157,7 @@ proc pause*(player: var Player) =
 
 proc play*(player: var Player) =
   ## Starts playback, rewinding first when already at the end.
-  if player.tick >= player.timelineEnd and player.timelineEnd > 0:
+  if not player.streamed and player.tick >= player.timelineEnd and player.timelineEnd > 0:
     player.seekTo(0)
   else:
     player.playing = true
@@ -201,6 +204,12 @@ proc shouldTick*(
 ): bool =
   ## Returns whether one more simulation tick belongs in this frame.
   ## Paused seeks run until they land so single-tick steps stay exact.
+  if player.streamed and player.tick >= player.recordedTicks:
+    player.accumulator = 0
+    if player.targetTick <= player.tick:
+      player.targetTick = -1
+    if not player.over:
+      return false
   if player.reachedEnd:
     if player.repeating and player.timelineEnd > 0:
       player.seekTo(0, automatic = true)

@@ -25,9 +25,11 @@ import
   test_landscapes,
   test_lanes,
   test_lighting,
+  test_lobby_readiness,
   test_mapgen,
   test_motions,
   test_mirrors,
+  test_minimap_orders,
   test_movement,
   test_observations,
   test_policies,
@@ -41,11 +43,15 @@ import
   test_scores,
   test_sizes,
   test_spells,
+  test_start_button,
   test_symmetry,
   test_targets,
   test_terrains,
   test_towers,
   test_walls,
-  test_multiplayer
+  test_multiplayer,
+  test_spectator,
+  test_spectator_player,
+  test_spectator_graphics
 
 echo "Game tests passed"

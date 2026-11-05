@@ -84,12 +84,17 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
     PanelInventory
   )
 
+var networkSpectator* = false
+
+proc transportAvailable*(): bool =
+  not defined(gotaTestRoom) and (not run.networked or networkSpectator)
+
 proc currentLayout*(window: Window): GameUiLayout =
   ## Reserves timeline space only when the transport controls are visible.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
       gameUiScale(window),
-    if run.networked or defined(gotaTestRoom): 0.0'f else: TransportHeight
+    if transportAvailable(): TransportHeight else: 0.0'f
   )
 
 var
@@ -895,7 +900,7 @@ proc drawUi*(
   ## Draws every Silky HUD panel for the current frame.
   if run.world.phase == Drafting:
     sk.drawDraft(window, currentLayout(window).size, transport.playing)
-    if not run.networked and not defined(gotaTestRoom):
+    if transportAvailable():
       transport.drawTransport(
         sk, window, currentLayout(window).transportPanel, actionCam,
         followSelection, addr statsState.toggled
@@ -1528,7 +1533,7 @@ proc drawUi*(
       run.hashCheck.error
     )
 
-  if not run.networked and not defined(gotaTestRoom):
+  if transportAvailable():
     transport.drawTransport(
       sk,
       window,

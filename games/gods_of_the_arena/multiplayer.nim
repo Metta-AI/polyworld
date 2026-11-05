@@ -10,6 +10,9 @@ type NetworkMatch* = ref object
   game*: Game
   revision*: uint32
   started*, finished*: bool
+  match: uint32
+  seats: seq[Seat]
+  spectator: bool
   decisionTick: int32 = -1
 
 proc networkHash*(game: Game): uint64 =
@@ -132,10 +135,22 @@ proc prepareNetworkMatch*(
     if seat.owner == client.participant and i < sources.len:
       ownedSources[i] = sources[i]
   game.loadBotSources(ownedSources)
-  result = NetworkMatch(client: client, game: game, revision: snapshot.revision)
+  result = NetworkMatch(client: client, game: game, revision: snapshot.revision,
+    spectator: true)
+  for seat in snapshot.seats:
+    result.seats.add seat
+    if seat.owner != 0 and seat.owner == client.participant:
+      result.spectator = false
+
+proc isSpectator*(session: NetworkMatch): bool =
+  ## Bot owners are controllers too; only seatless participants watch locally.
+  ## Keep this match's role even after a lobby update clears/reassigns seats.
+  session != nil and session.spectator
 
 proc flushSubmissions*(session: NetworkMatch) =
   ## Submits human and private bot intents through one ownership-checked path.
+  if session.isSpectator:
+    return
   session.game.flushPlayerCommands()
   for submission in session.game.submissions:
     let index = session.game.world.heroIndex(submission.action.heroId)
@@ -147,7 +162,7 @@ proc flushSubmissions*(session: NetworkMatch) =
 
 proc decide(session: NetworkMatch) =
   ## Runs each locally owned VM once per authoritative state, never on replay.
-  if session.decisionTick == session.game.world.tick or session.finished:
+  if session.isSpectator or session.decisionTick == session.game.world.tick or session.finished:
     return
   session.decisionTick = session.game.world.tick
   session.game.runBotDecisions()
@@ -157,6 +172,7 @@ proc start*(session: NetworkMatch, message: RoomMessage) =
   ## Confirms the immutable setup before any VM or live tick executes.
   if message.revision != session.revision:
     reject("GotA setup revision changed before startup")
+  session.match = message.match
   session.client.send(RoomMessage(
     kind: ReportHash, match: session.client.match, tick: 0,
     hash: session.game.networkHash()
@@ -166,24 +182,38 @@ proc start*(session: NetworkMatch, message: RoomMessage) =
   session.started = true
   session.decide()
 
-proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
+proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = false) =
   ## Validates ownership and executes a server tick in canonical sim phases.
   let
     game = session.game
     client = session.client
   if not session.started or packet.kind != TickPacket or
-    packet.match != client.match or packet.tick != uint32(game.world.tick + 1):
+    packet.match != session.match or packet.tick != uint32(game.world.tick + 1):
       reject("GotA received an unexpected simulation tick")
   # Validate the entire packet before applying any part of it.
   var submissions: seq[GameSubmission]
   for command in packet.commands:
-    if command.seat >= uint32(client.snapshot.seats.len) or
-      client.snapshot.seats[command.seat].owner != command.participant:
+    if command.seat >= uint32(session.seats.len) or
+      session.seats[command.seat].owner != command.participant:
         reject("Command participant does not own this seat")
     let submission = decodeSubmission(command.payload)
     if submission.action.heroId != game.world.heroes[command.seat].id:
       reject("GotA command hero does not belong to this seat")
     submissions.add submission
+  # A cached spectator packet is replayed with its mailbox commands as well as
+  # actions. Never append duplicate actions/hashes, run policies, or publish ACKs.
+  let recorder = game.recorder
+  let history = game.historyPlayback
+  if localPlayback:
+    if not session.isSpectator:
+      reject("Local packet playback requires a spectator")
+    if recorder != nil and int(packet.tick) <= recorder.data.hashes.len:
+      game.recorder = ReplayRecorder(data: recorder.data)
+      game.recorder.data.actions = @[]
+    game.historyPlayback = false
+  defer:
+    game.recorder = recorder
+    game.historyPlayback = history
   for submission in submissions:
     if submission.mailbox:
       discard game.deliverChat(
@@ -198,6 +228,8 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
   if uint32(game.world.tick) != packet.tick:
     reject("GotA failed to execute the authoritative tick")
   for outcome in game.actionResults:
+    if localPlayback:
+      continue
     game.publishActionResult(outcome.action.heroId, outcome.accepted)
     let seat = game.world.heroIndex(outcome.action.heroId)
     if outcome.action.kind == ActionBuyItem and seat >= 0 and
@@ -209,8 +241,15 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
           accepted: outcome.accepted
         )
   game.actionResults.setLen(0)
+  # Local viewing still completes metric ticks: finishTick deduplicates command
+  # totals on rewind, and history.capture retains only first-traversal samples.
   game.sampleMetrics(game.finished())
   game.metrics.finishTick(game.world.tick)
+  if localPlayback:
+    if recorder != nil and int(packet.tick) <= recorder.data.hashes.len and
+      recorder.data.hashes[int(packet.tick) - 1] != game.stateHash():
+        reject("Spectator replay state hash differs")
+    return
   client.appliedTick(packet.tick)
   if packet.tick mod uint32(TickRate) == 0:
     client.send(RoomMessage(

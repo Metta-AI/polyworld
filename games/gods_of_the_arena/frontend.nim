@@ -520,7 +520,8 @@ proc runFrontend*() =
                   "&room=" & encodeUrl(snapshot.room))
             if sk.lobbyButton(if selfReady: "Ready" else: "Ready up",
               layout.footer + vec2(420, 0), 190, "status",
-              editable and ownCount > 0 and not configDirty and not modal):
+              editable and ownCount > 0 and not configDirty and not modal,
+              iconTint = readinessColor(selfReady)):
                 var sources: array[HeroClassCount, string]
                 for i, policy in networkPolicies:
                   sources[i] = policy.bytes
@@ -542,7 +543,7 @@ proc runFrontend*() =
               if sk.lobbyButton("Start Game", layout.primary,
                 250, "arrow_right",
                 owner and editable and readyToStart and not modal,
-                tint = LobbyGreen):
+                tint = StartGameGreen):
                   client.send(RoomMessage(kind: StartMatch))
             if sk.lobbyButton(
               if owner and snapshot.phase in {rooms.Ended, Desynced}:
@@ -568,7 +569,7 @@ proc runFrontend*() =
               page = HomeMenu
             if sk.lobbyButton("Start Game", layout.primary,
               250, "arrow_right", emptyCount == 0 and not modal,
-              tint = LobbyGreen):
+              tint = StartGameGreen):
                 discard parseConfig(config.toJson())
                 launchLocal = true
             sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
