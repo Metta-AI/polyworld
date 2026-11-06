@@ -34,4 +34,4 @@ for suffix in js wasm data; do
   cp "$build/cac.$suffix" "$output/cac.$suffix"
 done
 cp "$build/cac.html" "$output/index.html"
-cp "$root/games/cac/web/loading/cac-logo.svg" "$output/loading-logo.svg"
+cp "$root/games/cac/web/loading/cnc-wordmark.svg" "$output/loading-logo.svg"

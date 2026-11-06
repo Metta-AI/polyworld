@@ -64,7 +64,7 @@ when defined(emscripten):
       readFile(cacPolyworldRepo / "src/polyworld/replay.html").replace(
         "<!-- GAME_LOGO -->",
         "<img id=\"loading-logo\" alt=\"Cards and Casters\" " &
-          "width=\"320\" height=\"240\" src=\"loading-logo.svg\" " &
+          "width=\"560\" height=\"350\" src=\"loading-logo.svg\" " &
           "fetchpriority=\"high\">"))
     switch("passL", "--shell-file " & quoteShell(replayShell))
   else:
