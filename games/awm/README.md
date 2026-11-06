@@ -419,14 +419,14 @@ nim r -d:headless --out:build/test_match tests/test_match.nim
 | Mage | Bouncer | 4 | 1 | Minion | 1/1 | Return a minion to owner's hand |
 | Mage | Spirit | 4 | 3 | Minion | 1/3 | Hidden; Ranged |
 | Mage | Summon Primordial | 4 | 8 | Spell | — | Return all cards a hero controls to their owner's hand, then summon a Primordial |
-| Mage | Primordial | — | 8 | Minion | 10/10 | — (only summoned, by Summon Primordial) |
+| Mage | Primordial | — | 10 | Minion | 10/10 | — (only summoned, by Summon Primordial) |
 | Mage | Study | 4 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
 | Mage | Plan | 4 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
 | Mage | Oozification | 4 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
 | Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |
 | Mage | Bubble Shield | 4 | 2 | Spell | — | Summon 2 Bubbles |
 | Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
-| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
+| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a friendly minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
 | Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
 | Mage | Overwork | 4 | 3 | Trinket | — | Lasts 3; gain 3 extra energy now, and at the start of each of your turns gain 2 extra energy and draw 1 card; when destroyed, summon a Burnout |
 | Mage | Burnout | — | 0 | Trinket | — | At the end of each of your turns, deal 2 damage to yourself and discard 1 card (only summoned, by Overwork) |

@@ -409,6 +409,22 @@ suite "Turns and the spectator camera":
       check centerInside
       check balconiesOutside
 
+  test "a human who dies during their own turn passes it":
+    var match = newMultiplayerMatch([Archer, Mage, Warrior], humanSeat = 0,
+      seed = 9)
+    match.game.currentPlayer = 0
+    match.game.players[0].life = 0
+    match.game.checkWinCondition()
+    check match.game.dead(0)
+    check not match.game.gameOver
+    # The dead can't act, so the table must end the turn for them.
+    check not match.humanTurn
+    check not match.humanActs
+    check match.skipDeadTurn()
+    check match.current != 0
+    check not match.game.dead(match.current)
+    check not match.skipDeadTurn()
+
   test "a turn's draw reaches the table as a visual event":
     var match = newMultiplayerMatch([Archer, Mage, Warrior],
       humanSeat = -1, seed = 9)
