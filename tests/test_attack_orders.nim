@@ -147,6 +147,7 @@ suite "LvD selected combat-capable attack orders":
     let enemy = world.spawnUnit(1, PeonUnit, arenaTile(-2))
     let hidden = world.spawnUnit(1, PeonUnit, tile2(1, 1))
     world.rebuildVision()
+    world.diplomacy.pairs[world.diplomacy.pairIndex(0, 1)].state = Allied
     check not world.queueSelectedAttack(0, [soldier], enemy)
     world.diplomacy.pairs[world.diplomacy.pairIndex(0, 1)].state = AtWar
     for target in [soldier, hidden, NoEntity, LastUnitId, world.buildings[0].id]:

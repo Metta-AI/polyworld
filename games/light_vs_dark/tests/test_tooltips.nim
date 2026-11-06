@@ -88,7 +88,7 @@ suite "LvD command tooltip content":
     check unitDetails(PeonUnit).row("Wood per trip") == $WoodPerTrip
 
 suite "LvD tooltip hover timing":
-  test "delay restarts on motion, target change, off-target and clock rollback":
+  test "one global dwell stays warm across targets and motion until empty":
     var state: TooltipHover
     let
       farm = buildingTooltipTarget(FarmBuilding, 0)
@@ -98,9 +98,12 @@ suite "LvD tooltip hover timing":
     check not state.updateTooltipHover(farm, anchor, mouse, 10.0)
     check not state.updateTooltipHover(farm, anchor, mouse, 10.49)
     check state.updateTooltipHover(farm, anchor, mouse, 10.5)
-    check not state.updateTooltipHover(farm, anchor, mouse + vec2(1, 0), 10.6)
+    check state.updateTooltipHover(farm, anchor, mouse + vec2(1, 0), 10.6)
+    check state.updateTooltipHover(unitTooltipTarget(PeonUnit), anchor, mouse, 10.7)
+    check state.updateTooltipHover(TooltipTarget(kind: ResearchCommandTooltip,
+      research: KeenflightArrows, producer: 42), anchor, mouse, 10.8)
     check state.updateTooltipHover(farm, anchor, mouse + vec2(1, 0), 11.1)
-    check not state.updateTooltipHover(tower, anchor, mouse + vec2(1, 0), 11.2)
+    check state.updateTooltipHover(tower, anchor, mouse + vec2(1, 0), 11.2)
     check state.updateTooltipHover(tower, anchor, mouse + vec2(1, 0), 11.7)
     check not state.updateTooltipHover(NoTooltipTarget, anchor, mouse, 11.8)
     check not state.updateTooltipHover(tower, anchor, mouse, 11.9)
@@ -113,9 +116,23 @@ suite "LvD tooltip hover timing":
     let shifted = GameUiPanel(origin: vec2(99), size: vec2(72))
     check not state.updateTooltipHover(unitTooltipTarget(PeonUnit, 1), shifted, mouse, 5.0)
     check state.updateTooltipHover(unitTooltipTarget(PeonUnit, 1), shifted, mouse, 5.5)
-    # HUD frames are skipped while the Esc menu is visible.
-    check not state.updateTooltipHover(unitTooltipTarget(PeonUnit, 1), shifted, mouse, 8.0)
+    # A long frame isn't a non-tooltip region or a lifecycle event.
+    check state.updateTooltipHover(unitTooltipTarget(PeonUnit, 1), shifted, mouse, 8.0)
     check state.updateTooltipHover(unitTooltipTarget(PeonUnit, 1), shifted, mouse, 8.5)
+
+  test "cold motion inside one anchor preserves dwell; another target restarts it":
+    var state: TooltipHover
+    let anchor = GameUiPanel(origin: vec2(100), size: vec2(72))
+    let a = buildingTooltipTarget(FarmBuilding)
+    let b = unitTooltipTarget(PeonUnit)
+    check not state.updateTooltipHover(a, anchor, vec2(110), 0)
+    check not state.updateTooltipHover(a, anchor, vec2(120), 0.4)
+    check state.updateTooltipHover(a, anchor, vec2(130), 0.5)
+    state.clearTooltip()
+    check not state.updateTooltipHover(a, anchor, vec2(110), 1)
+    check not state.updateTooltipHover(b, anchor, vec2(110), 1.4)
+    check not state.updateTooltipHover(b, anchor, vec2(120), 1.5)
+    check state.updateTooltipHover(b, anchor, vec2(130), 1.91)
 
 suite "LvD tooltip viewport placement":
   test "cards fit scaled viewports and prefer above bottom-right slots":
@@ -148,6 +165,14 @@ suite "LvD tooltip HUD integration":
     check source.contains("hoveredTarget = NoTooltipTarget")
     check source.count("sk.drawCommandTooltip(") == 1
     check source.contains("if playbackControlsVisible():")
+
+  test "menu focus and match lifecycle explicitly clear global hover":
+    let source = readFile(currentSourcePath().parentDir / "../graphics.nim")
+    check source.contains("hudNetwork = network\n  resetHudTooltips()")
+    check source.contains("hudNetwork = nil\n    resetHudTooltips()")
+    check source.contains("if matchMenu != HiddenMatchMenu:\n          resetHudTooltips()")
+    check source.contains("if matchMenu != HiddenMatchMenu:\n        resetHudTooltips()")
+    check source.contains("if not window.focused:\n      resetHudTooltips()")
 
 when defined(tooltipRenderTest):
   import pixie, silky
@@ -184,6 +209,26 @@ when defined(tooltipRenderTest):
           check vertex.pos.y >= 0
           check vertex.pos.x <= viewport.x
           check vertex.pos.y <= viewport.y
+        let popupVertices = sk.drawer.layers[PopupsLayer]
+        var low = vec2(1e9)
+        var high = vec2(-1e9)
+        for vertex in popupVertices:
+          low = min(low, vertex.pos)
+          high = max(high, vertex.pos)
+        # Previous-frame final fitted geometry must retain the same card, even
+        # when a different live action is underneath the popup.
+        sk.drawer.layers[PopupsLayer].setLen(0)
+        sk.mousePos = (low + high) / 2
+        check sk.drawCommandTooltip(state, buildingTooltipTarget(FarmBuilding),
+          GameUiPanel(origin: low, size: high - low), viewport, 10.6)
+        check sk.drawer.layers[PopupsLayer] == popupVertices
+        sk.drawer.layers[PopupsLayer].setLen(0)
+        check sk.drawCommandTooltip(state, NoTooltipTarget, GameUiPanel(), viewport, 10.7)
+        check sk.drawer.layers[PopupsLayer] == popupVertices
+        sk.mousePos = vec2(0)
+        check not sk.drawCommandTooltip(state, NoTooltipTarget, GameUiPanel(), viewport, 10.8)
+        sk.mousePos = anchor.origin + vec2(10)
+        check not sk.drawCommandTooltip(state, target, anchor, viewport, 10.9)
         check sk.uiScale == scale
         check sk.currentDrawLayer == NormalLayer
         sk.endUi()

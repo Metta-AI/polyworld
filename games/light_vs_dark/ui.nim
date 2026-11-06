@@ -1,12 +1,13 @@
 ## Light vs Dark Silky HUD.
 
 import
-  std/[strformat, monotimes],
+  std/[strformat, monotimes, unicode, tables],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels, networks, rooms, roomclients],
   assets, content, sim, game, controls, layouts, symbols, maps, factions, tooltips, multiplayer,
-  hudpresentation
+  hudpresentation, researchpresentation, rendervisibility
+import humancommunication as communications
 
 const
   ResourceColors = [
@@ -34,7 +35,8 @@ const
   CommandTabLift = 4.0'f32
 
 var
-  commandTab = 0
+  commandTab* = 0
+    ## Active command pane; graphics shortcuts share the HUD's tab state.
   commandHover: TooltipHover
   hudNetwork*: NetworkMatch
     ## Set for the lifetime of the current graphical network match.
@@ -58,6 +60,20 @@ for player in 0 ..< FactionFiles.len:
     else:
       buildingPortraitKeys[player][kind] =
         "lvd_b" & $player & "_" & $kind.ord
+
+proc resetHudTooltips*() =
+  ## Menus, pause/focus and match lifecycles explicitly retire the global dwell.
+  commandHover.clearTooltip()
+
+proc hudTooltipContains*(mouse: Vec2): bool =
+  # Input polling can precede drawUi: reject dead/removed research producers
+  # before letting a stale previous-frame panel capture world input.
+  if commandHover.target.kind == ResearchCommandTooltip:
+    let target = commandHover.target
+    if run == nil or run.world == nil or
+        target.research notin run.world.researchKinds(target.player, target.producer):
+      resetHudTooltips()
+  commandHover.tooltipContains(mouse)
 
 proc buildingPortraitKey*(player: int32, kind: BuildingKind): string =
   ## Returns the atlas name packed from one building's profile PNG.
@@ -144,6 +160,55 @@ proc matchResultsVisible*(): bool =
     (hudNetwork != nil and hudNetwork.client != nil and
       hudNetwork.client.snapshot.phase in {rooms.Ended, rooms.Desynced})
 
+var
+  commState: HumanCommunication
+  communicationHeld: set[Button]
+
+proc resetHumanCommunication*() =
+  commState.reset()
+  communicationHeld = {}
+
+proc humanCommunicationTyping*(): bool =
+  commState.typing
+
+proc cancelHumanCommunicationInput*() =
+  ## Focus loss cancels capture but retains the authoritative conversation.
+  discard commState.cancelCommunication()
+  communicationHeld = {}
+  commState.blockedFrame = true
+
+proc humanCommunicationBlocksGameplay*(): bool =
+  commState.blocksGameplay() or communicationHeld != {}
+
+proc finishHumanCommunicationFrame*() =
+  ## Clear only AFTER all event-driven and polled gameplay input for this frame.
+  commState.finishFrame()
+
+proc humanCommunicationRelease*(button: Button) =
+  communicationHeld.excl button
+
+proc observeHumanCommunication*(session: NetworkMatch, packet: RoomMessage) =
+  commState.observeHumanPacket(session, packet)
+
+proc humanCommunicationRune*(rune: Rune): bool =
+  commState.chatRune(rune)
+
+proc humanCommunicationKey*(button: Button): bool =
+  ## Call before shortcuts, pause, chrome and every other gameplay callback.
+  if button in {MouseLeft, MouseRight, MouseMiddle}: return false
+  if button in communicationHeld: return true # repeated Enter cannot double-send
+  if button == KeyEscape and commState.cancelCommunication():
+    result = true
+  elif button == KeyEnter and run != nil and options.playerSlot > 0 and
+      not run.replayMode:
+    result = commState.chatEnter(run, options.playerSlot - 1)
+  elif commState.typing:
+    if button == KeyBackspace: commState.chatBackspace()
+    result = true
+  elif commState.diplomacyOpen or commState.blockedFrame or communicationHeld != {}:
+    result = true
+  if result: communicationHeld.incl button
+
 proc currentMetrics(slot: int, complete: bool): MetricRow =
   ## Combines authoritative totals with live or original replay telemetry.
   result = run.metrics.read(slot, run.world.tick, complete)
@@ -183,7 +248,8 @@ proc matchResultHeadline*(): string =
   ## Only declare a victory/draw when the simulation actually resolved one.
   if run.world.over:
     if run.world.winner < 0: return "Draw"
-    return describeResult()
+    let winner = int(run.world.winner)
+    return run.config.players[winner].displayName(winner) & " wins"
   if run.maximumTicks > 0 and run.world.tick >= run.maximumTicks:
     return "Time limit reached"
   "Match interrupted"
@@ -200,34 +266,172 @@ proc returnToMatchLobby*(network: NetworkMatch): bool =
     client.error = ""
   true
 
+proc currentStatsOptions*(): StatsOptions =
+  ## Use the simulation's existing end-score, never a presentation formula.
+  result.individualPlayers = true
+  for slot in 0 ..< run.world.players.len:
+    result.scores.add run.world.score(int32(slot))
+  if matchResultsVisible():
+    if run.world.over and run.world.winner >= 0:
+      let winner = int(run.world.winner)
+      result.headline = run.config.players[winner].displayName(winner)
+      result.headlineSuffix = " wins"
+    else:
+      result.headline = matchResultHeadline()
+
 proc resultsLayout*(layout: GameUiLayout, table: StatsTable):
-    tuple[viewport: GameUiLayout, headline: GameUiPanel] =
-  ## Reserve headline space even when the roster fills the scrolling card.
+    tuple[viewport: GameUiLayout, headline: GameUiPanel, panel: GameUiPanel] =
+  ## Match the shared card's reserved headline and readable scale exactly.
   result.viewport = layout
-  result.viewport.margin = max(layout.margin, 64)
-  let panel = statsLayout(result.viewport, table).panel
-  result.headline = GameUiPanel(origin: panel.origin - vec2(0, 52),
-    size: vec2(panel.size.x, 40))
+  let slots = statsLayout(layout, table,
+    StatsOptions(headline: "Results", individualPlayers: true))
+  result.headline = slots.headline
+  result.panel = slots.panel
 
 proc statsContains(window: Window, mouse: Vec2): bool =
   ## Tests the overlay before allowing input through to the existing HUD.
   if matchResultsVisible(): return true
+  if humanCommunicationBlocksGameplay(): return false
   if not statsState.visible(window.tabHeld):
     return false
   statsState.mouseOverStats(window, currentLayout(window),
-    currentStats(), mouse)
+    currentStats(), mouse, currentStatsOptions())
 
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
-  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
+  not humanCommunicationBlocksGameplay() and not hudTooltipContains(sk.mousePos) and
+    not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
 
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
 
+proc communicationButtonPanel(window: Window): GameUiPanel =
+  let layout = currentLayout(window)
+  GameUiPanel(origin: vec2(12, 202), size: vec2(min(180'f32, layout.size.x - 24), 30))
+
+proc drawHumanCommunication(sk: Silky, window: Window) =
+  if run == nil or run.replayMode or options.playerSlot <= 0 or
+      matchResultsVisible(): return
+  let
+    layout = currentLayout(window)
+    player = options.playerSlot - 1
+    ink = rgbx(235, 231, 214, 255)
+    muted = rgbx(175, 187, 201, 255)
+  proc button(label: string, panel: GameUiPanel, enabled = true): bool =
+    sk.drawRect(panel.origin, panel.size,
+      if enabled: rgbx(48, 66, 85, 255) else: rgbx(27, 32, 42, 255))
+    sk.drawLabel(sk.fittedLabel(label, panel.size.x - 10, "Small"),
+      panel.origin + vec2(5, 0), panel.size - vec2(10, 0),
+      if enabled: ink else: muted, "Small", CenterAlign)
+    # Communication owns keyboard input; typed select aliases cannot click it.
+    enabled and not window.statsContains(sk.mousePos) and
+      window.buttonPressed[MouseLeft] and panel.contains(sk.mousePos)
+  var pending = 0
+  for other in 0'i32 ..< int32(run.world.players.len):
+    if other == player: continue
+    let relation = run.world.diplomacy.relation(player, other)
+    if relation.offer != NoOffer and relation.sender == other: inc pending
+  if button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
+      communicationButtonPanel(window)):
+    commState.diplomacyOpen = not commState.diplomacyOpen
+    commState.typing = false
+    commState.blockedFrame = true
+  let feedWidth = min(440'f32, layout.size.x - 24)
+  let feedOrigin = vec2(12, 238)
+  let shown = min(5, commState.feed.len)
+  if shown > 0 or commState.typing:
+    sk.drawRect(feedOrigin, vec2(feedWidth, float32(shown * 23 + 34)), rgbx(12, 16, 23, 235))
+  for row in 0 ..< shown:
+    let line = commState.feed[commState.feed.len - shown + row]
+    sk.drawLabel(sk.fittedLabel(line.name & ": " & line.text, feedWidth - 12, "Small"),
+      feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23), ink, "Small")
+  let prompt = if commState.typing: "> " & commState.draft & "|"
+    else: "Enter: chat to all players"
+  sk.drawLabel(sk.fittedLabel(prompt, feedWidth - 12, "Small"),
+    feedOrigin + vec2(6, float32(shown * 23)), vec2(feedWidth - 12, 30), muted, "Small")
+  if not commState.diplomacyOpen: return
+  let
+    width = min(660'f32, layout.size.x - 24)
+    rows = max(1, min(6, int((layout.size.y - 148) / 92)))
+    height = 100'f32 + float32(rows * 92)
+    origin = vec2((layout.size.x - width) / 2, max(12'f32, (layout.size.y - height) / 2))
+    total = run.world.players.len - 1
+    pages = max(1, (total + rows - 1) div rows)
+  commState.diplomacyPage = clamp(commState.diplomacyPage, 0, pages - 1)
+  sk.drawRect(origin - vec2(4), vec2(width + 8, height + 8), rgbx(100, 118, 140, 255))
+  sk.drawRect(origin, vec2(width, height), rgbx(17, 23, 32, 255))
+  sk.drawLabel("DIPLOMACY — peace first, then alliance", origin + vec2(12, 4),
+    vec2(width - 100, 34), ink, "Small")
+  if button("Close", GameUiPanel(origin: origin + vec2(width - 80, 6), size: vec2(68, 28))):
+    discard commState.cancelCommunication()
+  var index = 0
+  for other in 0'i32 ..< int32(run.world.players.len):
+    if other == player: continue
+    let ordinal = index
+    inc index
+    if ordinal div rows != commState.diplomacyPage: continue
+    let
+      rowOrigin = origin + vec2(12, 44 + float32((ordinal mod rows) * 92))
+      relation = run.world.diplomacy.relation(player, other)
+      choices = run.diplomacyChoices(player, other)
+      relationName = case relation.state
+        of Neutral: "Peace / neutral"
+        of WarPending: "War declared — warning"
+        of AtWar: "At war"
+        of Allied: "Ally — shared vision"
+        of AllianceEnding: "Alliance ending — vision retained"
+    var label = run.config.players[other].displayName(int(other)) & " — " & relationName
+    if run.world.players[other].defeated: label.add " (defeated)"
+    if relation.deadline > 0:
+      label.add " (" & $max(0'i32, (relation.deadline - run.world.tick + TickRate - 1) div TickRate) & "s)"
+    sk.drawLabel(sk.fittedLabel(label, width - 24, "Small"), rowOrigin,
+      vec2(width - 24, 22), ink, "Small")
+    var offerText = ""
+    if relation.offer != NoOffer:
+      offerText = (if relation.sender == player: "Outgoing " else: "Incoming ") &
+        (if relation.offer == PeaceOffer: "peace offer" else: "alliance offer") &
+        " (" & $max(0'i32, (relation.offerDeadline - run.world.tick + TickRate - 1) div TickRate) & "s)"
+    sk.drawLabel(offerText, rowOrigin + vec2(0, 22), vec2(width - 24, 20), muted, "Small")
+    var actions: seq[tuple[command: DiplomacyCommand, label: string]]
+    if relation.offer != NoOffer:
+      if relation.sender == player: actions.add (WithdrawOffer, "Withdraw offer")
+      else:
+        actions.add (AcceptOffer, "Accept")
+        actions.add (DeclineOffer, "Decline")
+    else:
+      case relation.state
+      of AtWar, WarPending: actions.add (OfferPeace, "Offer peace")
+      of Neutral:
+        actions.add (OfferAlliance, "Offer alliance")
+        actions.add (DeclareWar, "Declare war")
+      of Allied: actions.add (EndAlliance, "End alliance")
+      of AllianceEnding: discard
+    if relation.state == WarPending and relation.initiator == player:
+      actions.add (WithdrawWar, "Withdraw war")
+    let actionWidth = min(160'f32, (width - 36) / max(1, actions.len).float32)
+    for slot, action in actions:
+      if button(action.label, GameUiPanel(
+          origin: rowOrigin + vec2(float32(slot) * (actionWidth + 4), 46),
+          size: vec2(actionWidth, 28)), action.command in choices):
+        if run.submitHumanDiplomacy(player, other, action.command, relation.offerId):
+          commState.status = if run.networked: "Submitted — awaiting authoritative tick" else: "Diplomacy updated"
+        else: commState.status = "Relation changed; try again."
+        commState.blockedFrame = true
+  let footer = origin + vec2(12, height - 40)
+  if button("Previous", GameUiPanel(origin: footer, size: vec2(85, 28)), commState.diplomacyPage > 0):
+    dec commState.diplomacyPage
+  if button("Next", GameUiPanel(origin: footer + vec2(90, 0), size: vec2(65, 28)), commState.diplomacyPage < pages - 1):
+    inc commState.diplomacyPage
+  sk.drawLabel(sk.fittedLabel(commState.status, width - 190, "Small"),
+    footer + vec2(168, 0), vec2(width - 190, 30), muted, "Small")
+
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether the pointer is over an anchored game UI panel.
-  if window.statsContains(mouse) or mouseOverDebugMenu(mouse):
+  if humanCommunicationBlocksGameplay() or hudTooltipContains(mouse) or
+      (options.playerSlot > 0 and not run.replayMode and
+        communicationButtonPanel(window).contains(mouse)) or
+      window.statsContains(mouse) or mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
   mouseOverPanels(
@@ -344,17 +548,11 @@ proc drawSelectionBox*(
 
 proc shownUnit(unit: Unit, viewMode: int32): bool =
   ## Returns whether fog of war currently reveals this unit.
-  if unit.state == UnitInMine:
-    return false
-  if viewMode == 0:
-    return true
-  run.world.unitVisible(viewMode - 1, unit)
+  run.world.renderUnitVisible(viewMode, unit)
 
 proc shownBuilding(structure: Building, viewMode: int32): bool =
   ## Returns whether fog of war currently reveals this structure.
-  if viewMode == 0:
-    return true
-  run.world.buildingVisible(viewMode - 1, structure)
+  run.world.renderBuildingVisible(viewMode, structure)
 
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
   ## Returns the same stacked map rectangle used for rendering and input.
@@ -387,7 +585,7 @@ proc updateMinimapCamera*(
     followSelection: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
-  if window.statsContains(mouse):
+  if window.statsContains(mouse) or hudTooltipContains(mouse):
     minimapPanning = false
     return
   let
@@ -506,8 +704,31 @@ proc drawUi*(
     networkStats: NetworkStats = nil
 ) =
   ## Draws every Silky HUD panel for the current frame.
+  let tooltipsBlocked = not transport.playing or humanCommunicationBlocksGameplay() or
+    matchResultsVisible() or window.statsContains(sk.mousePos) or mouseOverDebugMenu(sk.mousePos)
+  if tooltipsBlocked:
+    resetHudTooltips()
+  # A research card exists only in the selected producer's live catalog.
+  if commandHover.target.kind != NoCommandTooltip:
+    let target = commandHover.target
+    let valid = target.player == commandPlayer(viewMode) and
+      (case target.kind
+       of BuildingCommandTooltip: commandTab == 0
+       of UnitCommandTooltip: commandTab == 1
+       of ResearchCommandTooltip:
+         commandTab == 2 and target.producer == primaryId and
+           target.research in run.world.researchKinds(target.player, primaryId)
+       of NoCommandTooltip: false)
+    if not valid:
+      # Changing to another catalog is allowed to inherit warmth, but an
+      # orphaned popup cannot retain content or capture covered controls.
+      commandHover.visible = false
+      if target.kind == ResearchCommandTooltip and
+          target.research notin run.world.researchKinds(target.player, target.producer):
+        resetHudTooltips()
   let table = currentStats(teamColors)
-  statsState.syncDirector(actionCam, table, window.tabHeld)
+  statsState.syncDirector(actionCam, table,
+    not humanCommunicationBlocksGameplay() and window.tabHeld)
   statsState.automatic = statsState.automatic or matchResultsVisible()
   let
     chrome = currentChrome(window)
@@ -626,17 +847,11 @@ proc drawUi*(
   for structure in run.world.buildings:
     if structure.owner < 0 or not shownBuilding(structure, viewMode):
       continue
-    let
-      point = minimapPoint(structure.origin, area)
-      size = vec2(structure.footprint.width.float32,
-        structure.footprint.depth.float32) * cell
-    if isPicked(structure.id, selectedIds):
-      sk.drawRect(point - vec2(2), size + vec2(4), rgbx(238, 235, 205, 255))
-    sk.drawRect(
-      point,
-      size,
-      teamColors[structure.owner]
-    )
+    for y in structure.origin.y.int32 ..< structure.origin.y.int32 + structure.footprint.depth:
+      for x in structure.origin.x.int32 ..< structure.origin.x.int32 + structure.footprint.width:
+        if not run.world.renderTileVisible(viewMode, x, y): continue
+        let point = minimapPoint(tile2(x, y), area)
+        sk.drawRect(point, vec2(cell), teamColors[structure.owner])
   for unit in run.world.units:
     if unit.state == UnitDying or not shownUnit(unit, viewMode):
       continue
@@ -681,10 +896,18 @@ proc drawUi*(
     portraitOwner = -1'i32
     portraitTint = rgbx(255, 255, 255, 255)
     portraitWorker: Unit
+  if portraitId.isUnitId and run.world.hasUnit(portraitId):
+    if not shownUnit(run.world.units[run.world.unitIndex(portraitId)], viewMode):
+      portraitId = NoEntity
+  elif portraitId.isBuildingId and run.world.hasBuilding(portraitId):
+    if not shownBuilding(run.world.buildings[run.world.buildingIndex(portraitId)], viewMode):
+      portraitId = NoEntity
   if portraitId == NoEntity:
     for id in selectedIds:
-      if (id.isUnitId and run.world.hasUnit(id)) or
-          (id.isBuildingId and run.world.hasBuilding(id)):
+      if (id.isUnitId and run.world.hasUnit(id) and
+          shownUnit(run.world.units[run.world.unitIndex(id)], viewMode)) or
+          (id.isBuildingId and run.world.hasBuilding(id) and
+          shownBuilding(run.world.buildings[run.world.buildingIndex(id)], viewMode)):
         portraitId = id
         break
   if portraitId.isUnitId and run.world.hasUnit(portraitId):
@@ -740,13 +963,22 @@ proc drawUi*(
     "Small"
   )
   sk.drawWorkerCargo(selection.cargo, portraitWorker)
+  if selectedIds.len <= 1 and portraitId.isUnitId and
+      run.world.hasUnit(portraitId):
+    let unit = run.world.units[run.world.unitIndex(portraitId)]
+    let statsOrigin = selection.details.origin +
+      (if portraitWorker != nil: vec2(0, 60) else: vec2(0))
+    for i, line in run.world.selectedResearchStats(unit.owner, unit.kind):
+      sk.drawLabel(line, statsOrigin + vec2(0, i.float32 * 26),
+        vec2(selection.details.size.x, 24), rgbx(226, 230, 239, 255), "Small")
   var
     shown = 0
     clickedId = NoEntity
   for id in selectedIds:
     if shown >= selection.units.len:
       break
-    if id == portraitId or not id.isUnitId or not run.world.hasUnit(id):
+    if id == portraitId or not id.isUnitId or not run.world.hasUnit(id) or
+        not shownUnit(run.world.units[run.world.unitIndex(id)], viewMode):
       continue
     let
       unit = run.world.units[run.world.unitIndex(id)]
@@ -823,6 +1055,7 @@ proc drawUi*(
     hoveredTarget = NoTooltipTarget
     hoveredAnchor: GameUiPanel
     hoveredIcon = ""
+    hoveredDetails: DetailTooltip
     hoveredTint = rgbx(255, 255, 255, 255)
   for i, label in CommandTabs:
     let
@@ -904,14 +1137,29 @@ proc drawUi*(
         hoveredIcon = unitSymbolKey(kind)
         hoveredTint = teamColors[player]
   else:
-    sk.drawLabel(
-      "No upgrades",
-      build.contents.origin,
-      vec2(build.contents.size.x, 28),
-      rgbx(150, 160, 178, 255),
-      "Small",
-      CenterAlign
-    )
+    let player = commandPlayer(viewMode)
+    let kinds = run.world.researchKinds(player, primaryId)
+    let slots = researchPanels(build.contents)
+    if kinds.len == 0:
+      discard sk.drawText("Small", "Select your Blacksmith, Lumber Mill or " &
+        tooltipBuildingName(StablesBuilding, player) & " to research upgrades.",
+        build.contents.origin + vec2(8), rgbx(190, 196, 208, 255),
+        maxWidth = build.contents.size.x - 16, wordWrap = true)
+    for i, kind in kinds:
+      var card = run.world.researchCard(player, primaryId, kind)
+      let temporaryIcon = not sk.atlas.entries.hasKey(card.icon)
+      if temporaryIcon:
+        card.icon = TemporaryResearchIcons[kind]
+      sk.drawResearchCard(slots[i], card, TickRate)
+      if sk.hovered(slots[i]):
+        hoveredTarget = TooltipTarget(kind: ResearchCommandTooltip,
+          research: kind, producer: primaryId, player: player)
+        hoveredAnchor = slots[i]
+        hoveredIcon = card.icon
+        hoveredDetails = researchDetails(kind, player, card, temporaryIcon)
+      if options.playerSlot > 0 and not run.replayMode and
+          card.researchEnabled and window.hudClicked(sk, slots[i]):
+        queueResearch(player, primaryId, kind)
 
   if playbackControlsVisible():
     transport.drawTransport(
@@ -931,13 +1179,16 @@ proc drawUi*(
         &"first at tick {run.hashCheck.firstTick}"
     )
   sk.drawDebugMenu(window, network = networkStats)
-  statsState.syncDirector(actionCam, table, window.tabHeld)
+  statsState.syncDirector(actionCam, table,
+    not humanCommunicationBlocksGameplay() and window.tabHeld)
   statsState.automatic = statsState.automatic or matchResultsVisible()
-  if window.statsContains(sk.mousePos) or mouseOverDebugMenu(sk.mousePos):
+  if tooltipsBlocked or window.statsContains(sk.mousePos) or mouseOverDebugMenu(sk.mousePos):
+    resetHudTooltips()
     hoveredTarget = NoTooltipTarget
   discard sk.drawCommandTooltip(commandHover, hoveredTarget, hoveredAnchor,
     chrome.layout.size, getMonoTime().ticks.float64 / 1_000_000_000.0,
-    hoveredIcon, hoveredTint)
+    hoveredIcon, hoveredTint, hoveredDetails)
+  sk.drawHumanCommunication(window)
 
 proc drawStatsOverlay*(
   sk: Silky,
@@ -945,29 +1196,13 @@ proc drawStatsOverlay*(
   teamColors: openArray[ColorRGBX]
 ) =
   ## Presents readable statistics above the HUD at every window width.
-  if matchResultsVisible():
-    let
-      scale = sk.uiScale
-      mouse = sk.mousePos
-      table = currentStats(teamColors)
-      layout = resultsLayout(statsViewport(currentLayout(window), scale), table)
-    statsState.automatic = true
-    sk.uiScale = statsScale(scale)
-    sk.beginUi(window, window.size)
-    sk.drawRect(layout.headline.origin - vec2(8, 4),
-      layout.headline.size + vec2(16, 8), rgbx(16, 18, 26, 240))
-    sk.drawLabel(sk.fittedLabel(matchResultHeadline(), layout.headline.size.x, "H1"),
-      layout.headline.origin, layout.headline.size,
-      rgbx(240, 226, 180, 255), "H1", CenterAlign)
-    sk.drawStats(window, layout.viewport, statsState, table, run.history)
-    sk.endUi()
-    sk.uiScale = scale
-    sk.mousePos = mouse
-    return
+  if humanCommunicationBlocksGameplay() and not matchResultsVisible(): return
+  if matchResultsVisible(): statsState.automatic = true
   sk.drawStatsOverlay(
     window,
     currentLayout(window),
     statsState,
     currentStats(teamColors),
-    run.history
+    run.history,
+    currentStatsOptions()
   )

@@ -10,7 +10,7 @@ import
     visions, mailboxes],
   content,
   maps,
-  replays, diplomacies
+  replays, diplomacies, localgrid, passiveresearch
 
 export diplomacies
 
@@ -54,6 +54,9 @@ type
     cooldown*: int32
     targetId*: int32
       ## Whatever the unit is currently walking to or swinging at.
+    constructionSiteId*: int32
+      ## Exact shell containing this builder; retained across interrupted orders
+      ## until a legal exit is available. Never grants general walkability.
     sourceId*: int32
       ## The gold mine a peon is working, kept across the whole round trip so
       ## delivering a load does not lose track of where the load came from.
@@ -72,6 +75,10 @@ type
       ## String-pulled waypoints in walk order.
     pathIndex*: int32
     pathGoal*: Tile2
+    blockedEndpoint*: Tile2
+      ## Proven nearest legal endpoint for a still-solid exact order goal.
+    blockedEndpointValid*: bool
+    blockedEndpointRevision*: int32
     blockedTicks*, repathCooldown*: int32
     passingPeer*, passingTicks*: int32
       ## Temporary local yield; never replaces the resource/order destination.
@@ -100,6 +107,8 @@ type
     queue*: array[QueueSlots, uint8]
       ## `UnitKind.ord + 1`, or zero for an empty slot.
     queueLength*, trainTicks*: int32
+    researchKind*: ResearchKind
+    researchLevel*, researchTicks*, researchTotal*: int32
     rally*: Tile2
     hasRally*: bool
     cooldown*: int32
@@ -107,6 +116,7 @@ type
     deathTicks*: int32
 
   Player* = object
+    researchLevels*: array[ResearchKind, int32]
     gold*, wood*, foodUsed*, foodCap*: int32
     goldGathered*, woodGathered*: int64
     unitsTrained*, unitsLost*: int32
@@ -136,6 +146,7 @@ type
     nextUnitId*, nextBuildingId*: int32   # HASH: include
     pathQueue*: seq[PathRequest]          # HASH: include
     terrainEdits*: seq[TileEdit]          # HASH: include
+    pathTerrainRevision*: int32          # HASH: include; partial-route validity
     exploredCount*: seq[int32]  # HASH: include
     map*: MapData                         # HASH: derived, fixed at generation
     blocker*: seq[int32]                  # HASH: derived from buildings/edits
@@ -146,6 +157,8 @@ type
     visibleStamp*: seq[seq[uint32]]   # HASH: derived
     visionGeneration*: seq[uint32]    # HASH: derived
     explored*: seq[seq[uint8]]        # HASH: derived
+    visionCaches: seq[VisionCache]       # HASH: derived, exact ray cache
+    visionCachedVisible: seq[seq[uint8]] # HASH: derived
   OverlordVm* = ref object
     output*: PrintProc
     prepareDecision*: proc(tick: int32) {.closure.}
@@ -185,6 +198,13 @@ type
 ##
 ## Identifier ranges make the kind checkable before any array is touched, and
 ## the slot tables turn a valid identifier into an index in constant time.
+
+proc unitStats*(w: World, player: int32, kind: UnitKind): UnitStats =
+  ## Dynamic stats apply equally to units born before and after completion.
+  passiveUnitStats(player, kind, w.players[player].researchLevels)
+
+proc unitMoveSpeed*(w: World, player: int32, kind: UnitKind): Fixed =
+  passiveMoveSpeed(player, kind, w.players[player].researchLevels)
 
 proc config*(game: Game): GameConfig =
   ## Reads the match configuration owned by the live or loaded replay.
@@ -283,13 +303,24 @@ proc adjacentToFootprint*(origin: Tile2, size: Footprint, x, y: int32): bool =
     y >= int32(origin.y) - 1 and y < int32(origin.y) + size.depth + 1 and
     not covers(origin, size, x, y)
 
+proc constructionInRange*(structure: Building, unit: Unit): bool =
+  ## Construction can be worked from its perimeter or by its inside builder.
+  covers(structure.origin, structure.footprint, unit.tile.x.int32,
+    unit.tile.y.int32) or adjacentToFootprint(structure.origin,
+    structure.footprint, unit.tile.x.int32, unit.tile.y.int32)
+
+iterator footprintPerimeter(origin: Tile2, size: Footprint): Tile2 =
+  ## The whole one-cell ring, all four sides and corners, row-major. Shared
+  ## by trained-unit spawning and mine release; art facing is irrelevant.
+  for y in int32(origin.y) - 1 .. int32(origin.y) + size.depth:
+    for x in int32(origin.x) - 1 .. int32(origin.x) + size.width:
+      if not covers(origin, size, x, y): yield tile2(x,y)
+
 proc freeTileAround*(w: World, origin: Tile2, size: Footprint): Tile2 =
   ## Returns the first free tile in the ring around a footprint, scanning
   ## row-major so the choice is reproducible. Off-map when the ring is full.
-  for y in int32(origin.y) - 1 .. int32(origin.y) + size.depth:
-    for x in int32(origin.x) - 1 .. int32(origin.x) + size.width:
-      if not covers(origin, size, x, y) and w.tileFree(x, y):
-        return tile2(x, y)
+  for tile in footprintPerimeter(origin, size):
+    if w.tileFree(tile.x, tile.y): return tile
   NoTile
 
 proc approachTile*(
@@ -340,6 +371,7 @@ var
   visionSkipKeys: seq[int32]
   visionSkipNow: seq[int32]
   splashHits: seq[int32]
+  visionSources: seq[VisionSource]
 
 proc fillVisionKeys(w: World, dest: var seq[int32]) =
   ## Records sources, building footprints, and terrain edits.
@@ -367,51 +399,12 @@ proc fillVisionKeys(w: World, dest: var seq[int32]) =
     dest.add structure.footprint.width
     dest.add structure.footprint.depth
 
-proc paintVisible(
-    w: World,
-    player: int32,
-    sourceX,
-    sourceZ,
-    radius: int32,
-    eyeHeight: int16
-) =
-  ## Marks one observer's circle on the current generation stamps.
-  if radius <= 0 or not w.map.inGrid(sourceX, sourceZ):
-    return
-  let
-    sourceIndex = w.map.tileIndex(sourceX, sourceZ)
-    sourceY = int64(w.map.heights[sourceIndex]) + int64(eyeHeight)
-    generation = w.visionGeneration[player]
-  for offset in visionCircleTiles(radius):
-    let
-      x = sourceX + int32(offset.dx)
-      z = sourceZ + int32(offset.dz)
-    if not w.map.inGrid(x, z):
-      continue
-    let index = w.map.tileIndex(x, z)
-    if w.visibleStamp[player][index] == generation:
-      continue
-    if offsetVisible(
-      w.map.side,
-      w.map.heights,
-      visionBlockers,
-      sourceX,
-      sourceZ,
-      sourceY,
-      offset
-    ):
-      w.visibleStamp[player][index] = generation
-      if w.explored[player][index] == 0:
-        w.explored[player][index] = 1
-        inc w.exploredCount[player]
-
 proc rebuildVision*(w: World) {.measure.} =
   ## Recomputes range- and occluder-limited visibility for every player.
   ##
-  ## A full rebuild rather than an incremental update: incremental vision
-  ## needs a matching decrement for every increment across movement, death,
-  ## spawning, and construction, and one missed case is a silent permanent
-  ## leak that only shows up as drift many ticks later.
+  ## Exact cached ray footprints, with full source enumeration each update.
+  ## The shared coverage cache removes absent sources and invalidates on
+  ## terrain/blocker changes; stamps/exploration retain the original contract.
   w.fillVisionKeys(visionSkipNow)
   if visionSkipWorld == cast[pointer](w) and
       sameVisionKeys(visionSkipNow, visionSkipKeys):
@@ -430,20 +423,24 @@ proc rebuildVision*(w: World) {.measure.} =
       visionBlockers[index] = 24
     elif blocker != NoEntity:
       visionBlockers[index] = 28
-  initVisionKernel()
+  # Derived cache is never shared between alternating peer worlds. The
+  # existing ray kernel still computes every newly exposed source footprint.
+  if w.visionCaches.len != w.players.len:
+    w.visionCaches.setLen(0)
+    w.visionCachedVisible.setLen(0)
+    for player in 0 ..< w.players.len:
+      # Sparse masks retain only active sources. Dense per-tile profiles would
+      # multiply map area by every sight radius and player on large maps.
+      w.visionCaches.add initVisionCache([])
+      w.visionCachedVisible.add newSeq[uint8](w.map.passable.len)
   for player in 0'i32 ..< int32(w.players.len):
-    for i in 0 ..< w.units.len:
-      let unit = w.units[i]
+    visionSources.setLen(0)
+    for unit in w.units:
       if (unit.owner == player or
           w.diplomacy.sharesVision(player, unit.owner)) and
           unit.state notin {UnitDying, UnitInMine}:
-        w.paintVisible(
-          player,
-          int32(unit.tile.x),
-          int32(unit.tile.y),
-          unitOf(unit.owner, unit.kind).sightTiles,
-          14
-        )
+        visionSources.add VisionSource(x: unit.tile.x, z: unit.tile.y,
+          radius: unitOf(unit.owner, unit.kind).sightTiles, eyeHeight: 14)
     for structure in w.buildings:
       if (structure.owner != player and
           not w.diplomacy.sharesVision(player, structure.owner)) or
@@ -454,7 +451,15 @@ proc rebuildVision*(w: World) {.measure.} =
           int32(structure.origin.y) + structure.footprint.depth:
         for x in int32(structure.origin.x) ..<
             int32(structure.origin.x) + structure.footprint.width:
-          w.paintVisible(player, x, y, radius, 24)
+          visionSources.add VisionSource(x: x, z: y, radius: radius, eyeHeight: 24)
+    revealVisionCached(w.visionCaches[player], w.visionCachedVisible[player],
+      w.map.side, w.map.side, w.map.heights, visionBlockers, visionSources)
+    for index, visible in w.visionCachedVisible[player]:
+      if visible != 0:
+        w.visibleStamp[player][index] = w.visionGeneration[player]
+        if w.explored[player][index] == 0:
+          w.explored[player][index] = 1
+          inc w.exploredCount[player]
   copyVisionKeys(visionSkipKeys, visionSkipNow)
   visionSkipWorld = cast[pointer](w)
 
@@ -518,8 +523,8 @@ proc entityVisible(w: World, player, id: int32): bool =
 ##
 ## Terrain walkability is a callback into `tileOpen`. Occupied tiles stay
 ## walkable so a packed ford is never a wall, but they pay
-## `OccupiedTilePenalty` so harvest traffic prefers empty ground. A unit
-## that is standing still is a wall, so a pulled route goes around it.
+## `OccupiedTilePenalty` so harvest traffic prefers empty ground. Friendly
+## idle bodies are compressible circles, not terrain walls.
 
 var
   pathSearches*, pathExpansions*: int
@@ -529,6 +534,15 @@ var
   walkWorld: World
   pathIgnoreId: int32
   pathTiles: seq[PathTile]
+  trafficGrid: LocalGrid
+  softPush: seq[FixedVec2]
+
+proc rebuildTrafficGrid(w: World) =
+  trafficGrid.reset(w.map.side, w.units.len)
+  # Reverse insertion makes each bucket ascend by stable unit ID.
+  for i in countdown(w.units.len - 1, 0):
+    if w.units[i].state notin {UnitDying, UnitInMine}:
+      trafficGrid.insert(int32(i), w.units[i].body.pos, w.units[i].owner)
 
 proc standingOccupant(w: World, holder, ignoreId: int32): bool =
   ## True when another living unit is idle on this occupancy slot.
@@ -538,6 +552,9 @@ proc standingOccupant(w: World, holder, ignoreId: int32): bool =
   if index < 0:
     return false
   let unit = w.units[index]
+  let mover = w.unitIndex(ignoreId)
+  if mover >= 0 and unit.owner == w.units[mover].owner:
+    return false
   unit.state != UnitDying and
     unit.state != UnitInMine and
     not unit.hasGoal
@@ -729,6 +746,7 @@ proc clearOrder(unit: Unit, failed: bool) =
   ## Drops whatever the unit was doing and returns it to idle.
   unit.state = UnitIdle
   unit.hasGoal = false
+  unit.blockedEndpointValid = false
   unit.goalOffset = FixedVec2Zero
   unit.attackMove = false
   unit.attackMoveGoal = NoTile
@@ -767,6 +785,7 @@ proc setGoal(w: World, index: int32, goal: Tile2,
     offset = FixedVec2Zero) =
   ## Points a unit at a destination tile and asks for a route.
   w.units[index].goal = goal
+  w.units[index].blockedEndpointValid = false
   w.units[index].goalOffset = offset
   w.units[index].hasGoal = true
   w.units[index].blockedTicks = 0
@@ -891,10 +910,12 @@ proc removeTree(w: World, index: int32) =
   w.treeWood[index] = 0
   if w.blocker[index] == TreeBlocker:
     w.blocker[index] = 0
+    inc w.pathTerrainRevision
   w.terrainEdits.add TileEdit(tick: w.tick, index: index)
 
 proc occupyFootprint(w: World, origin: Tile2, size: Footprint, id: int32) =
   ## Claims every tile of a footprint for a structure.
+  inc w.pathTerrainRevision
   for y in int32(origin.y) ..< int32(origin.y) + size.depth:
     for x in int32(origin.x) ..< int32(origin.x) + size.width:
       if w.map.inGrid(x, y):
@@ -902,6 +923,7 @@ proc occupyFootprint(w: World, origin: Tile2, size: Footprint, id: int32) =
 
 proc releaseFootprint(w: World, origin: Tile2, size: Footprint) =
   ## Releases every tile of a footprint.
+  inc w.pathTerrainRevision
   for y in int32(origin.y) ..< int32(origin.y) + size.depth:
     for x in int32(origin.x) ..< int32(origin.x) + size.width:
       if w.map.inGrid(x, y):
@@ -945,6 +967,37 @@ proc place*(w: World, unit: Unit, at: Tile2) =
   unit.body.pos = tileCenter(at)
   if w.map.inGrid(at) and unit.state != UnitInMine and unit.state != UnitDying:
     w.occupancy[w.map.tileIndex(at)] = unit.id
+
+proc releaseConstructionOccupant(w: World, unit: Unit): bool =
+  ## Like exiting a mine, release only onto free legal ground. A full ring
+  ## waits rather than clipping terrain, a structure, or another body.
+  let index = w.buildingIndex(unit.constructionSiteId)
+  if index < 0 or unit.state in {UnitDying, UnitInMine}:
+    unit.constructionSiteId = NoEntity
+    return true
+  let site = w.buildings[index]
+  if site.state == BuildingDying or not covers(site.origin, site.footprint,
+      unit.tile.x.int32, unit.tile.y.int32):
+    unit.constructionSiteId = NoEntity
+    return true
+  for y in site.origin.y.int32 - 1 .. site.origin.y.int32 + site.footprint.depth:
+    for x in site.origin.x.int32 - 1 .. site.origin.x.int32 + site.footprint.width:
+      if not adjacentToFootprint(site.origin, site.footprint, x, y) or
+          not w.tileFree(x, y): continue
+      let at = tile2(x, y)
+      var free = true
+      for other in w.units:
+        if other.id != unit.id and other.state notin {UnitDying, UnitInMine} and
+            length(other.body.pos - tileCenter(at)) <
+              other.body.radius + unit.body.radius:
+          free = false
+          break
+      if free:
+        w.place(unit, at)
+        unit.constructionSiteId = NoEntity
+        unit.clearPath()
+        return true
+  false
 
 ## Spawning
 
@@ -1074,11 +1127,18 @@ proc killUnit(w: World, index: int32) =
   w.players[owner].foodUsed -= unitOf(owner, kind).food
   inc w.players[owner].unitsLost
 
+proc clearResearch(building: var Building) =
+  building.researchKind = ResearchKind.low
+  building.researchLevel = 0
+  building.researchTicks = 0
+  building.researchTotal = 0
+
 proc razeBuilding(w: World, index: int32) =
   ## Starts a structure's collapse and returns everything it was holding.
   let owner = w.buildings[index].owner
   w.buildings[index].state = BuildingDying
   w.buildings[index].deathTicks = RubbleTicks
+  w.buildings[index].clearResearch()
   inc w.players[owner].buildingsLost
   ## Give back the food a training queue had reserved.
   for slot in 0 ..< w.buildings[index].queueLength:
@@ -1170,10 +1230,9 @@ proc lvdTilesWalkable(pos: FixedVec2): bool {.nimcall.} =
   let (x, z) = cell(pos)
   walkWorld != nil and walkWorld.tileOpen(x, z)
 
-proc moveSpeed(unit: Unit): Fixed =
-  ## Tiles walked in one tick from the unit's step cost.
-  let ticks = unitOf(unit.owner, unit.kind).stepTicks
-  FixedOne / fixed(max(ticks, 1))
+proc moveSpeed(w: World, unit: Unit): Fixed =
+  ## Never round the research bonus to whole step ticks.
+  w.unitMoveSpeed(unit.owner, unit.kind)
 
 proc waypointPosition(unit: Unit, tile: Tile2): FixedVec2 =
   ## Uses the exact destination for the last tile of a route.
@@ -1191,6 +1250,9 @@ proc arrivedAt(unit: Unit, tile: Tile2): bool =
       PathArrive
   length(unit.waypointPosition(tile) - unit.body.pos) <= radius
 
+proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2,
+    checkBodies = true): bool
+
 proc steerUnit(w: World, index: int32, toward: FixedVec2) =
   ## Turns and slides one unit, then syncs its tile.
   walkWorld = w
@@ -1198,10 +1260,23 @@ proc steerUnit(w: World, index: int32, toward: FixedVec2) =
   steer(
     w.units[index].body,
     toward,
-    w.units[index].moveSpeed,
+    w.moveSpeed(w.units[index]),
     BodyTurnRate,
     lvdTilesWalkable
   )
+  let after = w.units[index].body.pos
+  w.units[index].body.pos = before
+  if w.passingSegmentOpen(w.units[index], after):
+    w.units[index].body.pos = after
+  else:
+    # Center-line A* smoothing may graze a corner within the circle radius.
+    # Slide the actual swept body, not just its center point.
+    let onlyX = fixedVec2(after.x, before.y)
+    let onlyY = fixedVec2(before.x, after.y)
+    if onlyX != before and w.passingSegmentOpen(w.units[index], onlyX):
+      w.units[index].body.pos = onlyX
+    elif onlyY != before and w.passingSegmentOpen(w.units[index], onlyY):
+      w.units[index].body.pos = onlyY
   w.units[index].applyBody()
   if w.units[index].body.pos == before:
     inc w.units[index].blockedTicks
@@ -1218,7 +1293,8 @@ proc movementDirection(unit: Unit): FixedVec2 =
     else: unit.goal
   normalize(unit.waypointPosition(target) - unit.body.pos)
 
-proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2): bool =
+proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2,
+    checkBodies: bool): bool =
   ## Short swept corridor, including the body radius and diagonal corners.
   ## Sampling is finer than a body radius; no tile-sized jumps are permitted.
   let start = unit.body.pos
@@ -1235,9 +1311,16 @@ proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2): bool =
       for dy in [-unit.body.radius, unit.body.radius]:
         let corner = cell(pos + fixedVec2(dx, dy))
         if not w.tileOpen(corner.x, corner.z): return false
-    for other in w.units:
-      if other.id != unit.id and other.state notin {UnitDying, UnitInMine} and
-          length(other.body.pos - pos) < other.body.radius + unit.body.radius:
+    if not checkBodies or trafficGrid.onlyOwner(unit.owner): continue
+    if trafficGrid.crowdedForeign(pos, unit.body.radius * 2, unit.owner):
+      return false
+    for otherIndex in trafficGrid.neighbors(pos):
+      let other = w.units[otherIndex]
+      if other.owner != unit.owner and other.id != unit.id and
+          other.state notin {UnitDying, UnitInMine} and
+          lengthSquared(other.body.pos - pos) <
+            int64(int32(other.body.radius + unit.body.radius)) *
+            int64(int32(other.body.radius + unit.body.radius)):
         return false
   true
 
@@ -1247,18 +1330,20 @@ proc preparePassing(w: World) =
   ## Higher ID yields, and keeps its chosen side until the peer has passed.
   for i in 0 ..< w.units.len:
     let unit = w.units[i]
-    if unit.kind != PeonUnit or not unit.hasGoal or unit.passingTicks > 0:
+    if not unit.hasGoal or unit.passingTicks > 0:
       continue
     let forward = unit.movementDirection()
     if forward == FixedVec2Zero: continue
-    for j in 0 ..< i:
+    for j in trafficGrid.neighbors(unit.body.pos):
+      if j >= i: continue
       let peer = w.units[j]
-      if peer.kind != PeonUnit or not peer.hasGoal or peer.passingTicks > 0:
+      if peer.owner != unit.owner or not peer.hasGoal or peer.passingTicks > 0:
         continue
       let offset = peer.body.pos - unit.body.pos
-      if length(offset) > FixedOne or
+      if lengthSquared(offset) > int64(FixedScale) * FixedScale or
           dot(offset, forward) <= FixedZero or
-          dot(forward, peer.movementDirection()) > -0.5'fx:
+          dot(forward, peer.movementDirection()) >
+            (if unit.kind == PeonUnit: -0.5'fx else: 0.5'fx):
         continue
       let lateral = fixedVec2(-forward.y, forward.x)
       for side in [FixedOne, -FixedOne]:
@@ -1278,8 +1363,13 @@ proc advancePassing(w: World, index: int32): bool =
     let peer = w.unitIndex(unit.passingPeer)
     if unit.passingTicks == 0 or peer < 0 or not w.units[peer].hasGoal or
         dot(w.units[peer].body.pos - unit.body.pos, unit.passingForward) < -0.6'fx:
-      unit.clearPath()
-      w.requestPath(index)
+      if unit.kind == PeonUnit:
+        # Resource approach rings can have changed while another miner exits.
+        unit.clearPath()
+        w.requestPath(index)
+      else:
+        # No global search for routine combat-unit local passing.
+        unit.clearPassing()
       return false
     let toward = unit.passingPoint - unit.body.pos
     if length(toward) > 0.01'fx:
@@ -1287,7 +1377,7 @@ proc advancePassing(w: World, index: int32): bool =
       # movement. Do not count a temporary yield as an abandoned work order.
       let before = unit.body.pos
       walkWorld = w
-      steer(unit.body, toward, unit.moveSpeed, BodyTurnRate, lvdTilesWalkable)
+      steer(unit.body, toward, w.moveSpeed(unit), BodyTurnRate, lvdTilesWalkable)
       let after = unit.body.pos
       unit.body.pos = before
       if w.passingSegmentOpen(unit, after): unit.body.pos = after
@@ -1296,17 +1386,45 @@ proc advancePassing(w: World, index: int32): bool =
     else:
       unit.animation = IdleAnimation
     return true
-  for other in w.units:
-    if other.passingTicks > 0 and other.passingPeer == unit.id and
-        length(other.passingPoint - other.body.pos) > 0.01'fx:
-      unit.animation = IdleAnimation
-      return true
+  # Soft bodies keep advancing while a peer yields; a reciprocal wait can
+  # lock a whole choke behind a stalled lateral reservation.
   false
+
+proc retainedBlockedEndpoint(w: World, unit: Unit): bool =
+  ## This is order state, not occupancy: friendly pressure may move the body
+  ## without invalidating the terrain proof. All real static edits invalidate.
+  if unit.blockedEndpointValid and
+      (unit.blockedEndpointRevision != w.pathTerrainRevision or
+       w.tileOpen(unit.goal) or not w.tileOpen(unit.blockedEndpoint)):
+    unit.blockedEndpointValid = false
+    unit.clearPath()
+    unit.repathCooldown = 0
+  unit.blockedEndpointValid
+
+proc nearestLegalEndpoint(w: World, goal, endpoint: Tile2): bool =
+  ## Cache only a proven nearest legal tile, never an arbitrary budget prefix.
+  ## Any closer octile candidate lies within this finite square. Equal-distance
+  ## alternatives do not invalidate a route already proven reachable by A*.
+  let best = octileDistance(goal.x, goal.y, endpoint.x, endpoint.y)
+  let radius = best div OrthogonalCost
+  # This optional proof must not turn an early budget prefix into a large
+  # second search. Unknown remains unknown and uses the existing retry policy.
+  if int64(radius*2+1) * int64(radius*2+1) > MaxPathExpansions:
+    return false
+  for y in max(0'i32, goal.y.int32-radius) .. min(w.map.side-1, goal.y.int32+radius):
+    for x in max(0'i32, goal.x.int32-radius) .. min(w.map.side-1, goal.x.int32+radius):
+      if octileDistance(goal.x, goal.y, x, y) < best and w.tileOpen(x,y):
+        return false
+  true
 
 proc advanceMovement(w: World, index: int32) =
   ## Steers toward the next pulled waypoint. Does not cut toward the goal
   ## when the route is still queued or has run out.
   if not w.units[index].hasGoal:
+    return
+  let retained = w.retainedBlockedEndpoint(w.units[index])
+  if retained and w.units[index].arrivedAt(w.units[index].blockedEndpoint):
+    w.units[index].animation = IdleAnimation
     return
   if w.advancePassing(index): return
   if w.units[index].arrivedAt(w.units[index].goal):
@@ -1334,7 +1452,14 @@ proc advanceMovement(w: World, index: int32) =
     return
   w.units[index].clearPath()
   w.requestPath(index)
-  w.units[index].repathCooldown = ShortPathCooldownTicks
+  w.units[index].repathCooldown =
+    if w.tileOpen(w.units[index].goal.x, w.units[index].goal.y):
+      ShortPathCooldownTicks
+    else:
+      # An unchanged terrain/building goal cannot become reachable through
+      # local yielding. Retain intent/partial progress, but retry every half
+      # obstruction interval instead of exhausting A* every seven ticks.
+      RepathCooldownTicks div 2
 
 proc servePathQueue(w: World) {.measure.} =
   ## Runs a bounded number of searches per tick, oldest request first.
@@ -1347,13 +1472,28 @@ proc servePathQueue(w: World) {.measure.} =
     if index < 0 or not w.units[index].hasGoal or
         w.units[index].goal != request.goal:
       continue
+    # Replacement orders may start inside the old shell. Release before path
+    # search; otherwise a blocked start can reject the new order as unreachable.
+    if w.units[index].constructionSiteId != NoEntity and
+        not w.releaseConstructionOccupant(w.units[index]):
+      w.pathQueue.add request
+      break
+    let retained = w.retainedBlockedEndpoint(w.units[index])
+    let routeGoal = if retained: w.units[index].blockedEndpoint else: w.units[index].goal
     let complete = w.findPath(
       w.units[index].tile,
-      w.units[index].goal,
+      routeGoal,
       w.units[index].id,
       w.units[index].path
     )
     w.units[index].pathGoal = w.units[index].goal
+    if not retained and not complete and w.units[index].path.len > 0 and
+        not w.tileOpen(w.units[index].goal):
+      let endpoint = w.units[index].path[^1]
+      if w.nearestLegalEndpoint(w.units[index].goal, endpoint):
+        w.units[index].blockedEndpoint = endpoint
+        w.units[index].blockedEndpointValid = true
+        w.units[index].blockedEndpointRevision = w.pathTerrainRevision
     w.units[index].pathIndex = 0
     while w.units[index].pathIndex < int32(w.units[index].path.len) and
         w.units[index].arrivedAt(
@@ -1376,7 +1516,11 @@ proc servePathQueue(w: World) {.measure.} =
         ## means the unit is already standing on its goal, which is success.
         w.units[index].clearOrder(true)
       else:
-        w.units[index].repathCooldown = ShortPathCooldownTicks
+        w.units[index].repathCooldown =
+          if w.tileOpen(w.units[index].goal.x, w.units[index].goal.y):
+            ShortPathCooldownTicks
+          else:
+            max(w.units[index].repathCooldown, ShortPathCooldownTicks)
 
 ## Harvesting
 
@@ -1450,6 +1594,23 @@ proc resumeTreeWork(w: World, index: int32) =
     return
   w.units[index].clearOrder(true)
 
+proc mineExitTile(w: World, unit: Unit, mine: Building): Tile2 =
+  ## Prefer the first safe unoccupied perimeter slot, then a safe soft-friendly
+  ## slot. Validate BOTH passes: an empty occupancy slot can still overlap a
+  ## foreign circle whose centre is in a neighboring tile. Release is a discrete
+  ## interior transition, never a sweep through the mine's solid footprint.
+  let before = unit.body.pos
+  for occupiedPass in [false, true]:
+    for tile in footprintPerimeter(mine.origin, mine.footprint):
+      if not w.tileOpen(tile) or w.tileFree(tile.x,tile.y) == occupiedPass:
+        continue
+      let point = tileCenter(tile)
+      unit.body.pos = point
+      let allowed = w.passingSegmentOpen(unit, point)
+      unit.body.pos = before
+      if allowed: return tile
+  NoTile
+
 proc handleInMine(w: World, index: int32) =
   ## Counts down a mining shift and pushes the peon back out with its load.
   if w.units[index].stateTicks > 0:
@@ -1458,8 +1619,7 @@ proc handleInMine(w: World, index: int32) =
   let mine = w.buildingIndex(w.units[index].sourceId)
   if mine < 0:
     return  # razeBuilding puts stranded miners back on the map
-  let exit = w.freeTileAround(w.buildings[mine].origin,
-    w.buildings[mine].footprint)
+  let exit = w.mineExitTile(w.units[index], w.buildings[mine])
   if not w.map.inGrid(exit):
     return  # the ring is full; try again next tick
   let carried = min(GoldPerTrip, w.buildings[mine].goldLeft)
@@ -1593,7 +1753,7 @@ proc entityArmor(w: World, id: int32): int32 =
     let index = w.unitIndex(id)
     if index >= 0:
       let unit = w.units[index]
-      return unitOf(unit.owner, unit.kind).armor
+      return w.unitStats(unit.owner, unit.kind).armor
   0
 
 proc applySplash(w: World, origin: Tile2, amount, skipId, attacker: int32) =
@@ -1616,7 +1776,7 @@ proc applySplash(w: World, origin: Tile2, amount, skipId, attacker: int32) =
 
 proc strikeTarget(w: World, index: int32, target: int32) =
   ## Rolls miss, then applies piercing plus armor-reduced basic, then splash.
-  let stats = unitOf(w.units[index].owner, w.units[index].kind)
+  let stats = w.unitStats(w.units[index].owner, w.units[index].kind)
   if stats.missPercent > 0 and w.rng.chance(stats.missPercent):
     return
   w.damageEntity(
@@ -1681,6 +1841,17 @@ proc startNextOrder(w: World, index: int32)
 
 proc advanceUnit(w: World, index: int32) =
   ## Runs one unit for one tick.
+  let unit = w.units[index]
+  if unit.constructionSiteId != NoEntity:
+    let site = w.buildingIndex(unit.constructionSiteId)
+    let working = site >= 0 and
+      w.buildings[site].state == BuildingUnderConstruction and
+      w.buildings[site].builderId == unit.id and unit.hp > 0 and
+      unit.owner == w.buildings[site].owner and unit.kind == PeonUnit and
+      unit.state == UnitBuilding and unit.targetId == unit.constructionSiteId and
+      covers(w.buildings[site].origin, w.buildings[site].footprint,
+        unit.tile.x.int32, unit.tile.y.int32)
+    if not working and not w.releaseConstructionOccupant(unit): return
   if w.units[index].state == UnitDying:
     inc w.units[index].animationTicks
     dec w.units[index].deathTicks
@@ -1809,10 +1980,11 @@ proc advanceBuilding(w: World, index: int32) =
     if builderIndex < 0:
       w.buildings[index].builderId = NoEntity
       return  # paused until another peon adopts the site
-    if w.units[builderIndex].state != UnitBuilding or not adjacentToFootprint(
-        w.buildings[index].origin, w.buildings[index].footprint,
-        int32(w.units[builderIndex].tile.x), int32(w.units[builderIndex].tile.y)):
+    if w.units[builderIndex].state != UnitBuilding or
+        not constructionInRange(w.buildings[index], w.units[builderIndex]):
       return
+    if w.buildings[index].buildTicks <= 1 and
+        not w.releaseConstructionOccupant(w.units[builderIndex]): return
     dec w.buildings[index].buildTicks
     let
       stats = BuildingTable[w.buildings[index].kind]
@@ -1827,6 +1999,14 @@ proc advanceBuilding(w: World, index: int32) =
       w.units[builderIndex].clearOrder(false)
       w.recomputeFoodCap(w.buildings[index].owner)
     return
+
+  if w.buildings[index].researchTicks > 0:
+    dec w.buildings[index].researchTicks
+    if w.buildings[index].researchTicks == 0:
+      let building = w.buildings[index]
+      w.players[building.owner].researchLevels[building.researchKind] =
+        building.researchLevel
+      w.buildings[index].clearResearch()
 
   if w.buildings[index].queueLength > 0:
     if w.buildings[index].trainTicks > 0:
@@ -1901,6 +2081,48 @@ proc techMet*(w: World, player: int32, requires: set[BuildingKind]): bool =
       return false
   true
 
+proc researchLevel*(w: World, player: int32, kind: ResearchKind): int32 =
+  if player >= 0 and player < w.players.len:
+    result = w.players[player].researchLevels[kind]
+
+proc researchInProgress*(w: World, player: int32, kind: ResearchKind): bool =
+  for building in w.buildings:
+    if building.owner == player and building.state == BuildingComplete and
+        building.hp > 0 and building.researchTicks > 0 and
+        building.researchKind == kind: return true
+
+proc canResearch*(w: World, player, buildingId: int32,
+    kind: ResearchKind): bool =
+  if player < 0 or player >= w.players.len or w.over or
+      w.players[player].defeated: return false
+  let index = w.buildingIndex(buildingId)
+  if index < 0: return false
+  let building = w.buildings[index]
+  if building.owner != player or building.hp <= 0 or
+      building.state != BuildingComplete or
+      building.kind != researchBuilding(kind) or building.researchTicks > 0 or
+      building.queueLength > 0: return false
+  let level = w.researchLevel(player, kind)
+  if level >= MaxResearchLevel or w.researchInProgress(player, kind): return false
+  let cost = researchStats(kind, level + 1)
+  w.players[player].gold >= cost.gold and w.players[player].wood >= cost.wood and
+    w.techMet(player, BuildingTable[building.kind].requires)
+
+proc applyResearch*(w: World, player, buildingId, kindValue: int32): bool =
+  if kindValue notin 0'i32 .. ResearchKind.high.ord.int32: return false
+  let kind = ResearchKind(kindValue)
+  if not w.canResearch(player, buildingId, kind): return false
+  let index = w.buildingIndex(buildingId)
+  let level = w.researchLevel(player, kind) + 1
+  let cost = researchStats(kind, level)
+  w.players[player].gold -= cost.gold
+  w.players[player].wood -= cost.wood
+  w.buildings[index].researchKind = kind
+  w.buildings[index].researchLevel = level
+  w.buildings[index].researchTicks = cost.ticks
+  w.buildings[index].researchTotal = cost.ticks
+  true
+
 proc canPlace*(w: World, kind: BuildingKind, x, y: int32): bool =
   ## Returns whether a footprint would fit: on the map, on open terrain, and
   ## clear of trees, other structures, and every unit.
@@ -1909,6 +2131,30 @@ proc canPlace*(w: World, kind: BuildingKind, x, y: int32): bool =
     for tileX in x ..< x + size.width:
       if not w.tileFree(tileX, tileY):
         return false
+  true
+
+proc canPlace*(w: World, player: int32, kind: BuildingKind, x, y: int32,
+    builderId = NoEntity): bool =
+  ## Preview and authoritative placement share this narrow occupancy exception.
+  ## Omitting the builder retains strict placement; never ignore another unit.
+  if builderId == NoEntity: return w.canPlace(kind, x, y)
+  let index = w.unitIndex(builderId)
+  if index < 0: return false
+  let builder = w.units[index]
+  if builder.owner != player or builder.kind != PeonUnit or builder.hp <= 0 or
+      builder.state in {UnitDying, UnitInMine}: return false
+  let size = BuildingTable[kind].footprint
+  for tileY in y ..< y + size.depth:
+    for tileX in x ..< x + size.width:
+      if not w.tileOpen(tileX, tileY): return false
+      let occupant = w.occupancy[w.map.tileIndex(tileX, tileY)]
+      if occupant != NoEntity and occupant != builderId: return false
+  # Occupancy stores only one ID per tile; overlapping bodies must not hide a
+  # second blocker behind the assigned builder's entry.
+  for unit in w.units:
+    if unit.id != builderId and unit.state notin {UnitDying, UnitInMine} and
+        covers(tile2(x, y), size, unit.tile.x.int32, unit.tile.y.int32):
+      return false
   true
 
 proc canBuild*(w: World, player: int32, kind: BuildingKind): bool =
@@ -2116,7 +2362,7 @@ proc startNextOrder(w: World, index: int32) =
 proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
   ## Places a construction site and sends a peon to raise it.
   let index = w.ownedUnit(player, peonId)
-  if index < 0 or w.units[index].kind != PeonUnit or
+  if index < 0 or w.units[index].kind != PeonUnit or w.units[index].hp <= 0 or
       w.units[index].state == UnitInMine:
     return false
   if kindValue < 0 or kindValue > int32(BuildableHigh.ord):
@@ -2143,7 +2389,7 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
       break
 
   if siteId == NoEntity:
-    if not w.canPlace(kind, x, y):
+    if not w.canPlace(player, kind, x, y, peonId):
       return false
     if w.players[player].gold < stats.gold or
         w.players[player].wood < stats.wood:
@@ -2171,7 +2417,13 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
   w.units[index].orderQueue.setLen(0)
   w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
-  if w.footprintGoal(
+  if covers(origin, stats.footprint, w.units[index].tile.x.int32,
+      w.units[index].tile.y.int32):
+    w.units[index].state = UnitBuilding
+    w.units[index].targetId = siteId
+    w.units[index].constructionSiteId = siteId
+    w.buildings[site].builderId = peonId
+  elif w.footprintGoal(
     index,
     w.buildings[site].origin,
     w.buildings[site].footprint
@@ -2245,6 +2497,10 @@ proc applyCancel*(w: World, player, entityId: int32): bool =
     w.buildings[index].deathTicks = 0
     return true
 
+  if w.buildings[index].researchTicks > 0:
+    w.buildings[index].clearResearch()
+    return true
+
   if w.buildings[index].queueLength <= 0:
     return false
   let
@@ -2279,6 +2535,10 @@ proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
   if player < 0 or player >= w.players.len:
     return false
   case action.kind
+  of ActionResearch:
+    if action.append or action.offset != FixedVec2Zero or
+        action.second != 0 or action.third != 0: return false
+    w.applyResearch(player, action.entityId, action.first)
   of ActionDiplomacy:
     if action.second notin 0'i32 .. int32(DiplomacyCommand.high.ord):
       return false
@@ -2426,6 +2686,15 @@ proc applyTrain*(
     game.metrics.command(int(player), game.world.tick)
     game.record(ActionTrain, player, buildingId, kindValue)
 
+proc applyResearch*(game: Game, player, buildingId, kindValue: int32): bool =
+  ## Record only accepted local actions; online commands wait for relay ticks.
+  if game.networked:
+    return game.queueNetworkAction(ActionResearch, player, buildingId, kindValue)
+  result = game.world.applyResearch(player, buildingId, kindValue)
+  if result:
+    game.metrics.command(int(player), game.world.tick)
+    game.record(ActionResearch, player, buildingId, kindValue)
+
 proc applySetRally*(
     game: Game, player, buildingId, x, y: int32
 ): bool =
@@ -2474,6 +2743,8 @@ proc hashWorld(w: World): uint64 =
   hash.addHashy(w.nextBuildingId)
   for player in 0 ..< w.players.len:
     let side = w.players[player]
+    for level in side.researchLevels:
+      hash.addHashy(level)
     hash.addHashy(side.gold)
     hash.addHashy(side.wood)
     hash.addHashy(side.foodUsed)
@@ -2504,6 +2775,10 @@ proc hashWorld(w: World): uint64 =
       hash.addHashy(slot)
     hash.addHashy(structure.queueLength)
     hash.addHashy(structure.trainTicks)
+    hash.addHashy(structure.researchKind.ord.int32)
+    hash.addHashy(structure.researchLevel)
+    hash.addHashy(structure.researchTicks)
+    hash.addHashy(structure.researchTotal)
     hash.mixTile(structure.rally)
     hash.addHashy(structure.hasRally)
     hash.addHashy(structure.cooldown)
@@ -2526,6 +2801,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(unit.stateTicks)
     hash.addHashy(unit.cooldown)
     hash.addHashy(unit.targetId)
+    hash.addHashy(unit.constructionSiteId)
     hash.addHashy(unit.sourceId)
     hash.mixTile(unit.targetTile)
     hash.addHashy(int32(unit.body.pos.x))
@@ -2551,6 +2827,9 @@ proc hashWorld(w: World): uint64 =
     for step in unit.path:
       hash.mixTile(step)
     hash.mixTile(unit.pathGoal)
+    hash.mixTile(unit.blockedEndpoint)
+    hash.addHashy(unit.blockedEndpointValid)
+    hash.addHashy(unit.blockedEndpointRevision)
     hash.addHashy(unit.blockedTicks)
     hash.addHashy(unit.passingPeer)
     hash.addHashy(unit.passingTicks)
@@ -2566,6 +2845,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(unit.animationTicks)
     hash.addHashy(unit.deathTicks)
   hash.addHashy(w.terrainEdits.len)
+  hash.addHashy(w.pathTerrainRevision)
   for edit in w.terrainEdits:
     hash.addHashy(edit.tick)
     hash.addHashy(edit.index)
@@ -2698,22 +2978,65 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
   profileBlock "searchPath":
     w.servePathQueue()
   profileBlock "units":
+    w.rebuildTrafficGrid()
     w.preparePassing()
     for index in 0 ..< w.units.len:
       w.advanceUnit(int32(index))
   profileBlock "separate":
     walkWorld = w
+    w.rebuildTrafficGrid()
+    softPush.setLen(w.units.len)
+    for push in softPush.mitems: push = FixedVec2Zero
     for i in 0 ..< w.units.len:
-      if w.units[i].state == UnitDying or w.units[i].state == UnitInMine:
+      let unit = w.units[i]
+      if unit.state in {UnitDying, UnitInMine, UnitBuilding} or
+          unit.constructionSiteId != NoEntity:
         continue
-      for j in i + 1 ..< w.units.len:
-        if w.units[j].state == UnitDying or w.units[j].state == UnitInMine:
+      # Directed, bounded gather from a frozen grid. Even an omitted high ID
+      # receives pressure from the retained prefix; no all-pairs dense fallback.
+      for j in trafficGrid.neighbors(unit.body.pos):
+        if j == i: continue
+        let peer = w.units[j]
+        if peer.state in {UnitDying, UnitInMine}:
           continue
-        separatePair(
-          w.units[i].body,
-          w.units[j].body,
-          lvdTilesWalkable
-        )
+        let offset = unit.body.pos-peer.body.pos
+        let need = unit.body.radius+peer.body.radius
+        if lengthSquared(offset) >= int64(int32(need))*int64(int32(need)):
+          continue
+        let dist = length(offset)
+        var normal: FixedVec2
+        if dist > FixedZero:
+          normal = normalize(offset)
+        else:
+          # Stable anti-symmetric tie break, including coincident omitted IDs.
+          const directions = [(1,0), (1,1), (0,1), (-1,1),
+            (-1,0), (-1,-1), (0,-1), (1,-1)]
+          let axis = directions[int((int64(min(unit.id,peer.id))*3+
+            int64(max(unit.id,peer.id))*5) mod 8)]
+          normal = normalize(fixedVec2(fixed(axis[0].int32),fixed(axis[1].int32)))
+          if i > j: normal = normal * -FixedOne
+        let friendly = unit.owner == peer.owner
+        var share = 0.5'fx
+        if peer.state == UnitBuilding: share = FixedOne
+        elif friendly and unit.hasGoal != peer.hasGoal:
+          share = if unit.hasGoal: 0.1'fx else: FixedOne
+          if not unit.hasGoal:
+            # Give the idle circle a lateral component rather than endlessly
+            # bulldozing it along the mover's exact center line.
+            let forward = peer.movementDirection()
+            let side = fixedVec2(-forward.y, forward.x)
+            let sign = if dot(normal, side) < FixedZero: -FixedOne else: FixedOne
+            normal = normalize(normal + side*sign)
+        softPush[i] += normal * ((need-dist) *
+          (if friendly: 0.35'fx else: FixedOne) * share)
+    for i, unit in w.units:
+      var push = softPush[i]
+      if lengthSquared(push) > int64(int32(0.08'fx))*int64(int32(0.08'fx)):
+        push = normalize(push)*0.08'fx
+      if push != FixedVec2Zero:
+        let next = unit.body.pos+push
+        if w.passingSegmentOpen(unit, next):
+          unit.body.pos = next
     for i in 0 ..< w.occupancy.len:
       w.occupancy[i] = 0
     for unit in w.units:

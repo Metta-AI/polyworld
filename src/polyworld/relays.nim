@@ -46,6 +46,8 @@ type
     identity*: GameIdentity
     owner*: uint32
     public*, paused*: bool
+    galconStartPending: bool
+    lvdStartPending: bool
     phase*: RoomPhase
     revision*, match*, tickRate*, tick*: uint32
     payload*: string
@@ -216,6 +218,7 @@ proc stop(relay: Relay, room: RelayRoom, detail: string) =
   if room.phase == Desynced:
     return
   room.phase = Desynced
+  room.lvdStartPending = false
   room.detail = detail
   relay.logEvent("match.stopped", room = room, detail = detail)
   relay.status(room)
@@ -229,6 +232,15 @@ proc retainedBytes(relay: Relay): int =
 proc changed(relay: Relay, room: RelayRoom, rosterOnly = false) =
   ## Keeps roster readiness intent, but requires hashes for the new revision.
   inc room.revision
+  room.galconStartPending = false
+  if not rosterOnly:
+    room.lvdStartPending = false
+  elif room.lvdStartPending:
+    var occupied = false
+    for seat in room.seats:
+      occupied = occupied or seat.owner != 0
+    if not occupied:
+      room.lvdStartPending = false
   for id in room.participants:
     if not rosterOnly or not room.controls(id):
       relay.guest(id).ready = false
@@ -258,6 +270,8 @@ proc closeIfUnwatched(relay: Relay, room: RelayRoom): bool =
   for guest in relay.guests:
     if guest.room == room.id:
       guest.clearMembership()
+  room.galconStartPending = false
+  room.lvdStartPending = false
   room.paused = false
   room.deadline = 0
   room.owner = 0
@@ -291,6 +305,9 @@ proc disconnectConnection(relay: Relay, connection: int, preserveRoom = false) =
     return
   if room.phase == Lobby:
     guest.ready = false
+    room.galconStartPending = false
+    if guest.id == room.owner:
+      room.lvdStartPending = false
   relay.publish(room)
 
 proc disconnect*(relay: Relay, connection: int) =
@@ -406,8 +423,11 @@ proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
     if room.participants[i] == guest.id:
       room.participants.delete(i)
       break
-  if room.owner == guest.id and room.participants.len > 0:
-    room.owner = room.participants[0]
+  if room.owner == guest.id:
+    if room.participants.len > 0:
+      room.owner = room.participants[0]
+    room.galconStartPending = false
+    room.lvdStartPending = false
   relay.send(guest, RoomMessage(kind: RoomState))
   if relay.closeIfUnwatched(room):
     return
@@ -418,6 +438,25 @@ proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
 
 proc receive*(
     relay: Relay, connection: int, message: RoomMessage, now: float64
+)
+
+proc tryLvdStart(relay: Relay, room: RelayRoom, now: float64) =
+  ## Retain host intent across roster revisions, never stale preparation.
+  if room == nil or room.phase != Lobby or not room.lvdStartPending:
+    return
+  let owner = relay.guest(room.owner)
+  if owner == nil or owner.connection == 0:
+    return
+  for seat in room.seats:
+    if seat.owner == 0: continue
+    let controller = relay.guest(seat.owner)
+    if controller == nil or controller.connection == 0 or
+        controller.readyRevision != room.revision:
+      return
+  relay.receive(owner.connection, RoomMessage(kind: StartMatch), now)
+
+proc receive*(
+    relay: Relay, connection: int, message: RoomMessage, now: float64
 ) =
   ## Handles one event in the sole owner thread of the relay state.
   relay.now = now
@@ -425,6 +464,7 @@ proc receive*(
     reject("Clients cannot assign delivery identifiers")
   if message.kind == Hello:
     relay.hello(connection, message, now)
+    relay.tryLvdStart(relay.room(relay.connectionGuest(connection).room), now)
     return
   let guest = relay.connectionGuest(connection)
   if guest == nil:
@@ -492,6 +532,8 @@ proc receive*(
     )
     guest.room = room.id
     relay.rooms.add room
+    if room.identity.game == "light_vs_dark" and room.identity.protocol >= 3:
+      guest.readyRevision = 0
     relay.logEvent("room.created", connection, room,
       "seats=" & $message.number & " tickRate=" & $message.tickRate &
       " public=" & $message.flag)
@@ -511,6 +553,8 @@ proc receive*(
       reject("Room participant limit reached")
     guest.room = room.id
     guest.ready = false
+    if room.identity.game == "light_vs_dark" and room.identity.protocol >= 3:
+      guest.readyRevision = 0
     room.participants.add guest.id
     relay.logEvent("room.joined", connection, room)
     if room.phase == Lobby:
@@ -622,10 +666,36 @@ proc receive*(
     guest.readyHash = message.hash
     guest.readyRevision = room.revision
     relay.publish(room)
+    if room.identity.game == "galcon" and room.identity.protocol >= 2 and
+      room.galconStartPending:
+      relay.receive(relay.guest(room.owner).connection,
+        RoomMessage(kind: StartMatch), now)
+    else:
+      relay.tryLvdStart(room, now)
   of StartMatch:
     if room.phase != Lobby or room.owner != guest.id:
       reject("Only the owner can start a lobby")
     let hostPrepared = room.identity.game == "gods_of_the_arena"
+    let lvdAutomatic = room.identity.game == "light_vs_dark" and
+      room.identity.protocol >= 3
+    let automaticPreparation = lvdAutomatic or
+      (room.identity.game == "galcon" and room.identity.protocol >= 2)
+    if automaticPreparation:
+      var occupied, pending: bool
+      for seat in room.seats:
+        if seat.owner == 0: continue
+        occupied = true
+        let controller = relay.guest(seat.owner)
+        if controller == nil or controller.connection == 0:
+          reject("Every controlling client must be connected")
+        pending = pending or controller.readyRevision != room.revision
+      if not occupied: reject("At least one controlling client is required")
+      if pending:
+        if lvdAutomatic:
+          room.lvdStartPending = true
+        else:
+          room.galconStartPending = true
+        return
     if hostPrepared and message.revision != room.revision:
       reject("Start refers to outdated room settings")
     var
@@ -633,8 +703,8 @@ proc receive*(
       initialHash = if hostPrepared: message.hash else: 0'u64
     for seat in room.seats:
       if seat.owner == 0:
-        # These game adapters still require dense rosters when preparing worlds.
-        if room.identity.game == "light_vs_dark":
+        # Legacy LvD versions predate the packed-seat adapter.
+        if room.identity.game == "light_vs_dark" and not lvdAutomatic:
           reject("Every game seat must have an owner")
         continue
       if hostPrepared:
@@ -642,10 +712,12 @@ proc receive*(
         first = false
         continue
       let controller = relay.guest(seat.owner)
-      if controller.connection == 0 or not controller.ready:
+      if controller == nil or controller.connection == 0:
+        reject("Every controlling client must be connected")
+      if not automaticPreparation and not controller.ready:
         reject("Every controlling client must load the setup and be ready")
       if controller.readyRevision != room.revision:
-        reject("Ready clients must prepare the current roster revision")
+        reject("Controllers must automatically prepare the current roster revision")
       if first:
         initialHash = controller.readyHash
         first = false
@@ -656,6 +728,8 @@ proc receive*(
         return
     if first:
       reject("At least one controlling client is required")
+    room.galconStartPending = false
+    room.lvdStartPending = false
     room.initialHash = initialHash
     room.checkpoints = @[Checkpoint(present: true, hash: initialHash)]
     room.finalTick = 0

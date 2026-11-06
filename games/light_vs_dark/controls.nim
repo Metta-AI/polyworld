@@ -4,7 +4,7 @@
 ## `apply*` wrappers that also record the tape.
 
 import
-  sim
+  sim, content
 
 type
   PlayerCommandKind = enum
@@ -14,6 +14,7 @@ type
     CommandHarvest
     CommandBuild
     CommandTrain
+    CommandResearch
     CommandRally
     CommandCancel
 
@@ -102,6 +103,11 @@ proc queueTrain*(player, buildingId, kindValue: int32) =
     first: kindValue
   )
 
+proc queueResearch*(player, buildingId: int32, kind: ResearchKind) =
+  ## Enqueue only; multiplayer waits for its authoritative packet.
+  pending.add PlayerCommand(kind: CommandResearch, player: player,
+    entityId: buildingId, first: kind.ord.int32)
+
 proc queueSetRally*(player, buildingId, x, y: int32) =
   ## Queues a rally point.
   pending.add PlayerCommand(
@@ -152,6 +158,8 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
     )
   of CommandTrain:
     game.applyTrain(command.player, command.entityId, command.first)
+  of CommandResearch:
+    game.applyResearch(command.player, command.entityId, command.first)
   of CommandRally:
     game.applySetRally(
       command.player, command.entityId, command.first, command.second

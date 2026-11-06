@@ -15,7 +15,7 @@ macro keyHandler(): untyped =
   error("missing production key handler")
 
 suite "LvD production shortcut routing":
-  test "BB builds, TP trains, TA cannot arm attack, menus and Ctrl stay isolated":
+  test "BB builds, TP trains, combat A wins over TA, menus and Ctrl stay isolated":
     window = newWindow("LvD shortcuts", ivec2(1600, 1000), visible = false)
     defer:
       window.close()
@@ -24,7 +24,7 @@ suite "LvD production shortcut routing":
       clearPlayerCommands()
     sk = Silky(uiScale: 1)
     options.playerSlot = 1
-    run = Game(world: newWorld(generateMap(DefaultSeed), TickRate * 60))
+    run = newGame(generateMap(DefaultSeed), TickRate * 60)
     run.world.players[0].gold = 10000
     run.world.players[0].wood = 10000
     run.world.players[0].foodCap = 100
@@ -39,11 +39,15 @@ suite "LvD production shortcut routing":
     inputBindings = LvdControlProfile.defaults
     bindingCapture = false
     selectedIds = @[run.world.units[0].id]
+    commandTab = 1
     window.onButtonPress(KeyB)
+    check commandTab == 0
     check pendingBuild == -1
     window.onButtonPress(KeyB)
     check pendingBuild == -1
     shortcutState.releaseShortcut('B')
+    sleep(1400) # Former timeout must not close the actual production menu.
+    window.onButtonPress(MouseLeft)
     window.onButtonPress(KeyB)
     check pendingBuild == BarracksBuilding.ord
     pendingBuild = -1
@@ -53,7 +57,9 @@ suite "LvD production shortcut routing":
       if building.owner == 0 and building.kind == TownHallBuilding: hall = building.id
     selectedIds = @[hall]
     window.onButtonPress(KeyT)
+    check commandTab == 1
     shortcutState.releaseShortcut('T')
+    sleep(1400)
     window.onButtonPress(KeyP)
     run.flushPlayerCommands()
     check run.world.buildings[run.world.buildingIndex(hall)].queueLength == 1
@@ -62,7 +68,8 @@ suite "LvD production shortcut routing":
     window.onButtonPress(KeyT)
     shortcutState.releaseShortcut('T')
     window.onButtonPress(KeyA)
-    check not attackMoveArmed
+    check attackMoveArmed
+    attackMoveArmed = false
     shortcutState.resetShortcut()
     matchMenu = MatchSettings
     window.onButtonPress(KeyB)
@@ -121,3 +128,35 @@ suite "LvD production shortcut routing":
     window.onButtonPress(KeyJ)
     check not attackMoveArmed
     inputBindings = LvdControlProfile.defaults
+
+    # Producer-only selection retains Archer; combat selection owns A instead.
+    shortcutState.resetShortcut()
+    run.world.buildings.add Building(owner: 0, kind: LumberMillBuilding,
+      state: BuildingComplete, hp: 100)
+    require run.world.canTrain(barracks, ArcherUnit)
+    selectedIds = @[barracks]
+    window.onButtonPress(KeyT)
+    shortcutState.releaseShortcut('T')
+    window.onButtonPress(KeyA)
+    run.flushPlayerCommands()
+    check not attackMoveArmed
+    check run.world.buildings[run.world.buildingIndex(barracks)].queueLength == 3
+
+    # Text and modal owners precede both persistent menu and combat dispatch.
+    resetHumanCommunication()
+    shortcutState.resetShortcut()
+    selectedIds = @[soldier]
+    window.onButtonPress(KeyEnter)
+    require humanCommunicationBlocksGameplay()
+    for key in [KeyB, KeyT, KeyA]: window.onButtonPress(key)
+    check not attackMoveArmed
+    check pendingBuild == -1
+    resetHumanCommunication()
+    matchMenu = MatchSettings
+    window.onButtonPress(KeyA)
+    check not attackMoveArmed
+    matchMenu = HiddenMatchMenu
+    bindingCapture = true
+    window.onButtonPress(KeyA)
+    check not attackMoveArmed
+    bindingCapture = false

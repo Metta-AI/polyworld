@@ -106,7 +106,7 @@ block rejectsMalformedAtomically:
     doAssert session.game.networkActions.len == 0
 
 block privateBotsAndChat:
-  let bot = "a = declareWar(0)\na = sendChat(-2, \"hello\")"
+  let bot = "a = offerPeace(0)\na = sendChat(-2, \"hello\")"
   let host = prepareNetworkMatch(clientFor(2), ["", bot, ""])
   let observer = prepareNetworkMatch(clientFor(1), ["", "", ""])
   host.start(startEvent)

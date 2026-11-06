@@ -22,14 +22,25 @@ suite "LvD sequential shortcuts":
     check state.pressShortcut(DefaultShortcuts, 'B', 1.2).action == BuildBarracksShortcut.ord
     check state.pressShortcut(DefaultShortcuts, 'B', 1.3).action == -1
 
-  test "timeout, cancellation, modifiers and menus never leak a pending sequence":
-    for reason in 0 .. 4:
+  test "menu stays open across arbitrary delays and repeated commands":
+    var state: ShortcutState
+    discard state.pressShortcut(DefaultShortcuts, 'B', 1.0)
+    state.releaseShortcut('B')
+    check state.pressShortcut(DefaultShortcuts, 'B', 3600.0).action == BuildBarracksShortcut.ord
+    state.releaseShortcut('B')
+    check state.pressShortcut(DefaultShortcuts, 'F', 7200.0).action == BuildFarmShortcut.ord
+    state.releaseShortcut('F')
+    # Unassigned keys do not eat unrelated gameplay shortcuts or close the menu.
+    check not state.pressShortcut(DefaultShortcuts, 'Z', 8000.0).consumed
+    state.releaseShortcut('Z')
+    check state.pressShortcut(DefaultShortcuts, 'B', 9000.0).action == BuildBarracksShortcut.ord
+
+  test "cancellation, modifiers and menus never leak a pending sequence":
+    for reason in 1 .. 3:
       var state: ShortcutState
       discard state.pressShortcut(DefaultShortcuts, 'T', 1.0)
       state.releaseShortcut('T')
       case reason
-      of 0:
-        check state.pressShortcut(DefaultShortcuts, 'P', 3.0).action == -1
       of 1:
         discard state.pressShortcut(DefaultShortcuts, '\e', 1.1)
       of 2:
@@ -44,7 +55,7 @@ suite "LvD sequential shortcuts":
     state.releaseShortcut('T')
     check not state.pressShortcut(DefaultShortcuts, 'T', 1.1, gameplay = false).consumed
 
-  test "second key consumed before attack even on mismatch":
+  test "recognized menu action consumes but unrelated keys fall through":
     var state: ShortcutState
     discard state.pressShortcut(DefaultShortcuts, 'T', 1.0)
     state.releaseShortcut('T')
@@ -55,7 +66,7 @@ suite "LvD sequential shortcuts":
     discard state.pressShortcut(DefaultShortcuts, 'B', 2.0)
     state.releaseShortcut('B')
     let mismatch = state.pressShortcut(DefaultShortcuts, 'A', 2.1)
-    check mismatch.consumed
+    check not mismatch.consumed
     check mismatch.action == -1
 
   test "editing validates full sequences, rejects conflicts, persists and resets":

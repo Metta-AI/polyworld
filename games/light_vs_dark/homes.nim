@@ -4,8 +4,12 @@ proc opensMultiplayer*(room: string): bool =
   room.len > 0
 
 when not defined(headless):
-  import silky, polyworld/menus, polyworld/homes as sharedHomes, assets
+  import silky, windy, polyworld/menus, polyworld/homes as sharedHomes, assets
   export sharedHomes
+
+  proc drawLvdHome*(sk: Silky, window: Window, focus: var int): HomeAction =
+    ## Keep the game logo close to the menu without a platform caption.
+    sharedHomes.drawHome(sk, window, focus, compact = true)
 
   proc effectivePreferences*(stored: Preferences, queryServer,
     configuredServer: string): Preferences =

@@ -10,9 +10,19 @@ Light/Dark art, player colors, and player count.
 
 ## Relationships and timing
 
-Each pair of living players has one symmetric relationship. Everyone starts
-neutral. Declaring war affects both players, so the recipient can fight back
-as soon as the same countdown completes.
+Each pair of living players has one symmetric relationship. **Default local and
+multiplayer games are FFA: every distinct player pair starts at war immediately.**
+No declaration or warning is required for initial opponents. Set
+`diplomacySettings.neutralStart: true` in an explicit `LvdConfig` payload to opt
+into the negotiated, neutral-start variant. Omitted settings (including older
+saved lobby settings without this field) use FFA. Peace, alliances, shared
+vision, and their existing deadlines remain available; this changes initial
+relations, not the rules for later negotiated relationships.
+
+Declaring war on a neutral player affects both players, so the recipient can
+fight back as soon as the same countdown completes. Gameplay version 27 records
+this setting in replay setup and the deterministic state hash. Version 26
+recordings require their archived client; no compatibility simulation is added.
 
 Use one match setting, `warGraceSeconds`, default 10 simulation seconds.
 Leaving an alliance takes exactly twice that setting. Store deadlines in
@@ -29,7 +39,8 @@ with the rest of the simulation. Settings are fixed at match start.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Neutral
+  [*] --> War: Default FFA
+  [*] --> Neutral: Explicit neutralStart
   Neutral --> WarPending: Either player declares war
   WarPending --> War: After T
   WarPending --> Neutral: Declaration withdrawn or peace accepted

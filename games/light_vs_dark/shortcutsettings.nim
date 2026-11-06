@@ -86,15 +86,15 @@ proc drawShortcutRows(sk: Silky, window: Window, origin: Vec2) =
         if not shortcutEditor.active:
           bindingCapture = false
           break
-  sk.drawLabel("BUILD / TRAIN SEQUENCES", origin, vec2(720, 36),
+  sk.drawLabel("BUILD / UNITS MENU KEYS", origin, vec2(720, 36),
     sk.theme.defaultTextColor)
-  sk.drawLabel("Press two keys in order, not together. 1.25s timeout; Esc cancels.",
+  sk.drawLabel("First key opens a menu; next keys choose commands. No timeout; Esc exits.",
     origin + vec2(0, 36), vec2(720, 36), sk.theme.defaultTextColor)
   let message =
     if shortcutEditor.active: "Type both keys for " & shortcutLabel(shortcutEditor.action) & "; Esc cancels."
     elif shortcutSettingsError.len > 0: shortcutSettingsError
     elif shortcutEditor.error.len > 0: shortcutEditor.error
-    else: "Click a sequence to edit both keys. Duplicate sequences are rejected."
+    else: "Edit menu + command keys. Existing custom pairs are preserved."
   sk.drawLabel(message, origin + vec2(0, 72), vec2(720, 36),
     sk.theme.defaultTextColor)
   for action in ShortcutAction:

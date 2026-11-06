@@ -85,10 +85,14 @@ proc advanceClickMarks*(system: var ClickMarkSystem, delta: float32) =
 
 proc drawClickMarks*(
     system: ClickMarkSystem,
-    viewProjection: Mat4
+    viewProjection: Mat4,
+    visible: proc(origin: Vec3, radius: float32): bool {.closure.} = nil
 ) =
+  ## Optional game-owned current-sight bound; default preserves other games.
   ## Draws every live click cylinder through the shared fx mesh.
   for mark in system.marks:
+    let radius = system.settings.radius * max(system.settings.expandStart, system.settings.expandEnd)
+    if visible != nil and not visible(mark.origin, radius): continue
     let life = clickMarkLife(
       system.time - mark.startTime,
       system.settings.duration

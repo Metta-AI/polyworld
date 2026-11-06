@@ -25,6 +25,10 @@ Sound preferences are shared with GotA; actual audio playback remains unimplemen
 
 ## Playing
 
+Default matches are **FFA**: other players are enemies immediately, independent of Light/Dark art or color. Military units automatically acquire visible enemies while idle; attack-move acquires enemies along the route, and explicit attacks chase visible targets into range. Ordinary move does not acquire targets while moving. The explicit `diplomacySettings.neutralStart: true` config option retains neutral-start diplomacy; peace/alliance mechanics are not removed.
+
+Peons are workers, but not noncombatants: explicit attack and attack-move work. Idle peons deliberately do not autoattack. Their attack has only 1 basic damage and no piercing, so armor can reduce it to **zero** (including against a Swordsman); use military units against armored opponents.
+
 Normal human gameplay has no bottom time scrubber; playback controls remain for replays and spectator viewing. Use Esc for the match menu, pause controls, and Return to Home/Lobby—no persistent return button sits on the battlefield. Finished matches automatically display the winner/outcome headline above the Tab-style statistics and history charts.
 
 Select workers, then right-click a tree's visible canopy or trunk to harvest wood. Tree picking uses the rendered tree rather than the empty ground behind its canopy. If another worker blocks the chopping position, workers seek a reachable alternative approach or another explored tree, retaining cargo and queued orders. Opposing peons deterministically yield sideways when there is safe passing space, then resume their original work; they never overlap to force through a one-cell corridor.
@@ -44,15 +48,17 @@ Hover over Build or Units buttons for half a second to see their purpose, costs,
 - **Shift when issuing/releasing an order:** append it after the current order; ordinary replacement orders clear queued waypoints.
 - **Escape:** cancel an armed command or formation drag before opening the match menu.
 
-Construction requires the assigned living worker beside that exact site. Retargeting or losing the worker pauses the old site; right-click its unfinished shell with another worker to resume without paying again.
+Construction requires the assigned living owned peon beside or inside that exact site. A new footprint may contain its assigned peon, but not another friendly or enemy unit, terrain obstacle, tree, or building. The inside builder works in place and exits onto free legal perimeter ground on completion or interruption; a completely blocked exit waits rather than pushing the worker into obstacles. Retargeting, stopping, displacement out of range, or losing the worker pauses the old site; right-click its unfinished shell with another worker to resume without paying again.
 
-Per-unit queues hold up to 32 pending orders. Queued harvest hands off after its next resource deposit; invalid future targets are skipped. The new command semantics use LvD gameplay version 26 / network protocol 2 / replay format 6, so all multiplayer clients must reload the current build; older gameplay recordings require their matching archived client.
+Per-unit queues hold up to 32 pending orders. Queued harvest hands off after its next resource deposit; invalid future targets are skipped. The current semantics use LvD gameplay version 28 / network protocol 2 / replay format 6, so all multiplayer clients must reload the current build; older gameplay recordings (including version 27) require their matching archived client.
 
 `?server=wss://HOST/ws` chooses the relay without skipping Home. A `room` query additionally opens multiplayer and joins the invitation. Browser pages served over HTTPS require `wss://`.
 
 ## Keyboard sequences
 
-Edit these under **Settings → Controls → Build / Train Sequences** (scroll below the ordinary bindings). Click a sequence, press two keys in order, and it saves automatically. Duplicate sequences are rejected; **Reset build / train** restores defaults. A sequence times out after 1.25 seconds; Escape cancels it.
+**B** opens the persistent Build menu; the next **B** selects Barracks. **T** opens Units; **P** trains a Peon and **S** trains a Swordsman. There is no timeout, and commands leave their menu active until Escape, another menu, or a gameplay input owner cancels it. Unassigned keys fall through to ordinary controls. With eligible combat units selected, **A** (or your customized Attack Move binding) always arms attack movement instead of training an Archer; producer-only selections retain the Archer menu command.
+
+Edit these under **Settings → Controls → Build / Units Menu Keys** (scroll below the ordinary bindings). Existing saved custom pairs are preserved unchanged: their first key opens a persistent command context and their second key invokes the command. Click a pair to edit both keys; duplicate pairs are rejected and edits save automatically. **Reset build / train** restores defaults.
 
 | Build | Keys | Train | Keys |
 |---|---|---|---|
@@ -63,7 +69,9 @@ Edit these under **Settings → Controls → Build / Train Sequences** (scroll b
 | Tower | B T | Knight | T K |
 | Stables | B S | Catapult | T C |
 | Church | B C | Cleric | T H |
-| Blacksmith | B K | Summon / Fire elemental | T E |
+| Blacksmith | B K | Elemental | T E |
+
+Elementals wear a grand laurel crown and their bodies use the owning faction's color.
 
 Build sequences require an eligible selected worker; training requires a selected compatible producer, resources, and supply. They use the same validated command path as clicking the HUD.
 
@@ -92,6 +100,11 @@ nim r games/light_vs_dark/tests/test_tooltips.nim
 nim r games/light_vs_dark/tests/test_tree_orders.nim
 nim r games/light_vs_dark/tests/test_order_queue.nim
 nim r games/light_vs_dark/tests/test_order_queue_network.nim
+nim r -d:headless games/light_vs_dark/tests/test_builder_placement_network.nim
+nim r games/light_vs_dark/tests/test_ffa_combat.nim
+nim r games/light_vs_dark/tests/test_two_human_combat.nim
+# Optional real-socket check against the existing relay; creates a private QA room:
+nim r -d:liveHumanCombat games/light_vs_dark/tests/test_two_human_combat.nim
 nim r tests/test_attack_orders.nim
 nim r tests/test_line_moves.nim
 nim r -d:headless tests/test_worker_build.nim

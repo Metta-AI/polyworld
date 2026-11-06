@@ -1,6 +1,7 @@
 ## Worker-driven construction regressions. Run natively with -d:headless.
 ## No bot decisions: queued human commands are flushed on real decision ticks.
 import std/unittest
+import fixxy
 import ../games/light_vs_dark/[content, maps, sim, controls]
 
 let arenaMap = generateMap(DefaultSeed)
@@ -41,6 +42,227 @@ proc startFarm(game: Game, worker: Unit, origin: Tile2): int =
   doAssert worker.adjacent(game.world.buildings[result])
 
 suite "worker-driven farm construction":
+  test "queued farm over its assigned peon completes and releases onto open ground":
+    let game = fixture()
+    let w = game.world
+    let worker = w.units[0]
+    let origin = worker.tile
+    let start = worker.body.pos
+    game.enqueueFarm(worker, origin)
+    game.step(DecisionTicks)
+    let site = game.farmAt(origin)
+    require site >= 0
+    require worker.state == UnitBuilding
+    check worker.body.pos == start
+    check w.buildings[site].buildTicks < w.buildings[site].buildTotal
+    while w.buildings[site].state == BuildingUnderConstruction and
+        w.tick < TickRate * 30:
+      check worker.body.pos == start
+      game.step()
+    check w.buildings[site].state == BuildingComplete
+    check worker.state == UnitIdle
+    check worker.adjacent(w.buildings[site])
+    check w.tileOpen(worker.tile)
+    check w.occupancy[w.map.tileIndex(worker.tile)] == worker.id
+
+  test "every tile in the footprint can contain the assigned builder":
+    let size = BuildingTable[FarmBuilding].footprint
+    for dy in 0'i32 ..< size.depth:
+      for dx in 0'i32 ..< size.width:
+        let game = fixture()
+        let w = game.world
+        let worker = w.units[0]
+        let origin = tile2(worker.tile.x.int32 - dx, worker.tile.y.int32 - dy)
+        game.enqueueFarm(worker, origin)
+        game.step(DecisionTicks)
+        let site = game.farmAt(origin)
+        require site >= 0
+        require worker.state == UnitBuilding
+        check constructionInRange(w.buildings[site], worker)
+        game.step(BuildingTable[FarmBuilding].buildTicks)
+        check w.buildings[site].state == BuildingComplete
+        check w.tileOpen(worker.tile)
+
+  test "cancelling or destroying an occupied shell releases its worker":
+    for destroy in [false, true]:
+      let game = fixture()
+      let w = game.world
+      let worker = w.units[0]
+      let origin = worker.tile
+      game.enqueueFarm(worker, origin)
+      game.step(DecisionTicks)
+      let site = game.farmAt(origin)
+      require site >= 0
+      if destroy: w.damageEntity(w.buildings[site].id, w.buildings[site].hp)
+      else: check w.applyCancel(worker.owner, w.buildings[site].id)
+      game.step()
+      check worker.state == UnitIdle
+      check worker.constructionSiteId == NoEntity
+      check w.tileOpen(worker.tile)
+      let goal = arena(-10, -5)
+      check w.applyMove(worker.owner, worker.id, goal.x.int32, goal.y.int32)
+      game.step(TickRate * 10)
+      check worker.tile == goal
+
+  test "placement exception is only the assigned living owned available peon":
+    let game = fixture()
+    let w = game.world
+    let worker = w.units[0]
+    let origin = worker.tile
+    let x = origin.x.int32
+    let y = origin.y.int32
+    check not w.canPlace(FarmBuilding, x, y)
+    check not w.canPlace(worker.owner, FarmBuilding, x, y)
+    check w.canPlace(worker.owner, FarmBuilding, x, y, worker.id)
+    check not w.canPlace(worker.owner, FarmBuilding, x, y, w.units[1].id)
+    check not w.canPlace(1 - worker.owner, FarmBuilding, x, y, worker.id)
+    let before = game.stateHash()
+    check not w.applyBuild(1 - worker.owner, worker.id, FarmBuilding.ord.int32, x, y)
+    check game.stateHash() == before
+    for state in [UnitInMine, UnitDying]:
+      worker.state = state
+      check not w.canPlace(worker.owner, FarmBuilding, x, y, worker.id)
+      check not w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32, x, y)
+    worker.state = UnitIdle
+    worker.hp = 0
+    check not w.canPlace(worker.owner, FarmBuilding, x, y, worker.id)
+    check not w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32, x, y)
+    worker.hp = 10
+    worker.kind = SoldierUnit
+    check not w.canPlace(worker.owner, FarmBuilding, x, y, worker.id)
+    check not w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32, x, y)
+
+  test "other friendly enemy and overlapping units still block placement":
+    for owner in [0'i32, 1'i32]:
+      for overlap in [false, true]:
+        let game = fixture()
+        let w = game.world
+        let worker = w.units[0]
+        let origin = worker.tile
+        let at = if overlap: origin else: tile2(origin.x.int32 + 1, origin.y.int32)
+        discard w.spawnUnit(owner, PeonUnit, at)
+        # Model a collision cell whose lossy occupancy hint names our builder.
+        if overlap: w.occupancy[w.map.tileIndex(origin)] = worker.id
+        let before = game.stateHash()
+        check not w.canPlace(worker.owner, FarmBuilding,
+          origin.x.int32, origin.y.int32, worker.id)
+        check not w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32,
+          origin.x.int32, origin.y.int32)
+        check game.stateHash() == before
+
+  test "terrain trees buildings and map edges are never ignored":
+    let game = fixture()
+    let w = game.world
+    let worker = w.units[0]
+    let origin = worker.tile
+    let cell = w.map.tileIndex(origin)
+    for blocker in [TreeBlocker, w.buildings[0].id]:
+      w.blocker[cell] = blocker
+      check not w.canPlace(worker.owner, FarmBuilding,
+        origin.x.int32, origin.y.int32, worker.id)
+      check not w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32,
+        origin.x.int32, origin.y.int32)
+    w.blocker[cell] = NoEntity
+    w.map.passable[cell] = 0
+    check not w.canPlace(worker.owner, FarmBuilding,
+      origin.x.int32, origin.y.int32, worker.id)
+    check not w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32,
+      origin.x.int32, origin.y.int32)
+    w.map.passable[cell] = 1
+    check not w.canPlace(worker.owner, FarmBuilding, -1, 0, worker.id)
+    check not w.canPlace(worker.owner, FarmBuilding, w.map.side - 1,
+      w.map.side - 1, worker.id)
+
+  test "inside construction pauses on stop move death displacement and reassignment":
+    for interruption in 0 .. 4:
+      let game = fixture()
+      let w = game.world
+      let worker = w.units[0]
+      let origin = worker.tile
+      game.enqueueFarm(worker, origin)
+      game.step(DecisionTicks)
+      let site = game.farmAt(origin)
+      require site >= 0
+      let before = w.buildings[site].buildTicks
+      case interruption
+      of 0: discard w.applyCancel(worker.owner, worker.id)
+      of 1: discard w.applyMove(worker.owner, worker.id,
+        arena(-10, -5).x.int32, arena(-10, -5).y.int32)
+      of 2: w.damageEntity(worker.id, worker.hp)
+      of 3: w.place(worker, arena(-10, -5))
+      else: discard w.applyBuild(worker.owner, worker.id, FarmBuilding.ord.int32,
+        arena(-4, 0).x.int32, arena(-4, 0).y.int32)
+      game.step(TickRate * 3)
+      check w.buildings[site].buildTicks == before
+      if interruption != 2:
+        check w.tileOpen(worker.tile)
+        check worker.constructionSiteId == NoEntity
+      if interruption == 1:
+        check worker.tile == arena(-10, -5)
+      if interruption == 4:
+        let second = game.farmAt(arena(-4, 0))
+        require second >= 0
+        game.step(TickRate * 30)
+        check w.buildings[second].state == BuildingComplete
+
+  test "inside builder waits for a legal exit rather than entering blocked ground":
+    let game = fixture()
+    let w = game.world
+    let worker = w.units[0]
+    let origin = worker.tile
+    let start = worker.body.pos
+    game.enqueueFarm(worker, origin)
+    game.step(DecisionTicks)
+    let site = game.farmAt(origin)
+    require site >= 0
+    let size = w.buildings[site].footprint
+    for y in origin.y.int32 - 1 .. origin.y.int32 + size.depth:
+      for x in origin.x.int32 - 1 .. origin.x.int32 + size.width:
+        if adjacentToFootprint(origin, size, x, y):
+          w.blocker[w.map.tileIndex(x, y)] = TreeBlocker
+    game.step(BuildingTable[FarmBuilding].buildTicks + TickRate)
+    check w.buildings[site].state == BuildingUnderConstruction
+    check w.buildings[site].buildTicks == 1
+    check worker.body.pos == start
+    let exit = tile2(origin.x.int32 - 1, origin.y.int32 - 1)
+    w.blocker[w.map.tileIndex(exit)] = NoEntity
+    let blockerId = w.spawnUnit(worker.owner, PeonUnit, exit)
+    game.step(TickRate)
+    check worker.body.pos == start
+    check w.buildings[site].buildTicks == 1
+    w.place(w.units[w.unitIndex(blockerId)], arena(-10, 6))
+    game.step()
+    check w.buildings[site].state == BuildingComplete
+    check worker.tile == exit
+    check w.tileOpen(worker.tile)
+
+  test "stopped enclosed builder resumes exiting when a safe tile becomes free":
+    let game = fixture()
+    let w = game.world
+    let worker = w.units[0]
+    let origin = worker.tile
+    game.enqueueFarm(worker, origin)
+    game.step(DecisionTicks)
+    let site = game.farmAt(origin)
+    require site >= 0
+    let size = w.buildings[site].footprint
+    for y in origin.y.int32 - 1 .. origin.y.int32 + size.depth:
+      for x in origin.x.int32 - 1 .. origin.x.int32 + size.width:
+        if adjacentToFootprint(origin, size, x, y):
+          w.blocker[w.map.tileIndex(x, y)] = TreeBlocker
+    let before = w.buildings[site].buildTicks
+    discard w.applyCancel(worker.owner, worker.id)
+    game.step(TickRate)
+    check w.buildings[site].buildTicks == before
+    check worker.tile == origin
+    check worker.state == UnitIdle
+    let exit = tile2(origin.x.int32 - 1, origin.y.int32 - 1)
+    w.blocker[w.map.tileIndex(exit)] = NoEntity
+    game.step()
+    check worker.tile == exit
+    check w.buildings[site].buildTicks == before
+    check worker.constructionSiteId == NoEntity
+
   test "queued far farm waits for its selected owned worker then completes":
     let game = fixture()
     let w = game.world

@@ -79,6 +79,6 @@ block invalidAppendKindsAndVersionsAreRejected:
   try: old.validate()
   except ReplayError: refused = true
   doAssert refused, "Old gameplay requires its archived client"
-  doAssert LvdNetworkProtocol == 2
+  doAssert LvdNetworkProtocol == 3 # Packed-seat mapping retains append semantics.
 
 echo "LvD network order queue replay passed"

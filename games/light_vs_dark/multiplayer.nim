@@ -2,12 +2,13 @@
 import jsony, polyworld/[rooms, roomclients, tapes, metrics, bodies, hashes, mailboxes],
   bots, content, controls, presets, replays, sim
 
-const LvdNetworkProtocol* = 2'u32
+const LvdNetworkProtocol* = 3'u32
 
 type NetworkMatch* = ref object
   client*: RoomClient
   game*: Game
   revision*: uint32
+  playerSeats*: seq[int] ## Packed simulation player -> stable lobby seat.
   started*, finished*: bool
   decisionTick: int32 = -1
 
@@ -109,34 +110,63 @@ proc prepareNetworkMatch*(client: RoomClient,
     snapshot.seats.len != config.playerCount:
       reject("LvD identity, roster, or tick rate differs from room setup")
   config.playerSlot = 0
-  var owned = newSeq[string](config.playerCount)
+  let potentialPlayers = config.players
+  config.players = @[]
+  var owned: seq[string]
+  var playerSeats: seq[int]
   for i, seat in snapshot.seats:
-    if seat.owner == 0: reject("Every seat must have an owner")
+    if seat.owner == 0: continue
     discard snapshot.humanSeatFor(seat.owner)
-    config.players[i].name = seat.name
+    let player = config.players.len
+    config.players.add potentialPlayers[i]
+    playerSeats.add i
+    owned.add ""
+    config.players[player].name = seat.name
     if seat.name == "Human":
-      config.players[i].name = ""
+      config.players[player].name = ""
       for participant in snapshot.participants:
         if participant.id == seat.owner:
-          config.players[i].name = participant.name
-      if config.players[i].name.len == 0:
+          config.players[player].name = participant.name
+      if config.players[player].name.len == 0:
         reject("Human seat has no named participant")
     elif seat.owner == client.participant and i < sources.len:
-      owned[i] = sources[i]
+      owned[player] = sources[i]
+  config.playerCount = config.players.len
+  if config.playerCount == 0: reject("At least one occupied seat is required")
   let game = newLocalMatch(config, owned)
   game.networked = true
-  NetworkMatch(client: client, game: game, revision: snapshot.revision)
+  NetworkMatch(client: client, game: game, revision: snapshot.revision,
+    playerSeats: playerSeats)
+
+proc reopenedLobby*(session: NetworkMatch): bool =
+  ## The owner may reopen while another participant still views the results.
+  ## Yield the finished renderer so the frontend can prepare the next revision.
+  session != nil and session.started and session.client != nil and
+    session.client.snapshot.room.len > 0 and session.client.snapshot.phase == Lobby
+
+proc playerForSeat*(session: NetworkMatch, seat: int): int =
+  result = -1
+  for player, stableSeat in session.playerSeats:
+    if stableSeat == seat: return player
+
+proc humanPlayerFor*(session: NetworkMatch, participant: uint32): int =
+  session.playerForSeat(session.client.snapshot.humanSeatFor(participant))
+
+proc submissionSeat(session: NetworkMatch, player: int32): uint32 =
+  if player < 0 or player >= session.playerSeats.len:
+    reject("LvD submission player is outside the occupied roster")
+  uint32(session.playerSeats[player])
 
 proc flushSubmissions*(session: NetworkMatch) =
   session.game.flushPlayerCommands()
   for action in session.game.submissions:
     if action.playerId < 0 or not session.client.submit(
-      uint32(action.playerId), action.encodeSubmission()):
+      session.submissionSeat(action.playerId), action.encodeSubmission()):
         reject("Unable to queue a local LvD command")
   session.game.submissions.setLen(0)
   for chat in session.game.chatSubmissions:
     if chat.player < 0 or not session.client.submit(
-      uint32(chat.player), chat.encodeChat()):
+      session.submissionSeat(chat.player), chat.encodeChat()):
         reject("Unable to queue a local LvD mailbox message")
   session.game.chatSubmissions.setLen(0)
 
@@ -174,7 +204,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
     var reader = PacketReader(data: command.payload)
     if reader.get32() == 0:
       let chat = decodeChat(command.payload)
-      if chat.player != int32(command.seat) or chat.target < -2 or
+      if chat.player != int32(session.playerForSeat(int(command.seat))) or chat.target < -2 or
         chat.target == -1 or chat.target >= game.world.players.len:
           reject("Invalid LvD mailbox sender or target")
       chats.add chat
@@ -185,7 +215,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
       action.validateAction(game.recorder.data.header.setup)
     except ReplayError as error:
       reject(error.msg)
-    if action.playerId != int32(command.seat):
+    if action.playerId != int32(session.playerForSeat(int(command.seat))):
       reject("LvD command player does not belong to this seat")
     if action.kind != ActionDiplomacy:
       let index = game.world.unitIndex(action.entityId)

@@ -21,7 +21,9 @@ import
   replays,
   ui,
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
-  networkpresentation, shortcutsettings, unitselection, woodcuttingpresentation
+  networkpresentation, shortcutsettings, unitselection, orderfeedback,
+  constructionpresentation, targetfeedback, rendervisibility, strictfog,
+  harvestpresentation, woodcuttingpresentation
 
 const
   DefaultCameraDistance = 17.0'f
@@ -66,6 +68,7 @@ var
   selectionAdditive = false
   lineGesture: LineGesture
   rightOrderStarted = false
+  targetFlash: TargetFeedback
   groupCameraScale = 1.0'f32
   seekCheckpoints: seq[SeekCheckpoint]
   transport*: player.Player
@@ -98,6 +101,25 @@ proc cancelGameplayGestures() =
   minimapPanning = false
   rightOrderStarted = false
   lineGesture.cancelLine()
+
+proc selectedBuildWorker(): int32 =
+  ## Use the same first eligible selected worker for preview and submission.
+  if options.playerSlot <= 0 or run.replayMode: return NoEntity
+  for id in selectedIds:
+    if id.isUnitId and run.world.hasUnit(id):
+      let unit = run.world.units[run.world.unitIndex(id)]
+      if unit.owner == options.playerSlot - 1 and unit.kind == PeonUnit and
+          unit.hp > 0 and unit.state notin {UnitDying, UnitInMine}:
+        return id
+  NoEntity
+
+proc refreshPendingBuild(): bool =
+  ## Cancel only presentation intent, never a site or the worker's orders.
+  if pendingBuild >= 0 and selectedBuildWorker() == NoEntity:
+    pendingBuild = -1
+    attackMoveArmed = false
+    cancelGameplayGestures()
+    return true
 
 proc attackMinimapArea*(layout: GameUiLayout): GameUiPanel =
   ## Use the same stacked map rectangle as the HUD, not its clock/buttons.
@@ -157,6 +179,11 @@ proc unitYaw(unit: Unit): float32 =
 
 proc renderPoint(unit: Unit): Vec3 =
   ## Interpolates one unit between the latest simulation snapshots.
+  let work = run.world.constructionPresentation(unit)
+  if work.active:
+    let x = work.tilePoint.x - mapHalf()
+    let z = work.tilePoint.y - mapHalf()
+    return vec3(x, surfaceHeight(x, z) + work.floorLift, z)
   let current = unitWorldPoint(unit)
   if not interpolateVisuals:
     return current
@@ -168,12 +195,19 @@ proc renderPoint(unit: Unit): Vec3 =
 
 proc renderFacing(unit: Unit): float32 =
   ## Interpolates yaw the short way so a +pi / -pi flip is not a spin.
+  let work = run.world.constructionPresentation(unit)
+  if work.active: return work.yaw
   if not interpolateVisuals:
     return unitYaw(unit)
   let
     current = unitYaw(unit)
     previous = previousUnitFacings.getOrDefault(unit.id, current)
   previous + shortestTurn(previous, current) * frameAlpha
+
+proc renderAnimation(unit: Unit): AnimationSlot =
+  ## Uses the construction work pose while a worker is building.
+  let work = run.world.constructionPresentation(unit)
+  if work.active: work.animation else: unit.animation
 
 proc captureUnitPoses() =
   ## Remembers mobile poses before one authoritative tick.
@@ -249,17 +283,11 @@ proc isSelected*(id: int32): bool =
 
 proc shownUnit*(unit: Unit): bool =
   ## Returns whether fog of war currently reveals this unit.
-  if unit.state == UnitInMine:
-    return false
-  if viewMode == 0:
-    return true
-  run.world.unitVisible(viewMode - 1, unit)
+  run.world.renderUnitVisible(viewMode, unit)
 
 proc shownBuilding*(structure: Building): bool =
   ## Returns whether fog of war currently reveals this structure.
-  if viewMode == 0:
-    return true
-  run.world.buildingVisible(viewMode - 1, structure)
+  run.world.renderBuildingVisible(viewMode, structure)
 
 proc buildUiAtlas(factions: openArray[Faction]): AtlasBuilder =
   result = newHudAtlas(4096)
@@ -285,12 +313,26 @@ proc runGraphics*(network: NetworkMatch = nil,
   window.onFrame = nil
   window.onButtonPress = nil
   window.onButtonRelease = nil
+  window.onRune = nil
+  window.onFocusChange = nil
+  window.runeInputEnabled = false
   shortcutState.resetShortcut()
   shortcutHeldButtons = {}
   shortcutFrameButtons = {}
   endShortcutEditing()
   hudNetwork = network
-  defer: hudNetwork = nil
+  resetHudTooltips()
+  resetHumanCommunication()
+  defer:
+    hudNetwork = nil
+    resetHudTooltips()
+    resetHumanCommunication()
+    window.onFrame = nil
+    window.onButtonPress = nil
+    window.onButtonRelease = nil
+    window.onRune = nil
+    window.onFocusChange = nil
+    window.runeInputEnabled = false
   startGameProfile()
   var
     leaveMatch, quitToMenu, leaveRequested: bool
@@ -328,6 +370,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   framesSinceRebake = 0
   frameAlpha = 0
   clearPlayerCommands()
+  targetFlash = TargetFeedback()
   transport = initPlayer(live = not run.replayMode,
     durationTicks = run.maximumTicks, playing = not options.pauseOnStart,
     speed = options.speed,
@@ -424,14 +467,14 @@ proc runGraphics*(network: NetworkMatch = nil,
   let scene = newCharacterScene(window)
   scene.useToonShading()
   setEnvironmentPalette(scene.toon)
-  var attackMarkSettings = clickMarkSettings()
-  attackMarkSettings.startColor = vec4(1.0, 0.16, 0.12, 0.95)
-  attackMarkSettings.endColor = vec4(0.9, 0.04, 0.02, 0.0)
-  attackMarkSettings.edgeColor = vec4(1.0, 0.35, 0.25, 1.0)
   var
-    attackClickMarks = initClickMarks(attackMarkSettings)
+    attackClickMarks = initClickMarks(orderMarkSettings(attack = true))
     particles = initParticleSystem()
-    clickMarks = initClickMarks()
+    strictVision = initStrictFog()
+    harvesting: HarvestPresentation
+    harvestBars = initWorldBarRenderer()
+    currentSight: seq[uint8]
+    clickMarks = initClickMarks(orderMarkSettings(attack = false))
     worldShapes = initShapeRenderer()
     worldBarRenderer = initWorldBarRenderer()
     playerLabels = layoutNames(
@@ -456,17 +499,28 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc buildingKey(): string =
     ## Detects changes to displayed construction stages and building lifetimes.
-    result = $run.world.terrainEdits.len
+    result = $run.world.terrainEdits.len & ":view=" & $viewMode
+    for placement in scenery:
+      result.add (if run.world.renderTileVisible(viewMode,
+        int32(placement.tile mod run.world.map.side.int),
+        int32(placement.tile div run.world.map.side.int)): "1" else: "0")
     for structure in run.world.buildings:
-      result.add &"|{structure.id}:{structure.state.ord}"
+      result.add &"|{structure.id}:{structure.state.ord}:{shownBuilding(structure)}"
       if structure.state == BuildingUnderConstruction:
         result.add &":{structure.constructionStage().ord}"
 
   proc placeSceneProps() {.measure.} =
     ## Submits desired placements while the renderer retains unchanged groups.
     clearProps()
-    grove.plantGrove(scenery, run.world.treeWood)
+    var visibleScenery: seq[GrovePlacement]
+    for placement in scenery:
+      if run.world.renderTileVisible(viewMode,
+          int32(placement.tile mod run.world.map.side.int),
+          int32(placement.tile div run.world.map.side.int)):
+        visibleScenery.add placement
+    grove.plantGrove(visibleScenery, run.world.treeWood)
     for structure in run.world.buildings:
+      if not shownBuilding(structure): continue
       for part in buildingArt.buildingParts(
         structure, buildingCentre(structure)
       ):
@@ -571,6 +625,9 @@ proc runGraphics*(network: NetworkMatch = nil,
     previousUnitFacings.clear()
     sceneDirty = true
     particles.clearParticles()
+    harvesting.clearHarvest()
+    terrainVisionTick = -1
+    terrainVisionMode = -1
     while run.world.tick < wanted:
       advanceGame()
       if network == nil: captureCheckpoint()
@@ -581,11 +638,11 @@ proc runGraphics*(network: NetworkMatch = nil,
     ## Returns the current render position of a selectable entity.
     if id.isUnitId and run.world.hasUnit(id):
       let unit = run.world.units[run.world.unitIndex(id)]
-      if unit.state notin {UnitDying, UnitInMine}:
+      if unit.state notin {UnitDying, UnitInMine} and shownUnit(unit):
         return SelectionTarget(found: true, position: renderPoint(unit))
     elif id.isBuildingId and run.world.hasBuilding(id):
       let structure = run.world.buildings[run.world.buildingIndex(id)]
-      if structure.state != BuildingDying:
+      if structure.state != BuildingDying and shownBuilding(structure):
         return SelectionTarget(
           found: true,
           position: buildingCentre(structure)
@@ -650,7 +707,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       else:
         -1'i32
     for unit in run.world.units:
-      if unit.state notin {UnitDying, UnitInMine}:
+      if unit.state notin {UnitDying, UnitInMine} and shownUnit(unit):
         if owner >= 0 and unit.owner != owner:
           continue
         selectedIds.add unit.id
@@ -740,7 +797,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           result = id
     for unit in run.world.units:
       if unit.state in {UnitDying, UnitInMine} or
-          (viewMode != 0 and not run.world.unitVisible(viewMode - 1, unit)):
+          not shownUnit(unit):
         continue
       consider(unit.id, renderPoint(unit), UnitHeights[unit.kind] * 0.5'f32)
     if result == NoEntity:
@@ -765,8 +822,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         return
     for structure in run.world.buildings:
       if structure.state == BuildingDying or
-          (viewMode != 0 and
-            not run.world.buildingVisible(viewMode - 1, structure)):
+          not shownBuilding(structure):
         continue
       consider(structure.id, buildingCentre(structure), 1.4'f32)
       for y in 0'i32 ..< structure.footprint.depth:
@@ -815,8 +871,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         continue
       if ownerFilter >= 0 and unit.owner != ownerFilter:
         continue
-      if viewMode != 0 and
-          not run.world.unitVisible(viewMode - 1, unit):
+      if not shownUnit(unit):
         continue
       let point = screenPosition(
         renderPoint(unit) +
@@ -880,12 +935,17 @@ proc runGraphics*(network: NetworkMatch = nil,
       actionCam.director.observe(subjects)
     actionCam.director.refresh(subjects)
 
-  proc updateCamera(dt: float32) =
+  proc updateCamera(dt: float32, focused = window.focused) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
-    if not window.focused:
+    if refreshPendingBuild(): return
+    if not focused:
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
-    if matchMenu != HiddenMatchMenu:
+      shortcutFrameButtons = {}
+      cancelHumanCommunicationInput()
+      window.runeInputEnabled = false
+    if not focused or matchMenu != HiddenMatchMenu or bindingCapture or
+        humanCommunicationBlocksGameplay():
       cancelGameplayGestures()
       return
     pruneSelection()
@@ -902,7 +962,8 @@ proc runGraphics*(network: NetworkMatch = nil,
         window.actionDown(ControlInput):
       attackMoveArmed = false
       selectAllUnits()
-    elif window.mousePressed(MouseLeft) and not overUi and not attackMoveArmed:
+    elif window.mousePressed(MouseLeft) and not overUi and not attackMoveArmed and
+        pendingBuild < 0:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
@@ -985,6 +1046,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Windy raises DoubleClick on the second left press, not its release.
+    if refreshPendingBuild(): return
     if window.buttonPressed[DoubleClick]:
       # Consume the second release even when a modal/HUD/command owns input.
       selectionStarted = false
@@ -1040,15 +1102,16 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc queuePendingBuild(x, y: int32) =
     ## Sends the first selected peon to raise the pending structure.
-    let player = options.playerSlot - 1
-    for id in selectedIds:
-      if id.isUnitId and run.world.hasUnit(id):
-        let unit = run.world.units[run.world.unitIndex(id)]
-        if unit.owner == player and unit.kind == PeonUnit and unit.hp > 0 and
-            unit.state notin {UnitDying, UnitInMine}:
-          queueBuild(player, id, pendingBuild, x, y)
-          pendingBuild = -1
-          return
+    let id = selectedBuildWorker()
+    if id != NoEntity:
+      queueBuild(options.playerSlot - 1, id, pendingBuild, x, y)
+      pendingBuild = -1
+    else:
+      discard refreshPendingBuild()
+
+  proc feedbackVisible(origin: Vec3, radius: float32): bool =
+    viewMode == 0 or run.world.renderAreaVisible(viewMode, origin.x + mapHalf(),
+      origin.z + mapHalf(), radius)
 
   proc clickTilePoint(x, y: int32): Vec3 =
     ## Returns the render centre of one map tile.
@@ -1074,16 +1137,18 @@ proc runGraphics*(network: NetworkMatch = nil,
           queueSetRally(player, id, x, y)
           result = true
 
-  proc updatePlayerOrder(viewProjection: Mat4) =
+  proc updatePlayerOrder(viewProjection: Mat4, focused = window.focused) =
     ## A + primary targets an enemy or attack-moves combat-capable units.
     ## Keep arming through secondary press for the line-order gesture adapter.
-    if not playerMode():
+    if refreshPendingBuild(): return
+    if not playerMode() or hudTooltipContains(sk.mousePos):
       lineGesture.cancelLine()
       rightOrderStarted = false
       return
     let
       rightOrder = window.mouseReleased(MouseRight)
-      attackClick = attackMoveArmed and window.mousePressed(MouseLeft)
+      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
+      attackClick = pendingBuild < 0 and attackMoveArmed and window.mousePressed(MouseLeft)
       player = options.playerSlot - 1
       inside = window.mousePos.x >= 0 and window.mousePos.y >= 0 and
         window.mousePos.x < window.size.x and window.mousePos.y < window.size.y
@@ -1099,7 +1164,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           linePoint(ground.x + mapHalf(), ground.z + mapHalf()),
           linePoint(window.mousePos.x, window.mousePos.y), attackMoveArmed)
     if lineGesture.active:
-      if not inside or not window.focused or pendingBuild >= 0:
+      if not inside or not focused or pendingBuild >= 0:
         lineGesture.cancelLine()
         rightOrderStarted = false
       else:
@@ -1134,12 +1199,24 @@ proc runGraphics*(network: NetworkMatch = nil,
         elif not window.mouseDown(MouseRight):
           lineGesture.cancelLine()
           rightOrderStarted = false
-    if not rightOrder and not attackClick:
+    if not rightOrder and not attackClick and not buildClick:
       return
     if rightOrder:
       if not rightOrderStarted or not inside: return
       rightOrderStarted = false
       attackMoveArmed = false
+    if pendingBuild >= 0:
+      # Placement owns this press and its release, including invalid sites.
+      # HUD chooses a blueprint after this pass; only a fresh world press places it.
+      selectionStarted = false
+      minimapPanning = false
+      if not inside or overUi or onMinimap: return
+      let origin = buildGhostOrigin(viewProjection)
+      if run.world.canPlace(player, BuildingKind(pendingBuild), origin[0], origin[1],
+          selectedBuildWorker()):
+        queuePendingBuild(origin[0], origin[1])
+        clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
+      return
     # Minimap orders must precede generic HUD rejection. Tab owns its overlay.
     let mini = attackMinimapTile(currentLayout(window), sk.mousePos,
       run.world.map.side)
@@ -1159,8 +1236,9 @@ proc runGraphics*(network: NetworkMatch = nil,
       selectionStarted = false
       let picked = pickEntity(viewProjection)
       if picked != NoEntity:
-        if run.world.queueSelectedAttack(player, selectedIds, picked,
+        if run.world.queueFeedbackAttack(player, selectedIds, picked,
             append = window.actionDown(ShiftInput)):
+          targetFlash.flashTarget(AttackEntityFlash, picked, player)
           attackMoveArmed = false
           if run.world.hasUnit(picked):
             attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(picked)]))
@@ -1173,16 +1251,6 @@ proc runGraphics*(network: NetworkMatch = nil,
       let tile = groundTile(ground, mapHalf(), run.world.map.side)
       if run.world.queueArmedAttackMove(player, selectedIds, tile[0], tile[1], append = window.actionDown(ShiftInput)):
         attackClickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
-      return
-    if pendingBuild >= 0:
-      let origin = buildGhostOrigin(viewProjection)
-      if run.world.canPlace(
-          BuildingKind(pendingBuild),
-          origin[0],
-          origin[1]
-      ):
-        queuePendingBuild(origin[0], origin[1])
-        clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
       return
     let
       picked = pickEntity(viewProjection)
@@ -1216,44 +1284,36 @@ proc runGraphics*(network: NetworkMatch = nil,
               return
           return
         if structure.kind == GoldMineBuilding:
-          var harvested = false
-          for id in selectedIds:
-            if id.isUnitId and run.world.hasUnit(id):
-              let unit = run.world.units[run.world.unitIndex(id)]
-              if unit.owner == player and unit.kind == PeonUnit:
-                queueHarvest(player, id, target, 0, append = window.actionDown(ShiftInput))
-                harvested = true
-          if harvested:
+          if run.world.queueFeedbackHarvest(player, selectedIds, target, tree = false,
+              append = window.actionDown(ShiftInput)):
+            targetFlash.flashTarget(HarvestEntityFlash, target, player)
             clickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
         if structure.owner != player:
-          if run.world.queueSelectedAttack(player, selectedIds, target,
+          if run.world.queueFeedbackAttack(player, selectedIds, target,
               append = window.actionDown(ShiftInput)):
+            targetFlash.flashTarget(AttackEntityFlash, target, player)
             attackClickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
       elif run.world.hasUnit(target) and
           run.world.unitOwner(target) != player:
-        if run.world.queueSelectedAttack(player, selectedIds, target,
+        if run.world.queueFeedbackAttack(player, selectedIds, target,
             append = window.actionDown(ShiftInput)):
+          targetFlash.flashTarget(AttackEntityFlash, target, player)
           attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
         attackMoveArmed = false
         return
     if tree >= 0:
-      var harvested = false
-      for id in selectedIds:
-        if id.isUnitId and run.world.hasUnit(id):
-          let unit = run.world.units[run.world.unitIndex(id)]
-          if unit.owner == player and unit.kind == PeonUnit:
-            queueHarvest(player, id, tree, 1, append = window.actionDown(ShiftInput))
-            harvested = true
-      if harvested:
+      if run.world.queueFeedbackHarvest(player, selectedIds, tree, tree = true,
+          append = window.actionDown(ShiftInput)):
+        targetFlash.flashTarget(HarvestTreeFlash, tree, player)
         clickMarks.emitClickMark(clickTilePoint(
           tree mod run.world.map.side, tree div run.world.map.side
         ))
-        attackMoveArmed = false
-        return
+      attackMoveArmed = false
+      return
     if issueSelectedMove(player, tile[0], tile[1], append = window.actionDown(ShiftInput)):
       clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
     attackMoveArmed = false
@@ -1312,7 +1372,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         let
           model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
           clip = renderUnitClip(
-            unit, model, unitClips[unit.owner][unit.kind][unit.animation]
+            unit, model, unitClips[unit.owner][unit.kind][renderAnimation(unit)]
           )
         var animTime = unit.woodAnimationTime(
           renderTime(unit.animationTicks), frameAlpha
@@ -1341,15 +1401,49 @@ proc runGraphics*(network: NetworkMatch = nil,
         drawBuildingOutline(structure, viewProjection)
     selectionOutline.drawOutline()
 
+  proc drawTargetOutline(view, projection, viewProjection: Mat4) =
+    ## Separate mask/composite keeps the ordinary selected silhouette intact.
+    if not targetFlash.targetFlashVisible(run.world): return
+    selectionOutline.beginMask(window.size)
+    let target = targetFlash.target
+    if targetFlash.kind == HarvestTreeFlash:
+      for placement in scenery:
+        if placement.kind == LightTree and placement.tile == target:
+          grove.trees.drawProp(modelName(placement.kind, placement.variant),
+            placement.position, -placement.rotation, placement.scale, viewProjection)
+          break
+    elif run.world.hasBuilding(target):
+      drawBuildingOutline(run.world.buildings[run.world.buildingIndex(target)], viewProjection)
+    elif run.world.hasUnit(target):
+      let unit = run.world.units[run.world.unitIndex(target)]
+      let model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
+      let clip = renderUnitClip(unit, model,
+        unitClips[unit.owner][unit.kind][renderAnimation(unit)])
+      var animTime = unit.woodAnimationTime(renderTime(unit.animationTicks), frameAlpha)
+      if unit.animation in {DeathAnimation, VictoryAnimation}:
+        animTime = min(animTime, clipDuration(model, clip))
+      beginCharacters(scene, window, view, projection, cameraEye)
+      scene.prepareCharacter(outlinePose, model, renderPoint(unit),
+        renderFacing(unit), clip, animTime)
+      scene.drawCharacter(outlinePose)
+      finishCharacters(scene)
+    selectionOutline.drawOutline(targetFlash.targetFlashColor())
+
   proc drawBuildGhost(viewProjection: Mat4) =
     ## Follows the pointer with a transparent building while placing.
+    if refreshPendingBuild(): return
     if not playerMode() or pendingBuild < 0:
       return
     let
       kind = BuildingKind(pendingBuild)
       size = BuildingTable[kind].footprint
       origin = buildGhostOrigin(viewProjection)
-      valid = run.world.canPlace(kind, origin[0], origin[1])
+    for y in origin[1] ..< origin[1] + size.depth:
+      for x in origin[0] ..< origin[0] + size.width:
+        if not run.world.renderTileVisible(viewMode, x, y): return
+    let
+      valid = run.world.canPlace(options.playerSlot - 1, kind, origin[0], origin[1],
+        selectedBuildWorker())
       x = float32(origin[0]) + float32(size.width) * 0.5'f32 - mapHalf()
       z = float32(origin[1]) + float32(size.depth) * 0.5'f32 - mapHalf()
       centre = vec3(x, surfaceHeight(x, z), z)
@@ -1393,6 +1487,15 @@ proc runGraphics*(network: NetworkMatch = nil,
         blurVisibility(values, run.world.map.side, run.world.map.side),
         int(run.world.map.side)
       )
+
+  proc harvestAnchor(site: HarvestSite): Vec3 =
+    if site.kind == MineSparks:
+      let index = run.world.buildingIndex(site.id)
+      return buildingCentre(run.world.buildings[index]) +
+        vec3(0, 0.30'f32, buildingArt.heights[GoldMineBuilding] / 1.4'f32)
+    let x = site.tilePoint.x - mapHalf()
+    let z = site.tilePoint.y - mapHalf()
+    vec3(x, surfaceHeight(x, z) + 1.1'f32, z)
 
   proc drawWorldBars(
       viewProjection: Mat4,
@@ -1586,7 +1689,9 @@ proc runGraphics*(network: NetworkMatch = nil,
     let towerTargets = expectedTowerTargets()
     captureUnitPoses()
     if network == nil: advanceGame()
-    else: network.applyPacket(packet)
+    else:
+      network.applyPacket(packet)
+      observeHumanCommunication(network, packet)
     feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
     if network == nil: captureCheckpoint()
@@ -1656,6 +1761,9 @@ proc runGraphics*(network: NetworkMatch = nil,
       if network != nil:
         connection.stats.tickRate = int(TickRate)
         connection.pump()
+        if network.reopenedLobby():
+          leaveMatch = true
+          return
         if quitToMenu:
           if network.client.snapshot.room.len == 0:
             leaveMatch = true
@@ -1699,6 +1807,9 @@ proc runGraphics*(network: NetworkMatch = nil,
               else: int32(run.replayPlayer.data.hashes.len)
             transport.sync(run.world.tick, recordedNow, run.world.over)
       let active = simulationActive(transport)
+      harvesting.updateHarvest(run.world, dt, viewer = viewMode - 1, paused = not active)
+      currentSight = run.world.renderVisibilityValues(viewMode, CurrentSightMask)
+      pruneSelection()
       frameAlpha =
         if network != nil:
           networkPresentation.frameAlpha(
@@ -1707,6 +1818,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           clamp(transport.accumulator / Step, 0.0'f32, 1.0'f32)
         else:
           0.0'f32
+      targetFlash.advanceTargetFeedback(dt)
       if active:
         particles.advanceParticles(dt)
         clickMarks.advanceClickMarks(dt)
@@ -1716,7 +1828,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           buildingKey() != placedBuildingKey:
         sceneDirty = true
       if sceneDirty and
-        (showTiles or framesSinceRebake >= RebakeFrameGap):
+        (showTiles or buildingKey() != placedBuildingKey or framesSinceRebake >= RebakeFrameGap):
           profileBlock "rebake":
             rebakeScene()
       if showTiles and edgesDirty:
@@ -1740,12 +1852,12 @@ proc runGraphics*(network: NetworkMatch = nil,
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
       inputBindings = maskShortcutBindings(gameplayBindings,
         shortcutHeldButtons + shortcutFrameButtons)
-      if matchMenu == HiddenMatchMenu:
+      if matchMenu == HiddenMatchMenu and window.focused and not bindingCapture and
+          not humanCommunicationBlocksGameplay():
         updateWorldSelection(viewProjection)
         updatePlayerOrder(viewProjection)
       else:
-        lineGesture.cancelLine()
-        rightOrderStarted = false
+        cancelGameplayGestures()
       inputBindings = gameplayBindings
       shortcutFrameButtons = {}
       profileBlock "drawWorld":
@@ -1762,7 +1874,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             let
               model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
               clip = renderUnitClip(
-                unit, model, unitClips[unit.owner][unit.kind][unit.animation]
+                unit, model, unitClips[unit.owner][unit.kind][renderAnimation(unit)]
               )
             var animTime = unit.woodAnimationTime(
               renderTime(unit.animationTicks), frameAlpha
@@ -1800,11 +1912,28 @@ proc runGraphics*(network: NetworkMatch = nil,
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
         scene.toon.drawBackground()
         updateTerrainVision()
+        if viewMode != 0:
+          # Capture only explored/dim ground, with no prop or shadow contribution.
+          strictVision.beginStrictGround(window.size)
+          glDepthMask(GL_TRUE)
+          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          scene.toon.drawBackground()
+          let shadowsWereEnabled = sunShadowsEnabled
+          sunShadowsEnabled = false
+          drawTerrain(viewProjection, showTiles, drawProps = false)
+          sunShadowsEnabled = shadowsWereEnabled
+          drawWater(viewProjection, cameraEye, opacity = 0.5'f, highlightOpacity = 0.0'f)
+          strictVision.captureStrictGround(window.size, inverse(viewProjection),
+            currentSight, run.world.map.side.int)
+          glDepthMask(GL_TRUE)
+          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          scene.toon.drawBackground()
         drawTerrain(viewProjection, showTiles)
         beginCharacters(scene, window, view, projection, cameraEye)
         drawWorldUnits()
         finishCharacters(scene)
         drawSelectedOutline(view, projection, viewProjection)
+        drawTargetOutline(view, projection, viewProjection)
         drawBuildGhost(viewProjection)
         drawWater(
           viewProjection,
@@ -1816,14 +1945,18 @@ proc runGraphics*(network: NetworkMatch = nil,
           viewProjection,
           barCameraRight,
           barCameraUp,
-          cameraForward
+          cameraForward,
+          (if viewMode == 0: @[] else: currentSight),
+          run.world.map.side.int, vec2(-mapHalf()), visibilityPadding = 5
         )
-        clickMarks.drawClickMarks(viewProjection)
-        attackClickMarks.drawClickMarks(viewProjection)
+        harvestBars.clear()
+        harvestBars.addHarvestBillboards(harvesting, run.world, viewMode - 1, harvestAnchor)
+        harvestBars.draw(viewProjection, barCameraRight, barCameraUp)
+        clickMarks.drawClickMarks(viewProjection, feedbackVisible)
+        attackClickMarks.drawClickMarks(viewProjection, feedbackVisible)
         if lineGesture.active and lineGesture.dragging:
           worldShapes.clear()
-          let color = if lineGesture.attackMove: rgbx(255, 72, 65, 210)
-            else: rgbx(80, 245, 145, 210)
+          let color = orderFeedbackColor(lineGesture.attackMove)
           var strokePoints: seq[Vec3]
           for point in lineGesture.stroke:
             let x = point.x.float32 - mapHalf()
@@ -1840,7 +1973,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if showPaths:
           worldShapes.clear()
           for unit in run.world.units:
-            if unit.id == 0 or unit.state == UnitDying:
+            if unit.id == 0 or unit.state == UnitDying or not shownUnit(unit):
               continue
             if unit.pathIndex >= int32(unit.path.len):
               continue
@@ -1865,6 +1998,9 @@ proc runGraphics*(network: NetworkMatch = nil,
           barCameraUp,
           dt
         )
+        if viewMode != 0:
+          # Last world pass clips props, shadows, outlines and every effect.
+          strictVision.restoreHiddenGround()
       profileBlock "ui":
         glDisable(GL_DEPTH_TEST)
         glDisable(GL_CULL_FACE)
@@ -1905,6 +2041,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           )
         if network != nil: transport = beforeHud
         if matchMenu != HiddenMatchMenu:
+          resetHudTooltips()
           sk.pushLayer(PopupsLayer)
           let view = window.size.vec2 / sk.uiScale
           sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 170))
@@ -1969,6 +2106,12 @@ proc runGraphics*(network: NetworkMatch = nil,
         sk.endUi()
         if matchMenu == HiddenMatchMenu:
           drawStatsOverlay(sk, window, teamColors)
+        # Silky ends rune capture when no editable field was submitted. Restore
+        # chat capture after ALL UI passes, without interfering with Settings.
+        if matchMenu == HiddenMatchMenu:
+          window.runeInputEnabled = humanCommunicationTyping() and window.focused
+        if humanCommunicationBlocksGameplay(): cancelGameplayGestures()
+      finishHumanCommunicationFrame()
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -1988,8 +2131,27 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   window.onButtonPress = proc(button: Button) =
     if bindingCapture: return
-    if button in {MouseLeft, MouseRight, MouseMiddle}:
+    if matchMenu == HiddenMatchMenu and humanCommunicationKey(button):
+      shortcutState.resetShortcut()
+      cancelGameplayGestures()
+      pendingBuild = -1
+      attackMoveArmed = false
+      window.runeInputEnabled = humanCommunicationTyping()
+      return
+    if matchMenu == HiddenMatchMenu and humanCommunicationBlocksGameplay():
+      cancelGameplayGestures()
+      return
+    # Combat owns its configured attack key whenever eligible units are selected,
+    # even with Units open (whose Archer command defaults to A).
+    if matchMenu == HiddenMatchMenu and playerMode() and
+        AttackMoveInput.matches(button) and not window.scaleModifier and
+        not window.actionDown(ControlInput) and
+        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt] and
+        run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
       shortcutState.cancelShortcut()
+      selectionStarted = false
+      minimapPanning = false
+      return
     let key = shortcutKey(button)
     if key != '\0':
       let matched = shortcutState.pressShortcut(currentShortcuts, key, epochTime(),
@@ -1997,6 +2159,10 @@ proc runGraphics*(network: NetworkMatch = nil,
         modified = window.scaleModifier or window.actionDown(ControlInput) or
           window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt])
       if matched.consumed:
+        if matched.action >= 0:
+          commandTab = if ShortcutAction(matched.action) <= BuildBlacksmithShortcut: 0 else: 1
+        elif button == KeyB: commandTab = 0
+        elif button == KeyT: commandTab = 1
         shortcutHeldButtons.incl button
         shortcutFrameButtons.incl button
         if matched.action >= 0 and run.world.performShortcut(options.playerSlot - 1,
@@ -2021,6 +2187,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       matchMenu = if matchMenu == HiddenMatchMenu: PauseMenu
         elif matchMenu == MatchSettings: PauseMenu else: HiddenMatchMenu
       if matchMenu != HiddenMatchMenu:
+        resetHudTooltips()
         cancelGameplayGestures()
       return
     if FullscreenInput.matches(button):
@@ -2030,6 +2197,11 @@ proc runGraphics*(network: NetworkMatch = nil,
     if matchMenu != HiddenMatchMenu: return
     if window.scaleModifier or window.actionDown(ControlInput) or
         window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt]:
+      return
+    if playerMode() and button in {KeyB, KeyT}:
+      commandTab = if button == KeyB: 0 else: 1
+      shortcutHeldButtons.incl button
+      shortcutFrameButtons.incl button
       return
     if AttackMoveInput.matches(button) and not window.actionDown(ControlInput) and
         not window.scaleModifier:
@@ -2057,8 +2229,23 @@ proc runGraphics*(network: NetworkMatch = nil,
       viewMode = (viewMode + 1) mod int32(run.world.players.len + 1)
 
   window.onButtonRelease = proc(button: Button) =
+    humanCommunicationRelease(button)
     shortcutState.releaseShortcut(shortcutKey(button))
     shortcutHeldButtons.excl button
+
+  window.onRune = proc(rune: Rune) =
+    if matchMenu == HiddenMatchMenu:
+      discard humanCommunicationRune(rune)
+
+  window.onFocusChange = proc() =
+    if not window.focused:
+      resetHudTooltips()
+      cancelHumanCommunicationInput()
+      shortcutState.resetShortcut()
+      shortcutHeldButtons = {}
+      shortcutFrameButtons = {}
+      cancelGameplayGestures()
+      window.runeInputEnabled = false
 
   while not window.closeRequested and not leaveMatch:
     pollEvents()
@@ -2076,5 +2263,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   worldBarRenderer.closeWorldBarRenderer()
   selectionOutline.closeSelectionOutline()
   particles.closeParticles()
+  harvestBars.closeWorldBarRenderer()
+  strictVision.closeStrictFog()
   finishGameProfile()
   result = quitToMenu

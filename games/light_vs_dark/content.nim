@@ -105,6 +105,37 @@ const
     ## Highest kind an overlord may pass to `build`.
 
 type
+  ResearchKind* = enum
+    KeenflightArrows, TemperedEdges, RunedPlating, WindrunnerTraining
+  ResearchStats* = object
+    gold*, wood*, ticks*: int32
+
+const
+  MaxResearchLevel* = 3'i32
+  ResearchDamagePerTier* = 2'i32
+  ResearchArmorPerTier* = 2'i32
+  ResearchSpeedPercentPerTier* = 10'i32
+
+proc researchBuilding*(kind: ResearchKind): BuildingKind =
+  case kind
+  of KeenflightArrows: LumberMillBuilding
+  of TemperedEdges, RunedPlating: BlacksmithBuilding
+  of WindrunnerTraining: StablesBuilding
+
+proc researchName*(kind: ResearchKind): string =
+  case kind
+  of KeenflightArrows: "Keenflight Arrows"
+  of TemperedEdges: "Tempered Edges"
+  of RunedPlating: "Runed Plating"
+  of WindrunnerTraining: "Windrunner Training"
+
+proc researchStats*(kind: ResearchKind, level: int32): ResearchStats =
+  ## Target-tier prices; no campaign level or faction gate.
+  if level notin 1'i32 .. MaxResearchLevel: return
+  ResearchStats(gold: 300 + 300 * level, wood: 200 * level,
+    ticks: (10 + 10 * level) * TickRate)
+
+type
   Footprint* = tuple[width, depth: int32]
 
   UnitStats* = object
@@ -383,6 +414,18 @@ proc contentHash*(): uint64 =
   hash.addHashy(TickRate)
   hash.addHashy(DecisionTicks)
   hash.addHashy(VisionTicks)
+  hash.addHashy(MaxResearchLevel)
+  hash.addHashy(ResearchDamagePerTier)
+  hash.addHashy(ResearchArmorPerTier)
+  hash.addHashy(ResearchSpeedPercentPerTier)
+  for kind in ResearchKind:
+    hash.addHashy(kind.ord.int32)
+    hash.addHashy(researchBuilding(kind).ord.int32)
+    for level in 1'i32 .. MaxResearchLevel:
+      let stats = researchStats(kind, level)
+      hash.addHashy(stats.gold)
+      hash.addHashy(stats.wood)
+      hash.addHashy(stats.ticks)
   for player in 0 ..< FactionCount:
     for kind in UnitKind:
       let stats = UnitTable[player][kind]

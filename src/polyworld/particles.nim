@@ -398,7 +398,8 @@ proc particlePathVisible*(
     origin, target: Vec3,
     visibility: openArray[uint8],
     width: int,
-    mapOrigin: Vec2
+    mapOrigin: Vec2,
+    padding = 0
 ): bool =
   ## Hides an effect if any part of its travel path enters unseen tiles.
   if visibility.len == 0:
@@ -416,6 +417,11 @@ proc particlePathVisible*(
     if x < 0 or z < 0 or x >= width or z >= width or
       visibility[z * width + x] == 0:
         return false
+    if padding > 0:
+      for row in z-padding .. z+padding:
+        for col in x-padding .. x+padding:
+          if col < 0 or row < 0 or col >= width or row >= width or
+              visibility[row * width + col] == 0: return false
   true
 
 proc drawParticles*(
@@ -426,7 +432,8 @@ proc drawParticles*(
     cameraForward: Vec3,
     visibility: openArray[uint8] = [],
     visibilityWidth = 0,
-    visibilityOrigin = vec2(0)
+    visibilityOrigin = vec2(0),
+    visibilityPadding = 0
 ) =
   ## Draws every visible active effect with instanced, depth-tested billboards.
   if system.program.id == 0 or system.effects.len == 0:
@@ -444,7 +451,8 @@ proc drawParticles*(
       effect.target,
       visibility,
       visibilityWidth,
-      visibilityOrigin
+      visibilityOrigin,
+      visibilityPadding
     ):
       continue
     if effect.kind in

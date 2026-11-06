@@ -75,7 +75,8 @@ proc drawHomeBackground*(sk: Silky, window: Window) =
   sk.drawSprite("home-background", (size - backdrop) * 0.5'f, backdrop)
   sk.drawRect(vec2(0), size, rgbx(8, 12, 22, 35))
 
-proc drawHome*(sk: Silky, window: Window, focus: var int): HomeAction =
+proc drawHome*(sk: Silky, window: Window, focus: var int,
+    compact = false): HomeAction =
   ## Draws the centered arena menu with pointer and keyboard navigation.
   sk.uiScale = selectedUiScale(max(0.1'f, min(
     window.size.x.float32 / 720,
@@ -87,11 +88,13 @@ proc drawHome*(sk: Silky, window: Window, focus: var int): HomeAction =
     size = window.size.vec2 / sk.uiScale
     origin = (size - HomeSize) * 0.5'f
     count = when defined(emscripten): 3 else: 4
+    logoY = if compact: 105'f else: 30'f
   sk.drawHomeBackground(window)
   sk.drawSprite("home-shade", origin + vec2(386, 95), vec2(900, 850))
-  sk.drawSprite("home-logo", origin + vec2(536, 30), vec2(600, 400))
-  sk.drawLabel("Polyworld", origin + vec2(536, 437), vec2(600, 36),
-    rgbx(222, 222, 218, 255), "Bold", CenterAlign)
+  sk.drawSprite("home-logo", origin + vec2(536, logoY), vec2(600, 400))
+  if not compact:
+    sk.drawLabel("Polyworld", origin + vec2(536, 437), vec2(600, 36),
+      rgbx(222, 222, 218, 255), "Bold", CenterAlign)
   if window.buttonPressed[KeyUp]:
     focus = (focus + count - 1) mod count
   if window.buttonPressed[KeyDown] or window.buttonPressed[KeyTab]:

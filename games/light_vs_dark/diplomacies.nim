@@ -10,6 +10,8 @@ type
     DeclareWar, WithdrawWar, OfferPeace, OfferAlliance,
     AcceptOffer, DeclineOffer, WithdrawOffer, EndAlliance
   DiplomacySettings* = object
+    neutralStart*: bool = false
+      ## Opt into negotiated diplomacy; ordinary FFA starts at war.
     warGraceSeconds*: int32 = 10
     offerSeconds*: int32 = 60
   Relation* = object
@@ -30,7 +32,7 @@ proc validate*(settings: DiplomacySettings) =
       raise newException(LvdError, "Diplomacy delays must be 1 .. 3600 seconds.")
 
 proc initDiplomacy*(players: int, settings = DiplomacySettings()): Diplomacy =
-  ## Starts one neutral relationship per unordered player pair.
+  ## FFA opponents are hostile immediately; neutral diplomacy is opt-in.
   settings.validate()
   let count = int64(players) * int64(players - 1) div 2
   if players < 1 or count > int64(high(int)):
@@ -41,6 +43,9 @@ proc initDiplomacy*(players: int, settings = DiplomacySettings()): Diplomacy =
     nextOfferId: 1,
     pairs: newSeq[Relation](int(count))
   )
+  if not settings.neutralStart:
+    for pair in result.pairs.mitems:
+      pair.state = AtWar
 
 proc pairIndex*(diplomacy: Diplomacy, first, second: int32): int =
   ## Finds the unique pair record, or -1 for self and invalid players.

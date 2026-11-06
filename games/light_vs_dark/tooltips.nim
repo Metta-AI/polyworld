@@ -10,18 +10,27 @@ const TooltipDelay* = 0.5
 
 type
   TooltipTargetKind* = enum
-    NoCommandTooltip, BuildingCommandTooltip, UnitCommandTooltip
+    NoCommandTooltip, BuildingCommandTooltip, UnitCommandTooltip, ResearchCommandTooltip
   TooltipTarget* = object
     kind*: TooltipTargetKind
     building*: BuildingKind
     unit*: UnitKind
+    research*: ResearchKind
+    producer*: int32
     player*: int32
+  DetailTooltip* = object
+    title*, subtitle*, description*, requirements*, production*, unlocks*: string
+    rows*: seq[tuple[label, value: string]]
   TooltipHover* = object
-    target: TooltipTarget
+    target*: TooltipTarget
     anchor: GameUiPanel
-    mouse: Vec2
+    panel*: GameUiPanel
+    card: DetailTooltip
+    icon: string
+    tint: ColorRGBX
     started, lastTime: float64
-    active: bool
+    active, warm: bool
+    visible*: bool
 
 const NoTooltipTarget* = TooltipTarget(kind: NoCommandTooltip)
 
@@ -34,22 +43,28 @@ proc unitTooltipTarget*(kind: UnitKind, player = LightPlayer): TooltipTarget =
 proc updateTooltipHover*(state: var TooltipHover, target: TooltipTarget,
     anchor: GameUiPanel, mouse: Vec2, now: float64): bool =
   ## Call once EVERY frame, including no-target frames. Use monotonic seconds.
-  ## Pointer, target/side and anchor changes restart the entire dwell delay.
+  ## One HUD-wide warm state; cold dwell belongs to a stable target, not a pixel.
   if target.kind == NoCommandTooltip or not anchor.contains(mouse):
     state = default(TooltipHover)
     return false
-  if not state.active or state.target != target or state.anchor != anchor or
-      state.mouse != mouse or now < state.lastTime or now - state.lastTime > 1.0:
-    state = TooltipHover(target: target, anchor: anchor, mouse: mouse,
+  if not state.active or now < state.lastTime:
+    state = TooltipHover(target: target, anchor: anchor,
       started: now, lastTime: now, active: true)
     return false
+  if not state.warm and (state.target != target or state.anchor != anchor):
+    state.started = now
+  state.target = target
+  state.anchor = anchor
   state.lastTime = now
-  now - state.started >= TooltipDelay
+  state.warm = state.warm or now - state.started >= TooltipDelay
+  state.warm
 
 
-type DetailTooltip* = object
-  title*, subtitle*, description*, requirements*, production*, unlocks*: string
-  rows*: seq[tuple[label, value: string]]
+proc clearTooltip*(state: var TooltipHover) =
+  state = default(TooltipHover)
+
+proc tooltipContains*(state: TooltipHover, mouse: Vec2): bool =
+  state.visible and state.panel.contains(mouse)
 
 proc number(value: float): string =
   result = formatFloat(value, ffDecimal, 2)
@@ -104,7 +119,7 @@ proc buildingDetails*(kind: BuildingKind, player = LightPlayer): DetailTooltip =
     of ChurchBuilding:
       "A training site for Clerics. Clerics currently fight with piercing attacks; they do not heal allies."
     of BlacksmithBuilding:
-      "Unlocks advanced Barracks troops together with their other required buildings. No research actions are currently available."
+      "Unlocks advanced Barracks troops together with their other required buildings. Select it and open Upgrades to research Tempered Edges or Runed Plating."
     of GoldMineBuilding:
       "A neutral source of gold for Peons. Workers must carry mined gold to a completed drop-off building."
   result.rows = @[
@@ -137,6 +152,9 @@ proc buildingDetails*(kind: BuildingKind, player = LightPlayer): DetailTooltip =
   for other in TownHallBuilding .. BuildableHigh:
     if kind in BuildingTable[other].requires:
       unlocks.add tooltipBuildingName(other, player)
+  for research in ResearchKind:
+    if researchBuilding(research) == kind:
+      unlocks.add researchName(research)
   result.production = if trains.len > 0: trains.join(", ") else: "None"
   result.unlocks = if unlocks.len > 0: unlocks.join(", ") else: "None"
 
@@ -223,17 +241,36 @@ proc wrapTooltipText*(text: string, width: float32,
 
 proc drawCommandTooltip*(sk: Silky, state: var TooltipHover,
     target: TooltipTarget, anchor: GameUiPanel, viewport: Vec2,
-    now: float64, icon = "", tint = rgbx(255, 255, 255, 255)): bool =
+    now: float64, icon = "", tint = rgbx(255, 255, 255, 255),
+    details = DetailTooltip()): bool =
   ## Call once after the HUD, even when target == NoTooltipTarget (empty tab,
   ## off-slot, covered by a menu). `now` is wall/monotonic seconds, NOT match
   ## ticks. `anchor`, `viewport` and sk.mousePos are all layout-space values.
   ## `icon` is the same atlas key used for the hovered slot; tint is its team
   ## color without the unavailable-action dimming. Returns whether drawn.
-  if not state.updateTooltipHover(target, anchor, sk.mousePos, now):
-    return false
-  let card =
-    if target.kind == BuildingCommandTooltip: buildingDetails(target.building, target.player)
-    else: unitDetails(target.unit, target.player)
+  # Test the PREVIOUS final fitted panel before clearing anything or adopting
+  # a covered anchor. Retain content, icon, tint AND anchor while over the card.
+  let retain = state.tooltipContains(sk.mousePos) and
+    now >= state.lastTime
+  if retain:
+    state.lastTime = now
+  else:
+    state.visible = false
+    state.panel = GameUiPanel()
+    if not state.updateTooltipHover(target, anchor, sk.mousePos, now):
+      return false
+    state.card =
+      if details.title.len > 0: details
+      elif target.kind == BuildingCommandTooltip: buildingDetails(target.building, target.player)
+      else: unitDetails(target.unit, target.player)
+    state.icon = icon
+    state.tint = tint
+  let
+    card = state.card
+    target = state.target
+    anchor = state.anchor
+    icon = state.icon
+    tint = state.tint
   const
     Width = 420'f32
     TextWidth = Width - 32
@@ -252,7 +289,8 @@ proc drawCommandTooltip*(sk: Silky, state: var TooltipHover,
   sections.add ("", false)
   for line in wrapTooltipText("Requires: " & card.requirements, TextWidth, measure):
     sections.add (line, true)
-  let productionLabel = if target.kind == BuildingCommandTooltip: "Trains: " else: "Trained at: "
+  let productionLabel = if target.kind == BuildingCommandTooltip: "Trains: "
+    elif target.kind == ResearchCommandTooltip: "Research at: " else: "Trained at: "
   for line in wrapTooltipText(productionLabel & card.production, TextWidth, measure):
     sections.add (line, true)
   if card.unlocks.len > 0 and card.unlocks != "None":
@@ -263,7 +301,10 @@ proc drawCommandTooltip*(sk: Silky, state: var TooltipHover,
     naturalSize = vec2(Width, 112 + statsHeight + 18 + sections.len.float32 * lineHeight + 16)
     placement = placeTooltip(anchor, viewport, naturalSize)
   if placement.scale <= 0:
+    state.clearTooltip()
     return false
+  state.panel = placement.panel
+  state.visible = true
   # Draw in unscaled card coordinates then transform just its vertex span.
   # uiScale remains untouched; Silky applies HUD scaling once at endUi.
   sk.pushLayer(PopupsLayer)

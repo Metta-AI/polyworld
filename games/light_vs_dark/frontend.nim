@@ -3,7 +3,7 @@ import
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, presets, replays,
-  rosterstate
+  rosterstate, participantcontext, lobbyreadiness
 
 const AppName = "Polyworld LvD"
 
@@ -24,21 +24,25 @@ proc runFrontend*() =
     preferences = Preferences()
     page = HomeMenu
     error: string
-    roomName = "LvD room"
+    roomName: string
+    matchName, namedRoom, publishedName: string
     invite = inviteParameter("room")
     joinRequested = invite.len > 0
     connection: Connection
     prepared: NetworkMatch
     preparedRevision = 0'u32
+    readyRefresh: ReadyRefresh
     viewedRevision = 0'u32
     config = defaultConfig()
     viewedPayload: string
     roster: RosterState
     lobbyUi = LobbyUi()
     rosterScroll = FrameState()
+    participantMenu: ParticipantContext
+    contextDismissGuard: bool
     rng = initRand(2026)
     publicRoom = true
-    humanSeat = 0
+    humanSeat = -1
     multiplayerHuman = -1
     localPolicies = newSeq[LocalPolicy](config.playerCount)
     networkPolicies = newSeq[LocalPolicy](config.playerCount)
@@ -54,12 +58,12 @@ proc runFrontend*() =
     error = getCurrentExceptionMsg()
   preferences = effectivePreferences(preferences, inviteServer, serverAddress)
   preferences.applyPreferences(window)
+  roomName = defaultGameName(preferences.name)
   let bots = @[
     bundledBot("Base bot", "base")
   ]
   let base = bots[0]
-  for policy in localPolicies.mitems:
-    policy = base
+
   chosenPolicy = base
   config.seed = options.seed
   config.maxTicks = options.maximumTicks
@@ -89,6 +93,7 @@ proc runFrontend*() =
           prepared = nil
           preparedRevision = 0
           viewedRevision = 0
+          readyRefresh = ReadyRefresh()
           viewedPayload = ""
           roster = RosterState()
           multiplayerHuman = -1
@@ -103,14 +108,22 @@ proc runFrontend*() =
         client.snapshot.room.len == 0:
         client.send(RoomMessage(kind: JoinRoom, room: invite))
         joinRequested = false
-      if client.snapshot.room.len == 0 and page == LobbyMenu:
-        page = MultiplayerMenu
+      if client.snapshot.room.len == 0 and
+          (page == LobbyMenu or viewedRevision != 0 or prepared != nil):
+        if page == LobbyMenu: page = MultiplayerMenu
         prepared = nil
         preparedRevision = 0
+        readyRefresh = ReadyRefresh()
         viewedRevision = 0
+        viewedPayload = ""
+        roster = RosterState()
         multiplayerHuman = -1
         networkPolicies = newSeq[LocalPolicy](config.playerCount)
       if client.snapshot.room.len > 0:
+        if namedRoom != client.snapshot.room or publishedName != client.snapshot.name:
+          namedRoom = client.snapshot.room
+          publishedName = client.snapshot.name
+          matchName = publishedName
         page = LobbyMenu
         if viewedRevision != client.snapshot.revision:
           if viewedPayload != client.snapshot.payload or
@@ -122,12 +135,20 @@ proc runFrontend*() =
             except CatchableError as problem:
               error = problem.msg
           viewedRevision = client.snapshot.revision
+        try:
+          var sources = newSeq[string](networkPolicies.len)
+          for i, policy in networkPolicies:
+            sources[i] = policy.bytes
+          discard readyRefresh.refreshRetainedReady(client, sources,
+            prepared, preparedRevision)
+        except CatchableError as problem:
+          error = problem.msg
       if client.events.len > 0:
         let event = client.events[0]
         client.events.delete(0)
         try:
           if prepared == nil or preparedRevision != event.revision:
-            var sources = newSeq[string](config.playerCount)
+            var sources = newSeq[string](networkPolicies.len)
             for i, policy in networkPolicies:
               sources[i] = policy.bytes
             prepared = prepareNetworkMatch(client, sources)
@@ -147,7 +168,7 @@ proc runFrontend*() =
     if launchNetwork:
       run = prepared.game
       options.playerSlot = int32(
-        connection.client.snapshot.humanSeatFor(connection.client.participant) + 1
+        prepared.humanPlayerFor(connection.client.participant) + 1
       )
       options.replayPath = ""
       options.recordPath = ""
@@ -165,9 +186,12 @@ proc runFrontend*() =
         viewedRevision = 0
         multiplayerHuman = -1
         networkPolicies = newSeq[LocalPolicy](config.playerCount)
+        viewedPayload = ""
+        roster = RosterState()
       prepared = nil
       preparedRevision = 0
       clearPlayerCommands()
+      readyRefresh = ReadyRefresh()
       run = nil
       continue
 
@@ -178,6 +202,10 @@ proc runFrontend*() =
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      var contextInputBlocked = false
+      if page != LobbyMenu:
+        participantMenu.dismiss()
+        contextDismissGuard = false
       let needsPlayerName = preferences.name.len > 64 or
         not validName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):
@@ -216,6 +244,8 @@ proc runFrontend*() =
               updated.name = name
               try:
                 updated.savePreferences(AppName)
+                if roomName == defaultGameName(preferences.name):
+                  roomName = defaultGameName(updated.name)
                 preferences = updated
                 editingPlayer = false
                 if connection != nil and connection.client.name != name:
@@ -231,14 +261,11 @@ proc runFrontend*() =
           reportReplayFrame(0, 0)
           return
       if page == HomeMenu:
-        case sk.drawHome(window, homeFocus)
+        case sk.drawLvdHome(window, homeFocus)
         of StayHome: discard
         of PlaySingle:
           roster = RosterState()
-          let previousCount = localPolicies.len
           localPolicies.setLen(config.playerCount)
-          for i in previousCount ..< localPolicies.len:
-            localPolicies[i] = base
           if humanSeat >= config.playerCount: humanSeat = -1
           config.playerSlot = 0
           page = SingleMenu
@@ -271,7 +298,8 @@ proc runFrontend*() =
         else:
           layout =
             if page in {SingleMenu, LobbyMenu}:
-              sk.beginLvdBattle(window, lobbyUi, config.playerCount)
+              sk.beginLvdBattle(window, lobbyUi, config.playerCount,
+                participantMenu.isOpen or contextDismissGuard)
             else:
               sk.beginLobby(window, lobbyUi, "MULTIPLAYER", true)
           layout.origin
@@ -417,7 +445,16 @@ proc runFrontend*() =
             snapshot = if online: client.snapshot else: RoomMessage()
             editable = not online or snapshot.phase == rooms.Lobby
             owner = not online or snapshot.participant == client.participant
-            modal = lobbyUi.selectedSeat != -1
+            contextBlocked = participantMenu.isOpen or contextDismissGuard
+            modal = lobbyUi.selectedSeat != -1 or contextBlocked
+          # Keep the underlying UI inert for the entire dismissal gesture.
+          contextInputBlocked = contextBlocked
+          contextDismissGuard = contextBlocked and window.buttonDown[MouseLeft]
+          participantMenu.update(client, sk.mousePos, window.size.vec2 / sk.uiScale,
+            leftPressed = window.buttonPressed[MouseLeft],
+            leftReleased = window.buttonReleased[MouseLeft],
+            rightPressed = window.buttonPressed[MouseRight],
+            escape = window.buttonPressed[KeyEscape])
           if online and not roster.pending and snapshot.seats.len != config.playerCount:
             raise newException(MenusError, "Room roster does not match its settings")
           sk.lvdRosterPanel(layout)
@@ -425,8 +462,7 @@ proc runFrontend*() =
           var
             emptyCount = 0
             ownCount = 0
-            readyToStart = true
-            selfReady = false
+            selfReady = readyRefresh.cosmeticReady
           for i in 0 ..< config.playerCount:
             let
               seat = if online and i < snapshot.seats.len: snapshot.seats[i] else: Seat()
@@ -443,124 +479,123 @@ proc runFrontend*() =
             if online and not empty:
               for participant in snapshot.participants:
                 if participant.id == seat.owner:
-                  controller = participant.name &
-                    (if participant.ready: " / Ready" else: " / Not ready")
+                  controller = participant.name
+                  if mine:
+                    controller.add(if selfReady: " / Ready" else: " / Not ready")
                   if human:
                     name = participant.name
-                  readyToStart = readyToStart and participant.ready and
-                    participant.connected
-                  if mine:
-                    selfReady = participant.ready
+
               if mine:
                 inc ownCount
             if empty:
               inc emptyCount
-              readyToStart = false
             if sk.seatButton(layout, i, rosterScroll.scrollPos.y, name, controller, human, empty,
               editable and (mine or empty) and not modal and
                 roster.assignmentsEnabled(online), config.seed):
                 lobbyUi.selectedSeat = i
+            if online and not modal and window.buttonPressed[MouseRight] and
+                rosterCardHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
+              participantMenu.openSeat(client, i, sk.mousePos)
           sk.popClipRect()
           let rosterAt = rosterControlsPosition(layout)
           sk.lobbyLabel($config.playerCount & " players", rosterAt + vec2(454, 0), 180)
-          let canResize = owner and editable and not modal and not roster.pending
-          if sk.lobbyButton("Add player", rosterAt, 210, "cross",
-            canResize and config.playerCount < MaxSeats):
-              if online: client.error = ""
-              roster.resizeRoster(config, client, config.playerCount + 1, publicRoom)
-              if online:
-                networkPolicies.setLen(config.playerCount)
-              else:
-                localPolicies.add base
-          if sk.lobbyButton("Remove last", rosterAt + vec2(222, 0), 210, "minus",
-            canResize and config.playerCount > 1):
-              if online: client.error = ""
-              roster.resizeRoster(config, client, config.playerCount - 1, publicRoom)
-              if online:
-                networkPolicies.setLen(config.playerCount)
-                multiplayerHuman = humanAfterRemoval(multiplayerHuman, config.playerCount)
-              else:
-                localPolicies.setLen(config.playerCount)
-                humanSeat = humanAfterRemoval(humanSeat, config.playerCount)
-          let
-            fill = layout.left + vec2(22, layout.panelHeight - 164)
-            botWidth = 216.0'f
-          sk.lobbyLabel("Fill empty slots", fill, 210, "LobbyBold")
-          var botNames: seq[string]
-          for bot in bots:
-            botNames.add bot.name
-          if chosenPolicy.name notin botNames:
-            botNames.add chosenPolicy.name
-          sk.lobbySelect(window, lobbyUi.selectedBot, botNames, fill + vec2(216, 0),
-            botWidth, editable and not modal)
-          for bot in bots:
-            if bot.name == lobbyUi.selectedBot:
-              chosenPolicy = bot
-          if sk.lobbyButton("Fill " & $emptyCount & " slots",
-            fill + vec2(444, 0), 198, "cross",
-            editable and emptyCount > 0 and not modal and
-              roster.assignmentsEnabled(online)):
-              for i in 0 ..< config.playerCount:
+          if owner:
+            let canResize = owner and editable and not modal and not roster.pending
+            if sk.lobbyButton("Add player", rosterAt, 210, "cross",
+              canResize and config.playerCount < MaxSeats):
+                if online: client.error = ""
+                roster.resizeRoster(config, client, config.playerCount + 1, publicRoom)
                 if online:
-                  if snapshot.seats[i].owner == 0:
-                    networkPolicies[i] = chosenPolicy
-                    client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
-                      name: chosenPolicy.name))
-                elif i != humanSeat and localPolicies[i].bytes.len == 0:
-                  localPolicies[i] = chosenPolicy
-          if sk.lobbyButton(if online: "Shuffle mine" else: "Shuffle",
-            fill + vec2(654, 0), layout.leftWidth - 698, "shuffle",
-            editable and not modal and roster.assignmentsEnabled(online)):
-              var seats: seq[int]
-              for i in 0 ..< config.playerCount:
-                if not online or snapshot.seats[i].owner == client.participant:
-                  seats.add i
-              var shuffled = seats
-              rng.shuffle(shuffled)
-              let
-                oldPolicies = if online: networkPolicies else: localPolicies
-                oldHuman = if online: multiplayerHuman else: humanSeat
-              for j, destination in seats:
-                let source = shuffled[j]
-                if online:
-                  networkPolicies[destination] = oldPolicies[source]
-                  if oldHuman == source:
-                    multiplayerHuman = destination
-                  client.send(RoomMessage(kind: ClaimSeat,
-                    seat: uint32(destination), name: snapshot.seats[source].name))
+                  networkPolicies.setLen(config.playerCount)
                 else:
-                  localPolicies[destination] = oldPolicies[source]
-                  if oldHuman == source:
-                    humanSeat = destination
-          sk.lobbyLabel(if online and roster.pending: "Saving roster / settings..."
-            elif online: "Other players keep control of their seats."
-            else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
-            fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
+                  localPolicies.add LocalPolicy()
+            if sk.lobbyButton("Remove last", rosterAt + vec2(222, 0), 210, "minus",
+              canResize and config.playerCount > 1):
+                if online: client.error = ""
+                roster.resizeRoster(config, client, config.playerCount - 1, publicRoom)
+                if online:
+                  networkPolicies.setLen(config.playerCount)
+                  multiplayerHuman = humanAfterRemoval(multiplayerHuman, config.playerCount)
+                else:
+                  localPolicies.setLen(config.playerCount)
+                  humanSeat = humanAfterRemoval(humanSeat, config.playerCount)
+            let
+              fill = layout.left + vec2(22, layout.panelHeight - 164)
+              botWidth = 216.0'f
+            sk.lobbyLabel("Fill empty slots", fill, 210, "LobbyBold")
+            var botNames: seq[string]
+            for bot in bots:
+              botNames.add bot.name
+            if chosenPolicy.name notin botNames:
+              botNames.add chosenPolicy.name
+            sk.lobbySelect(window, lobbyUi.selectedBot, botNames, fill + vec2(216, 0),
+              botWidth, editable and not modal)
+            for bot in bots:
+              if bot.name == lobbyUi.selectedBot:
+                chosenPolicy = bot
+            if sk.lobbyButton("Fill " & $emptyCount & " slots",
+              fill + vec2(444, 0), 198, "cross",
+              editable and emptyCount > 0 and not modal and
+                roster.assignmentsEnabled(online)):
+                for i in 0 ..< config.playerCount:
+                  if online:
+                    if snapshot.seats[i].owner == 0:
+                      networkPolicies[i] = chosenPolicy
+                      client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
+                        name: chosenPolicy.name))
+                  elif i != humanSeat and localPolicies[i].bytes.len == 0:
+                    localPolicies[i] = chosenPolicy
+            if sk.lobbyButton("Shuffle players",
+              fill + vec2(654, 0), layout.leftWidth - 698, "shuffle",
+              editable and not modal and roster.assignmentsEnabled(online)):
+                var seats: seq[int]
+                for i in 0 ..< config.playerCount:
+                  if not online or snapshot.seats[i].owner == client.participant:
+                    seats.add i
+                var shuffled = seats
+                rng.shuffle(shuffled)
+                let
+                  oldPolicies = if online: networkPolicies else: localPolicies
+                  oldHuman = if online: multiplayerHuman else: humanSeat
+                for j, destination in seats:
+                  let source = shuffled[j]
+                  if online:
+                    networkPolicies[destination] = oldPolicies[source]
+                    if oldHuman == source:
+                      multiplayerHuman = destination
+                    client.send(RoomMessage(kind: ClaimSeat,
+                      seat: uint32(destination), name: snapshot.seats[source].name))
+                  else:
+                    localPolicies[destination] = oldPolicies[source]
+                    if oldHuman == source:
+                      humanSeat = destination
+            sk.lobbyLabel(if online and roster.pending: "Saving roster / settings..."
+              elif online: "Host-owned slots only; guests keep their seats."
+              else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
+              fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
           if sk.configPanel(window, lobbyUi, config, layout.right,
             layout.rightWidth, layout.panelHeight,
-            owner and editable and not modal and not roster.pending):
+            owner and editable and not modal and not roster.pending,
+            showControls = owner,
+            gameName = if online: addr matchName else: nil):
               roster.dirty = online
+          if online and owner and editable and not modal and not roster.pending and
+              matchName != snapshot.name and window.buttonPressed[KeyEnter]:
+            discard client.renameGame(matchName)
+            error = client.error
           if online:
             let info = layout.left + vec2(22, layout.panelHeight - 72)
-            if sk.lobbyButton("Participants", info, 190, "units", not modal):
-              lobbyUi.selectedSeat = -2
-            sk.lobbyLabel(snapshot.name, info + vec2(208, 0), 400,
+            sk.lobbyLabel(snapshot.name, info, 600,
               tint = LobbyMuted)
             if sk.lobbyButton("Copy invite", layout.footer + vec2(204, 0),
               200, "link", not modal):
                 copyInvite(inviteBase() & "?server=" & encodeUrl(preferences.server) &
                   "&room=" & encodeUrl(snapshot.room))
-            if sk.lobbyButton(if selfReady: "Ready" else: "Ready up",
+            if sk.lobbyButton(if selfReady: "Ready" else: "Not ready",
               layout.footer + vec2(420, 0), 190, "status",
               editable and ownCount > 0 and not roster.dirty and not roster.pending and not modal,
               iconTint = readinessColor(selfReady)):
-                var sources = newSeq[string](config.playerCount)
-                for i, policy in networkPolicies:
-                  sources[i] = policy.bytes
-                prepared = prepareNetworkMatch(client, sources)
-                preparedRevision = snapshot.revision
-                client.send(RoomMessage(kind: Ready, revision: snapshot.revision,
-                  hash: prepared.game.networkHash()))
+                readyRefresh.toggleCosmeticReady()
             if roster.dirty and owner and editable:
               if sk.lobbyButton("Apply Settings", layout.primary,
                 250, "settings", not modal and not roster.pending):
@@ -572,10 +607,10 @@ proc runFrontend*() =
                     flag: publicRoom, payload: config.toJson()
                   ))
                   roster.pendingPayload = config.toJson()
-            else:
+            elif owner:
               if sk.lobbyButton("Start Game", layout.primary,
                 250, "arrow_right",
-                owner and editable and readyToStart and not roster.pending and not modal,
+                owner and editable and not roster.pending and not modal,
                 tint = LobbyGreen):
                   client.send(RoomMessage(kind: StartMatch))
             if sk.lobbyButton(
@@ -592,8 +627,10 @@ proc runFrontend*() =
                 page = MultiplayerMenu
                 prepared = nil
                 preparedRevision = 0
+                readyRefresh = ReadyRefresh()
                 viewedRevision = 0
                 viewedPayload = ""
+                roster = RosterState()
                 multiplayerHuman = -1
                 networkPolicies = newSeq[LocalPolicy](config.playerCount)
                 lobbyUi.scroll = 0
@@ -610,7 +647,8 @@ proc runFrontend*() =
               layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
           let selectedSeat = lobbyUi.selectedSeat
           let choice =
-            if modal: sk.seatPicker(window, lobbyUi, bots)
+            if modal and not contextBlocked and lobbyUi.selectedSeat >= 0:
+              sk.seatPicker(window, lobbyUi, bots)
             else: SlotChoice()
           if choice.chosen:
             var selected = if choice.file: selectPolicy()
@@ -645,43 +683,18 @@ proc runFrontend*() =
                   humanSeat = -1
                 localPolicies[selectedSeat] = selected
               lobbyUi.selectedSeat = -1
-          if online and lobbyUi.selectedSeat == -2:
+          if participantMenu.isOpen:
             sk.pushLayer(PopupsLayer)
             let
               view = window.size.vec2 / sk.uiScale
-              at = (view - vec2(650, 500)) * 0.5'f
+              panel = participantMenu.bounds(view)
+              item = participantMenu.itemRect(view)
             discard sk.interact(rect(vec2(0), view), true)
-            sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 180))
-            sk.lobbyPanel(at, vec2(650, 500))
-            sk.lobbyLabel("PARTICIPANTS", at + vec2(24, 16), 580,
-              "LobbyHeading")
-            lobbyUi.participantPage = min(lobbyUi.participantPage,
-              max(0, (snapshot.participants.len - 1) div 6))
-            for row in 0 ..< 6:
-              let index = lobbyUi.participantPage * 6 + row
-              if index >= snapshot.participants.len:
-                break
-              let
-                participant = snapshot.participants[index]
-                point = at + vec2(24, 76 + row.float32 * 48)
-              sk.lobbyLabel(participant.name &
-                (if not participant.connected: " / Offline"
-                 elif participant.ready: " / Ready" else: " / Not ready"),
-                point, 430)
-              if sk.lobbyButton("Remove", point + vec2(450, 0), 140,
-                enabled = owner and editable and
-                  participant.id != client.participant):
-                    client.send(RoomMessage(kind: KickParticipant,
-                      participant: participant.id))
-            if sk.lobbyButton("Previous", at + vec2(24, 422), 170,
-              enabled = lobbyUi.participantPage > 0):
-                dec lobbyUi.participantPage
-            if sk.lobbyButton("Next", at + vec2(210, 422), 170,
-              enabled = (lobbyUi.participantPage + 1) * 6 <
-                snapshot.participants.len):
-                  inc lobbyUi.participantPage
-            if sk.lobbyButton("Close", at + vec2(396, 422), 230):
-              lobbyUi.selectedSeat = -1
+            sk.lobbyPanel(panel.xy, panel.wh)
+            discard sk.lobbyButton(participantMenu.label(client), item.xy,
+              item.w, tint = LobbyRed)
+            sk.lobbyLabel(participantMenu.warning(client), panel.xy + vec2(12, 60),
+              panel.w - 24, tint = LobbyMuted)
             sk.popLayer()
         of SettingsMenu:
           let height = max(440.0'f,
@@ -694,6 +707,7 @@ proc runFrontend*() =
       except CatchableError as problem:
         error = problem.msg
       if page in {MultiplayerMenu, LobbyMenu, SettingsMenu} and
+        not participantMenu.isOpen and not contextInputBlocked and
         lobbyUi.selectedSeat == -1 and
         sk.playerButton(window, preferences.name,
           page != LobbyMenu or connection.client.snapshot.phase == rooms.Lobby):

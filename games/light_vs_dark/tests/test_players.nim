@@ -76,7 +76,7 @@ block allBots:
 block multipleOpponents:
   let
     map = generateMap(42, 4)
-    game = newGame(map, 1000)
+    game = newGame(map, 1000, DiplomacySettings(neutralStart: true))
     centre = map.side div 2
     attacker = game.world.spawnUnit(0, SoldierUnit, tile2(centre, centre))
     enemy = game.world.spawnUnit(2, PeonUnit, tile2(centre + 1, centre))

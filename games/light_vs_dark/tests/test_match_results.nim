@@ -17,7 +17,7 @@ suite "LvD finished results":
     check mouseOverUi(window, layout.gameAreaSize / 2)
     check not playbackControlsVisible()
 
-  test "winner headline never intersects the table, even with a scrolling roster":
+  test "winner headline is inside the card above columns, including scrolling rosters":
     when declared(resultsLayout):
       for size in [vec2(640,480), vec2(1000,700), vec2(1920,1080)]:
         for count in [2, 4, 16]:
@@ -26,8 +26,13 @@ suite "LvD finished results":
           for transport in [0.0'f32, 56.0'f32]:
             let layout = initGameUiLayout(size, transport)
             let presentation = resultsLayout(layout, table)
-            let panel = statsLayout(presentation.viewport, table).panel
-            check not overlaps(presentation.headline, panel, 8)
+            let panel = presentation.panel
+            check presentation.headline.origin.y >= panel.origin.y
+            check presentation.headline.origin.y + presentation.headline.size.y <=
+              panel.origin.y + panel.size.y
+            check presentation.headline.origin.x >= panel.origin.x
+            check presentation.headline.origin.x + presentation.headline.size.x <=
+              panel.origin.x + panel.size.x
             check presentation.headline.inside(layout.gameAreaSize)
             check panel.inside(layout.gameAreaSize)
             check panel.size.y > 120
@@ -67,6 +72,34 @@ suite "LvD finished results":
     for row in table.rows:
       check row.metrics.values[GoldMetric] == run.world.players[row.slot].goldGathered
       check row.metrics.values[LossesMetric] == run.world.players[row.slot].unitsLost
+
+  test "Score uses existing world score, retaining departed match identities":
+    var config = defaultConfig()
+    config.players[0].name = "Departed :)"
+    config.players[1].name = "Other commander"
+    initializeLocalMatch(config, ["", ""])
+    defer:
+      run = nil
+      hudNetwork = nil
+    run.world.players[1].goldGathered = 50000
+    run.world.players[1].woodGathered = 90000
+    run.world.over = true
+    run.world.winner = 0 # Winner is deliberately not the highest scoring row.
+    hudNetwork = NetworkMatch(client: RoomClient(snapshot: RoomMessage(phase: rooms.Ended)))
+    check matchResultHeadline() == "Departed :) wins"
+    when declared(currentStatsOptions):
+      let presentation = currentStatsOptions()
+      check presentation.scores[0] == run.world.score(0)
+      check presentation.scores[1] == run.world.score(1)
+      check presentation.scores[1] > presentation.scores[0]
+      var state: StatsState
+      let table = state.displayedTable(currentStats(), options = presentation)
+      check table.rows[0].slot == 1
+      check table.rows[1].name == "Departed :)"
+      check run.config.players[0].name == "Departed :)"
+      check table.winner == 0
+    else:
+      check false
 
   test "return controls are absent outside the Esc menu":
     const source = staticRead("../graphics.nim")

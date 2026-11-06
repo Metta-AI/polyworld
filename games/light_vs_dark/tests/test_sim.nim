@@ -218,9 +218,11 @@ block pathsGoAroundOtherUnits:
   for _ in 1 .. TickRate * 8:
     w.tickWorld(noDecisions)
     let walker = w.units[w.unitIndex(walkerId)]
-    doAssert walker.tile != mid,
-      "the walker stepped onto a standing peon instead of going around"
+    doAssert w.tileOpen(walker.tile), "Soft contact must preserve hard terrain"
   let walker = w.units[w.unitIndex(walkerId)]
+  doAssert w.units[w.unitIndex(blockerId)].body.pos !=
+    fixedVec2(fixed(mid.x.int32)+FixedHalf, fixed(mid.y.int32)+FixedHalf),
+    "Friendly idle occupant should yield rather than act as a tile wall"
   doAssert tileDistance(walker.tile, goal) <= 1,
     &"the walker stopped at ({walker.tile.x},{walker.tile.y}) short of the goal"
 

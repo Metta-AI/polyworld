@@ -16,7 +16,7 @@ const
   ReplayFormatVersion* = 6'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 26'u16
+  ReplayGameVersion* = 33'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -27,7 +27,8 @@ const
   ActionCancel* = 7'u8
   ActionAttackMove* = 8'u8
   ActionDiplomacy* = 9'u8
-  ActionKindHigh* = ActionDiplomacy
+  ActionResearch* = 10'u8
+  ActionKindHigh* = ActionResearch
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
@@ -74,6 +75,7 @@ type
       ##   Harvest   mine id or tile index, tree flag, unused
       ##   Build     building kind, x, y
       ##   Train     unit kind, unused, unused
+      ##   Research  research category, zero, zero (next sequential tier)
       ##   SetRally  x, y, unused
       ##   Cancel    unused, unused, unused
       ##   Diplomacy target player, command kind, offer ID
@@ -207,6 +209,12 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
         fail("replay action names a tile outside the map")
 
   case action.kind
+  of ActionResearch:
+    if not action.entityId.isPlayerBuildingId or
+        action.first notin 0'i32 .. ResearchKind.high.ord.int32 or
+        action.second != 0 or action.third != 0 or
+        action.offset != FixedVec2Zero:
+      fail("replay research command is invalid")
   of ActionDiplomacy:
     if action.entityId != NoEntity or action.offset != FixedVec2Zero or
       action.first < 0 or action.first >= int32(setup.players.len) or

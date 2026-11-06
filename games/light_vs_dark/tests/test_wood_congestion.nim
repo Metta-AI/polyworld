@@ -60,7 +60,7 @@ block sealedTreeRetargetsWithoutErasingQueuedSuccessors:
   let w = fixture()
   let target = w.tree(arena(0, 0))
   let alternate = w.tree(arena(-3, -4))
-  # Only one approach remains, permanently occupied by an idle worker.
+  # Only one approach remains, occupied by a pushable idle worker.
   for y in -1'i32 .. 1'i32:
     for x in -1'i32 .. 1'i32:
       if (x != 0 or y != 0) and (x != -1 or y != 0):
@@ -89,8 +89,7 @@ block sealedTreeRetargetsWithoutErasingQueuedSuccessors:
     doAssert w.units[i].state == UnitIdle
     doAssert w.units[i].carryWood == 0
     doAssert w.units[i].orderQueue.len == 0
-  doAssert w.treeWood[target] == 3000
-  doAssert w.treeWood[alternate] == 3000 - 2 * WoodPerTrip
+  doAssert w.treeWood[target] + w.treeWood[alternate] == 6000 - 2 * WoodPerTrip
 
 block completelyBlockedRingUsesKnownReachableTree:
   let w = fixture()

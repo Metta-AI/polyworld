@@ -44,14 +44,19 @@ type
     showingResults*: bool
     automatic*, automaticFinal*: bool
     finalTable: StatsTable
+  StatsOptions* = object
+    ## Opt-in presentation; defaults preserve all existing game layouts.
+    headline*, headlineSuffix*: string
+    individualPlayers*: bool
+    scores*: seq[int64] ## Optional game-owned Score values indexed by stable slot.
   StatsLayout* = object
-    panel*, header*, body*: GameUiPanel
+    panel*, headline*, header*, body*: GameUiPanel
     contentHeight*, maxScroll*: float32
   StatsColumn = object
     label: string
     metric: MetricKind
     width: float32
-    spark: bool
+    spark, score: bool
 
 var
   sparkSamples: seq[SparkSample]
@@ -91,11 +96,16 @@ proc displayedValue*(row: MetricRow, kind: StatsKind,
   if kind == AdventureStats and metric == GoldMetric:
     result += row.values[BankedMetric]
 
-proc sortRows(table: var StatsTable) =
+proc sortRows(table: var StatsTable, options = StatsOptions()) =
   ## Ranks by gold, preserving Gota factions and breaking ties by seat.
   let kind = table.kind
   table.rows.sort(proc(first, second: StatsRow): int =
     ## Keeps blue before red in Gota, then compares gold and stable seats.
+    if options.scores.len > 0:
+      result = cmp(options.scores[second.slot], options.scores[first.slot])
+      if result == 0: result = cmp(first.slot, second.slot)
+      if result == 0: result = cmp(first.name, second.name)
+      return
     if kind == GotaStats and first.team != second.team:
       return cmp(second.team, first.team)
     result = cmp(
@@ -107,7 +117,7 @@ proc sortRows(table: var StatsTable) =
   )
 
 proc displayedTable*(state: var StatsState, current: StatsTable,
-    transportInput = false): StatsTable =
+    transportInput = false, options = StatsOptions()): StatsTable =
   ## Keeps results readable during automatic looping until playback is used.
   if current.complete:
     state.finalTable = current
@@ -118,14 +128,20 @@ proc displayedTable*(state: var StatsState, current: StatsTable,
     result = state.finalTable
   else:
     result = current
-  result.sortRows()
+  result.sortRows(options)
 
 proc tabHeld*(window: Window): bool =
   ## Reads temporary visibility directly from current focused input.
   window.focused and window.buttonDown[KeyTab]
 
-proc columns(kind: StatsKind, compact = false): seq[StatsColumn] =
+proc columns(kind: StatsKind, compact = false, showScore = false): seq[StatsColumn] =
   ## Selects explicit per-game columns for the shared renderer.
+  if compact and showScore:
+    return @[
+      StatsColumn(label: "SCORE", width: 18, score: true),
+      StatsColumn(label: "GOLD", metric: GoldMetric, width: 25),
+      StatsColumn(label: "KILLS", metric: KillsMetric, width: 13)
+    ]
   if compact:
     return @[
       StatsColumn(label: "GOLD", metric: GoldMetric, width: 22),
@@ -168,10 +184,16 @@ proc columns(kind: StatsKind, compact = false): seq[StatsColumn] =
       StatsColumn(label: "APM", metric: ApmMetric, width: 8)
     ]
 
-proc statsLayout*(layout: GameUiLayout, table: StatsTable): StatsLayout =
+  if showScore:
+    result[0].width -= 5
+    result[1].width -= 4
+    result.insert(StatsColumn(label: "SCORE", width: 9, score: true), 0)
+
+proc statsLayout*(layout: GameUiLayout, table: StatsTable,
+    options = StatsOptions()): StatsLayout =
   ## Fits a centered table to its roster above the existing transport.
   var bands = 0
-  if table.kind != AdventureStats:
+  if table.kind != AdventureStats and not options.individualPlayers:
     var previous = -1
     for row in table.rows:
       if row.team != previous:
@@ -179,13 +201,18 @@ proc statsLayout*(layout: GameUiLayout, table: StatsTable): StatsLayout =
         previous = row.team
   let
     area = layout.gameAreaSize
-    kills = if table.kind == GotaStats: StatsKillsHeight else: 0.0'f
+    headline = if options.headline.len > 0: StatsKillsHeight else: 0.0'f
+    kills = (if table.kind == GotaStats: StatsKillsHeight else: 0.0'f) + headline
     content = table.rows.len.float32 * StatsRowHeight +
       bands.float32 * StatsBandHeight
     height = min(content + StatsHeaderHeight + kills + StatsPadding * 2,
       max(area.y - layout.margin * 2, 0))
     width = min(StatsWidth, max(area.x - layout.margin * 2, 0))
   result.panel = layout.panel(GameUiRegion.Center, vec2(width, height))
+  result.headline = GameUiPanel(
+    origin: result.panel.origin + vec2(StatsPadding),
+    size: vec2(max(width - StatsPadding * 2, 0), headline)
+  )
   result.header = GameUiPanel(
     origin: result.panel.origin + vec2(StatsPadding, StatsPadding + kills),
     size: vec2(max(width - StatsPadding * 2, 0), StatsHeaderHeight)
@@ -209,13 +236,14 @@ proc statsViewport*(layout: GameUiLayout, hudScale: float32): GameUiLayout =
     layout.margin * ratio)
 
 proc mouseOverStats*(state: StatsState, window: Window,
-    layout: GameUiLayout, table: StatsTable, mouse: Vec2): bool =
+    layout: GameUiLayout, table: StatsTable, mouse: Vec2,
+    options = StatsOptions()): bool =
   ## Blocks underlying input only within the visible statistics window.
   let
     scale = window.size.x.float32 / max(layout.size.x, 1)
     viewport = statsViewport(layout, scale)
   state.visible(window.tabHeld) and
-    statsLayout(viewport, table).panel.contains(mouse * scale / statsScale(scale))
+    statsLayout(viewport, table, options).panel.contains(mouse * scale / statsScale(scale))
 
 proc statsColor(kind: StatsKind, team: int): ColorRGBX =
   ## Selects familiar faction accents for bands and trends.
@@ -233,8 +261,15 @@ proc metricText(value: int64, percent = false): string =
   if percent:
     result.add '%'
 
+proc fittedStatsHeadline*(sk: Silky, options: StatsOptions, width: float32): string =
+  ## Fit the identity while retaining the game-provided result suffix.
+  let suffixWidth = sk.getTextSize("H1", options.headlineSuffix).x
+  sk.fittedLabel(options.headline, max(width - suffixWidth, 0), "H1") &
+    options.headlineSuffix
+
 proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
-    state: var StatsState, current: StatsTable, history: MetricHistory) =
+    state: var StatsState, current: StatsTable, history: MetricHistory,
+    options = StatsOptions()) =
   ## Draws the overlay after the normal world, HUD, and transport pass.
   when defined(takeScreenshot):
     if existsEnv("SHOW_STATS"):
@@ -243,19 +278,23 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
     current,
     window.buttonPressed[KeySpace] or
       (window.mousePressed(MouseLeft) and
-        layout.transportPanel.contains(sk.mousePos))
+        layout.transportPanel.contains(sk.mousePos)),
+    options
   )
   if not state.visible(window.tabHeld):
     return
   let
-    slots = statsLayout(layout, table)
-    specs = columns(table.kind, layout.size.x < 1000)
+    slots = statsLayout(layout, table, options)
+    specs = columns(table.kind, layout.size.x < 1000, options.scores.len > 0)
     innerWidth = slots.header.size.x
   state.scroll = clamp(state.scroll, 0, slots.maxScroll)
   if slots.panel.contains(sk.mousePos):
     state.scroll = clamp(state.scroll - window.scrollDelta.y * 48,
       0, slots.maxScroll)
   sk.drawPanel(slots.panel)
+  if options.headline.len > 0:
+    sk.drawLabel(sk.fittedStatsHeadline(options, slots.headline.size.x),
+      slots.headline.origin, slots.headline.size, GoldColor, "H1", CenterAlign)
   if table.kind == GotaStats:
     let center = slots.panel.origin + vec2(slots.panel.size.x / 2, 16)
     sk.drawLabel($table.kills[1], center - vec2(132, 0), vec2(88, 48),
@@ -296,8 +335,10 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
     y = slots.body.origin.y - state.scroll
     previousTeam = -1
   for row in table.rows:
-    let color = statsColor(table.kind, row.team)
-    if table.kind != AdventureStats and row.team != previousTeam:
+    let color =
+      if options.individualPlayers and row.portraitTint.a > 0: row.portraitTint
+      else: statsColor(table.kind, row.team)
+    if not options.individualPlayers and table.kind != AdventureStats and row.team != previousTeam:
       let name =
         case table.kind
         of GotaStats:
@@ -326,7 +367,8 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
         continue
     if row.selected:
       sk.drawRect(rowPanel.origin, rowPanel.size, rgbx(32, 61, 88, 230))
-      sk.drawRect(rowPanel.origin, vec2(3, StatsRowHeight), BlueColor)
+      sk.drawRect(rowPanel.origin, vec2(3, StatsRowHeight),
+        if options.individualPlayers: color else: BlueColor)
     sk.drawRect(rowPanel.origin + vec2(0, StatsRowHeight - 1),
       vec2(innerWidth, 1), rgbx(66, 64, 65, 255))
     let
@@ -352,9 +394,11 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
         width = spec.width * innerWidth / 100
         cell = GameUiPanel(origin: vec2(x + 8, rowPanel.origin.y + 8),
           size: vec2(width - 16, StatsRowHeight - 16))
-        value = row.metrics.displayedValue(table.kind, spec.metric)
+        value =
+          if spec.score: options.scores[row.slot]
+          else: row.metrics.displayedValue(table.kind, spec.metric)
       x += width
-      if spec.metric == CpuMetric:
+      if not spec.score and spec.metric == CpuMetric:
         sk.drawLabel(if row.metrics.hasCpu: metricText(value, true) else: "-",
           cell.origin, vec2(cell.size.x, 24), align = CenterAlign)
         if row.metrics.hasCpu:
@@ -395,7 +439,7 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
         )
       else:
         let text =
-          if spec.metric == ApmMetric and not row.metrics.hasApm: "-"
+          if not spec.score and spec.metric == ApmMetric and not row.metrics.hasApm: "-"
           else: metricText(value)
         sk.drawLabel(text, cell.origin, cell.size, align = CenterAlign)
   sk.popClipRect()
@@ -408,7 +452,8 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
       vec2(3, height), MutedColor)
 
 proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
-    state: var StatsState, current: StatsTable, history: MetricHistory) =
+    state: var StatsState, current: StatsTable, history: MetricHistory,
+    options = StatsOptions()) =
   ## Draws the readable overlay in its own pass after the ordinary HUD.
   when defined(takeScreenshot):
     if existsEnv("SHOW_STATS"):
@@ -420,7 +465,7 @@ proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
     mouse = sk.mousePos
   sk.uiScale = statsScale(scale)
   sk.beginUi(window, window.size)
-  sk.drawStats(window, statsViewport(layout, scale), state, current, history)
+  sk.drawStats(window, statsViewport(layout, scale), state, current, history, options)
   sk.endUi()
   sk.uiScale = scale
   sk.mousePos = mouse

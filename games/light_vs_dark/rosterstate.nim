@@ -43,7 +43,7 @@ proc resizeRoster*(state: var RosterState, config: var LvdConfig,
     published.players.setLen(count)
     published.validate()
     let payload = published.toJson()
-    client.send(RoomMessage(kind: ConfigureRoom, name: client.snapshot.name,
+    client.send(RoomMessage(kind: ResizeRoom, name: client.snapshot.name,
       number: uint32(count), tickRate: client.snapshot.tickRate,
       flag: publicRoom, payload: payload))
     state.pendingPayload = payload

@@ -10,20 +10,29 @@ macro graphicsRoutine(name: static[string]): untyped =
   for node in source:
     if node.kind == nnkProcDef and node[0].repr == "runGraphics*":
       for child in node[^1]:
-        if name == "buttonHandler" and child.kind == nnkAsgn and
-            child[0].repr == "window.onButtonPress" and child[1].kind == nnkLambda:
+        if child.kind == nnkAsgn and child[1].kind == nnkLambda and
+            ((name == "buttonHandler" and child[0].repr == "window.onButtonPress") or
+             (name == "releaseHandler" and child[0].repr == "window.onButtonRelease")):
           return child
         if child.kind == nnkProcDef and child[0].repr == name:
           return child
   error("Missing production routine: " & name)
 
 suite "LvD match menu input isolation":
+  setup:
+    resetHumanCommunication()
+  teardown:
+    resetHumanCommunication()
+
   test "menu frames ignore held camera, selection, minimap and zoom input":
     window = newWindow("LvD input regression", ivec2(1600, 1000), visible = false)
     defer:
       window.close()
       window = nil
       run = nil
+    # Focus is an independent production input gate. Keep it open so these
+    # assertions exercise the menu gate, not hidden-window cancellation.
+    # AppKit key-window activation is unavailable on unattended hosts.
     sk = Silky(uiScale: 1)
     options.playerSlot = 1
     run = Game(world: newWorld(generateMap(47, 3), 100))
@@ -64,7 +73,7 @@ suite "LvD match menu input isolation":
         window.state.perFrame = PerFrame(
           buttonPressed: {MouseLeft, MouseMiddle, KeyA},
           mouseDelta: ivec2(100, 80), scrollDelta: vec2(0, 3))
-        updateCamera(0.1)
+        updateCamera(0.1, focused = true)
         check cameraTarget == vec3(2, 0, 3)
         check cameraDistance == 40
         check selectedIds == beforeSelection
@@ -78,7 +87,7 @@ suite "LvD match menu input isolation":
         matchMenu = HiddenMatchMenu
         window.state.buttonDown = {}
         window.state.perFrame = PerFrame(buttonReleased: {MouseLeft, MouseMiddle})
-        updateCamera(0.1)
+        updateCamera(0.1, focused = true)
         check not selectionStarted
         check not panning
         check not minimapPanning
@@ -87,9 +96,18 @@ suite "LvD match menu input isolation":
     window.state.buttonDown = {MouseLeft}
     window.state.perFrame = PerFrame(buttonPressed: {MouseLeft})
     sk.mousePos = mini.origin + mini.size * 0.75'f32
-    updateCamera(0.1)
+    updateCamera(0.1, focused = true)
     check minimapPanning
     check cameraTarget != vec3(2, 0, 3)
+    # The explicit focus seam also verifies the production loss-of-focus gate.
+    let focusedCamera = cameraTarget
+    selectionStarted = true
+    lineGesture = LineGesture(active: true, dragging: true)
+    updateCamera(0.1, focused = false)
+    check cameraTarget == focusedCamera
+    check not selectionStarted
+    check not minimapPanning
+    check not lineGesture.active
 
   test "menu entry cancels immediately and menu/UI bindings remain usable":
     window = newWindow("LvD menu bindings", ivec2(1600, 1000), visible = false)
@@ -109,6 +127,13 @@ suite "LvD match menu input isolation":
       actionCam = initActionCam(subjectMode = true)
     graphicsRoutine("playerMode")
     graphicsRoutine("buttonHandler")
+    graphicsRoutine("releaseHandler")
+    proc tap(button: Button) =
+      window.state.buttonDown.incl button
+      window.onButtonPress(button)
+      window.state.buttonDown.excl button
+      window.onButtonRelease(button)
+
     pendingBuild = -1
     attackMoveArmed = false
     selectionStarted = true
@@ -117,7 +142,7 @@ suite "LvD match menu input isolation":
     minimapPanning = true
     rightOrderStarted = true
     lineGesture.cancelLine()
-    window.onButtonPress(KeyEscape)
+    tap(KeyEscape)
     check matchMenu == PauseMenu
     check not selectionStarted
     check not selectionAdditive
@@ -125,21 +150,21 @@ suite "LvD match menu input isolation":
     check not minimapPanning
     check not rightOrderStarted
     # No frame occurs between opening and closing the menu.
-    window.onButtonPress(KeyEscape)
+    tap(KeyEscape)
     check matchMenu == HiddenMatchMenu
     check not selectionStarted
     matchMenu = MatchSettings
     debugMenuOpen = false
-    window.onButtonPress(KeyF1)
+    tap(KeyF1)
     check debugMenuOpen
-    window.onButtonPress(KeyEscape)
+    tap(KeyEscape)
     check matchMenu == PauseMenu
-    window.onButtonPress(KeyEscape)
+    tap(KeyEscape)
     check matchMenu == HiddenMatchMenu
     # Existing Esc-cancels-command behavior still precedes opening the menu.
     lineGesture = LineGesture(active: true, dragging: true)
     rightOrderStarted = true
-    window.onButtonPress(KeyEscape)
+    tap(KeyEscape)
     check matchMenu == HiddenMatchMenu
     check not lineGesture.active
     check not rightOrderStarted

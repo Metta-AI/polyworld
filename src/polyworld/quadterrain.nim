@@ -4434,7 +4434,7 @@ proc drawTexturedBatch(batch: TexturedBatch, mvp: Mat4) =
   glBindVertexArray(0)
 
 proc drawTerrain*(viewProjection: Mat4, showEdges = false,
-    drawGround = true) {.measure.} =
+    drawGround = true, drawProps = true) {.measure.} =
   ## Opaque terrain and prop passes. Disables back-face culling itself (the
   ## gltf PBR renderer's beginFrame leaves culling on and the terrain mesh
   ## is not consistently wound) and enables the depth test.
@@ -4466,6 +4466,10 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false,
   if drawGround:
     glDrawArrays(GL_TRIANGLES, 0, meshVertexCount.GLsizei)
   glBindVertexArray(0)
+
+  if not drawProps:
+    glUseProgram(0)
+    return
 
   if propMesh.len > 0:
     var model3d = mat4()

@@ -57,9 +57,8 @@ proc miningTrace(queued = false): seq[uint64] =
       checkpointChecked = true
     elif not checkpointChecked and w.units[1].passingTicks > 0:
       checkpoint = w.clone()
-    if w.units[0].state != UnitInMine and w.units[1].state != UnitInMine:
-      doAssert length(w.units[0].body.pos - w.units[1].body.pos) >=
-        w.units[0].body.radius + w.units[1].body.radius - 0.001'fx
+    # Friendly rubber circles can overlap during a pass. Progress, bounded
+    # displacement, terrain legality and repeated deposits are the contract.
     for i in 0 .. 1:
       if states[i] != UnitInMine:
         doAssert length(w.units[i].body.pos - before[i]) < 0.2'fx
@@ -135,13 +134,11 @@ proc pathTrace(walls: int): seq[uint64] =
           for dy in [-unit.body.radius, unit.body.radius]:
             let point = unit.body.pos + fixedVec2(dx, dy)
             doAssert w.tileOpen(whole(point.x), whole(point.y))
-      doAssert length(w.units[0].body.pos - w.units[1].body.pos) >=
-        w.units[0].body.radius + w.units[1].body.radius - 0.001'fx,
-        "No body overlap after separation"
+      # Contact is intentionally soft; it is not resolved in a single tick.
     if walls == 3:
       doAssert not lateral
-      doAssert w.units[0].body.pos.x < w.units[1].body.pos.x
-      break # A one-cell bottleneck cannot pass; retain the orders safely.
+      # Compressible friendly circles can pass within the one-tile corridor;
+      # the hard footprint/corner assertions above still apply every tick.
     for i in 0 .. 1:
       let point = fixedVec2(fixed(int32(destinations[i].x)) + 0.6'fx,
         fixed(int32(destinations[i].y)) + 0.5'fx)

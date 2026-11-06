@@ -1,5 +1,5 @@
 ## Native GL fixture of the production endgame overlay with real match history.
-import std/[os, unittest]
+import std/[os, unittest, strutils]
 import chroma, pixie, silky, vmath, windy, opengl
 import polyworld/[chrome, gameuis, stats, metrics, viewers]
 import ../[game, sim, ui, presets, symbols, content]
@@ -56,11 +56,60 @@ suite "LvD automatic native results":
     check table.rows[0].metrics.values[GoldMetric] > 0
     check run.history.frames.len > 1
     let presentation = resultsLayout(statsViewport(currentLayout(window),sk.uiScale),table)
-    let panel = statsLayout(presentation.viewport,table).panel
-    check not overlaps(presentation.headline,panel)
+    let panel = presentation.panel
+    check presentation.headline.origin.y >= panel.origin.y
+    check presentation.headline.origin.y + presentation.headline.size.y <= panel.origin.y + panel.size.y
     let scale = statsScale(sk.uiScale)
     let sample = (panel.origin+vec2(4))*scale
     check image[int(sample.x),int(sample.y)] != rgbx(28,38,34,255)
+proc captureCase(name: string, size: IVec2): Image =
+  window.size = size
+  pollEvents()
+  sk.uiScale = gameUiScale(window)
+  glBindTexture(GL_TEXTURE_2D, colorTexture)
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, size.x, size.y,
+    0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+  glViewport(0, 0, size.x, size.y)
+  glClearColor(28.0/255, 38.0/255, 34.0/255, 1)
+  glClear(GL_COLOR_BUFFER_BIT)
+  ui.drawStatsOverlay(sk, window, [rgbx(76,154,239,255), rgbx(192,124,234,255)])
+  result = newImage(size.x, size.y)
+  glReadPixels(0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, result.data[0].addr)
+  result.flipVertical()
+  let scale = statsScale(sk.uiScale)
+  let slots = statsLayout(statsViewport(currentLayout(window), sk.uiScale),
+    currentStats(), currentStatsOptions())
+  when declared(fittedStatsHeadline):
+    if run.world.over and run.world.winner >= 0:
+      doAssert sk.fittedStatsHeadline(currentStatsOptions(), slots.headline.size.x).endsWith(" wins"),
+        "Long names must not truncate the victory declaration"
+  else:
+    doAssert false, "Need suffix-preserving headline fitting"
+  var ink = 0
+  for y in 0 ..< size.y:
+    for x in 0 ..< size.x:
+      let point = vec2(x.float32, y.float32) / scale
+      let pixel = result[x,y]
+      if slots.headline.contains(point) and pixel.r > 170 and pixel.g > 130 and pixel.b < 150:
+        inc ink
+      if not GameUiPanel(origin: slots.panel.origin - vec2(3),
+          size: slots.panel.size + vec2(6)).contains(point):
+        doAssert pixel == rgbx(28,38,34,255), "Stats escaped the panel: " & name
+  doAssert ink > 40, "Headline must be visible within its reserved panel: " & name
+  let path = output.parentDir / ("lvd-score-" & name & ".png")
+  result.writeFile(path)
+  echo "FBO ", name, ": ", size, "; headline ink=", ink, "; ", path
+
+# Render the actual production overlay at compact and full readable scales.
+run.recorder.data.config.players[0].name = "A very long departed commander name with spaces and punctuation :)"
+run.world.players[1].goldGathered = 900000
+run.world.winner = 0 # Winner label is independent of the highest Score.
+discard captureCase("compact-winner-not-first", ivec2(640,480))
+run.world.winner = -1
+discard captureCase("draw", ivec2(1000,700))
+run.world.over = false
+discard captureCase("time-limit", ivec2(1920,1080))
+# Release GL resources.
 glDeleteTextures(1,colorTexture.addr)
 glDeleteFramebuffers(1,framebuffer.addr)
 window.close()
