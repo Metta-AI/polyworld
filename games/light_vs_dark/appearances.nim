@@ -151,31 +151,37 @@ proc loadUnitModel*(
   cache: var UnitModelCache,
   manifest: Manifest,
   entry: UnitPreset,
-  kind: UnitKind
+  kind: UnitKind,
+  woodAxe = false
 ): CharacterModel =
   ## Reuses an assembled outfit while keeping variant colors and rigs separate.
+  if woodAxe and kind != PeonUnit:
+    raise newException(ChargenError, "Wood axe is only available to peons.")
   var
-    preset = entry.preset
+    variant = entry
     templateModel: CharacterModel
+  if woodAxe:
+    variant.preset = woodAxePreset(entry.preset)
+  var preset = variant.preset
   preset.name = ""
   for appearance in cache.appearances:
     if appearance.kind != kind or appearance.preset != preset:
       continue
-    if appearance.skin == entry.skinRgb:
+    if appearance.skin == variant.skinRgb:
       return appearance.model
     templateModel = appearance.model
   if templateModel == nil:
     profileBlock "unit outfit":
-      result = loadUnitModel(manifest, entry, kind)
+      result = loadUnitModel(manifest, variant, kind)
   else:
     result = copyUnitModel(templateModel)
     let
       rgb = entry.skinRgb
-      inventory = manifest.presetManifest(entry.preset)
+      inventory = manifest.presetManifest(variant.preset)
     partNodes(result.file.root).applySkin(
       inventory, color(rgb[0], rgb[1], rgb[2], 1)
     )
     discard result.mergeCharacterParts()
   cache.appearances.add UnitAppearance(
-    preset: preset, kind: kind, skin: entry.skinRgb, model: result
+    preset: preset, kind: kind, skin: variant.skinRgb, model: result
   )

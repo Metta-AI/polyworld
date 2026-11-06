@@ -10,6 +10,7 @@ import
   test_replays,
   test_sim,
   test_resourcepacks,
+  test_woodcutting_presentation,
   test_backend_config,
   test_multiplayer_backend,
   test_relay_backend,

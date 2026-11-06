@@ -25,9 +25,10 @@ proc loadBackpackModel*(
   cache: var UnitModelCache,
   manifest: Manifest,
   entry: UnitPreset,
-  pack: ResourcePack
+  pack: ResourcePack,
+  woodAxe = false
 ): CharacterModel =
   ## Builds each cargo outfit once through the existing merged model cache.
   var variant = entry
   variant.preset = resourcePackPreset(entry.preset, pack)
-  cache.loadUnitModel(manifest, variant, PeonUnit)
+  cache.loadUnitModel(manifest, variant, PeonUnit, woodAxe = woodAxe)

@@ -21,7 +21,7 @@ import
   replays,
   ui,
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
-  networkpresentation, shortcutsettings, unitselection
+  networkpresentation, shortcutsettings, unitselection, woodcuttingpresentation
 
 const
   DefaultCameraDistance = 17.0'f
@@ -78,7 +78,8 @@ var
   previousUnitPositions: Table[int32, Vec3]
   previousUnitFacings: Table[int32, float32]
   unitPoses: seq[CharacterPose]
-  resourceModels: seq[array[ResourcePack, CharacterModel]]
+  woodAxeModels: seq[CharacterModel]
+  resourceModels: seq[array[ResourcePack, array[bool, CharacterModel]]]
   outlinePose: CharacterPose
   terrainVisionTick = int32.low
   terrainVisionMode = int32.low
@@ -190,10 +191,20 @@ proc renderUnitModel(unit: Unit, ordinary: CharacterModel): CharacterModel =
   ## Reuses one cargo outfit for the world, shadows and selection outline.
   let pack = carriedPack(unit.kind, unit.hp, unit.carryGold, unit.carryWood)
   if pack != NoPack and unit.owner >= 0 and unit.owner < resourceModels.len:
-    let model = resourceModels[unit.owner][pack]
+    let model = resourceModels[unit.owner][pack][unit.woodAxeVisible]
     if model != nil:
       return model
+  if unit.woodAxeVisible and unit.owner >= 0 and
+    unit.owner < woodAxeModels.len and woodAxeModels[unit.owner] != nil:
+      return woodAxeModels[unit.owner]
   ordinary
+
+proc renderUnitClip(unit: Unit, model: CharacterModel, ordinary: int): int =
+  ## Overrides only the tree-chopping clip, preserving combat and construction.
+  if unit.woodAxeVisible and unit.state == UnitChopping:
+    model.clipIndex(unit.woodAnimationClip(""))
+  else:
+    ordinary
 
 proc buildingCentre(structure: Building): Vec3 =
   ## Returns the world centre of a structure's footprint.
@@ -373,7 +384,8 @@ proc runGraphics*(network: NetworkMatch = nil,
     )
     teamColors = newSeq[ColorRGBX](run.world.players.len)
     unitModelCache: UnitModelCache
-  resourceModels = newSeq[array[ResourcePack, CharacterModel]](
+  woodAxeModels = newSeq[CharacterModel](run.world.players.len)
+  resourceModels = newSeq[array[ResourcePack, array[bool, CharacterModel]]](
     run.world.players.len
   )
   profileBlock "models":
@@ -386,6 +398,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       if player >= FactionFiles.len:
         unitModels[player] = unitModels[player mod FactionFiles.len]
         unitClips[player] = unitClips[player mod FactionFiles.len]
+        woodAxeModels[player] = woodAxeModels[player mod FactionFiles.len]
         resourceModels[player] = resourceModels[player mod FactionFiles.len]
         continue
       for kind in UnitKind:
@@ -395,12 +408,17 @@ proc runGraphics*(network: NetworkMatch = nil,
         unitModels[player][kind] = model
         for slot in AnimationSlot:
           unitClips[player][kind][slot] = model.clipIndex(kind.unitClip(slot))
+      woodAxeModels[player] = unitModelCache.loadUnitModel(
+        manifest, roster.players[player][PeonUnit.ord], PeonUnit, woodAxe = true
+      )
       for pack in WoodPack .. GoldPack:
-        resourceModels[player][pack] = unitModelCache.loadBackpackModel(
-          manifest,
-          roster.players[player][PeonUnit.ord],
-          pack
-        )
+        for axe in false .. true:
+          resourceModels[player][pack][axe] = unitModelCache.loadBackpackModel(
+            manifest,
+            roster.players[player][PeonUnit.ord],
+            pack,
+            woodAxe = axe
+          )
   drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
@@ -1293,8 +1311,12 @@ proc runGraphics*(network: NetworkMatch = nil,
           continue
         let
           model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
-          clip = unitClips[unit.owner][unit.kind][unit.animation]
-        var animTime = renderTime(unit.animationTicks)
+          clip = renderUnitClip(
+            unit, model, unitClips[unit.owner][unit.kind][unit.animation]
+          )
+        var animTime = unit.woodAnimationTime(
+          renderTime(unit.animationTicks), frameAlpha
+        )
         if unit.animation == DeathAnimation or
             unit.animation == VictoryAnimation:
           animTime = min(animTime, clipDuration(model, clip))
@@ -1739,8 +1761,12 @@ proc runGraphics*(network: NetworkMatch = nil,
               continue
             let
               model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
-              clip = unitClips[unit.owner][unit.kind][unit.animation]
-            var animTime = renderTime(unit.animationTicks)
+              clip = renderUnitClip(
+                unit, model, unitClips[unit.owner][unit.kind][unit.animation]
+              )
+            var animTime = unit.woodAnimationTime(
+              renderTime(unit.animationTicks), frameAlpha
+            )
             # Hold one-shot clips at their final pose instead of looping.
             if unit.animation == DeathAnimation or
                 unit.animation == VictoryAnimation:

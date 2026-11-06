@@ -61,6 +61,22 @@ type
     factions*: seq[Faction]
     players*: seq[seq[UnitPreset]]
 
+proc woodAxePreset*(preset: Preset): Preset =
+  ## Preserve the outfit and its colors while equipping the right-hand axe.
+  result = preset
+  result.parts = @[]
+  var replaced = false
+  for part in preset.parts:
+    if part.category == "Right hand":
+      var axe = part
+      axe.item = "Berserker axe"
+      result.parts.add axe
+      replaced = true
+    else:
+      result.parts.add part
+  if not replaced:
+    result.parts.add PresetPart(category: "Right hand", item: "Berserker axe")
+
 proc readCharacterRoster*(
   factions: openArray[Faction] = []
 ): CharacterRoster =
@@ -149,14 +165,18 @@ proc generatedCharacterAssets*(): seq[Asset] =
     result.add modelAsset(directory / "clothing/backs" / (name & ".glb"))
   for units in roster.players:
     for entry in units:
-      let inventory = manifest.presetManifest(entry.preset)
-      for category in inventory.categories:
-        for item in category.items:
-          for path in item.files:
-            result.add modelAsset(directory / path, textureSize = 512)
-          for path in [item.texture, item.pupilMask]:
-            if path.len > 0:
-              result.add imageAsset(directory / path, 512)
+      var presets = @[entry.preset]
+      if entry.kind == $PeonUnit:
+        presets.add woodAxePreset(entry.preset)
+      for preset in presets:
+        let inventory = manifest.presetManifest(preset)
+        for category in inventory.categories:
+          for item in category.items:
+            for path in item.files:
+              result.add modelAsset(directory / path, textureSize = 512)
+            for path in [item.texture, item.pupilMask]:
+              if path.len > 0:
+                result.add imageAsset(directory / path, 512)
   for name in CharacterClips:
     var found = false
     for clip in manifest.clips:
