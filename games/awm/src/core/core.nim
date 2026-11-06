@@ -426,6 +426,8 @@ type
     DestroyIntent
     KeywordIntent
     GainControlIntent
+    FightIntent
+      ## It fights a minion: Duel's second target, whatever it loses first.
 
   DamageRule* = ref object of Rule
     amount*: RuleValue[int]
@@ -1500,6 +1502,8 @@ method text*(rule: FightRule, card: Card): string =
     rule.opponent.targetText(card) & "."
 
 method isCommand*(rule: FightRule): bool = false
+
+method intent*(rule: FightRule): TargetIntent = FightIntent
 
 method targets*(rule: FightRule): seq[Target] =
   for target in [rule.fighter, rule.opponent]:
@@ -2806,23 +2810,70 @@ proc helpsTarget*(rules: Rules, step: int, picks: seq[Choice] = @[],
   else:
     false
 
+proc fights(rules: Rules, into: var seq[FightRule]) =
+  ## Every fight in these rules and in their branches.
+  for rule in rules:
+    if rule of FightRule:
+      into.add FightRule(rule)
+    elif rule of ChooseRule:
+      for option in ChooseRule(rule).options:
+        option.fights(into)
+
+proc objectIndex(aims: seq[Aim], step: int): int =
+  ## The `step`th aim's number as `getTarget` counts it: among the objects
+  ## aimed at, which leaves options out.
+  for aim in aims[0 ..< step]:
+    if not (aim.target of OptionTarget):
+      inc result
+
+proc foughtBy(rules: Rules, aims: seq[Aim], step: int): FightRule =
+  ## The fight that names the `step`th target as the one fought, if any.
+  if aims[step].target of OptionTarget:
+    return nil
+  let index = aims.objectIndex(step)
+  var found: seq[FightRule]
+  rules.fights(found)
+  for fight in found:
+    if fight.opponent of PickedTarget and
+        PickedTarget(fight.opponent).index == index:
+      return fight
+
 proc intent*(rules: Rules, step: int, picks: seq[Choice] = @[],
     board: seq[BoardCard] = @[]): TargetIntent =
-  ## What the `step`th target (from 0) has done to it.
+  ## What the `step`th target (from 0) has done to it. A target a later
+  ## fight names as the one fought is mostly fighting, whatever the rule
+  ## that asks for it does first: Duel's second target loses Ranged, then
+  ## fights the first.
   let aims = rules.aims(picks, board)
-  if step in 0 ..< aims.len:
-    aims[step].rule.intent()
-  else:
+  if step notin 0 ..< aims.len:
     NoIntent
+  elif rules.foughtBy(aims, step) != nil:
+    FightIntent
+  else:
+    aims[step].rule.intent()
 
 proc intentAmount*(rules: Rules, step: int, picks: seq[Choice] = @[],
     board: seq[BoardCard] = @[]): int =
-  ## How much of it the `step`th target (from 0) takes.
+  ## How much of it the `step`th target (from 0) takes. A fought target
+  ## takes its fighter's power, as it is now once the fighter is picked,
+  ## and 1 before.
   let aims = rules.aims(picks, board)
-  if step in 0 ..< aims.len:
-    aims[step].rule.intentAmount()
-  else:
-    0
+  if step notin 0 ..< aims.len:
+    return 0
+  let fight = rules.foughtBy(aims, step)
+  if fight == nil:
+    return aims[step].rule.intentAmount()
+  result = 1
+  if fight.fighter of PickedTarget:
+    var objects: seq[Choice]
+    for pick in picks:
+      if pick.kind != OptionChoice:
+        objects.add pick
+    let index = PickedTarget(fight.fighter).index
+    if index < objects.len:
+      for entry in board:
+        if entry.choice == objects[index]:
+          return entry.power
 
 proc choices*(rules: Rules, context: RuleContext, step = 0,
     picks: seq[Choice] = @[]): seq[Choice] =

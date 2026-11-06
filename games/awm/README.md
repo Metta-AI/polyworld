@@ -243,6 +243,16 @@ intent 7 keeps its number; it now reads as gaining control.
 another player controls it, -1 otherwise. Scripts that call it need no
 change.
 
+### For bot creators: Duel's second target is intent 8, a fight
+
+`targetIntent` and `nextIntent` report a target that a later rule fights
+(Duel's second target) as intent 8, "fights it", instead of 6, the Ranged
+it loses first. `nextAmount` for it
+is the power of the minion it fights, once that minion is picked (1
+before). Intents 0 to 7 are unchanged. The reference players aim a fight
+like damage of that power, and prefer a Ranged minion, which only a fight
+that takes Ranged away can reach.
+
 ### Headless matches and replays
 
 ```sh

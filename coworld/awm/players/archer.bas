@@ -43,7 +43,7 @@
 '                                  0 = nothing to judge, 1 = damage,
 '                                  2 = buff, 3 = weaken, 4 = bounce,
 '                                  5 = destroy, 6 = loses a keyword,
-'                                  7 = gain control
+'                                  7 = gain control, 8 = fights it
 '   targetAmount(handIndex, step)  how much: damage dealt, stats changed
 '   choiceCount(handIndex)              number of valid targets
 '   choiceKind(handIndex, choiceIndex)  0=canceled 1=noTarget 2=hero 3=creature
@@ -197,8 +197,9 @@ IF triggerTargets > 0 THEN
   END
 END IF
 
-' Try attacks before cards on some decisions and after cards on others.
-' This allows attacking a Primordial before bouncing and replaying it.
+' Try attacks before cards on some decisions and after cards on others,
+' so removal sometimes clears the way for combat and sometimes finishes
+' what combat left.
 IF random(2) THEN GOSUB attacks
 
 ' Visit every card from a random starting position, choosing its targets
@@ -214,6 +215,8 @@ IF handSize > 0 THEN
         IF playCard(i) THEN END
       ELSE
         valid = 1
+        harm = 0
+        gain = 0
         s = 0
         WHILE s < count AND valid
           n = nextChoiceCount(i, "picks", s)
@@ -221,11 +224,16 @@ IF handSize > 0 THEN
             valid = 0
           ELSE
             GOSUB aim
+            IF skip THEN valid = 0
             ' Picking an option reveals that branch's own targets.
             count = nextTargetCount(i, "picks", s + 1)
           END IF
           s = s + 1
         WEND
+        ' A card that only hurts your own side waits in hand. One whose
+        ' cost lands there, like Explode's friendly minion, still plays
+        ' when another of its targets is worth hitting.
+        IF harm = 1 AND gain = 0 THEN valid = 0
         IF valid THEN
           IF playCardTargets(i, "picks") THEN END
         END IF
@@ -242,20 +250,30 @@ END
 aim:
 ' Choose the s'th target of hand card i (-1 for a waiting trigger) by what
 ' the card does to it. A target that helps goes on your best body; damage
-' goes where it kills, otherwise at a hero; removal takes their biggest
-' threat; a keyword only comes off a minion that has one. Ties break at
-' random, and when nothing scores every choice stays eligible, so a lone
-' minion still bounces itself and declining stays possible.
+' and fights go where they kill, otherwise at a hero or their biggest;
+' removal takes their biggest threat; a keyword only comes off a minion
+' that has one. Ties break at random. When nothing scores, decline if
+' that is allowed (a minion then enters play without its effect), else
+' take any enemy choice, and only then your own side: harm notes it, and
+' skip keeps a card whose fight would pit your own minions against each
+' other in hand. A waiting trigger must be answered, so it never skips.
 mine = nextHelpsTarget(i, "picks", s)
 what = nextIntent(i, "picks", s)
 size = nextAmount(i, "picks", s)
+skip = 0
 best = -1
 bestScore = 0
+decline = -1
+enemies = 0
 c = 0
 WHILE c < n
   k = nextChoiceKind(i, "picks", s, c)
   o = nextChoiceOwner(i, "picks", s, c)
   d = nextChoiceId(i, "picks", s, c)
+  IF k < 2 THEN decline = c
+  IF k = 2 OR k = 3 THEN
+    IF o >= 0 AND o <> selfPlayer THEN enemies = enemies + 1
+  END IF
   GOSUB score
   IF value > 0 THEN
     IF best < 0 THEN
@@ -272,11 +290,39 @@ WHILE c < n
   END IF
   c = c + 1
 WEND
-IF best < 0 THEN
-  picks(s) = random(n)
+IF best >= 0 THEN
+  picks(s) = best
+  ' An option chooses what happens; it hits nothing yet.
+  IF nextChoiceKind(i, "picks", s, best) <> 4 THEN gain = 1
   RETURN
 END IF
-picks(s) = best
+IF decline >= 0 THEN
+  picks(s) = decline
+  RETURN
+END IF
+IF enemies > 0 THEN
+  ' Nothing scores, but an enemy is offered: never hurt your own side,
+  ' though help given to an enemy is harm too.
+  IF mine THEN harm = 1
+  want = random(enemies)
+  c = 0
+  WHILE c < n
+    k = nextChoiceKind(i, "picks", s, c)
+    o = nextChoiceOwner(i, "picks", s, c)
+    IF k = 2 OR k = 3 THEN
+      IF o >= 0 AND o <> selfPlayer THEN
+        IF want = 0 THEN picks(s) = c
+        want = want - 1
+      END IF
+    END IF
+    c = c + 1
+  WEND
+  RETURN
+END IF
+' Only your own side is offered.
+IF mine = 0 THEN harm = 1
+IF what = 8 AND i >= 0 THEN skip = 1
+picks(s) = random(n)
 RETURN
 
 score:
@@ -308,10 +354,14 @@ ELSE
   IF mine THEN
     value = 4 + power * 2 + hp
   ELSE
-    IF what = 1 THEN
-      ' Damage: a kill is worth their whole body, else soften the biggest.
+    IF what = 1 OR what = 8 THEN
+      ' Damage, or a fight with a minion of that power: a kill is worth
+      ' their whole body, else soften the biggest.
       value = 1 + power
       IF hp <= size THEN value = 10 + power * 2 + hp
+      ' Duel takes Ranged off the minion it fights: the one answer to a
+      ' Ranged minion, which takes no combat damage from the rest.
+      IF what = 8 AND ranged THEN value = value + 10
     ELSE
       IF what = 6 THEN
         ' Taking a keyword away only matters to a minion that has one.

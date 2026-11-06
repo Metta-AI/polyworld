@@ -160,8 +160,15 @@ with `optionDamage(handIndex, "picks", pickedCount, option)` and
 `optionSelfDamage(...)`, which report what a branch deals and what it costs
 your own hero, and read its words with `optionRules$(...)`. `nextHelpsTarget`, `nextIntent`, and `nextAmount` describe the
 next target the same way, following earlier picks: intent 1 is damage,
-2 a buff, 3 a weaken, 4 a bounce, 5 a destroy, 6 a lost keyword, and 7
-gaining control (Control takes an enemy minion for good).
+2 a buff, 3 a weaken, 4 a bounce, 5 a destroy, 6 a lost keyword, 7
+gaining control (Control takes an enemy minion for good), and 8 a fight:
+Duel's second target loses Ranged, then fights the first, and its
+`nextAmount` is the first target's power once that is picked.
+
+When nothing on the side a target should be on is worth it, a target that
+allows it can be declined with its no-target choice: a minion then enters
+play without its effect. The reference players do that, and otherwise keep
+a card in hand rather than aim it at their own side for nothing.
 
 A card in play can gain or lose rules (Morphosis Chamber gives a minion
 Ranged or Hidden 1; Duel takes Ranged away). `boardHasKeyword` follows them,

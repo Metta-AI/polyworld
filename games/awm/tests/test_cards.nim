@@ -978,6 +978,26 @@ suite "AWM Duel and Shields":
     check printed(rules(fight(getTarget(1), getTarget(0)))) ==
       "The second target fights the first target."
 
+  test "Duel's second target reads as fighting the first, at its power":
+    let duel = baseCard("Duel", 2)
+    check duel.intent(0) == BuffIntent
+    check duel.intent(1) == FightIntent
+    # Before the fighter is picked its power is unknown.
+    check duel.intentAmount(1) == 1
+    let
+      bear = baseCard("Bear", 2)
+      (game, me, _) = duelGame(602, bear, baseCard("Sniper", 2))
+    check duel.intentAmount(1, @[creatureChoice(me, 1)],
+      game.boardCards()) == bear.power
+    # A fight names its targets by getTarget, so the fought one is found
+    # wherever it is asked for.
+    let reversed = Card(kind: Spell, rules: rules(
+      lose(ranged(), target({kind: {Minion}})),
+      addPowerToughness(1, 1, target({kind: {Minion}})),
+      fight(getTarget(1), getTarget(0))))
+    check reversed.intent(0) == FightIntent
+    check reversed.intent(1) == BuffIntent
+
   test "each Duel target offers every minion":
     let (game, me, enemy) =
       duelGame(601, Warrior.classCard(), baseCard("Sniper", 2))
@@ -2480,10 +2500,11 @@ suite "AWM target intents":
     check baseCard("oozification-4").intent(0) == DestroyIntent
     check baseCard("tactician-2").intent(0) == WeakenIntent
     check baseCard("tactician-2").intentAmount(0) == 1
-    # Duel buffs its first target and takes Ranged off its second.
+    # Duel buffs its first target; its second loses Ranged, but above all
+    # fights the first.
     check baseCard("duel-2").intent(0) == BuffIntent
     check baseCard("duel-2").intentAmount(0) == 2
-    check baseCard("duel-2").intent(1) == KeywordIntent
+    check baseCard("duel-2").intent(1) == FightIntent
     # A card with nothing to judge, and a step past the end.
     check baseCard("bolt-1").intent(0) == DamageIntent
     check baseCard("plan-3").intent(0) == NoIntent

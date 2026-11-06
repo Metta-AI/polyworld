@@ -111,14 +111,13 @@ block:
   doAssert played.step()
   doAssert played.bots[0].action.kind == ActionEndTurn
 block:
-  var bouncedSelf = false
+  # Alone, a Bouncer enters play and declines to bounce itself.
   for seed in 0 ..< 16:
     var played = fixture(seed)
     played.game.players[0].hand = @[baseCardNamed("Bouncer")]
     doAssert played.step()
     doAssert played.bots[0].action.kind == ActionPlayCard
-    bouncedSelf = bouncedSelf or played.game.players[0].board.len == 0
-  doAssert bouncedSelf
+    doAssert played.game.players[0].board.len == 1
 block:
   var played = fixture(3)
   played.game.players[0].hand = @[baseCardNamed("Duel")]
@@ -129,6 +128,50 @@ block:
   doAssert played.step()
   doAssert played.bots[0].action.kind == ActionPlayCard
   doAssert played.bots[0].action.choices.len == 2
+
+echo "The reference script never turns a card on its own side for nothing"
+block:
+  # With no enemy minion, removal, damage and weakening stay in hand or
+  # enter play doing nothing, whatever the seed.
+  for seed in 0 ..< 16:
+    for name in ["Oozification", "Overcharge", "Assassin", "Tactician"]:
+      var played = fixture(seed)
+      played.game.players[0].hand = @[baseCardNamed(name)]
+      played.game.players[0].board = @[ready(0, 1, "Bear")]
+      played.game.players[0].board[0].canAttack = false
+      played.game.nextMinionId = 2
+      while played.game.currentPlayer == 0 and played.step():
+        discard
+      let board = played.game.players[0].board
+      doAssert board.len >= 1 and board[0].id == 1, name
+      doAssert board[0].currentToughness == board[0].card.toughness, name
+      doAssert board[0].bonusPower == 0, name
+block:
+  # Duel never makes your own minions fight each other.
+  for seed in 0 ..< 16:
+    var played = fixture(seed)
+    played.game.players[0].hand = @[baseCardNamed("Duel")]
+    played.game.players[0].board = @[ready(0, 1, "Bear"),
+      ready(0, 2, "Footsoldier")]
+    for minion in played.game.players[0].board.mitems:
+      minion.canAttack = false
+    played.game.nextMinionId = 3
+    doAssert played.step()
+    doAssert played.bots[0].action.kind == ActionEndTurn
+block:
+  # Explode's friendly minion is its cost: with no enemy minion it still
+  # destroys one of yours to hit a hero.
+  var played = fixture(7)
+  played.game.players[0].hand = @[baseCardNamed("Explode")]
+  played.game.players[0].board = @[ready(0, 1, "Bear")]
+  played.game.players[0].board[0].canAttack = false
+  played.game.nextMinionId = 2
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == creatureChoice(0, 1)
+  doAssert action.choices[1].toChoice.kind == HeroChoice
+  doAssert action.choices[1].toChoice.owner != 0
 
 echo "The reference script aims at what each card does"
 block:
