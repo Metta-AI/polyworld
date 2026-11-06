@@ -1,6 +1,7 @@
 ## Archers Warriors Mages — Polyworld native and browser client.
 ## Reads the command line and starts a game mode.
-import core/sim
+import std/os
+import core/[sim, cardlist]
 export sim
 
 when not defined(headless):
@@ -43,6 +44,11 @@ when not defined(headless):
       "                   play its precon.\n" &
       "  --replay PATH    Watch a recorded match (see --record in the\n" &
       "                   headless build)\n" &
+      "  --cards          List every card and exit\n" &
+      "  --cards:CLASS    List one class's cards (archer, warrior or mage)\n" &
+      "                   and exit\n" &
+      "  --card:NAME      Show one card and exit; case, spaces and hyphens\n" &
+      "                   don't matter (--card:hail-of-arrows)\n" &
       "  -h, --help       Show this help and exit"
 
   proc readHumanSeat(path: string, seats: int, seed: int64): Seat =
@@ -60,6 +66,9 @@ when not defined(headless):
   proc runAwm*() =
     if "--help" in commandLineParams() or "-h" in commandLineParams():
       printHelp()
+      return
+    # The card reference needs no window.
+    if printCardReference(commandLineParams()):
       return
     var options = parseSessionOptions(commandLineParams())
     # Before initApp, which moves to the Polyworld folder.
@@ -92,4 +101,5 @@ when defined(headless):
     when defined(coworld):
       runCoworld()
     else:
-      runHeadless()
+      if not printCardReference(commandLineParams()):
+        runHeadless()

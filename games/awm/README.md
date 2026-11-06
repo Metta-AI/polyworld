@@ -1,432 +1,485 @@
 # AWM — Archers Warriors Mages
 
-Card-game prototype in Nim + Polyworld. Native and browser.
+A card game for 2 to 7 heroes, written in Nim on Polyworld, native and in the
+browser. Players are BASIC scripts (or a human at the table). This file is
+the reference for writing those scripts: the rules, the whole bot API, a
+working example, and how to test a bot.
 
-## Layout
+## Quick start
 
-```
-src/awm.nim          reads the command line and starts a game mode
-src/baseset.nim      the cards and decks: edit here to change the set
-src/app.nim          what every mode shares: window, renderers, heroes
-src/play.nim         playing on a table: targeting, attacks, bots, beats
-src/core/            the game itself: no window, no graphics
-  core.nim           cards, rules and the rules DSL
-  sim.nim            the match: players, turns, effects, deaths
-  cardset.nim        card lookups, wire IDs and dealing decks
-  explanations.nim   what named mechanics (Ranged, Hidden...) mean, for
-                     the card inspector
-  sessions.nim       saved games and the built-in bot
-  bots.nim           BASIC bot scripts
-src/modes/           game modes, clients of the core
-  duel.nim           two players
-  multiplayer.nim    three to seven players around the ring
-src/scene/           the 3D world: cards and piles, the courtyard and the
-                     ring, heroes, camera placements, post-processing
-src/vfx/             card and combat effects
-src/ui/              the HUD, card faces, and developer panels
-src/net/             the browser server and its client side
-```
-
-`nim c src/awm.nim` writes `./awm` (see `config.nims`), next to `players/`
-and `web/`.
-
-## Native
+From this folder (`games/awm`):
 
 ```sh
-nim c src/awm.nim                            # builds ./awm
-./awm                                        # bot vs bot, random classes
-./awm --human --class warrior --opponent mage # play against a bot
-./awm --human players/archer_warrior.bas     # play that script's deck
-./awm --seed 42                              # fixed deal
-./awm --players=4 --human                    # multiplayer: you and 3 bots
-```
-
-| Flag | Default |
-|---|---|
-| `--human [PATH.bas]` | off (bot vs bot) |
-| `--class CLASS` | `archer` |
-| `--opponent CLASS` | `mage` |
-| `--seed INTEGER` | `20260910` |
-| `--players INTEGER` | `2` |
-| `--bot PATH` | the reference players in `players/` |
-
-Bot vs bot ignores `--class`/`--opponent`: each script picks its own class
-and deck. `--human` alone puts up the class selection screen, and you play
-the chosen class's precon; `--human PATH.bas` skips it and plays the class
-and deck that script's setup lists (only its setup runs).
-
-`players/` holds four reference players that play alike and differ only in
-their setup: `archer.bas`, `warrior.bas` and `mage.bas` play the precons, and
-`archer_warrior.bas` an Archer deck with Warrior cards and Warrior class
-cards. Without `--bot`, a duel's bots are drawn from them and a multiplayer
-match seats them in turn.
-
-### Decks
-
-A bot script lists its deck in its setup, after picking a class:
-
-```basic
-IF selectingClass THEN
-  pickClass(0)            ' Archer
-  deckCard("Bolt", 4)
-  deckCard("Sniper", 4)
-  ' ... 40 cards in all
-  END
-END IF
-```
-
-A deck is exactly 40 base-set cards, by printed name, with 1 to 4 copies of
-each; the class cards (Archer, Warrior, Mage) take any number. A card listed
-twice counts its copies together. A seat whose deck breaks these rules sits
-down with its class and no deck, and is out before the first turn; the
-problems are printed (in Coworld, to the player's private log). The precons
-in `baseDeckLists` follow the same rules, checked at startup.
-Replays record every seat's deck.
-
-Hero Select presents the animated Polyworld characters on stone podiums,
-with class banners, lanterns and the battlefield's starry sky and materials.
-In human mode, click a character or its button, or press 1, 2 or 3 for Archer,
-Warrior or Mage. The camera and hit areas adapt to the viewport. The same
-selection screen is used for duels and multiplayer; bot selection stays automatic.
-
-`--players=3` (or `--players 3`) and larger counts play a multiplayer match:
-a small circular center surrounded by one modular balcony per player. Each
-balcony has its own hero, deck, cards in play, discard pile and hand. The
-camera fits all balconies in the view. With `--human` you pick your class on
-screen (or bring a deck) and play seat 1; bots play the others, and the last
-player alive wins. Without it, bots play every seat. Omitting `--players`, or
-using `--players=2`, keeps the existing two-player game. Counts below two and
-invalid counts are rejected. F8 toggles the same screen effects as the game.
-
-Balcony zones and the camera fit live in `src/scene/ring.nim`. The stone floor,
-fascia, parapet and end pieces are built in separate curved courses; the ring
-expands with player count while preserving card sizes and usable balcony depth.
-Lanterns, ivy and hanging banners use the original courtyard materials and props.
-
-Build with `-d:awmLayoutTuning` to tune the camera and the hands live, in the
-duel and in the multiplayer preview. Z/X pick what moves — your hand, the
-opponent's hand, the camera, or (in the duel) the spot a played spell floats
-in, printed to the console — WASD move it forward,
-left, back and right, Q/E raise and lower it, T/G pitch it down and up, F/H yaw
-it left and right, and Enter prints the values to paste back as defaults.
-
-### Screen effects
-
-`src/scene/post.nim` renders the 3D scene offscreen and adds screen-space ambient
-occlusion (before the VFX), bloom from the light the VFX add, FXAA, a light
-grade and a vignette. The HUD is not affected. F8 toggles all of it.
-
-| Variable (native) | Default |
-|---|---|
-| `AWM_POSTFX=0` | all effects on |
-| `AWM_SSAO=0` / `AWM_BLOOM=0` / `AWM_FXAA=0` | each on |
-| `AWM_SSAO_RADIUS` | `1.501` world units |
-| `AWM_SSAO_INTENSITY` | `3.523` |
-| `AWM_SSAO_BIAS` | `0.08` |
-
-Build with `-d:awmPostLayers` to view the intermediate layers: 1 final image,
-2 scene before bloom and grading, 3 depth, 4 surface normals, 5 unblurred
-occlusion, 6 occlusion, 7 scene before VFX, 8 light added by VFX, 9 bloom
-source, 0 bloom. `AWM_POST_LAYER=N` starts on layer N (for screenshots).
-
-Build with `-d:awmPostPanel` for a draggable tuning window with every setting,
-grouped by layer (F9 shows or hides it; with `-d:awmPostLayers` it also picks
-the layer). "Print settings" writes the values as Nim for
-`defaultPostSettings` in `src/scene/post.nim`. Clicks over the window don't reach
-the board.
-
-### Night courtyard materials
-
-The paving ends at the enclosure walls. The background is a three-layer
-starfield with camera parallax, scrolling, twinkling and soft star halos.
-Blue-violet nebulas drift and pulse behind it. It writes no depth, so SSAO
-ignores the sky while the brightest stars can feed bloom.
-
-Stone uses two seamless linear OpenGL (+Y) normal maps: broad fractured rock
-faces and restrained fine grain. A weathering texture adds mineral variation
-without baking in a light direction. Triplanar mapping keeps the
-circular slabs, wall faces and bevels at the same material scale. Assets live
-in `polyworld_art/awm/battlefield/textures` and are staged by the web build.
-The original generated rock source and its prompt are retained in
-`polyworld_art/awm/battlefield/source`; rebuilding conditions the edges and
-normalizes the vectors after resizing. Rebuild them with:
-
-```sh
-nim r --out:build/render-stone-normals tools/render_stone_normals.nim
-```
-
-Lighting uses the mapped normals. A depth-tested normal replay supplies the
-visible stone normals to SSAO and layer 4; cards and characters keep their
-depth-derived normals. The replay shares scene depth and never writes it,
-so floor detail cannot leak onto foreground cards. SSAO uses a restrained
-blend of surface detail while the debug layer shows the full mapped normals.
-`AWM_STONE_NORMALS=0` disables the normal perturbation for comparison. Neither
-the material nor the sky changes the HUD or card artwork.
-
-```sh
-nim r -d:headless --out:build/test_courtyard tests/test_courtyard.nim
-nim r --out:build/test_courtyard_render tests/test_courtyard_render.nim
-```
-
-Screenshot builds support `AWM_CAPTURE_NO_HOVER=1` and `AWM_SCENE_TIME=0` for
-repeatable material comparisons without the card inspector.
-
-## Browser
-
-```sh
-./tools/serve.sh                             # build + serve
-./tools/build_web.sh                         # build only
-AWM_SKIP_WEB_BUILD=1 ./tools/serve.sh       # serve existing build
-```
-
-The browser loader uses a flat Polyworld-style night courtyard and an AWM
-shield logo, spelling out **Archers Warriors Mages**. Its brass progress bar reports
-asset download progress, then shows preparation until the first game frame
-is ready. Loading assets are staged separately from the game pack so they
-can appear immediately. Source mappings are in `web/loading/README.md`.
-
-Card illustrations are staged already cropped to the card's 546 × 417 art
-window (`tools/stage_card_art.nim`), the size the game draws them at, so the
-game pack stays near 31 MB instead of carrying the full-size originals.
-`tests/test_assets.nim` checks each staged image draws exactly as its
-original.
-
-With Playwright and Chrome available, run `node tests/test_hero_select.cjs`
-against the server to check hero and button selection, keyboard shortcuts,
-duel/multiplayer, portrait/Retina layouts, and loader progress/error states.
-
-The page takes the native flags as URL parameters:
-
-- Bots: <http://127.0.0.1:8080/awm.html>
-- Duel: <http://127.0.0.1:8080/awm.html?human=1&class=warrior&opponent=mage&seed=42>
-- Multiplayer, bots: <http://127.0.0.1:8080/awm.html?players=5>
-- Multiplayer, you and 3 bots: <http://127.0.0.1:8080/awm.html?players=4&human=1>
-
-| Parameter | Native flag |
-|---|---|
-| `human=1` | `--human` |
-| `class`, `opponent` | `--class`, `--opponent` |
-| `players` | `--players` |
-| `seed` | `--seed` |
-| `bot=URL` (repeatable) | `--bot` |
-
-## Online: Coworld
-
-AWM runs online on Coworld the way Polyworld's other games do: the platform
-stages one BASIC player per seat, the game plays the match headless, then
-publishes the results and a replay that plays in the browser. Two seats play
-a duel; three to seven play the multiplayer ring. The package (manifest,
-Compose file, guide, baseline player and replay viewer build hook) is in
-[`coworld/awm`](../../coworld/awm); the shared runtime contract is in
-[`coworld/integration.md`](../../coworld/integration.md).
-
-```sh
-(cd ../.. && nim r coworld/tools/sync_dependencies.nim)
-nim c -d:coworld -o:../../tmp/coworld/awm src/awm.nim  # the Coworld server
-(cd ../.. && nim r coworld/tools/test_runtime.nim awm)  # its contract tests
-coworld build --project ../../coworld/awm --version VERSION
-```
-
-The config takes `players` and `tokens` (2 to 7 each), `seed`, `max_ticks`,
-and an optional `classes` array (one of `archer`, `warrior`, `mage` per seat,
-each playing its precon; otherwise every script picks its class and deck). One tick is one game action. The winner
-scores 1, everyone else 0; a draw or a timeout scores 0 for all.
-
-### For bot creators: `steal` is now `gainControl`
-
-Control's rule was renamed from `steal` to `gainControl`. A script that
-matches it by name must now look for `"gainControl"`, both as a rule-tree
-node (`nodeKind$`, `nodeFind`) and as a log event (`logKind$`). Target
-intent 7 keeps its number; it now reads as gaining control.
-
-`boardStolenFrom(p, i)` keeps its name and meaning: whose card it is while
-another player controls it, -1 otherwise. Scripts that call it need no
-change.
-
-### For bot creators: Duel's second target is intent 8, a fight
-
-`targetIntent` and `nextIntent` report a target that a later rule fights
-(Duel's second target) as intent 8, "fights it", instead of 6, the Ranged
-it loses first. `nextAmount` for it
-is the power of the minion it fights, once that minion is picked (1
-before). Intents 0 to 7 are unchanged. The reference players aim a fight
-like damage of that power, and prefer a Ranged minion, which only a fight
-that takes Ranged away can reach.
-
-### Headless matches and replays
-
-```sh
+nim c src/awm.nim                                 # builds ./awm
+./awm --cards:warrior                             # print a class's cards
+./awm --human --bot players/warrior.bas           # play against a bot
 nim c -d:headless -o:build/awm-headless src/awm.nim
-./build/awm-headless --bot players/archer.bas:3 --bot players/warrior.bas:2 \
-  --seed 9 --record build/m.replay
-./build/awm-headless --replay build/m.replay  # checks every tick's hash
-./awm --replay build/m.replay                 # watch it on the table
-```
-
-`--classes archer,mage,...` fixes the classes (each seat then plays its
-class's precon) and `--ticks N` limits the
-match. The replay viewer has the shared Polyworld transport: play/pause
-(Space), step, seek, loop and 1x-16x speed. Its browser build is
-`AWM_WEB_DIR=build/replay ./tools/build_web.sh -d:replayViewer`; open
-`awm.html?replay=URL` from the same server.
-
-## Tests
-
-```sh
-nim r -d:headless --out:build/test_cards tests/test_cards.nim
-nim r -d:headless --out:build/test_sessions tests/test_sessions.nim
-nim r -d:headless --out:build/test_multiplayer tests/test_multiplayer.nim
-nim r -d:headless --out:build/test_match tests/test_match.nim
+./build/awm-headless --bot my.bas --bot players/mage.bas --seed 7
 ```
 
 ## Rules
 
-- Choose Archer, Warrior, or Mage, and a 40-card deck (see Decks).
-- 20 life, 5-card opening hand.
-- Random first player; first player skips their turn draw.
-- Each turn: +1 max energy, full replenish, draw one card.
-- Minions attack once per turn, starting the turn after they're played:
-  click one, then an enemy minion or hero (right-click cancels). Minions
-  deal their power to each other; damage stays, and minions at 0
-  toughness go to the discard pile.
-- Ranged minions take no combat damage from non-ranged minions, whether
-  attacking or defending. Spells and on-play effects still damage them.
-- Power/toughness buffs are permanent while the minion stays on the board;
-  a bounced minion returns to hand with its printed stats. Changed stats
-  show green (raised) or red (lowered) on the card.
-- `gain(rule, ...)` gives a card in play any rule, and `lose(rule, ...)`
-  takes away every rule of its own that prints the same; both last while it
-  stays in play. A gained rule takes hold at once: `hidden(1)` hides the
-  minion until the start of its owner's next turn (a longer hiding stands),
-  and a gained trigger fires from then on. A gained on-play rule never runs.
-  Losing `hidden()` ends any hiding. Gaining a rule back undoes its loss.
-  The card's rules box shows the change: its printed rules in order, lost
-  ones in red and struck through, then the gained ones in green.
-- Summoned minions enter at the right of their owner's board. Like played
-  minions they attack from their owner's next turn, and their own on-play
-  rules run for their owner, who may pick no target. That happens once the
-  card that summoned them has resolved, before any trigger already
-  waiting, so a card's later rules reach them first (Rally buffs its own
-  Footsoldiers).
-- Trinkets (Plan) stay in play on their owner's board but aren't minions:
-  they can't attack or be attacked, and minion targets and "all minions"
-  effects ignore them.
-- `on(nextTurn(...))` rules fire once, at the start of that player's next
-  turn after their draw, for the card's owner, if the card is still in
-  play. Drawing from an empty deck loses the game, as on a normal turn.
-- Cards with several targets (Duel) are aimed one target at a time. A
-  fight is combat without an attack: both minions deal their power at
-  once, Ranged applies, and it doesn't use up either minion's attack.
-- A deck may carry cards of another class. An off-class card costs 3 more
-  energy, and its crystal shows the total in red; the surcharge never takes
-  a card below its printed price. The class cards (Archer,
-  Warrior, Mage) belong to no class, cost nothing, and stay in play as
-  trinkets: each one you control takes 1 off the surcharge on cards of the
-  class it names, and announces itself with that class's icon beside your
-  hero. The `archer_warrior.bas` deck carries Warrior class cards.
-- A hidden minion (Ambusher, Spirit) can't be attacked. `hidden(2)` lasts
-  until the start of its owner's second turn from now, counting down as
-  their turns begin; `hidden()` lasts as long as the minion is in play.
-  Spells and other card effects still reach it, it attacks as usual, and
-  attacking doesn't reveal it. Its owner sees it normally; everyone else
-  sees it in shadow.
-- A lasting card (Post, Overwork) leaves play by itself: `lasts(3)` sends
-  it to its owner's discard pile as the third of its controller's turns
-  ends, counting the one it was played in. Only its controller's turns
-  count: a Post you Gift counts down as the new controller's turns end.
-  Each count comes at Lasts' place among the card's rules, so an
-  end-of-turn trigger written before `lasts(...)` still fires on the
-  card's last turn. A card that enters as a turn ends starts counting at
-  its controller's next one.
-  Gained, a count starts (a longer one already running stands); lost, it
-  stops.
-- A Ready minion can attack the turn it enters play, played or summoned.
-  Gaining Ready (`gain(ready(), ...)`) lets it attack that turn if it
-  hasn't yet; losing it the turn it entered takes that attack back.
-- `gainControl(You, ...)` (Control) takes a minion for good: it moves to the
-  end of your board with its damage, buffs and gained or lost rules, and
-  attacks from your next turn, like a minion just played. Its triggers fire
-  for you. It is still its owner's card: bounced, it goes to their hand, and
-  slain, to their discard pile. Stolen back by its owner, it is simply
-  theirs again. `gainControl(target({kind: {Hero}}), ...)` (Gift) picks the
-  hero first, then hands them the card the same way; picking your own hero
-  leaves it where it is.
-- `repeat` (Reload) runs another card in play's printed rules again. Its
-  targets are picked afresh, and anything the rules aim at their own card
-  (`self()`) finds nothing and does nothing. Picking no card cancels.
-- `on(eachTurn(...))` fires at the start of every one of that player's
-  turns, for as long as the card is in play; `on(nextTurn(...))` fires
-  once.
-- `on(eachEndOfTurn(...))` fires as every one of that player's turns ends
-  while the card is in play, the turn it entered too. Lasts counts as the
-  turn ends too, in rule order. A choice it asks for (Burnout's discard)
-  holds the turn, and a Lasts count after it, until it's made; making it
-  ends the turn.
-- `on(played(You, {kind: {Minion}, class: {Archer}, energyCost:
-  atMost(3)}), ...)` fires each time that player plays a matching card
-  from hand, once the card has resolved. `getPlayed()` is that card:
-  rules that act on cards in play (`gain(ready(), getPlayed())`) reach it
-  while it's still in play, and `summon(1, getPlayed())` copies it as it
-  is then, with its damage, buffs and gained or lost rules (so Post's
-  copies are Ready too). Summoned and repeated cards aren't played, so
-  copies are never copied, and a card's own play doesn't fire its
-  triggers. Each Post fires on its own: two of them make two copies. A
-  copy is a summon, so it runs its on-play rules again (Sharpshooter
-  shoots twice) and goes to its owner's hand, printed, if bounced.
-- Filters (`target`, `getCards`, `played`) take numbers too:
-  `energyCost:` (printed, without the off-class surcharge), `power:` and
-  `toughness:` (live in play), each with `eq(n)`, `notEq(n)`, `atMost(n)`,
-  `atLeast(n)` or `between(a, b)`, all inclusive; and `class: {Archer}`
-  (any of the classes listed). Heroes and class cards have no card class,
-  and heroes no numbers, so those filters never pick them.
-- A card that offers a choice (Overcharge) asks for it first: the table
-  dims and shows one card per branch, each printing that branch alone.
-  Click one to take it, or cancel with the button, a click off the cards,
-  or a right-click. A trigger's choice (Morphosis Chamber) can't be
-  canceled: canceling declines it, so no branch runs and the rest of the
-  trigger still does. The branch's own targets are aimed afterwards, as
-  usual. Bots weigh a branch by what it deals against what it costs their
-  own hero, and never take one that would finish them off.
-- No victory condition yet.
+- **Heroes.** Each hero has a class (Archer, Warrior or Mage), 20 life and
+  a 40-card deck, and draws 5 cards. Seats take turns in order; the first
+  is random and skips the draw on the first turn.
+- **Turn.** At the start of your turn your total energy rises by 1 (no
+  cap), your energy refills to it, you draw 1 card, and your start-of-turn
+  triggers fire. Then, in any order: play cards you can afford, and attack
+  once with each ready minion. Ending the turn fires end-of-turn triggers.
+- **Card kinds.** A minion stays in play with power/toughness and attacks.
+  A spell resolves and goes to the discard pile. A trinket stays in play
+  but is not a minion: it never attacks, can't be attacked, and "minion"
+  targets and "all minions" effects skip it.
+- **Combat.** An attacker hits one opponent's hero or minion; minions deal
+  their power to each other at once. Damage stays. A minion at 0 toughness
+  dies to its owner's discard pile. A minion attacks from its controller's
+  next turn, once per turn. A fight (Duel) is combat without an attack: it
+  uses up neither minion's attack.
+- **Keywords.**
+  - *Ranged*: takes no combat damage from non-Ranged minions, attacking or
+    defending. Card effects still damage it.
+  - *Hidden N*: can't be attacked for N more of its owner's turns; plain
+    *Hidden* lasts while it is in play. Cards still reach it, and it
+    attacks normally.
+  - *Ready*: can attack the turn it enters play.
+  - *Lasts N*: leaves play as the Nth of its controller's turns ends,
+    counting the turn it entered.
+- **Changes in play.** Buffs, weakens, damage, and gained or lost rules
+  last while the card stays in play. A bounced card returns to its owner's
+  hand as printed. Summoned minions enter at the right of the board and
+  run their on-play rules for their controller.
+- **Control.** A minion taken with Control or Gift keeps its damage and
+  changes, and attacks from its new controller's next turn. It is still
+  its owner's card: bounced or killed, it goes to the owner.
+- **Classes.** A card of another class costs 3 more energy, less 1 for each
+  of that class's level-up card (the 0-cost `Archer`, `Warrior` and `Mage`
+  trinkets) you control, and never less than printed.
+- **Decks.** Exactly 40 cards, any base-set cards by printed name, 1 to 4
+  copies each; level-up cards take any number. An illegal deck is out
+  before the first turn.
+- **Winning.** A hero at 0 life or below, or who draws from an empty deck,
+  is out: their hand is discarded, and their cards in play stay (their
+  minions can still be attacked). The last hero standing wins. If the
+  last heroes fall together, the one whose turn it is wins.
 
-| Class | Card | In precon | Cost | Type | Stats | Effect |
-|---|---|---|---|---|---|---|
-| — | Archer | — | 0 | Trinket | — | Off-class Archer cards cost 1 less |
-| — | Warrior | — | 0 | Trinket | — | Off-class Warrior cards cost 1 less |
-| — | Mage | — | 0 | Trinket | — | Off-class Mage cards cost 1 less |
-| Archer | Bolt | 4 | 1 | Spell | — | 2 damage to either hero |
-| Archer | Sniper | 4 | 2 | Minion | 2/1 | Ranged |
-| Archer | Sharpshooter | 4 | 3 | Minion | 3/1 | Ranged; 1 damage to any target |
-| Archer | Hail of Arrows | 4 | 3 | Spell | — | 1 damage to all enemy minions |
-| Archer | Overcharge | 4 | 3 | Spell | — | Choose: 1 damage to a minion and its owner; or 3 damage to a minion, its owner and yourself |
-| Archer | Explode | 2 | 3 | Spell | — | Destroy a friendly minion, then deal its power to any target |
-| Archer | Ambusher | 4 | 3 | Minion | 2/2 | Hidden 1 |
-| Archer | Assassin | 3 | 6 | Minion | 5/1 | Hidden 1; 2 damage to a minion |
-| Archer | Reload | 3 | 2 | Spell | — | Repeat a minion or trinket's rules, aiming fresh targets |
-| Archer | Wildfire | 4 | 6 | Trinket | — | At the start of each of your turns, 1 damage to all minions and to each player |
-| Archer | Post | 4 | 1 | Trinket | — | Lasts 2; when you play an Archer minion that costs 3 or less, it gains Ready, summon a copy of it (buffs and all) |
-| Archer | Gift | — | 3 | Spell | — | A hero gains control of a friendly minion or trinket (in no precon) |
-| Warrior | Bear | 4 | 2 | Minion | 3/2 | — |
-| Warrior | Swords | 4 | 2 | Spell | — | Friendly minions get +1/+0 permanently |
-| Warrior | Shields | 4 | 1 | Spell | — | Friendly minions get +0/+1 permanently |
-| Warrior | Duel | 4 | 2 | Spell | — | A minion gets +1/+1, a minion loses Ranged, then they fight |
-| Warrior | Tactician | 4 | 2 | Minion | 1/2 | A minion gets -1/-0 permanently |
-| Warrior | Footsoldier | 4 | 1 | Minion | 1/2 | — |
-| Warrior | Commander | 4 | 5 | Minion | 2/3 | Summons 2 Footsoldiers |
-| Warrior | Rally | 4 | 5 | Spell | — | Summons 2 Footsoldiers, then friendly minions get +1/+0 |
-| Warrior | Banner | 4 | 3 | Trinket | — | At the start of each of your turns, summon a Footsoldier |
-| Warrior | Pillage | 4 | 4 | Spell | — | Destroy a trinket, then choose: friendly minions get +1/+0, or +0/+1 |
-| Mage | Bouncer | 4 | 1 | Minion | 1/1 | Return a minion to owner's hand |
-| Mage | Spirit | 4 | 3 | Minion | 1/3 | Hidden; Ranged |
-| Mage | Summon Primordial | 4 | 8 | Spell | — | Return all cards a hero controls to their owner's hand, then summon a Primordial |
-| Mage | Primordial | — | 10 | Minion | 10/10 | — (only summoned, by Summon Primordial) |
-| Mage | Study | 4 | 2 | Spell | — | Draw 2 cards, then discard 1 card of your choice |
-| Mage | Plan | 4 | 3 | Trinket | — | Draw 1 card; at the start of your next turn, draw 1 card and destroy Plan |
-| Mage | Oozification | 4 | 4 | Spell | — | Destroy a minion; its owner gets Oozes equal to its current toughness |
-| Mage | Ooze | — | 0 | Minion | 0/1 | — (only summoned, by Oozification) |
-| Mage | Bubble Shield | 4 | 2 | Spell | — | Summon 2 Bubbles |
-| Mage | Bubble | — | 0 | Trinket | — | When your hero is attacked, return the attacker to its owner's hand and destroy Bubble (only summoned, by Bubble Shield) |
-| Mage | Morphosis Chamber | 4 | 3 | Trinket | — | At the start of each of your turns, choose: a friendly minion gains Ranged; a friendly minion gains Hidden 1; give a friendly minion +1/-1; or give a friendly minion -1/+1 |
-| Mage | Control | 4 | 5 | Spell | — | Gain control of an enemy minion |
-| Mage | Overwork | 4 | 3 | Trinket | — | Lasts 3; gain 3 extra energy now, and at the start of each of your turns gain 2 extra energy and draw 1 card; when destroyed, summon a Burnout |
-| Mage | Burnout | — | 0 | Trinket | — | At the end of each of your turns, deal 2 damage to yourself and discard 1 card (only summoned, by Overwork) |
+Every card: `./awm --cards` (or `--cards:CLASS`, `--card:NAME`; see
+[Card reference](#card-reference)). The precon decks are `baseDeckLists` in
+`src/baseset.nim`.
+
+## Writing a bot
+
+A bot is one `.bas` file. `players/` holds four reference bots that play
+alike and differ only in their deck: `archer.bas`, `warrior.bas` and
+`mage.bas` play the precons, `archer_warrior.bas` an Archer deck splashing
+Warrior cards. They are good starting points and list the API in their
+header.
+
+### How a script runs
+
+1. **Setup.** Before the deal the script runs once with `selectingClass`
+   set. Call `pickClass(c)` and `deckCard(name$, copies)` until the deck
+   has 40 cards, then `END`. Game commands are refused here, and
+   `selfClass`, `enemyClass` and `playerClass` return -1.
+2. **Decisions.** Whenever your seat must act, the script runs again from
+   the top and must make **exactly one successful command**. A run with
+   none is a player error: the match stops and you score 0. Commands
+   return 1 when accepted and 0 when refused (a refused command changes
+   nothing, so try another). `END` stops the script; it does not end the
+   turn. Globals and arrays keep their values between runs within a match.
+3. **What is asked.** Check in this order:
+
+| Condition | Command to make |
+|---|---|
+| `tossCount > 0` | `discardCards("picks")`: a rule makes you discard `tossCount` cards |
+| `triggerTargets > 0` | `resolveTrigger("picks")`: one of your triggers waits for targets |
+| otherwise (your turn) | `playCard…`, `attack` or `endTurn()` |
+
+Discards and triggers can come during another player's turn. The engine
+never acts for you: no automatic attack, target, discard or turn end.
+
+### BASIC in brief
+
+[Bassy](https://github.com/treeform/bassy) BASIC
+([language reference](https://github.com/treeform/bassy/blob/master/docs/language.md)).
+Case-insensitive. `name$` is a string, `name` a number (int32, or Q16.16
+fixed point). `DIM a(63)` makes a global array with indexes 0 to 63; there
+are no 2-D arrays. Blocks: `IF … THEN … ELSEIF … ELSE … END IF`,
+`WHILE … WEND`, `FOR i = a TO b [STEP s] … NEXT`, `GOSUB label` /
+`RETURN`, `SUB name(args) … END SUB` (no return values). `:` separates
+statements; `'` starts a comment. Comparisons give -1 (true) or 0; `AND`,
+`OR`, `NOT` are bitwise, so compare host results explicitly
+(`IF canPlay(i) = 1 AND n > 0`). `/` divides in fixed point, `\` in
+integers, `MOD` is the remainder. `PRINT` writes to your private log.
+Per decision: 5,000,000 instructions, 64 MiB, 256 arrays; source up to
+256 KiB.
+
+### Values
+
+Read-only numbers, current at each run. "Enemy" is `enemyPlayer`, the next
+living seat after yours.
+
+| Value | Meaning |
+|---|---|
+| `selfPlayer`, `enemyPlayer`, `currentPlayer`, `playerCount` | Seats, zero-based; `currentPlayer` is whose turn it is |
+| `turnNumber` | The current turn, counting every seat's turns from 1 |
+| `selfLife`, `enemyLife` | Hero life |
+| `energy`, `totalEnergy` | Your energy now, and your per-turn total |
+| `handSize`, `selfDeckSize`, `enemyDeckSize` | Card counts |
+| `selfBoardSize`, `enemyBoardSize` | Cards in play (minions and trinkets) |
+| `selfClass`, `enemyClass` | Classes: 0 Archer, 1 Warrior, 2 Mage |
+| `tossCount`, `triggerTargets` | See [How a script runs](#how-a-script-runs) |
+| `selectingClass` | 1 during setup |
+
+### Numbers used everywhere
+
+| Kind | Values |
+|---|---|
+| Class | 0 Archer, 1 Warrior, 2 Mage; -1 none (level-up cards) |
+| Card kind | 0 minion, 1 spell, 2 trinket |
+| Keyword `k` | 0 Ranged, 1 Ready |
+| Choice kind | 0 canceled, 1 no target, 2 hero, 3 a card in play, 4 an option (a branch of "Choose:"); 5 a hand card (event log only) |
+| Intent | 0 nothing to judge, 1 damage, 2 buff, 3 weaken, 4 bounce, 5 destroy, 6 loses a keyword, 7 gain control, 8 fights it |
+
+Board indexes run 0 to `boardCount(p) - 1`, hand indexes 0 to
+`handSize - 1`. A card in play also has a stable `boardId` that survives
+moves; a card's string id (`id$`) is its printed name.
+
+### Queries
+
+**Players** (any seat `p`): `playerClass(p)`, `playerLife(p)`,
+`playerEnergy(p)`, `playerTotalEnergy(p)`, `playerHandSize(p)`,
+`playerDeckSize(p)`, `playerDead(p)`.
+
+**Your hand** (`i`): `handName$(i)`, `handId$(i)`, `handKind(i)`,
+`handCost(i)` (what it costs you now, off-class extra included),
+`handPower(i)`, `handToughness(i)`, `canPlay(i)` (1 if affordable; it may
+still lack a legal target), `needsChoice(i)` (1 if it takes targets).
+
+**Cards in play** (seat `p`, index `i`):
+
+| Query | Returns |
+|---|---|
+| `boardCount(p)`, `boardId(p, i)` | How many; the card's stable id |
+| `boardName$(p, i)`, `boardCard$(p, i)`, `boardKind(p, i)` | Name, string id, kind |
+| `boardPower(p, i)`, `boardHp(p, i)` | Live power and remaining toughness |
+| `boardReady(p, i)`, `boardAttacked(p, i)` | 1 if it may attack this turn; 1 if it already did |
+| `boardHasKeyword(p, i, k)` | 1 if it has keyword `k` now |
+| `boardRules$(p, i)` | Its rules now, as text |
+| `boardStolenFrom(p, i)` | Its owner when someone else controls it; -1 otherwise |
+| `boardHiddenTurns(p, i)` | Owner's turns it stays Hidden: 0 none, -1 for good |
+| `boardLastsTurns(p, i)` | Controller's turns before it leaves play; 0 if it doesn't |
+
+`selfBoardPower(i)`, `selfBoardHp(i)`, `enemyBoardPower(i)` and
+`enemyBoardHp(i)` are shorthands for your board and `enemyPlayer`'s.
+
+**Any card by string id** (from `handId$`, `boardCard$` or a printed
+name): `cardName$(id$)`, `cardRules$(id$)`, `cardKind(id$)`,
+`cardClass(id$)`, `cardCost(id$)` (printed), `cardPower(id$)`,
+`cardToughness(id$)`, `cardHasKeyword(id$, k)`.
+
+### Playing a card
+
+A card asks for its targets one step at a time. A choice of branches
+(Overcharge, Pillage) is a step whose choices are options (kind 4), and
+the branch's own targets appear only once it is picked; Reload's targets
+appear once the card to repeat is picked. So build the picks in a BASIC
+array, and re-read the target count after each pick:
+
+| Query (hand index `h`, -1 for a waiting trigger) | Returns |
+|---|---|
+| `nextTargetCount(h, "picks", s)` | Targets the card asks for, given the first `s` picks |
+| `nextChoiceCount(h, "picks", s)` | Legal choices for target `s` |
+| `nextChoiceKind/Owner/Id(h, "picks", s, c)` | Choice `c`: kind, seat (-1 for an option), `boardId` (0 for a hero) |
+| `nextHelpsTarget(h, "picks", s)` | 1 if target `s` should be one of yours |
+| `nextIntent(h, "picks", s)`, `nextAmount(h, "picks", s)` | What it does to target `s`, and how much (a fight: the fighter's power) |
+| `optionDamage/optionSelfDamage(h, "picks", s, c)` | Damage option `c` deals, and deals to your own hero |
+| `optionRules$(h, "picks", s, c)` | Option `c`'s words |
+
+Then play with `playCardTargets(h, "picks")`. `playCard(h)` plays a card
+without targets; `playCardChoice(h, c)` and `playCardChoices(h, c1, c2)`
+take one or two choice indexes directly. A minion's on-play target offers
+a no-target choice (kind 1): pick it to play the minion without its effect.
+The same steps answer a waiting trigger (`h = -1`, then
+`resolveTrigger("picks")`).
+
+Earlier, simpler forms read only what a card asks before any pick:
+`targetCount(h)`, `choiceCount/Kind/Owner/Id(h, c)` (first target),
+`targetChoiceCount(h, s)`, `targetChoiceKind/Owner(h, s, c)`,
+`helpsTarget(h, s)`, `targetIntent(h, s)`, `targetAmount(h, s)`, and for
+triggers `triggerChoiceCount(s)`, `triggerChoiceKind/Owner/Id(s, c)`,
+`triggerHelpsTarget(s)`.
+
+### Attacking and ending the turn
+
+`attackChoiceCount(id)` lists what minion `id` (a `boardId`) may attack now:
+0 if it can't. Choices run over every opponent in seat order after yours,
+each hero before its minions; Hidden minions and the heroes of players who
+are out are not offered. `attackChoiceKind/Owner/Id(id, c)` describe choice
+`c`, and `attack(id, c)` makes the attack. `endTurn()` ends your turn.
+
+### Who is asking
+
+While a discard or trigger waits, these name its source (`""`, -1 or 0
+otherwise):
+
+| Query | Returns |
+|---|---|
+| `tossCard$()`, `tossRules$()`, `tossOwner()`, `tossSourceId()` | The card asking you to discard, its rule, whose effect it is, its `boardId` (0 for a spell) |
+| `triggerCard$()`, `triggerRules$()`, `triggerOwner()`, `triggerSourceId()` | The waiting trigger's card, its sentence, whose it is (you), its `boardId` |
+| `triggerOnPlay()` | 1 for a summoned card's on-play rules, 0 for an `on(...)` trigger |
+| `triggerAttackerOwner()`, `triggerAttackerId()` | The attack that fired it |
+| `triggerPlayed$()`, `triggerPlayedId()` | The card whose play fired it |
+
+### Event log
+
+Everything since your last decision, your own actions included, oldest
+first: events 0 to `logCount() - 1`.
+
+| Query (event `e`, target `t`) | Returns |
+|---|---|
+| `logKind$(e)`, `logTurn(e)`, `logPlayer(e)` | What happened, when, and who acted or was hit |
+| `logCard$(e)`, `logCardId(e)`, `logOwner(e)` | The card, its `boardId` (0 if not in play), whose it is |
+| `logCause$(e)`, `logCauseId(e)`, `logCauseOwner(e)` | What fired a trigger |
+| `logAmount(e)`, `logAmount2(e)`, `logText$(e)` | Its numbers and the rule's words |
+| `logTargetCount(e)`, `logTargetKind/Owner/Id(e, t)`, `logTargetCard$(e, t)` | Its picks or the cards it names |
+
+| `logKind$` | `logPlayer` | Also |
+|---|---|---|
+| `turn` | whose turn starts | |
+| `draw` | who drew | the card stays hidden |
+| `play` | who played | card (id 0 for a spell); targets: its picks |
+| `attack` | the attacker's controller | card: the attacker; amount: its power; target: what it hit |
+| `choice`, `trigger` | who it resolves for | card; cause; text; targets: the picks |
+| `discard` | who discarded | card: what asked; amount; targets: the cards |
+| `damage` | the hit hero's player, or the minion's controller | card (`""` for a hero); amount |
+| `death`, `bounce` | its controller | card; owner: whose discard pile or hand it goes to |
+| `summon` | who it is summoned for | card |
+| `gainControl` | who took it | card; owner: who had it |
+| `stats` | its controller | amount: power change; amount2: toughness change |
+| `gain`, `lose` | its controller | card; text: the rule |
+| `defeat` | who is out | targets: their discarded hand |
+
+An event comes before what it causes: a `play` before its damage, an
+`attack` before the damage and deaths.
+
+### Reading rules as a tree
+
+`rulesOfCard(id$)`, `rulesOfBoard(p, i)` (its rules now) or
+`rulesOfTrigger()` selects a card's rules and returns the node count. Nodes
+0 to `nodeCount() - 1` come in written order, each after its parent:
+`nodeKind$(n)` is the card DSL call (`damage`, `target`, `hidden`,
+`lasts`, `fixed`, `set`…), `nodeRole$(n)` its part of the parent
+(`amount`, `what`, `turns`…), `nodeParent(n)` (-1 for a top rule),
+`nodeValue(n)` (a number; -1 for a count that never ends), `nodeText$(n)`,
+`nodeChild(n, role$)` and `nodeFind(kind$, after)` (-1 when none). For
+example `nodeValue(nodeChild(nodeFind("hidden", -1), "turns"))` is a card's
+printed Hidden count.
+
+### Other calls
+
+- `random(n)`: an integer from 0 to n - 1, seeded by the match seed and
+  your seat. It doesn't touch the game's shuffle.
+- `sendChat(slot, text$)` (`-2` for everyone), `pullMailbox$()`,
+  `mailboxId()`, `mailboxCount()`, `mailboxSelf()`, `mailboxPlayers()`:
+  messages between players, read when your script next runs.
+
+### A complete minimal bot
+
+It plays the first card it can aim, attacks the first legal target with
+each minion, and answers every discard and trigger:
+
+```basic
+IF selectingClass THEN
+  pickClass(1)                    ' Warrior, with its precon deck
+  deckCard("Bear", 4): deckCard("Swords", 4): deckCard("Shields", 4)
+  deckCard("Duel", 4): deckCard("Tactician", 4): deckCard("Footsoldier", 4)
+  deckCard("Commander", 4): deckCard("Rally", 4): deckCard("Banner", 4)
+  deckCard("Pillage", 4)
+  END
+END IF
+
+DIM picks(63)
+
+IF tossCount > 0 THEN             ' discard the first cards in hand
+  FOR i = 0 TO tossCount - 1: picks(i) = i: NEXT
+  discardCards("picks")
+  END
+END IF
+
+IF triggerTargets > 0 THEN        ' aim a waiting trigger
+  h = -1: GOSUB aimAll
+  resolveTrigger("picks")
+  END
+END IF
+
+FOR h = 0 TO handSize - 1         ' play the first card that can be aimed
+  IF canPlay(h) THEN
+    GOSUB aimAll
+    IF ok THEN
+      IF playCardTargets(h, "picks") THEN END
+    END IF
+  END IF
+NEXT
+
+FOR b = 0 TO boardCount(selfPlayer) - 1
+  id = boardId(selfPlayer, b)
+  IF attackChoiceCount(id) > 0 THEN
+    IF attack(id, 0) THEN END
+  END IF
+NEXT
+
+endTurn()
+END
+
+aimAll:
+' Fill picks() for hand card h (-1: the waiting trigger): one of yours when
+' the target helps, an enemy's when it hurts, else the first choice.
+ok = 1: s = 0
+count = nextTargetCount(h, "picks", 0)
+WHILE s < count AND ok
+  n = nextChoiceCount(h, "picks", s)
+  IF n = 0 THEN
+    ok = 0
+  ELSE
+    mine = nextHelpsTarget(h, "picks", s)
+    picks(s) = 0
+    FOR c = n - 1 TO 0 STEP -1
+      o = nextChoiceOwner(h, "picks", s, c)
+      IF o >= 0 AND (o = selfPlayer) = (mine = 1) THEN picks(s) = c
+    NEXT
+    count = nextTargetCount(h, "picks", s + 1)  ' a pick can add targets
+    s = s + 1
+  END IF
+WEND
+RETURN
+```
+
+### Testing a bot
+
+```sh
+./build/awm-headless --bot my.bas --bot players/warrior.bas --seed 3
+./build/awm-headless --bot my.bas:4 --bot players/mage.bas --record m.replay
+./build/awm-headless --replay m.replay       # check it replays exactly
+./awm --replay m.replay                      # watch it
+./awm --bot my.bas                           # watch it play itself
+./awm --human --bot my.bas                   # play against it
+```
+
+Headless flags: `--bot PATH[:COUNT]` once per group of seats (2 to 7 seats
+in all), `--seed N`, `--ticks N` (one tick is one action), `--classes
+archer,mage,...` (one class per seat, each playing its precon instead of
+the script's deck), `--record PATH`, `--replay PATH`. It prints the outcome
+(`winner_N`, `draw`, `timeout` or `player_failure`), and a script's errors
+and illegal deck.
+
+## Card reference
+
+`--cards` prints every card and exits; `--cards:CLASS` (`archer`, `warrior`,
+`mage`) prints that class's cards, its level-up card included; `--card:NAME`
+prints one. Names ignore case, spaces and hyphens (`--card:hail-of-arrows`);
+`--card NAME` works too. Every build answers without opening a window:
+
+```
+Card:   Sharpshooter
+Cost:   3
+Class:  Archer
+Type:   Minion
+Effect: Ranged
+        Deal 1 damage to any target.
+P/T:    3/1
+```
+
+`—` marks no rules, no class or no stats.
+
+## Playing
+
+```sh
+./awm                               # two reference bots
+./awm --human                       # you pick a class on screen and play its precon
+./awm --human players/mage.bas      # you play that script's class and deck
+./awm --players 4 --human           # you and 3 bots around the ring
+```
+
+| Flag | Meaning |
+|---|---|
+| `--human [PATH.bas]` | You play seat 0 (shown as player 1) |
+| `--bot PATH` | Bot script, up to 2; one plays both duel seats, and with `--human` it is your opponent. Default: the reference bots in `players/` (a human faces one at random) |
+| `--players N` | 2 is a duel; 3 to 7 play the ring (last one standing wins) |
+| `--seed N` | Fixed deal; without it every game takes a new seed and prints it |
+| `--replay PATH` | Watch a recorded match |
+| `--cards`, `--cards:CLASS`, `--card:NAME` | Print cards and exit |
+| `-h`, `--help` | Print the options and exit |
+
+`--class` and `--opponent` are accepted but ignored: pick your class on
+screen and your opponent with `--bot`.
+
+## Coworld
+
+AWM runs on Coworld like Polyworld's other games: each seat is one uploaded
+`.bas` file, the match plays headless, and its results and replay are
+published. Two seats play a duel, 3 to 7 the ring. The config takes
+`players` and `tokens` (2 to 7), `seed`, `max_ticks`, and an optional
+`classes` list (one per seat; each then plays its precon). The winner
+scores 1 and everyone else 0; a draw, a timeout or a player failure scores
+0 for all. `PRINT` output and errors go to the player's private log. The
+package is in [`coworld/awm`](../../coworld/awm), the platform guide is
+[`coworld/awm/guide.md`](../../coworld/awm/guide.md), and the runtime
+contract is [`coworld/integration.md`](../../coworld/integration.md).
+
+```sh
+(cd ../.. && nim r coworld/tools/sync_dependencies.nim)
+nim c -d:coworld -o:../../tmp/coworld/awm src/awm.nim
+(cd ../.. && nim r coworld/tools/test_runtime.nim awm)
+coworld build --project ../../coworld/awm --version VERSION
+```
+
+## Development
+
+```
+src/awm.nim         command line, then a game mode
+src/baseset.nim     the cards and precon decks
+src/core/           the game, no window: the card rules DSL (core), the
+                    match engine (sim), the BASIC bot API (bots), bot
+                    matches (match), replays, card lookups (cardset) and
+                    reference (cardlist), event text, rule trees, session
+                    options and saved games
+src/modes/          duel, multiplayer ring, headless and Coworld runners
+src/app.nim, src/play.nim, src/replayer.nim
+                    what the table modes share: window, targeting, replays
+src/scene/          3D table, courtyard, ring, heroes, screen effects
+src/ui/, src/vfx/   HUD, card faces, tuning panels; card and combat effects
+tools/              web build, asset staging and review renders
+```
+
+Every test (`test_courtyard_render` needs a GPU):
+
+```sh
+for t in tests/*.nim; do nim r --out:build/$(basename $t .nim) $t; done
+```
+
+**Browser.** `./tools/serve.sh` builds and serves on port 8080
+(`AWM_SKIP_WEB_BUILD=1` serves the existing build; `./tools/build_web.sh`
+only builds). URL parameters mirror the flags: `human=1`, `players=N`,
+`seed=N`, `bot=URL` (repeatable), `replay=URL`, e.g.
+`awm.html?players=4&human=1`. Card art is staged cropped to the 546 × 417
+art window, so the download stays near 31 MB. The replay viewer:
+`AWM_WEB_DIR=build/replay ./tools/build_web.sh -d:replayViewer`, then
+`awm.html?replay=URL`. With Playwright, `node tests/test_hero_select.cjs`
+checks hero selection against the server.
+
+**Debug switches.**
+
+| Switch | Effect |
+|---|---|
+| F8 | Screen effects on or off |
+| `AWM_POSTFX=0`; `AWM_SSAO=0`, `AWM_BLOOM=0`, `AWM_FXAA=0` | All effects off; one off |
+| `AWM_SSAO_RADIUS`, `AWM_SSAO_INTENSITY`, `AWM_SSAO_BIAS` | Occlusion tuning (1.501, 3.523, 0.08) |
+| `AWM_STONE_NORMALS=0` | Flat stone |
+| `-d:awmPostLayers`, `AWM_POST_LAYER=N` | Keys 0–9 show the effect layers; start on layer N |
+| `-d:awmPostPanel` | Effect tuning window (F9); "Print settings" gives `defaultPostSettings` |
+| `-d:awmLayoutTuning` | Move camera and hands live: Z/X pick, WASD/QE move, T/G pitch, F/H yaw, Enter prints |
+| `-d:takeScreenshot` | Writes a screenshot after `AWM_CAPTURE_FRAME` frames (`SCREENSHOT_PATH`) and quits |
+
+Assets come from the sibling `polyworld_art/awm`. `tools/render_cards.nim`
+and `tools/render_vfx.nim` render review images into `build/`;
+`tools/render_stone_normals.nim` rebuilds the stone normal maps.

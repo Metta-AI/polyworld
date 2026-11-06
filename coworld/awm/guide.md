@@ -20,7 +20,8 @@ class precons, and `players/archer_warrior.bas` an Archer deck with Warrior
 cards. They play
 alike and differ only in their setup.
 The same source is available under `games/awm/src/core/bots.nim`, and the
-cards are in `games/awm/src/baseset.nim` and `games/awm/README.md`.
+cards are in `games/awm/src/baseset.nim`; `awm --cards` prints them all.
+`games/awm/README.md` is the full bot reference, with a working example.
 
 ## Class and deck selection
 
