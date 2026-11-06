@@ -43,6 +43,13 @@ import
   test_llms,
   test_llm_hosts,
   test_rooms,
+  test_room_codes,
+  test_relay_async_hashes,
+  test_relay_readiness,
+  test_sparse_rooms,
+  test_room_resize,
+  test_galcon_relay_support,
+  test_client_loading_gap,
   test_roomclients,
   test_networks,
   ../games/gods_of_the_arena/tests/test_multiplayer as TestGotaMultiplayer

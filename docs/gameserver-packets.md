@@ -142,7 +142,10 @@ Return compatible public rooms.
 
 ## 4. CreateRoom — Client → server
 
-Create a room with opaque game setup.
+Create a room with opaque game setup. The relay assigns a six-character uppercase
+A–Z/0–9 invitation code using OS randomness and bounded collision retries.
+Unlisted invitations are not authentication; private reconnect tokens remain
+separate 24-byte secrets. Existing longer room IDs remain joinable exactly.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -154,7 +157,9 @@ Create a room with opaque game setup.
 
 ## 5. JoinRoom — Client → server
 
-Join by room ID; joins during a match are spectators.
+Join by room ID; joins during a match are spectators. Lookup is exact-first;
+only six-character alphanumeric invitations fall back to uppercase. Longer
+legacy IDs and reconnect tokens are never case-folded.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -186,7 +191,7 @@ Owner changes lobby settings; clears readiness and increments revision.
 | `name` | `string` | Room name; ≤96 bytes. |
 | `flag` | `uint32` | Public = 1, unlisted = 0. |
 | `tickRate` | `uint32` | 1–120 ticks/second. |
-| `number` | `uint32` | Seat count must remain unchanged. |
+| `number` | `uint32` | 1–64 seats; shrinking cannot remove another participant's seat. |
 | `payload` | `string` | Opaque setup; ≤65,536 bytes. |
 
 ## 8. ClaimSeat — Client → server
@@ -200,7 +205,9 @@ Claim an empty lobby seat or rename your own seat.
 
 ## 9. ReleaseSeat — Client → server
 
-Release your lobby seat; an already empty seat is accepted.
+Release your lobby seat; an already empty seat is accepted. In Galcon only,
+the host may also release a foreign bot seat (seat name is not `Human`),
+without removing its participant or their other seats.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -208,7 +215,9 @@ Release your lobby seat; an already empty seat is accepted.
 
 ## 10. Ready — Client → server
 
-Confirm the current setup is loaded and report its initial state hash.
+Only a current controller may confirm the loaded setup and initial state hash.
+Roster-only edits retain visible ready intent, but Start requires a new Ready
+confirmation for the current revision; newcomers are never auto-readied.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -217,7 +226,9 @@ Confirm the current setup is loaded and report its initial state hash.
 
 ## 11. StartMatch — Client → server
 
-Owner starts once all seats are owned and all controllers are connected, ready and hash-matched.
+Owner starts once all controllers are connected, ready for the current revision
+and hash-matched, with at least one controller. Galcon may leave potential seats
+empty; other adapters retain the dense-roster requirement.
 
 | Body | Size |
 | --- | --- |
@@ -378,6 +389,20 @@ A controller pauses or resumes the current match; spectators cannot.
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
 | `flag` | `uint32` | 1 pauses new ticks; 0 resumes without waiting for client progress or hashes. |
+
+## 30. ResizeRoom — Client → server
+
+Uses the same body and owner/lobby validation as ConfigureRoom. When tick rate
+and opaque payload are unchanged, preserves controlling participants' ready
+intent while incrementing revision. For Galcon JSON setups, a change only to
+integer `players` matching `number` is also roster-only. Other payload changes
+invalidate readiness. Every controller must confirm the resulting revision
+before StartMatch. Name-only changes use the same operation; preserve visibility
+from the Lobby RoomState flag.
+
+Spectator membership changes publish snapshots without changing setup revision.
+Seat changes and controller renames require new revision-bound proofs even when
+ready intent is retained.
 
 ## Shared rules
 
