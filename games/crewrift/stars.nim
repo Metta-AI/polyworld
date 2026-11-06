@@ -1,4 +1,4 @@
-## AWM's procedural star field behind the ship, with replay-timed motion.
+## CaC's procedural star field behind the ship, with replay-timed motion.
 
 import
   opengl, vmath,
@@ -37,7 +37,7 @@ proc compileStage(kind: GLenum, source: string): GLuint =
     raise newException(CrewriftError, "Star field shader failed: " & log)
 
 proc initStarField*(): StarField =
-  ## Creates the AWM sky program and its fullscreen triangle vertex array.
+  ## Creates the CaC sky program and its fullscreen triangle vertex array.
   let vertex = compileStage(GL_VERTEX_SHADER, VertexSource)
   defer:
     glDeleteShader(vertex)

@@ -12,7 +12,7 @@ const
   LogLimit = 10 * 1024 * 1024
   SocketTimeout = 5000
   Games = [("gota", 10), ("lvd", 6), ("cta", 4),
-    ("awm", 2), ("awm", 7)]
+    ("cac", 2), ("cac", 7)]
 
 proc fileUri(path: string): string =
   ## Encodes one absolute path for the runner's local file handoff.
@@ -148,11 +148,11 @@ proc episode(
     config["classes"] = %classes
   for slot, fixture in scripts:
     let source =
-      if game == "awm" and selectClass:
+      if game == "cac" and selectClass:
         # A reference player's setup picks the class and deck, then the
         # fixture, then the reference player's play.
         let
-          reference = readFile(Root / "games/awm/players" /
+          reference = readFile(Root / "games/cac/players" /
             (if slot mod 2 == 0: "archer.bas" else: "warrior.bas"))
           setupStart = reference.find("IF selectingClass THEN")
           setupEnd = reference.find("END IF\n", setupStart) + "END IF\n".len
@@ -264,7 +264,7 @@ proc episode(
     doAssert logs[0].contains("BASIC error:")
   else:
     doAssert output["scores"].len == count
-    if game == "awm":
+    if game == "cac":
       doAssert output["seed"].getInt() == seed
       doAssert output["ticks"].getInt() in 0 .. ticks
     if game == "gota":
@@ -347,11 +347,11 @@ for (game, count) in Games:
   episode(game, count, scripts, failure = true)
   scripts[0] = "WHILE 1\nWEND\n"
   episode(game, count, scripts)
-  if game == "awm":
+  if game == "cac":
     episode(game, count, scripts.mapIt("END\n"), failure = true,
       selectClass = false,
       expectedRuntimeError = "BASIC setup selected no class")
-    echo "AWM missing class reports policy failure with healthy endpoints"
+    echo "CaC missing class reports policy failure with healthy endpoints"
     # The classes override skips every script's setup: these scripts pick
     # no class, yet each seat plays the class its slot names. Every seat
     # only ends its turn, so max_ticks ends the match.
@@ -366,7 +366,7 @@ for (game, count) in Games:
       expectedOutput = "CLASS-OVERRIDDEN")
     doAssert overridden["outcome"].getStr() == "timeout"
     doAssert overridden["ticks"].getInt() == 7
-    echo "AWM classes, seed and max_ticks reach the match"
+    echo "CaC classes, seed and max_ticks reach the match"
   echo game, ": runtime contracts passed"
 
   for slot in 0 ..< scripts.len:
@@ -374,8 +374,8 @@ for (game, count) in Games:
 sendChat(-2, "CHAT")
 print pullMailbox$(), mailboxId()
 """
-  # AWM actions share a turn, so allow the baseline to reach every seat.
-  episode(game, count, scripts, ticks = (if game == "awm": 240 else: 3),
+  # CaC actions share a turn, so allow the baseline to reach every seat.
+  episode(game, count, scripts, ticks = (if game == "cac": 240 else: 3),
     waitForLlm = true, expectedOutput = "CHAT")
   echo game, ": hosted mailbox integration passed"
 

@@ -1,0 +1,9 @@
+cac
+cac_capture
+cac.atlas.png
+cac_*.png
+nimcache/
+build/
+
+# Source artwork and previews belong in the sibling polyworld_art repo.
+/artwork/

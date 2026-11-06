@@ -51,7 +51,7 @@ The `polyworld_art` repository contains mostly CC0 AI-generated artwork, along
 with openly licensed third-party assets and their notices.
 See its README and per-file license inventory for reuse and contribution terms.
 Git LFS is required for models, images, fonts and editable art sources.
-Heartleaf and AWM assets are not part of this migration.
+Heartleaf and Cards and Casters assets are not part of this migration.
 
 From the repository root, launch a game with its bundled baseline agents:
 

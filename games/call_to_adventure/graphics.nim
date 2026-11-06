@@ -48,7 +48,7 @@ const
     sharpness: 15.4,
     bodyOcclusion: 0.25
   )
-    ## Soft contact shadows where walls meet floors and under bodies: AWM's
+    ## Soft contact shadows where walls meet floors and under bodies: CaC's
     ## SSAO, a little tighter and lighter. Bodies keep a quarter of their own.
     ## CTA_SSAO=0 or F8 turns it off; CTA_SSAO_RADIUS, _INTENSITY and _BIAS
     ## override these.

@@ -1,0 +1,10 @@
+services:
+  game:
+    image: polyworld-cac-coworld:latest
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: coworld/Dockerfile
+      args:
+        GAME: cac
+        ENTRY: src/cac

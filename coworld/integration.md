@@ -5,7 +5,7 @@ Coworld builds. Desktop, ordinary headless, and WASM builds do not import Mummy.
 `-d:emscripten -d:replayViewer` selects the static replay bootstrap and enables
 looping. Each game retains its simulation, BASIC resource limits and early endings.
 
-The packages are `coworld/gota`, `coworld/lvd`, `coworld/cta`, and `coworld/awm`.
+The packages are `coworld/gota`, `coworld/lvd`, `coworld/cta`, and `coworld/cac`.
 Each contains a manifest template, Compose definition, unchanged BASIC baseline,
 game guide and executable viewer build hook. Generated packages and test outputs are ignored.
 
@@ -21,7 +21,7 @@ nim r coworld/tools/sync_dependencies.nim
 coworld build --project coworld/gota --version 2026.9.9.3
 coworld build --project coworld/lvd --version 2026.9.9.3
 coworld build --project coworld/cta --version 2026.9.9.3
-coworld build --project coworld/awm --version VERSION
+coworld build --project coworld/cac --version VERSION
 ```
 
 Local builds use sibling dependency checkouts, such as `/Users/me/p/zippy`.
@@ -45,7 +45,7 @@ The runner supplies local `file://` URIs through `COGAME_CONFIG_URI`,
 `COGAME_PLAYER_SEATS_URI`, `COGAME_RESULTS_URI`, `COGAME_SAVE_REPLAY_URI`, and
 `COGAME_PLAYER_FAILURE_URI`. Configurations require matching tokens and players
 arrays. GotA has ten seats, CTA has four, and LvD supports variable rosters with
-six-player FFA in Competition. AWM takes two to seven seats: two play a duel,
+six-player FFA in Competition. Cards and Casters takes two to seven seats: two play a duel,
 more a free-for-all; its turn-based tick is one game action. Staged policy filenames may have no extension.
 Raw BASIC source is read with bounded reads and compiled with the game limits.
 
@@ -78,7 +78,7 @@ purpose, `function` names the operation, and `args` must encode a JSON object.
 The policy cannot select a seat or filesystem path. Coworld binds its optional
 `annotations_uri` to each seat. Desktop and WASM hosts expose the same functions
 and return disabled when there is no destination; they do not save files yet.
-This includes GoTA, Light vs Dark, Call to Adventure, AWM and Heartleaf hosts.
+This includes GoTA, Light vs Dark, Call to Adventure, Cards and Casters and Heartleaf hosts.
 Heartleaf does not yet have a Coworld output integration.
 
 `ANNOTATE` returns a status instead of raising a BASIC error.
@@ -129,7 +129,7 @@ under Emscripten without threads. It is included in the normal CI suite.
 entrypoints, recording regression tests, and full replay verification. First record
 full matches into `tmp/coworld/{gota,lvd,cta}.replay` with the headless binaries and
 `--record PATH`. Run `nim r coworld/tools/test_runtime.nim` from the repository root.
-Pass a game name, such as `awm`, to check only that game.
+Pass a game name, such as `cac`, to check only that game.
 It uses the binaries in `tmp/coworld` to check
 extensionless and empty sources, slot-specific print and annotation output, optional
 annotation destinations, compilation failure,

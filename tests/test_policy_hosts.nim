@@ -1,9 +1,9 @@
 ## Non-LLM games expose exactly the same optional policy capabilities.
 import bassy
 import ../games/heartleaf/bots as heartleafBots
-import ../games/awm/src/core/bots as awmBots
+import ../games/cac/src/core/bots as cacBots
 
-for host in [heartleafBots.buildVillagerHost(0), awmBots.botSchema()]:
+for host in [heartleafBots.buildVillagerHost(0), cacBots.botSchema()]:
   let program = compile("""
 status = ANNOTATE(123, "intent", "test", "{}")
 message$ = ANNOTATE_ERROR$()
@@ -15,4 +15,4 @@ after = 42
   doAssert runtime.getGlobal("after") == 42
   doAssert runtime.getString(runtime.getGlobalValue("message$")) ==
     "No annotation destination"
-echo "Heartleaf and AWM expose the shared annotation API without an LLM client"
+echo "Heartleaf and CaC expose the shared annotation API without an LLM client"

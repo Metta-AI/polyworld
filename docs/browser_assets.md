@@ -7,7 +7,7 @@ Native games read the cleared original assets from `../polyworld_art` at their
 original quality. Browser builds use that directory by default, or the directory
 selected by `POLYWORLD_ART`, and mount the result at `/polyworld_art`.
 Clone `Metta-AI/polyworld_art` with Git LFS first. It remains private until the
-owner approves publication. Heartleaf and AWM assets are excluded.
+owner approves publication. Heartleaf and Cards and Casters assets are excluded.
 
 ## GotA asset licenses
 

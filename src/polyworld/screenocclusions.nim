@@ -1,7 +1,7 @@
 ## Screen-space ambient occlusion for clients that draw straight to the
 ## window.
 ##
-## Ported from AWM's post pass (examples/awm/src/scene/post.nim): the same
+## Ported from CaC's post pass (games/cac/src/scene/post.nim): the same
 ## 16-tap spiral around a depth-reconstructed normal, at half resolution,
 ## the same depth-aware blur and the same tinted multiply. Three changes fit
 ## it to a game that keeps drawing into the window's multisampled buffer:
@@ -19,9 +19,9 @@
 ## ground, but keep only `bodyOcclusion` of their own darkening, so their
 ## colors stay readable.
 ##
-## Normals come from depth alone: AWM's material-normal replay is left out.
+## Normals come from depth alone: CaC's material-normal replay is left out.
 ## `screenOcclusionSettings` reads PREFIX=0 (off), PREFIX_RADIUS,
-## PREFIX_INTENSITY and PREFIX_BIAS, like AWM's AWM_SSAO variables.
+## PREFIX_INTENSITY and PREFIX_BIAS, like CaC's CAC_SSAO variables.
 
 import
   std/[os, strutils, tables],
@@ -224,7 +224,7 @@ void main() {
 """
 
 proc defaultScreenOcclusionSettings*(): ScreenOcclusionSettings =
-  ## AWM's tuned values. Its blur sharpness of 40 per unit of relative depth
+  ## CaC's tuned values. Its blur sharpness of 40 per unit of relative depth
   ## becomes 15.4 here: its 42 degree camera has a projection scale of 2.6.
   ScreenOcclusionSettings(
     enabled: true,
