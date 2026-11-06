@@ -1,6 +1,7 @@
 import
   std/sets,
   polyworld/chargen,
+  polyworld/chargen/teamcolors,
   ../../games/light_vs_dark/[assets, content, factions],
   lvd_presets
 
@@ -25,6 +26,8 @@ for player, units in roster.players:
       names.incl preset.name
       doAssert preset.group == "LvD"
       var expected = entry.preset
+      if kind == KnightUnit:
+        expected.tintVanguardTeam(roster.factions[player].skinRgb())
       doAssert preset.parts == expected.parts
       doAssert preset.hairColor == entry.preset.hairColor
       doAssert preset.pupilColor == entry.preset.pupilColor

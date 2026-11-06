@@ -2,6 +2,7 @@ import
   std/os,
   jsony,
   polyworld/[assets, chargen, common, terrainsurfaces],
+  polyworld/chargen/teamcolors,
   content, factions
 
 const
@@ -102,6 +103,13 @@ proc readCharacterRoster*(
       raise newException(ChargenError, "LvD roster needs all eight roles.")
     for kind in UnitKind:
       units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      if kind == KnightUnit:
+        # Looks repeat across seats; separate their mutable part lists.
+        var parts: seq[PresetPart]
+        for part in units[kind.ord].preset.parts:
+          parts.add part
+        units[kind.ord].preset.parts = parts
+        units[kind.ord].preset.tintVanguardTeam(result.factions[player].skinRgb())
       let entry = units[kind.ord]
       if entry.kind != $kind:
         raise newException(ChargenError, "LvD roster is missing " & $kind)

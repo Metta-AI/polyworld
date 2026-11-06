@@ -675,7 +675,14 @@ proc testGarments() =
               doAssert ids[j].int < node.skin.joints.len
           doAssert abs(total - 1) < 0.00001
   doAssert count == 9
-  doAssert clothes.len == 7
+  var clothCategories: HashSet[string]
+  for category in manifest.categories:
+    for item in category.items:
+      if item.clothShades.len > 0:
+        clothCategories.incl category.key
+  doAssert clothes.len == clothCategories.len
+  for cloth in clothes:
+    doAssert cloth.category in clothCategories
   var preset = Preset()
   for i, cloth in clothes:
     preset.parts.add PresetPart(

@@ -2,6 +2,7 @@ import
   std/os,
   jsony,
   polyworld/chargen,
+  polyworld/chargen/teamcolors,
   ../../games/light_vs_dark/[assets, content, factions]
 
 proc addLvdPresets*(manifest: var Manifest, directory: string) =
@@ -25,6 +26,8 @@ proc addLvdPresets*(manifest: var Manifest, directory: string) =
       if entry.kind != $kind:
         raise newException(ChargenError, "LvD roster is missing " & $kind)
       var preset = entry.preset
+      if kind == KnightUnit:
+        preset.tintVanguardTeam(roster.factions[player].skinRgb())
       var exists = false
       for existing in manifest.presets:
         if existing.name == preset.name:
