@@ -221,10 +221,11 @@ proc shouldTick*(
     return true
   false
 
-proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
+proc transportPanels*(panel: GameUiPanel, showStats = false,
+    tickLabelW = TickLabelW): TransportPanels =
   ## Reserves fixed controls at both ends, then fills the timeline between.
   var trailing = panel.stack(RightToLeft, vec2(0, IconY))
-  let tick = trailing.takeColumn(TickLabelW, 16)
+  let tick = trailing.takeColumn(tickLabelW, 16)
   result.fullscreen = trailing.take(vec2(IconSize), IconGap)
   result.camera = trailing.take(vec2(IconSize), GroupGap)
   if showStats:
@@ -250,7 +251,7 @@ proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
   )
   var label = tick.stack(TopToBottom)
   label.gap((IconSize - clusterH) * 0.5'f)
-  result.tick = label.take(vec2(TickLabelW - 12, clusterH))
+  result.tick = label.take(vec2(tickLabelW - 12, clusterH))
 
 proc drawGlyph(
     sk: Silky,
@@ -339,8 +340,16 @@ proc drawTransport*(
   ## Draws the shared play/replay bar and applies clicks.
   sk.drawRibbon(panel)
   let playing = player.playing or player.targetTick >= 0
+  # Size the tick label for the widest one this timeline can show, so a
+  # large Hud font widens its column instead of clipping it.
+  hudScratch.setLen(0)
+  hudScratch.add "Tick "
+  hudScratch.addHudInt(player.timelineEnd.int)
+  hudScratch.add " / "
+  hudScratch.addHudInt(player.timelineEnd.int)
+  let tickLabelW = max(TickLabelW, sk.getTextSize("Hud", hudScratch).x + 16)
   let
-    slots = panel.transportPanels(statsToggle != nil)
+    slots = panel.transportPanels(statsToggle != nil, tickLabelW)
     skipStart = slots.controls[0]
     stepBackBtn = slots.controls[1]
     playBtn = slots.controls[2]
