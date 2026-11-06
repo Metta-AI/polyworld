@@ -66,6 +66,8 @@ type
     goal*: Tile2
     goalOffset*: FixedVec2
     hasGoal*: bool
+    holdPosition*: bool
+      ## Direct moves keep their destination until another order replaces them.
     attackMove*: bool
       ## True while walking a destination that should stop to fight.
     attackMoveGoal*: Tile2
@@ -748,6 +750,7 @@ proc clearOrder(unit: Unit, failed: bool) =
   unit.hasGoal = false
   unit.blockedEndpointValid = false
   unit.goalOffset = FixedVec2Zero
+  unit.holdPosition = false
   unit.attackMove = false
   unit.attackMoveGoal = NoTile
   unit.attackMoveOffset = FixedVec2Zero
@@ -1514,7 +1517,9 @@ proc servePathQueue(w: World) {.measure.} =
       if w.units[index].path.len == 0:
         ## Genuinely nowhere to go. An empty path with `complete` set just
         ## means the unit is already standing on its goal, which is success.
+        let hold = w.units[index].holdPosition
         w.units[index].clearOrder(true)
+        w.units[index].holdPosition = hold
       else:
         w.units[index].repathCooldown =
           if w.tileOpen(w.units[index].goal.x, w.units[index].goal.y):
@@ -1722,9 +1727,8 @@ proc tryAcquire(w: World, index: int32): bool =
   true
 
 proc autoAcquire(w: World, index: int32) =
-  ## Idle soldiers defend themselves. Peons never do, so a worker told to
-  ## stand somewhere does not wander off and die.
-  if w.units[index].kind == PeonUnit:
+  ## Unassigned soldiers defend themselves; workers and direct moves stay put.
+  if w.units[index].kind == PeonUnit or w.units[index].holdPosition:
     return
   discard w.tryAcquire(index)
 
@@ -1896,7 +1900,9 @@ proc advanceUnit(w: World, index: int32) =
     if w.units[index].attackMove and w.tryAcquire(index):
       w.handleCombat(index)
     elif w.units[index].arrivedAt(w.units[index].goal):
+      let hold = w.units[index].holdPosition
       w.units[index].clearOrder(false)
+      w.units[index].holdPosition = hold
       return
   of UnitToMine:
     let mine = w.buildingIndex(w.units[index].sourceId)
@@ -2224,6 +2230,7 @@ proc applyMove*(w: World, player, unitId, x, y: int32,
   w.units[index].orderQueue.setLen(0)
   w.units[index].orderFailed = false
   w.units[index].clearOrder(false)
+  w.units[index].holdPosition = true
   w.units[index].state = UnitMoving
   w.setGoal(index, tile2(x, y), offset)
   true
@@ -2811,6 +2818,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(int32(unit.goalOffset.x))
     hash.addHashy(int32(unit.goalOffset.y))
     hash.addHashy(unit.hasGoal)
+    hash.addHashy(unit.holdPosition)
     hash.addHashy(unit.attackMove)
     hash.mixTile(unit.attackMoveGoal)
     hash.addHashy(int32(unit.attackMoveOffset.x))

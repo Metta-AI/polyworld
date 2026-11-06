@@ -30,6 +30,7 @@ import
   test_lobby_resize,
   test_relay_backend,
   test_order_queue,
+  test_move_priority,
   test_two_human_movement,
   test_order_queue_network,
   test_builder_placement_network,
