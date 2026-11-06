@@ -39,10 +39,11 @@ stage_dir="$web_dir/assets"
 art_stage="$stage_dir/polyworld_art"
 
 # The browser displays these before the game asset pack is available. Keep the
-# small, flat Polyworld courtyard and logo separate from the wasm preload.
+# compressed illustration and vector wordmark separate from the wasm preload.
 loading_dir="$web_dir/loading"
 mkdir -p "$loading_dir"
 cp "$project_dir"/web/loading/*.svg "$loading_dir/"
+cp "$art_dir/cac/loading/moonlit-table.webp" "$loading_dir/"
 cp "$art_dir/cac/cards/fonts/Grenze-SemiBold.ttf" "$loading_dir/"
 cp "$art_dir/cac/cards/fonts/OFL.txt" "$loading_dir/"
 cp "$art_dir"/cac/ui/hud/class-*.svg "$loading_dir/"

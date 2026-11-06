@@ -1,5 +1,6 @@
 // Focused browser regression checks. Serve a fresh tools/build_web.sh output
 // with tools/serve.sh, then run with Playwright and Chrome available.
+// Pass --loading-only to check the browser shell without starting the game.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -81,7 +82,7 @@ function choicePoint(viewport, index, target = 'hero') {
     assert.equal(await page.locator('#loading canvas').count(), 0);
     const artwork = await page.locator('.loading-background, .game-logo').evaluateAll(images =>
       images.map(image => ({src: image.getAttribute('src'), valid: image.complete && image.naturalWidth > 0})));
-    assert.equal(artwork.length, 2, 'the loader must show its flat background and CaC logo');
+    assert.equal(artwork.length, 2, 'the loader must show its painted background and Cards and Casters wordmark');
     assert.ok(artwork.every(image => image.valid), 'loading background and logo must decode');
     assert.equal(await page.locator('#loading-note').isVisible(), false);
     assert.doesNotMatch(await page.locator('#loading').textContent(), /Your battle is taking shape/);
@@ -171,6 +172,12 @@ function choicePoint(viewport, index, target = 'hero') {
   try {
     await loadingScreen({width: 1440, height: 900}, 'loading-desktop');
     await loadingScreen({width: 390, height: 844}, 'loading-mobile');
+    if (process.argv.includes('--loading-only')) {
+      await loadingScreen({width: 844, height: 390}, 'loading-landscape');
+      assert.deepEqual(errors, [], 'loading screen must not report JavaScript or resource errors');
+      console.log('PASS: loading artwork, wordmark, progress, first-frame readiness and error recovery; desktop, portrait and short landscape.');
+      return;
+    }
     await humanChoice({name: 'hero-select-desktop', index: 0, outside: true, animate: true});
     await humanChoice({name: 'hero-select-portrait', index: 1, viewport: {width: 390, height: 844}});
     await humanChoice({name: 'hero-select-retina', index: 2, viewport: {width: 1280, height: 800}, density: 2});
@@ -183,7 +190,7 @@ function choicePoint(viewport, index, target = 'hero') {
     await botChoice(2);
     await botChoice(4);
     assert.deepEqual(errors, [], 'browser must not report JavaScript, Wasm or resource errors');
-    console.log('PASS: flat loading background/logo/progress/readiness/error recovery; all classes; animated hero and button clicks; duel/multiplayer; portrait/Retina; keyboard and bot isolation.');
+    console.log('PASS: loading background/wordmark/progress/readiness/error recovery; all classes; animated hero and button clicks; duel/multiplayer; portrait/Retina; keyboard and bot isolation.');
   } catch (error) {
     for (const [index, page] of browser.contexts().flatMap(context => context.pages()).entries()) {
       console.error('Page state:', await status(page).catch(() => 'unavailable'));

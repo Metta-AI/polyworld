@@ -3,36 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111d30">
+  <meta name="theme-color" content="#0b1420">
   <title>Cards and Casters</title>
   <link rel="icon" href="data:,">
   <link rel="preload" href="loading/Grenze-SemiBold.ttf" as="font" type="font/ttf" crossorigin>
-  <link rel="preload" href="loading/cac-logo.svg" as="image">
-  <link rel="preload" href="loading/courtyard-night.svg" as="image">
+  <link rel="preload" href="loading/cnc-wordmark.svg" as="image">
+  <link rel="preload" href="loading/moonlit-table.webp" as="image">
   <style>
     @font-face { font-family: Grenze; src: url("loading/Grenze-SemiBold.ttf") format("truetype"); font-style: normal; font-weight: 600; font-display: swap; }
-    :root { color-scheme: dark; --ink: #111d30; --parchment: #f1e5c9; --gold: #d6b775; --muted: #adb6c4; }
+    :root { color-scheme: dark; --ink: #0b1420; --parchment: #f1e5c9; --gold: #d6b775; --muted: #adb6c4; }
     * { box-sizing: border-box; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--ink); color: var(--parchment); }
     body { font: 14px/1.5 system-ui, sans-serif; }
     #canvas { display: block; width: 100%; height: 100%; outline: none; }
     #game-status, .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    #loading { position: fixed; z-index: 1; inset: 0; overflow-y: auto; display: flex; isolation: isolate; padding: 48px 24px 72px; background: #111d30; opacity: 1; transition: opacity .35s ease; }
-    #loading::before { content: ""; position: fixed; pointer-events: none; z-index: -1; inset: 0; background: radial-gradient(ellipse at 50% 42%, #0b172400 12%, #0b142338 66%, #080e1a8c 100%), linear-gradient(#111d3015, #0d192535); }
+    #loading { position: fixed; z-index: 1; inset: 0; overflow-y: auto; display: flex; isolation: isolate; padding: 48px 4.5vw 64px; background: var(--ink); opacity: 1; transition: opacity .35s ease; }
+    #loading::before { content: ""; position: fixed; pointer-events: none; z-index: -1; inset: 0; background: linear-gradient(90deg, #07101d77, #07101d22 32%, transparent 52%), linear-gradient(0deg, #060e1b77, transparent 25%, transparent 85%, #060e1b33); }
     #loading::after { content: ""; position: fixed; pointer-events: none; inset: 18px; border: 1px solid #d6b77524; clip-path: polygon(0 0, 30% 0, 30% 1px, 70% 1px, 70% 0, 100% 0, 100% 100%, 70% 100%, 70% calc(100% - 1px), 30% calc(100% - 1px), 30% 100%, 0 100%); }
     #loading[hidden] { display: none; }
     #loading.ready { opacity: 0; pointer-events: none; }
-    .loading-background { position: fixed; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center bottom; pointer-events: none; }
-    .loading-content { width: min(100%, 660px); margin: auto; text-align: center; }
+    .loading-background { position: fixed; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; pointer-events: none; }
+    .loading-content { width: clamp(300px, 32vw, 470px); margin: auto 0; text-align: center; }
     h1 { margin: 0; }
-    .game-logo { display: block; width: min(100%, 530px); height: auto; margin: 0 auto; filter: drop-shadow(0 9px 22px #050c1799); }
-    .game-name { display: flex; align-items: center; justify-content: center; gap: .35em; margin: -1px 0 0; color: var(--parchment); font: 600 clamp(22px, 2.7vw, 31px)/1.3 Grenze, Georgia, serif; letter-spacing: .045em; text-shadow: 0 2px 7px #08121d; }
+    .game-logo { display: block; width: 100%; height: auto; margin: 0 auto; filter: drop-shadow(0 9px 22px #050c1799); }
+    .game-name { display: flex; align-items: center; justify-content: center; gap: .45em; margin: 5px 0 0; color: #d1c5a9; font: 600 clamp(21px, 1.6vw, 26px)/1.3 Grenze, Georgia, serif; letter-spacing: .045em; text-shadow: 0 2px 7px #08121d; }
     .game-name .class-name { white-space: nowrap; }
     .game-name .separator { color: #a78c5a; font: 7px Georgia, serif; }
     .divider { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 21px 0 0; color: var(--gold); font-size: 8px; }
     .divider::before, .divider::after { content: ""; width: 76px; height: 1px; background: linear-gradient(90deg, transparent, #c8a46980); }
     .divider::after { transform: rotate(180deg); }
-    .loading-footer { width: min(100%, 376px); margin: 39px auto 0; }
+    .loading-footer { width: min(88%, 360px); margin: 36px auto 0; }
     .loading-message { display: flex; min-height: 24px; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--parchment); font-size: 12px; letter-spacing: .04em; text-shadow: 0 1px 4px #071321; }
     #status { margin: 0; text-align: left; }
     #progress-value { flex-shrink: 0; color: var(--gold); font-variant-numeric: tabular-nums; }
@@ -50,21 +50,23 @@
     #loading.error .progress-frame { display: none; }
     #loading.error #status { color: #edc0b1; }
     @keyframes kindle { 0% { transform: translateX(-110%); } 50% { transform: translateX(105%); } 100% { transform: translateX(325%); } }
-    @media (max-width: 600px) {
-      #loading { padding: 28px 24px 70px; }
+    @media (max-width: 600px), (max-aspect-ratio: 1/1) {
+      #loading { --scene-height: min(46svh, 100vw, 480px); padding: 0 24px 40px; }
+      #loading::before { background: linear-gradient(0deg, var(--ink) calc(100% - var(--scene-height)), #0b142000 calc(100% - var(--scene-height) + 140px)); }
       #loading::after { inset: 10px; }
-      .game-logo { width: min(114%, 450px); max-width: none; margin-left: 50%; transform: translateX(-50%); }
-      .game-name { font-size: clamp(19px, 5.2vw, 28px); letter-spacing: .015em; gap: .30em; }
+      .loading-background { height: var(--scene-height); object-position: 94% top; }
+      .loading-content { width: min(100%, 430px); margin: calc(var(--scene-height) - 30px) auto 0; }
+      .game-logo { width: min(100%, 360px); }
+      .game-name { font-size: clamp(19px, 5.2vw, 25px); letter-spacing: .025em; gap: .4em; }
       .game-name .separator { font-size: 5px; }
-      .divider { margin-top: 20px; }
-      .loading-footer { width: min(90%, 360px); margin-top: 34px; }
+      .divider { margin-top: 15px; }
+      .loading-footer { width: min(90%, 340px); margin-top: 28px; }
       .loading-message { font-size: 11px; letter-spacing: .01em; }
     }
     @media (max-height: 560px) and (min-width: 601px) {
-      #loading { padding: 20px 24px 30px; }
-      .loading-background { object-position: center top; }
-      .game-logo { width: 350px; }
-      .game-name { font-size: 24px; }
+      #loading { padding: 20px 4.5vw 30px; }
+      .loading-content { width: clamp(250px, 32vw, 350px); }
+      .game-name { font-size: 19px; }
       .divider { margin-top: 12px; }
       .loading-footer { margin-top: 20px; }
     }
@@ -78,10 +80,10 @@
   <canvas id="canvas" tabindex="0" aria-label="Cards and Casters" oncontextmenu="event.preventDefault()"></canvas>
   <p id="game-status" role="status" aria-live="polite"></p>
   <main id="loading" aria-labelledby="game-title" aria-busy="true">
-    <img class="loading-background" src="loading/courtyard-night.svg" alt="" aria-hidden="true" fetchpriority="high">
+    <img class="loading-background" src="loading/moonlit-table.webp" alt="" aria-hidden="true" fetchpriority="high">
     <div class="loading-content">
       <header>
-        <h1 id="game-title"><img class="game-logo" src="loading/cac-logo.svg" alt="Cards and Casters" width="600" height="292" fetchpriority="high"></h1>
+        <h1 id="game-title"><img class="game-logo" src="loading/cnc-wordmark.svg" alt="Cards and Casters" width="560" height="350" fetchpriority="high"></h1>
         <p class="game-name"><span class="class-name">Archers</span> <span class="separator" aria-hidden="true">◆</span> <span class="class-name">Warriors</span> <span class="separator" aria-hidden="true">◆</span> <span class="class-name">Mages</span></p>
         <div class="divider" aria-hidden="true">◆</div>
       </header>

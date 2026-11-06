@@ -1,22 +1,34 @@
-# Browser loading artwork
+# Cards and Casters loading artwork
 
-The loading screen uses lightweight, static SVG illustrations that are available
-before the WebAssembly game asset pack downloads. It does not initialize a 3D
-scene or a second canvas.
+The browser shows a moonlit card-table illustration while the game downloads.
+An archer, warrior and mage gather in a ruined observatory, with quiet scenery
+on the left for the title. Portrait screens focus on the gathering above the
+title and progress bar. The loading screen uses ordinary HTML images; it does
+not initialize a 3D scene or a second canvas.
 
-- `courtyard-night.svg` is a flat geometric interpretation of the Old Crossroads
-  battlefield: a starry blue sky, faceted mountains, slate stone arches and slabs,
-  hanging class banners, cypress trees, and warm brass lanterns. The bow and staff
-  motifs echo the existing CaC class crests.
-- `cac-logo.svg` is an emblazoned shield with green, red, and blue class fields,
-  brass trim, and an outlined CaC wordmark. The letter shapes come from the
-  project's existing Grenze SemiBold font. It renders immediately without
-  waiting for the webfont. The full name is accessible live text in the shell.
+- `polyworld_art/cac/loading/moonlit-table.webp` is the runtime painting,
+  approximately 305 KiB. Its original PNG, generation prompt and conversion
+  recipe live in the art repository's `cac/loading/` directory.
+- `cnc-wordmark.svg` replaces the old shield with the full **Cards and Casters**
+  name and a small fan of cards. The letter shapes are outlined from the
+  project's Grenze SemiBold font and retain its SIL OFL 1.1 attribution.
+  Outlines render immediately, before the subtitle's webfont is ready.
+- `cac-logo.svg` and `courtyard-night.svg` are the previous design, retained as
+  source history. The loading page no longer requests them.
 
-The two SVGs total approximately 36 KB and scale cleanly to Retina displays.
-`tools/build_web.sh` copies them into the browser output's `loading/` directory,
-with the existing Grenze font and its OFL license.
+`tools/build_web.sh` copies the WebP, wordmark, Grenze font and OFL notice into
+the browser output's `loading/` directory, outside the Wasm asset pack. The
+source PNG is not packaged. The shell preloads its two images and font.
 
-The page keeps its existing download progress, indeterminate preparation state,
-first-frame reveal, and recoverable error handling. The empty `loading-note`
-element is hidden during loading and reserved for error recovery guidance.
+Download progress, indeterminate preparation, first-frame reveal, reduced
+motion support and error recovery retain their existing behavior. The empty
+`loading-note` element is reserved for error recovery guidance.
+
+With a fresh browser build served locally, run the focused loading checks:
+
+```sh
+CAC_TEST_URL=http://127.0.0.1:8080 node tests/test_hero_select.cjs --loading-only
+```
+
+These use Playwright and Chrome and save desktop, portrait and short-landscape
+screenshots to `build/test-output/`.
