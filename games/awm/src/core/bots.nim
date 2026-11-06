@@ -597,12 +597,12 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   discard result.addFunction("cardHasKeyword", 2, cardKeywordProc, 8)
 
   let handCostProc: HostProc = proc(args: openArray[int32]): int32 =
-    ## Returns the printed cost of a hand card.
+    ## Returns what a hand card costs this hero now: its printed cost plus
+    ## any off-class surcharge. -1 for an index outside the hand.
     let
       i = args[0].int
       hand = activeGame[].players[activePlayer].hand
     if i < 0 or i >= hand.len: return -1
-    # What it costs this hero now, the off-class surcharge included.
     activeGame[].playCost(activePlayer, hand[i]).int32
   discard result.addFunction("handCost", 1, handCostProc, 3)
 
