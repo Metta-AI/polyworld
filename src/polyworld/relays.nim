@@ -498,7 +498,7 @@ proc receive*(
       message.tickRate == room.tickRate
     if rosterOnly and message.payload != room.payload:
       rosterOnly = false
-      if room.identity.game == "galcon":
+      if room.identity.game in ["galcon", "light_vs_dark"]:
         try:
           let before = parseJson(room.payload)
           let after = parseJson(message.payload)
@@ -509,6 +509,25 @@ proc receive*(
               before.delete("players")
               after.delete("players")
               rosterOnly = before == after
+            elif room.identity.game == "light_vs_dark" and
+                before.hasKey("players") and before["players"].kind == JArray and
+                after.hasKey("players") and after["players"].kind == JArray and
+                after["players"].len == message.number.int and
+                after.hasKey("playerCount") and after["playerCount"].kind == JInt and
+                after["playerCount"].getInt == message.number.int:
+              # Resizing may truncate or append empty records, never alter survivors.
+              var namesUnchanged = true
+              for index in 0 ..< min(before["players"].len, after["players"].len):
+                if before["players"][index] != after["players"][index]:
+                  namesUnchanged = false
+              for index in before["players"].len ..< after["players"].len:
+                if after["players"][index] != %*{"name": ""}:
+                  namesUnchanged = false
+              before.delete("players")
+              after.delete("players")
+              before.delete("playerCount")
+              after.delete("playerCount")
+              rosterOnly = namesUnchanged and before == after
         except JsonParsingError:
           discard
     # Validate the entire removed tail before changing settings or assignments.
@@ -528,7 +547,7 @@ proc receive*(
       reject("Seats can only change in the lobby")
     let owner = room.seats[message.seat].owner
     let hostBotRemoval = message.kind == ReleaseSeat and
-      room.identity.game == "galcon" and
+      room.identity.game in ["galcon", "gods_of_the_arena", "light_vs_dark"] and
       guest.id == room.owner and room.seats[message.seat].name != "Human"
     if owner != 0 and owner != guest.id and not hostBotRemoval:
       reject("Seat belongs to another participant")
@@ -557,7 +576,7 @@ proc receive*(
     for seat in room.seats:
       if seat.owner == 0:
         # These game adapters still require dense rosters when preparing worlds.
-        if room.identity.game != "galcon":
+        if room.identity.game == "light_vs_dark":
           reject("Every game seat must have an owner")
         continue
       let controller = relay.guest(seat.owner)

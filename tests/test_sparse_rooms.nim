@@ -31,9 +31,9 @@ proc send(relay: Relay, connection: int, message: RoomMessage) =
 
 echo "Testing roster readiness intent and current-revision setup proofs"
 var relay = Relay()
-let host = relay.connect(1, "galcon")
-let peer = relay.connect(2, "galcon")
-discard relay.connect(3, "galcon")
+let host = relay.connect(1, "gods_of_the_arena")
+let peer = relay.connect(2, "gods_of_the_arena")
+discard relay.connect(3, "gods_of_the_arena")
 relay.send(1, RoomMessage(kind: CreateRoom, name: "Sparse", number: 10, tickRate: 24))
 let sparse = relay.rooms[0]
 relay.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Human"))
@@ -113,8 +113,8 @@ block:
   galconRelay.send(1, RoomMessage(kind: StartMatch))
   doAssert room.phase == Desynced, "Sparse controllers still require hash consensus"
 
-# Other adapters retain their existing dense-roster requirement.
-for game in ["light_vs_dark", "gods_of_the_arena", "unknown-adapter"]:
+# LvD still requires full occupancy.
+for game in ["light_vs_dark"]:
   let denseRelay = Relay()
   discard denseRelay.connect(1, game)
   denseRelay.send(1, RoomMessage(kind: CreateRoom, name: "Dense adapter",
@@ -130,7 +130,7 @@ for game in ["light_vs_dark", "gods_of_the_arena", "unknown-adapter"]:
   doAssert room.phase == Playing
 
 echo "Testing host removal of one foreign bot slot without kicking its owner"
-for game in ["galcon"]:
+for game in ["galcon", "gods_of_the_arena"]:
   let botRelay = Relay()
   let owner = botRelay.connect(1, game)
   let botOwner = botRelay.connect(2, game)

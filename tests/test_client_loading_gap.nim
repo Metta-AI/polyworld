@@ -10,7 +10,7 @@ suite "Browser graphics loading gap":
     var clients: array[2, RoomClient]
     for i in 0 .. 1:
       clients[i] = RoomClient(identity: GameIdentity(
-        game: "galcon", gameplay: 77, protocol: 1),
+        game: "gods_of_the_arena", gameplay: 77, protocol: 1),
         name: if i == 0: "DraftBrowserHost" else: "DraftBrowserGuest")
       clients[i].opened()
 
