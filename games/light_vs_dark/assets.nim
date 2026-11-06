@@ -145,6 +145,8 @@ proc generatedCharacterAssets*(): seq[Asset] =
     for path in walkFiles(directory / category.directory / "*.json"):
       result.add fileAsset(path)
   result.add modelAsset(directory / manifest.rig)
+  for name in ["resource_wood", "resource_gold"]:
+    result.add modelAsset(directory / "clothing/backs" / (name & ".glb"))
   for units in roster.players:
     for entry in units:
       let inventory = manifest.presetManifest(entry.preset)

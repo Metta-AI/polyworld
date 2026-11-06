@@ -14,7 +14,8 @@ import
     inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
     viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays],
-  appearances, assets, buildings, content, factions, groves, symbols, treeorders,
+  appearances, assets, backpacks, buildings, content, factions, groves,
+  resourcepacks, symbols, treeorders,
   sim, maps,
   game,
   replays,
@@ -77,6 +78,7 @@ var
   previousUnitPositions: Table[int32, Vec3]
   previousUnitFacings: Table[int32, float32]
   unitPoses: seq[CharacterPose]
+  resourceModels: seq[array[ResourcePack, CharacterModel]]
   outlinePose: CharacterPose
   terrainVisionTick = int32.low
   terrainVisionMode = int32.low
@@ -183,6 +185,15 @@ proc captureUnitPoses() =
 proc renderTime(ticks: int32): float32 =
   ## Converts animation ticks into seconds for the clip sampler.
   (float32(ticks) + frameAlpha) / float32(TickRate)
+
+proc renderUnitModel(unit: Unit, ordinary: CharacterModel): CharacterModel =
+  ## Reuses one cargo outfit for the world, shadows and selection outline.
+  let pack = carriedPack(unit.kind, unit.hp, unit.carryGold, unit.carryWood)
+  if pack != NoPack and unit.owner >= 0 and unit.owner < resourceModels.len:
+    let model = resourceModels[unit.owner][pack]
+    if model != nil:
+      return model
+  ordinary
 
 proc buildingCentre(structure: Building): Vec3 =
   ## Returns the world centre of a structure's footprint.
@@ -362,6 +373,9 @@ proc runGraphics*(network: NetworkMatch = nil,
     )
     teamColors = newSeq[ColorRGBX](run.world.players.len)
     unitModelCache: UnitModelCache
+  resourceModels = newSeq[array[ResourcePack, CharacterModel]](
+    run.world.players.len
+  )
   profileBlock "models":
     let
       manifest = readManifest(ChargenLibrary)
@@ -372,6 +386,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       if player >= FactionFiles.len:
         unitModels[player] = unitModels[player mod FactionFiles.len]
         unitClips[player] = unitClips[player mod FactionFiles.len]
+        resourceModels[player] = resourceModels[player mod FactionFiles.len]
         continue
       for kind in UnitKind:
         let model = unitModelCache.loadUnitModel(
@@ -380,6 +395,12 @@ proc runGraphics*(network: NetworkMatch = nil,
         unitModels[player][kind] = model
         for slot in AnimationSlot:
           unitClips[player][kind][slot] = model.clipIndex(kind.unitClip(slot))
+      for pack in WoodPack .. GoldPack:
+        resourceModels[player][pack] = unitModelCache.loadBackpackModel(
+          manifest,
+          roster.players[player][PeonUnit.ord],
+          pack
+        )
   drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
@@ -1271,7 +1292,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if not shownUnit(unit) or unit.state == UnitDying:
           continue
         let
-          model = unitModels[unit.owner][unit.kind]
+          model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
           clip = unitClips[unit.owner][unit.kind][unit.animation]
         var animTime = renderTime(unit.animationTicks)
         if unit.animation == DeathAnimation or
@@ -1717,7 +1738,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             if not shownUnit(unit):
               continue
             let
-              model = unitModels[unit.owner][unit.kind]
+              model = renderUnitModel(unit, unitModels[unit.owner][unit.kind])
               clip = unitClips[unit.owner][unit.kind][unit.animation]
             var animTime = renderTime(unit.animationTicks)
             # Hold one-shot clips at their final pose instead of looping.
