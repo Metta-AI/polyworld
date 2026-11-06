@@ -845,13 +845,18 @@ proc drawUi*(
       let (pos, size) = minimapCell(x, y, MapSampleStride, area)
       sk.drawRect(pos, size, shade)
   for structure in run.world.buildings:
-    if structure.owner < 0 or not shownBuilding(structure, viewMode):
+    if not shownBuilding(structure, viewMode):
       continue
     for y in structure.origin.y.int32 ..< structure.origin.y.int32 + structure.footprint.depth:
       for x in structure.origin.x.int32 ..< structure.origin.x.int32 + structure.footprint.width:
-        if not run.world.renderTileVisible(viewMode, x, y): continue
-        let point = minimapPoint(tile2(x, y), area)
-        sk.drawRect(point, vec2(cell), teamColors[structure.owner])
+        let
+          point = minimapPoint(tile2(x, y), area)
+          tint =
+            if structure.kind == GoldMineBuilding:
+              rgbx(235, 188, 70, 255)
+            else:
+              teamColors[structure.owner]
+        sk.drawRect(point, vec2(cell), tint)
   for unit in run.world.units:
     if unit.state == UnitDying or not shownUnit(unit, viewMode):
       continue

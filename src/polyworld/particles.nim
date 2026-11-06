@@ -65,6 +65,7 @@ type
     travelTime: float32
     endTime: float32
     seed: uint32
+    owner: int32
     anchor: int32
       ## What the effect travels with, or 0; see `followParticleAnchors`.
 
@@ -229,7 +230,8 @@ proc addParticleEffect(
     target: Vec3,
     travelTime,
     delay: float32,
-    anchor = 0'i32
+    anchor = 0'i32,
+    owner = -1'i32
 ) =
   ## Adds one effect while keeping the presentation queue bounded.
   if system.effects.len >= MaximumParticleEffects:
@@ -243,7 +245,8 @@ proc addParticleEffect(
     travelTime: max(travelTime, 0.05'f32),
     endTime: startTime + kind.effectLifetime(travelTime),
     seed: system.nextSeed,
-    anchor: anchor
+    anchor: anchor,
+    owner: owner
   )
   inc system.nextSeed
 
@@ -252,7 +255,8 @@ proc emitParticleBurst*(
     kind: ParticleEffectKind,
     position: Vec3,
     delay = 0.0'f32,
-    anchor = 0'i32
+    anchor = 0'i32,
+    owner = -1'i32
 ) =
   ## Emits one burst now or after a short presentation delay. It stays
   ## where it was emitted unless it has an anchor to follow.
@@ -262,7 +266,8 @@ proc emitParticleBurst*(
     position,
     0.05'f32,
     delay,
-    anchor
+    anchor,
+    owner
   )
 
 proc emitParticleSpan*(
@@ -297,7 +302,8 @@ proc emitParticleProjectile*(
     impact: ParticleEffectKind,
     origin,
     target: Vec3,
-    travelTime: float32
+    travelTime: float32,
+    owner = -1'i32
 ) =
   ## Emits a travelling effect and a matching impact at its destination.
   let duration = max(travelTime, 0.05'f32)
@@ -306,9 +312,10 @@ proc emitParticleProjectile*(
     origin,
     target,
     duration,
-    0.0'f32
+    0.0'f32,
+    owner = owner
   )
-  system.emitParticleBurst(impact, target, duration)
+  system.emitParticleBurst(impact, target, duration, owner = owner)
 
 proc followParticleAnchors*(
     system: var ParticleSystem,
@@ -433,7 +440,8 @@ proc drawParticles*(
     visibility: openArray[uint8] = [],
     visibilityWidth = 0,
     visibilityOrigin = vec2(0),
-    visibilityPadding = 0
+    visibilityPadding = 0,
+    viewer = -1'i32
 ) =
   ## Draws every visible active effect with instanced, depth-tested billboards.
   if system.program.id == 0 or system.effects.len == 0:
@@ -446,15 +454,18 @@ proc drawParticles*(
   glUseProgram(system.program.id)
   glBindVertexArray(system.vertexArray)
   for effect in system.effects:
-    if effect.startTime > system.time or not particlePathVisible(
-      effect.origin,
-      effect.target,
-      visibility,
-      visibilityWidth,
-      visibilityOrigin,
-      visibilityPadding
-    ):
+    if effect.startTime > system.time:
       continue
+    if viewer < 0 or effect.owner != viewer:
+      if not particlePathVisible(
+        effect.origin,
+        effect.target,
+        visibility,
+        visibilityWidth,
+        visibilityOrigin,
+        visibilityPadding
+      ):
+        continue
     if effect.kind in
         {ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves}:
       glBlendFuncSeparate(

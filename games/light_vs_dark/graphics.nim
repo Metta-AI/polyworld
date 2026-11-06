@@ -22,7 +22,7 @@ import
   ui,
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
   networkpresentation, shortcutsettings, unitselection, orderfeedback,
-  constructionpresentation, targetfeedback, rendervisibility, strictfog,
+  constructionpresentation, targetfeedback, rendervisibility,
   harvestpresentation, woodcuttingpresentation
 
 const
@@ -470,7 +470,6 @@ proc runGraphics*(network: NetworkMatch = nil,
   var
     attackClickMarks = initClickMarks(orderMarkSettings(attack = true))
     particles = initParticleSystem()
-    strictVision = initStrictFog()
     harvesting: HarvestPresentation
     harvestBars = initWorldBarRenderer()
     currentSight: seq[uint8]
@@ -500,10 +499,6 @@ proc runGraphics*(network: NetworkMatch = nil,
   proc buildingKey(): string =
     ## Detects changes to displayed construction stages and building lifetimes.
     result = $run.world.terrainEdits.len & ":view=" & $viewMode
-    for placement in scenery:
-      result.add (if run.world.renderTileVisible(viewMode,
-        int32(placement.tile mod run.world.map.side.int),
-        int32(placement.tile div run.world.map.side.int)): "1" else: "0")
     for structure in run.world.buildings:
       result.add &"|{structure.id}:{structure.state.ord}:{shownBuilding(structure)}"
       if structure.state == BuildingUnderConstruction:
@@ -512,13 +507,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   proc placeSceneProps() {.measure.} =
     ## Submits desired placements while the renderer retains unchanged groups.
     clearProps()
-    var visibleScenery: seq[GrovePlacement]
-    for placement in scenery:
-      if run.world.renderTileVisible(viewMode,
-          int32(placement.tile mod run.world.map.side.int),
-          int32(placement.tile div run.world.map.side.int)):
-        visibleScenery.add placement
-    grove.plantGrove(visibleScenery, run.world.treeWood)
+    grove.plantGrove(scenery, run.world.treeWood)
     for structure in run.world.buildings:
       if not shownBuilding(structure): continue
       for part in buildingArt.buildingParts(
@@ -1109,10 +1098,6 @@ proc runGraphics*(network: NetworkMatch = nil,
     else:
       discard refreshPendingBuild()
 
-  proc feedbackVisible(origin: Vec3, radius: float32): bool =
-    viewMode == 0 or run.world.renderAreaVisible(viewMode, origin.x + mapHalf(),
-      origin.z + mapHalf(), radius)
-
   proc clickTilePoint(x, y: int32): Vec3 =
     ## Returns the render centre of one map tile.
     let xz = tileCentreXZ(tile2(x, y))
@@ -1438,9 +1423,6 @@ proc runGraphics*(network: NetworkMatch = nil,
       kind = BuildingKind(pendingBuild)
       size = BuildingTable[kind].footprint
       origin = buildGhostOrigin(viewProjection)
-    for y in origin[1] ..< origin[1] + size.depth:
-      for x in origin[0] ..< origin[0] + size.width:
-        if not run.world.renderTileVisible(viewMode, x, y): return
     let
       valid = run.world.canPlace(options.playerSlot - 1, kind, origin[0], origin[1],
         selectedBuildWorker())
@@ -1624,7 +1606,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             (target.position - origin).length / 17.0'f32,
             0.08'f32,
             0.42'f32
-          )
+          ),
+          owner = unit.owner
         )
       of MageUnit, ClericUnit:
         particles.emitParticleProjectile(
@@ -1636,7 +1619,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             (target.position - origin).length / 12.0'f32,
             0.12'f32,
             0.5'f32
-          )
+          ),
+          owner = unit.owner
         )
       of CatapultUnit, SummonUnit:
         particles.emitParticleProjectile(
@@ -1648,10 +1632,12 @@ proc runGraphics*(network: NetworkMatch = nil,
             (target.position - origin).length / 13.0'f32,
             0.14'f32,
             0.52'f32
-          )
+          ),
+          owner = unit.owner
         )
       of PeonUnit, SoldierUnit, KnightUnit:
-        particles.emitParticleBurst(CombatSparks, target.position)
+        particles.emitParticleBurst(
+          CombatSparks, target.position, owner = unit.owner)
     for structure in run.world.buildings:
       if not shownBuilding(structure) or structure.id notin towerTargets:
         continue
@@ -1672,7 +1658,8 @@ proc runGraphics*(network: NetworkMatch = nil,
           (target.position - origin).length / 13.0'f32,
           0.14'f32,
           0.52'f32
-        )
+        ),
+        owner = structure.owner
       )
 
   ## Frame
@@ -1807,7 +1794,7 @@ proc runGraphics*(network: NetworkMatch = nil,
               else: int32(run.replayPlayer.data.hashes.len)
             transport.sync(run.world.tick, recordedNow, run.world.over)
       let active = simulationActive(transport)
-      harvesting.updateHarvest(run.world, dt, viewer = viewMode - 1, paused = not active)
+      harvesting.updateHarvest(run.world, dt, viewer = -1, paused = not active)
       currentSight = run.world.renderVisibilityValues(viewMode, CurrentSightMask)
       pruneSelection()
       frameAlpha =
@@ -1912,22 +1899,6 @@ proc runGraphics*(network: NetworkMatch = nil,
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
         scene.toon.drawBackground()
         updateTerrainVision()
-        if viewMode != 0:
-          # Capture only explored/dim ground, with no prop or shadow contribution.
-          strictVision.beginStrictGround(window.size)
-          glDepthMask(GL_TRUE)
-          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-          scene.toon.drawBackground()
-          let shadowsWereEnabled = sunShadowsEnabled
-          sunShadowsEnabled = false
-          drawTerrain(viewProjection, showTiles, drawProps = false)
-          sunShadowsEnabled = shadowsWereEnabled
-          drawWater(viewProjection, cameraEye, opacity = 0.5'f, highlightOpacity = 0.0'f)
-          strictVision.captureStrictGround(window.size, inverse(viewProjection),
-            currentSight, run.world.map.side.int)
-          glDepthMask(GL_TRUE)
-          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-          scene.toon.drawBackground()
         drawTerrain(viewProjection, showTiles)
         beginCharacters(scene, window, view, projection, cameraEye)
         drawWorldUnits()
@@ -1947,13 +1918,14 @@ proc runGraphics*(network: NetworkMatch = nil,
           barCameraUp,
           cameraForward,
           (if viewMode == 0: @[] else: currentSight),
-          run.world.map.side.int, vec2(-mapHalf()), visibilityPadding = 5
+          run.world.map.side.int, vec2(-mapHalf()), visibilityPadding = 5,
+          viewer = viewMode - 1
         )
         harvestBars.clear()
-        harvestBars.addHarvestBillboards(harvesting, run.world, viewMode - 1, harvestAnchor)
+        harvestBars.addHarvestBillboards(harvesting, run.world, -1, harvestAnchor)
         harvestBars.draw(viewProjection, barCameraRight, barCameraUp)
-        clickMarks.drawClickMarks(viewProjection, feedbackVisible)
-        attackClickMarks.drawClickMarks(viewProjection, feedbackVisible)
+        clickMarks.drawClickMarks(viewProjection)
+        attackClickMarks.drawClickMarks(viewProjection)
         if lineGesture.active and lineGesture.dragging:
           worldShapes.clear()
           let color = orderFeedbackColor(lineGesture.attackMove)
@@ -1998,9 +1970,6 @@ proc runGraphics*(network: NetworkMatch = nil,
           barCameraUp,
           dt
         )
-        if viewMode != 0:
-          # Last world pass clips props, shadows, outlines and every effect.
-          strictVision.restoreHiddenGround()
       profileBlock "ui":
         glDisable(GL_DEPTH_TEST)
         glDisable(GL_CULL_FACE)
@@ -2264,6 +2233,5 @@ proc runGraphics*(network: NetworkMatch = nil,
   selectionOutline.closeSelectionOutline()
   particles.closeParticles()
   harvestBars.closeWorldBarRenderer()
-  strictVision.closeStrictFog()
   finishGameProfile()
   result = quitToMenu

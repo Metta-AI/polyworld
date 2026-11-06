@@ -1,8 +1,8 @@
-## LvD presentation-only visibility. Never use targeting's own-entity bypass.
+## LvD presentation visibility keeps owned entities and map resources visible.
 ## View 0 is the existing designated omniscient spectator/replay view;
 ## positive views are one-based players. These queries never rebuild vision.
 import std/math
-import maps, sim
+import content, maps, sim
 
 type RenderVisibilityMask* = enum
   CurrentSightMask, TerrainMemoryMask
@@ -20,13 +20,18 @@ proc renderAreaVisible*(world: World, viewMode: int32,
   true
 
 proc renderUnitVisible*(world: World, viewMode: int32, unit: Unit): bool =
-  unit.state != UnitInMine and world.renderTileVisible(viewMode,
-    unit.tile.x.int32, unit.tile.y.int32)
+  ## Keeps owned units whole while hiding unseen enemy units.
+  unit.state != UnitInMine and viewMode in 0 .. world.players.len.int32 and
+    (viewMode == 0 or unit.owner == viewMode - 1 or
+      world.renderTileVisible(viewMode, unit.tile.x.int32, unit.tile.y.int32))
 
 proc renderBuildingVisible*(world: World, viewMode: int32,
     building: Building): bool =
-  ## Visibility of the footprint, independent of ownership. Pixel clipping
-  ## remains necessary for geometry extending beyond visible footprint cells.
+  ## Reveals the whole building when any footprint tile is visible.
+  if viewMode notin 0 .. world.players.len.int32:
+    return false
+  if building.kind == GoldMineBuilding or building.owner == viewMode - 1:
+    return true
   for y in building.origin.y.int32 ..<
       building.origin.y.int32 + building.footprint.depth:
     for x in building.origin.x.int32 ..<

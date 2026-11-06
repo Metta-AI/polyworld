@@ -18,7 +18,7 @@ block currentUnitSight:
   unit.state = UnitDying
   w.rebuildVision()
   doAssert not w.visible(0, unit.tile)
-  doAssert not renderUnitVisible(w, 1, unit), "Own corpse cannot bypass current sight"
+  doAssert renderUnitVisible(w, 1, unit), "Owned units remain visible"
   unit.state = UnitInMine
   doAssert not renderUnitVisible(w, 0, unit)
   unit.state = UnitIdle
@@ -37,8 +37,8 @@ own.state = BuildingDying
 w.rebuildVision()
 doAssert not w.visible(0, own.origin)
 doAssert w.explored(0, own.origin.x.int32, own.origin.y.int32)
-doAssert not renderBuildingVisible(w, 1, own),
-  "Even owned building remains hidden once current sight is lost"
+doAssert renderBuildingVisible(w, 1, own),
+  "Owned buildings remain visible even without current sight"
 when not defined(legacyRenderVisibility):
   let before = Game(world: w).stateHash()
   doAssert renderBuildingVisible(w, 0, own), "Designated omniscient retains view"
@@ -57,7 +57,7 @@ when not defined(legacyRenderVisibility):
   doAssert renderAreaVisible(w, 1, own.origin.x.float32 + 0.5,
     own.origin.y.float32 + 0.5, 0.2)
   doAssert not renderAreaVisible(w, 1, -0.1, 0.5, 0.2)
-  echo "Strict render visibility: own building visible -> explored hidden -> restored; read-only masks passed"
+  echo "Owned entities remain visible; fog masks remain read-only"
 
   var enemyIndex = -1
   for i, b in w.buildings:
@@ -82,3 +82,28 @@ when not defined(legacyRenderVisibility):
   w.restore(allied)
   doAssert renderBuildingVisible(w, 1, enemy)
   echo "Authoritative allied sight -> alliance withdrawal -> explored hidden -> restored passed"
+
+block resourcesAndWholeBuildings:
+  let world = trafficFixture(0, "open").world
+  for stamp in world.visibleStamp[0].mitems:
+    stamp = 0
+  var mineIndex = -1
+  var enemyIndex = -1
+  for i, building in world.buildings:
+    if building.kind == GoldMineBuilding:
+      mineIndex = i
+    elif building.owner == 1:
+      enemyIndex = i
+  doAssert mineIndex >= 0 and enemyIndex >= 0
+  let
+    mine = world.buildings[mineIndex]
+    enemy = world.buildings[enemyIndex]
+  doAssert world.renderBuildingVisible(1, mine)
+  doAssert not world.renderBuildingVisible(1, enemy)
+  let corner = world.map.tileIndex(enemy.origin)
+  world.visibleStamp[0][corner] = world.visionGeneration[0]
+  doAssert world.renderBuildingVisible(1, enemy)
+  world.visibleStamp[0][corner] = 0
+  doAssert not world.renderBuildingVisible(1, enemy)
+  doAssert world.renderBuildingVisible(1, mine)
+  echo "Mines ignore fog; one visible building cell reveals the whole object"

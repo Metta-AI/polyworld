@@ -21,13 +21,13 @@ proc advanceTargetFeedback*(feedback: var TargetFeedback, dt: float32) =
   if feedback.remaining <= 0: feedback = TargetFeedback()
 
 proc targetFlashVisible*(feedback: TargetFeedback, world: World): bool =
-  ## Recheck current vision every draw, even if the renderer is in all-view mode.
+  ## Keeps resource orders visible; enemy targets still require current sight.
   if world == nil or feedback.kind == NoTargetFlash or feedback.remaining <= 0:
     return false
   let target = feedback.target
   if feedback.kind == HarvestTreeFlash:
-    return target >= 0 and target < world.treeWood.len and world.treeWood[target] > 0 and
-      world.visible(feedback.player, target mod world.map.side, target div world.map.side)
+    return target >= 0 and target < world.treeWood.len and
+      world.treeWood[target] > 0
   if world.hasUnit(target):
     let unit = world.units[world.unitIndex(target)]
     return unit.hp > 0 and unit.state notin {UnitDying, UnitInMine} and
@@ -35,7 +35,8 @@ proc targetFlashVisible*(feedback: TargetFeedback, world: World): bool =
   if world.hasBuilding(target):
     let structure = world.buildings[world.buildingIndex(target)]
     return structure.hp > 0 and structure.state != BuildingDying and
-      world.buildingVisible(feedback.player, structure) and
+      (structure.kind == GoldMineBuilding or
+        world.buildingVisible(feedback.player, structure)) and
       (feedback.kind != HarvestEntityFlash or structure.kind != GoldMineBuilding or structure.goldLeft > 0)
 
 proc targetFlashColor*(feedback: TargetFeedback): Vec3 =

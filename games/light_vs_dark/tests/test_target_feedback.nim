@@ -164,7 +164,7 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
     maximumTicks: (TickRate*60).uint32, decisionTicks: DecisionTicks.uint16,
     players: @[ReplayPlayerSetup(id: 0), ReplayPlayerSetup(id: 1)]))
   run.flushPlayerCommands()
-  if invalid.len > 0:
+  if invalid.len > 0 and not (invalid == "unseen" and kind in ["tree", "mine"]):
     check run.submissions.len == 0
     check targetFlash.kind == NoTargetFlash
     return
@@ -199,7 +199,7 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
   check targetFlash.target == target
   check targetFlash.remaining == ClickMarkDuration
   let retained = targetFlash
-  proc checkHidden() =
+  proc checkHidden(resourceVisible = false) =
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
     glClearColor(0,0,0,1)
     glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
@@ -211,7 +211,10 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
       if (pixel.g > 100 and pixel.g.int > pixel.r.int*14 div 10) or
           (pixel.r > 100 and pixel.r.int > pixel.g.int*2): inc tinted
       if pixel.r > 150 and pixel.g > 100 and pixel.b < 80: inc selected
-    check tinted == 0
+    if resourceVisible:
+      check tinted > 100
+    else:
+      check tinted == 0
     if shownUnit(run.world.units[run.world.unitIndex(id)]):
       check selected > 100
     else:
@@ -221,7 +224,7 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
   checkHidden()
   targetFlash = retained
   for cell in run.world.visibleStamp[0].mitems: cell = run.world.visionGeneration[0] + 1
-  checkHidden()
+  checkHidden(resourceVisible = kind in ["tree", "mine"])
   for cell in run.world.visibleStamp[0].mitems: cell = run.world.visionGeneration[0]
   if kind == "tree": run.world.treeWood[tile] = 0
   elif kind == "mine": run.world.buildings[0].goldLeft = 0
@@ -254,8 +257,10 @@ suite "LvD target flash":
     checkTarget("mine", invalid = "full")
   test "full Shift queue cannot flash attack":
     checkTarget("unit", invalid = "full")
-  test "unseen tree cannot queue or flash":
+  test "tree orders remain visible through fog":
     checkTarget("tree", invalid = "unseen")
+  test "mine orders remain visible through fog":
+    checkTarget("mine", invalid = "unseen")
   test "unseen enemy cannot queue or flash even in all-view":
     checkTarget("unit", invalid = "unseen")
 selectionOutline.closeSelectionOutline()

@@ -54,9 +54,14 @@ glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, text
 doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
 glViewport(0, 0, window.size.x, window.size.y)
 
-proc checkOrder(attack, minimap: bool, drag = false, enemy = false, shift = false) =
+proc checkOrder(attack, minimap: bool, drag = false, enemy = false,
+    shift = false, fogged = false) =
   run = Game(world: newWorld(generateMap(DefaultSeed), TickRate * 60))
   run.world.buildings.setLen(0) # No building art needed for ground input.
+  viewMode = if fogged: 1 else: 0
+  if fogged:
+    for stamp in run.world.visibleStamp[0].mitems:
+      stamp = 0
   clearPlayerCommands()
   lineGesture.cancelLine()
   rightOrderStarted = false
@@ -226,6 +231,12 @@ suite "LvD rendered order feedback":
     checkOrder(true, false, enemy = true)
   test "contextual enemy right-click queues targeted Attack and renders red":
     checkOrder(false, false, enemy = true)
+
+block foggedOrders:
+  checkOrder(false, false, fogged = true)
+  checkOrder(true, false, fogged = true)
+  checkOrder(false, false, drag = true, fogged = true)
+  checkOrder(true, false, drag = true, fogged = true)
 
 glDeleteTextures(1, texture.addr)
 glDeleteFramebuffers(1, framebuffer.addr)

@@ -27,7 +27,8 @@ doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
 initTerrain(treeStyle = NoTrees, rockStyle = NoRocks,
   terrainStyle = GeneratedTerrain, settings = TerrainAssets(size: 256))
 initSunShadows(lightRadius = 60)
-let art = loadBuildingArt(Grove(), factions = [Emerald, Emerald])
+let grove = generateGrove(73021, {LightTree, LightRock})
+let art = loadBuildingArt(grove, factions = [Emerald, Emerald])
 let world = trafficFixture(0, "open").world
 var enemyIndex = -1
 for i, b in world.buildings:
@@ -63,8 +64,7 @@ effects.advanceParticles(0.2'f32)
 
 let run = Game(world: world)
 let viewMode = 1'i32
-let grove = Grove()
-let scenery: seq[GrovePlacement] = @[]
+var scenery: seq[GrovePlacement] = @[]
 let buildingArt = art
 proc shownBuilding(b: Building): bool = world.renderBuildingVisible(1, b)
 proc buildingCentre(b: Building): Vec3 =
@@ -81,7 +81,7 @@ macro productionPlacement(): untyped =
   error("Missing production placement")
 productionPlacement()
 
-proc draw(kind: int): int =
+proc draw(kind: int, viewer = -1'i32): int =
   ## 0 real building color, 1 actual shadow-map depth, 2 actual particle color.
   let hashBefore = Game(world: world).stateHash()
   uploadTerrainVisibility(world.renderVisibilityValues(1, TerrainMemoryMask), world.map.side.int)
@@ -112,7 +112,8 @@ proc draw(kind: int): int =
         effects.drawParticles(vp, right, up, forward)
       else:
         effects.drawParticles(vp, right, up, forward,
-          world.renderVisibilityValues(1, CurrentSightMask), world.map.side.int, vec2(-half))
+          world.renderVisibilityValues(1, CurrentSightMask), world.map.side.int,
+          vec2(-half), viewer = viewer)
     var pixels = newSeq[uint8](Size * Size * 4)
     glReadPixels(0, 0, Size, Size, GL_RGBA, GL_UNSIGNED_BYTE, pixels[0].addr)
     for i in 0 ..< Size * Size:
@@ -141,6 +142,44 @@ for kind in 0 .. 2:
   let count = draw(kind)
   echo "restored kind=", kind, " pixels=", count
   doAssert count == initial[kind]
+# A single revealed footprint cell submits the same complete silhouette.
+for stamp in world.visibleStamp[0].mitems:
+  stamp = world.visionGeneration[0]
+let completePixels = draw(0)
+for stamp in world.visibleStamp[0].mitems:
+  stamp = 0
+world.visibleStamp[0][world.map.tileIndex(building.origin)] =
+  world.visionGeneration[0]
+doAssert draw(0) == completePixels
+for stamp in world.visibleStamp[0].mitems:
+  stamp = 0
+doAssert draw(0) == 0
+
+# Ownership keeps both a projectile and its impact visible through fog.
+effects.clearParticles()
+effects.emitParticleProjectile(MagicBolt, MagicBurst,
+  center + vec3(-1, 2, 0), center + vec3(1, 2, 0), 0.4'f, owner = 0)
+effects.advanceParticles(0.2'f)
+doAssert draw(2, viewer = 0) > 10
+doAssert draw(2, viewer = 1) == 0
+effects.advanceParticles(0.8'f)
+doAssert draw(2, viewer = 0) > 10
+doAssert draw(2, viewer = 1) == 0
+
+# Resource geometry remains present when every sight cell is hidden.
+world.buildings[0].kind = GoldMineBuilding
+world.buildings[0].footprint = BuildingTable[GoldMineBuilding].footprint
+doAssert draw(0) > 10
+world.buildings.setLen(0)
+let treeTile = world.map.tileIndex(40, 40)
+scenery = @[GrovePlacement(kind: LightTree, tile: treeTile, variant: 0,
+  position: center, scale: 1.0'f)]
+world.treeWood[treeTile] = 100
+doAssert draw(0) > 10
+world.treeWood[treeTile] = 0
+doAssert draw(0) == 0
+echo "Whole buildings, resources, and owner-aware combat effects passed"
+
 effects.closeParticles()
 window.close()
 echo "Native real building, shadow depth and persistent effect visibility transitions passed (production placement + baked GPU passes)"
