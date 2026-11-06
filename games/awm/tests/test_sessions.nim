@@ -1,4 +1,4 @@
-import std/[json, options, unittest]
+import std/[json, options, strutils, unittest]
 import ../src/core/sessions
 
 suite "session options":
@@ -6,18 +6,22 @@ suite "session options":
     let options = parseSessionOptions([])
     check options.seed == DefaultSessionSeed
     check not options.seedGiven
-    check options.playerClass == Archer
-    check options.opponentClass == Mage
     check options.playerCount == 2
     check options.human == false
 
   test "URL argument forms and negative seeds":
     let options = parseSessionOptions([
-      "--seed", "-123", "--class", "warrior", "--opponent=MAGE"])
+      "--seed", "-123", "--players=3", "--replay", "m.replay"])
     check options.seed == -123
     check options.seedGiven
-    check options.playerClass == Warrior
-    check options.opponentClass == Mage
+    check options.playerCount == 3
+    check options.replayPath == "m.replay"
+
+  test "bots are paths, at most one per duel seat":
+    check parseSessionOptions(["--bot", "a.bas", "--bot=b.bas"]).botPaths ==
+      @["a.bas", "b.bas"]
+    expect ValueError:
+      discard parseSessionOptions(["--bot=a.bas", "--bot=b.bas", "--bot=c.bas"])
 
   test "human flag forms":
     check parseSessionOptions(["--human"]).human == true
@@ -39,10 +43,9 @@ suite "session options":
     check parseSessionOptions(["--players=2"]).playerCount == 2
     check parseSessionOptions(["--players=3"]).playerCount == 3
     let options = parseSessionOptions([
-      "--players", "6", "--human", "--class=warrior", "--seed=42"])
+      "--players", "6", "--human", "--seed=42"])
     check options.playerCount == 6
     check options.human
-    check options.playerClass == Warrior
     check options.seed == 42
     check options.seedGiven
 
@@ -55,12 +58,19 @@ suite "session options":
         discard parseSessionOptions(args)
 
   test "invalid and incomplete options fail clearly":
-    for args in [@["--seed=none"], @["--class=rogue"],
-        @["--opponent=rogue"], @["--seed"], @["--seed="],
-        @["--class", "--seed=1"], @["--unknown=value"], @["local"],
-        @["--seed=9223372036854775808"]]:
+    for args in [@["--seed=none"], @["--seed"], @["--seed="],
+        @["--unknown=value"], @["local"], @["--seed=9223372036854775808"]]:
       expect ValueError:
         discard parseSessionOptions(args)
+
+  test "--class and --opponent are gone":
+    for args in [@["--class=warrior"], @["--class", "warrior"],
+        @["--opponent=mage"], @["--opponent", "mage"]]:
+      try:
+        discard parseSessionOptions(args)
+        check false
+      except ValueError as error:
+        check error.msg.startsWith("Unknown session option: --")
 
 suite "deterministic session bots":
   test "Bolt targets the enemy hero and never an ally":

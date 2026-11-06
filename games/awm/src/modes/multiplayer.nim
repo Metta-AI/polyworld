@@ -280,8 +280,8 @@ when not defined(headless):
       # The human brought a deck: no class to choose.
       startMatch(app.humanSeat)
     elif getEnv("AWM_AUTOSTART") == "1":
-      startMatch(if sessionOptions.human:
-          some(precon(sessionOptions.playerClass))
+      # As the duel's autostart, the human plays the Archer precon.
+      startMatch(if sessionOptions.human: some(precon(Archer))
         else: none(Seat))
     if app.replay != nil:
       # A recorded match: its classes and deal, played back on the ring.

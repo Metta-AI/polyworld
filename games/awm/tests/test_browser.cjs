@@ -54,19 +54,19 @@ fs.mkdirSync(output, {recursive: true});
     await local.close();
 
     // A new tab creates an independent local deal. No global state is imported.
-    const fresh = await gamePage('mode=local&class=warrior&opponent=archer&seed=42');
-    assert.match(await status(fresh), /Player 1 Warrior/);
-    assert.match(await status(fresh), /Player 2 Archer/);
+    const fresh = await gamePage('mode=local&seed=42');
+    assert.match(await status(fresh), /Player 1 Archer/);
+    assert.match(await status(fresh), /Player 2 Mage/);
     await fresh.close();
 
     // CSS mouse coordinates must still hit cards/HUD on Retina displays.
-    const retina = await gamePage('mode=local&opponent=warrior', 2);
+    const retina = await gamePage('mode=local', 2);
     await waitText(retina, 'Ready for your action.');
     await retina.mouse.click(735, 675);
     await waitText(retina, 'highlighted avatar');
     await retina.mouse.click(1090, 375);
     await waitText(retina, 'Bolt resolves');
-    assert.match(await status(retina), /Player 2 Warrior: life 18/);
+    assert.match(await status(retina), /Player 2 Mage: life 18/);
     await waitText(retina, 'Ready for your action.');
     await retina.mouse.click(1345, 860);
     await waitText(retina, 'opponent is thinking');

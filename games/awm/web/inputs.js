@@ -11,13 +11,9 @@
     args.push("--human", "true");
   }
 
-  ["class", "opponent", "players"].forEach(
-    function addValue(name) {
-      parameters.getAll(name).forEach(function (value) {
-        args.push("--" + name, value);
-      });
-    }
-  );
+  parameters.getAll("players").forEach(function (value) {
+    args.push("--players", value);
+  });
 
   Module["arguments"] = args;
 })();

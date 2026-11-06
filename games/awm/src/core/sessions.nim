@@ -12,7 +12,6 @@ type
   SessionOptions* = object
     seed*: int64
     seedGiven*: bool  ## --seed was passed; otherwise games may pick their own.
-    playerClass*, opponentClass*: HeroClass
     playerCount*: int  ## Above two selects the multiplayer scene preview.
     human*: bool
     humanDeckPath*: string
@@ -51,15 +50,13 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
   ## Accept both --key=value and --key value, including negative numeric seeds.
   ## --human is a flag: --human, --human=true, --human true all work, and
   ## --human PATH.bas plays the deck that script lists.
-  result = SessionOptions(seed: DefaultSessionSeed,
-    playerClass: Archer, opponentClass: Mage, playerCount: PlayerCount,
+  result = SessionOptions(seed: DefaultSessionSeed, playerCount: PlayerCount,
     human: false)
   var index = 0
   while index < args.len:
     let separator = args[index].find('=')
     let key = if separator >= 0: args[index][0 ..< separator] else: args[index]
-    if key notin ["--seed", "--class", "--opponent", "--players", "--bot",
-        "--human", "--replay"]:
+    if key notin ["--seed", "--players", "--bot", "--human", "--replay"]:
       raise newException(ValueError, "Unknown session option: " & key)
     if key == "--human":
       var value = "true"
@@ -92,8 +89,6 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
       except ValueError:
         raise newException(ValueError, "Invalid integer seed: " & value)
       result.seedGiven = true
-    of "--class": result.playerClass = parseHeroClass(value)
-    of "--opponent": result.opponentClass = parseHeroClass(value)
     of "--players":
       try:
         result.playerCount = parseInt(value)

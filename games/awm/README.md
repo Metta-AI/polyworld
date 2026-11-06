@@ -410,9 +410,6 @@ P/T:    3/1
 | `--cards`, `--cards:CLASS`, `--card:NAME` | Print cards and exit |
 | `-h`, `--help` | Print the options and exit |
 
-`--class` and `--opponent` are accepted but ignored: pick your class on
-screen and your opponent with `--bot`.
-
 ## Coworld
 
 AWM runs on Coworld like Polyworld's other games: each seat is one uploaded

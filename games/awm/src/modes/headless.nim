@@ -2,12 +2,20 @@
 ## Coworld server, which plays the platform's staged BASIC players and
 ## publishes their results and replay like the other Polyworld games.
 import std/[os, strutils]
+import jsony
 import polyworld/cli
 import ../core/[sim, sessions, bots, match, replays]
 
 when defined(coworld):
-  import jsony
   import polyworld/coworld
+
+type
+  HeadlessArgs* = object
+    options*: GameOptions
+    classNames*: seq[string]  ## `--classes`, one per seat; empty without it.
+
+  ConfigClasses = object
+    classes: seq[string]
 
 proc seatClasses*(names: openArray[string], seats: int): seq[Seat] =
   ## Parses an explicit class override with one entry per seat. Each seat
@@ -16,6 +24,11 @@ proc seatClasses*(names: openArray[string], seats: int): seq[Seat] =
     raise newException(ValueError, "classes must name one class per player")
   for name in names:
     result.add precon(parseHeroClass(name))
+
+proc configClasses*(config: string): seq[string] =
+  ## A Coworld config's optional `classes` override; empty without one. The
+  ## shared `GameConfig` reads the other fields.
+  config.fromJson(ConfigClasses).classes
 
 proc checkReplay*(path: string) =
   ## Plays a replay back with no window and requires every hash to match.
@@ -35,34 +48,45 @@ proc checkReplay*(path: string) =
   echo "Replay verified: ", data.hashes.len, " ticks, ",
     data.header.setup.classes.len, " players."
 
-proc runHeadless*() =
-  ## `--bot PATH[:COUNT]` once per seat (2 to 7 seats), `--seed`,
-  ## `--ticks`, `--classes archer,mage,...` and `--record PATH`; or
-  ## `--replay PATH` to verify a recording.
-  var
-    options = GameOptions(seed: DefaultSessionSeed.int32,
-      maximumTicks: DefaultDurationTicks)
-    classNames: seq[string]
-    arguments = commandLineParams()
-    index = 0
+proc parseHeadlessArgs*(arguments: seq[string]): HeadlessArgs =
+  ## `--bot PATH[:COUNT]` once per group of seats (2 to 7 seats), `--seed`,
+  ## `--ticks` (or `--seconds`, `--minutes`), `--classes archer,mage,...`
+  ## and `--record PATH`; or `--replay PATH` to verify a recording. The
+  ## shared flags parse as in every Polyworld game; an error quits.
+  result.options = GameOptions(seed: DefaultSessionSeed.int32,
+    maximumTicks: DefaultDurationTicks)
+  var index = 0
   while index < arguments.len:
     let argument = arguments[index]
-    if options.takeCommonFlag(arguments, index, argument):
+    if result.options.takeCommonFlag(arguments, index, argument):
       discard
     elif argument == "--classes":
-      classNames = arguments.argumentValue(index, argument).split(',')
+      result.classNames = arguments.argumentValue(index, argument).split(',')
     elif argument.startsWith("--classes="):
-      classNames = argument["--classes=".len .. ^1].split(',')
+      result.classNames = argument["--classes=".len .. ^1].split(',')
     else:
       fail("unknown argument: " & argument)
     inc index
+  # No window: --player is refused, and --replay takes no bots or record.
+  result.options.validateGameOptions(0, "")
+
+proc runHeadless*() =
+  ## Plays and optionally records one bot match, or verifies a replay.
+  let
+    parsed = parseHeadlessArgs(commandLineParams())
+    options = parsed.options
   if options.replayPath.len > 0:
-    options.validateGameOptions(0, "")
     checkReplay(options.replayPath)
     return
   let seats = options.botGroups.botCount
   if seats notin 2 .. MaxPlayers:
     fail("supply 2 to " & $MaxPlayers & " bots with --bot PATH[:COUNT]")
+  var classOverride: seq[Seat]
+  if parsed.classNames.len > 0:
+    try:
+      classOverride = seatClasses(parsed.classNames, seats)
+    except ValueError as error:
+      fail("--classes: " & error.msg)
   var
     sources: seq[string]
     players: seq[PlayerConfig]
@@ -73,7 +97,7 @@ proc runHeadless*() =
   let
     bots = loadBots(sources)
     seated =
-      if classNames.len > 0: seatClasses(classNames, seats)
+      if classOverride.len > 0: classOverride
       else: setupBotSeats(bots, options.seed.int64)
     recorder = initReplayRecorder(
       matchSetup(seated, options.seed, options.maximumTicks.uint32),
@@ -93,9 +117,6 @@ proc runHeadless*() =
     played.game.turnNumber, " turns. Scores: ", played.scores
 
 when defined(coworld):
-  type CoworldClasses = object
-    classes: seq[string]
-
   proc runCoworld*() =
     ## One Coworld episode: every staged player is a BASIC script.
     let
@@ -107,7 +128,7 @@ when defined(coworld):
     let
       names =
         try:
-          readLocal(getEnv("COGAME_CONFIG_URI")).fromJson(CoworldClasses).classes
+          readLocal(getEnv("COGAME_CONFIG_URI")).configClasses()
         except JsonError as error:
           raise newException(CoworldError,
             "Invalid Coworld configuration: " & error.msg)

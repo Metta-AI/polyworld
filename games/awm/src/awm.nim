@@ -28,10 +28,6 @@ when not defined(headless):
       "  --players N      Player count (2). 2 plays a duel; 3 to 7 play a\n" &
       "                   multiplayer match: the last player alive wins.\n" &
       "  --seed INTEGER   Match seed (random when omitted)\n" &
-      "  --class CLASS    Your hero class: archer, warrior or mage (archer).\n" &
-      "                   Duel only: in multiplayer you pick it on screen.\n" &
-      "  --opponent CLASS Opponent hero class: archer, warrior or mage (mage).\n" &
-      "                   Duel only: multiplayer opponents get random classes.\n" &
       "  --bot PATH       Bot program (.bas), repeatable up to " & $PlayerCount &
         " times.\n" &
       "                   Duel: one bot plays both seats; with --human it\n" &

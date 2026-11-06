@@ -109,9 +109,12 @@ proc episode(
     expectedOutput = "",
     expectedRuntimeError = "",
     annotations = true,
-    selectClass = true
-) =
+    selectClass = true,
+    seed = 2026,
+    classes: seq[string] = @[]
+): JsonNode {.discardable.} =
   ## Runs one local roster and inspects outputs at the completion marker.
+  ## Returns the results, or the failure marker.
   doAssert scripts.len == count
   let
     evidenceRoot = getEnv("COWORLD_TEST_ARTIFACTS")
@@ -128,7 +131,7 @@ proc episode(
   listener.close()
   let
     config = %*{
-      "tokens": [], "players": [], "seed": 2026, "max_ticks": ticks,
+      "tokens": [], "players": [], "seed": seed, "max_ticks": ticks,
       "wait_for_llm": waitForLlm
     }
     seats = newJArray()
@@ -141,6 +144,8 @@ proc episode(
     env[key] = value
   env["COGAME_HOST"] = "127.0.0.1"
   env["COGAME_PORT"] = $port
+  if classes.len > 0:
+    config["classes"] = %classes
   for slot, fixture in scripts:
     let source =
       if game == "awm" and selectClass:
@@ -215,6 +220,7 @@ proc episode(
       "episode timed out: " & readFile(logPath)
     sleep(20)
   let output = readFile(marker).fromJson(JsonNode)
+  result = output
   doAssert fileExists(directory / "status.json"), "completion preceded status"
   var logs: seq[string]
   for slot in 0 ..< count:
@@ -258,6 +264,9 @@ proc episode(
     doAssert logs[0].contains("BASIC error:")
   else:
     doAssert output["scores"].len == count
+    if game == "awm":
+      doAssert output["seed"].getInt() == seed
+      doAssert output["ticks"].getInt() in 0 .. ticks
     if game == "gota":
       doAssert output["total_xp"].len == count
       for xp in output["total_xp"]:
@@ -343,6 +352,21 @@ for (game, count) in Games:
       selectClass = false,
       expectedRuntimeError = "BASIC setup selected no class")
     echo "AWM missing class reports policy failure with healthy endpoints"
+    # The classes override skips every script's setup: these scripts pick
+    # no class, yet each seat plays the class its slot names. Every seat
+    # only ends its turn, so max_ticks ends the match.
+    let classNames = ["archer", "warrior", "mage"]
+    var classes: seq[string]
+    for slot in 0 ..< count:
+      classes.add classNames[slot mod classNames.len]
+    let overridden = episode(game, count, newSeq[string](count).mapIt(
+      "IF selfClass = selfPlayer MOD 3 THEN PRINT \"CLASS-OVERRIDDEN\"\n" &
+      "endTurn()\nEND\n"), selectClass = false, ticks = 7,
+      seed = -2147483648, classes = classes,
+      expectedOutput = "CLASS-OVERRIDDEN")
+    doAssert overridden["outcome"].getStr() == "timeout"
+    doAssert overridden["ticks"].getInt() == 7
+    echo "AWM classes, seed and max_ticks reach the match"
   echo game, ": runtime contracts passed"
 
   for slot in 0 ..< scripts.len:
