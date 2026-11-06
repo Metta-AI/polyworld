@@ -9,14 +9,12 @@ not initialize a 3D scene or a second canvas.
 - `polyworld_art/cac/loading/moonlit-table.webp` is the runtime painting,
   approximately 305 KiB. Its original PNG, generation prompt and conversion
   recipe live in the art repository's `cac/loading/` directory.
-- `cnc-wordmark.svg` replaces the old shield with the full **Cards and Casters**
-  name and a small fan of cards. The letter shapes are outlined from the
+- `cnc-wordmark.svg` is the full **Cards and Casters** name over a small fan
+  of cards. The letter shapes are outlined from the
   project's Grenze SemiBold font and retain its SIL OFL 1.1 attribution.
   Outlines render immediately, before the subtitle's webfont is ready. The
   Coworld replay viewer shows it too, as `loading-logo.svg` above its status
   line (`coworld/cac/tools/build_replay_viewer.sh`).
-- `cac-logo.svg` and `courtyard-night.svg` are the previous design, retained as
-  source history. Neither the game nor the replay viewer requests them.
 
 `tools/build_web.sh` copies the WebP, wordmark, Grenze font and OFL notice into
 the browser output's `loading/` directory, outside the Wasm asset pack. The
