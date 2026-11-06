@@ -65,8 +65,7 @@ for player in 0 ..< FactionCount:
   for kind in UnitKind:
     let entry = roster.players[player][kind.ord]
     doAssert entry.preset.selected("Hair") == "None"
-    if kind != SummonUnit:
-      doAssert entry.skinRgb == roster.factions[player].skinRgb()
+    doAssert entry.skinRgb == roster.factions[player].skinRgb()
     if kind == KnightUnit:
       doAssert entry.preset.selected("Headgear") == "Vanguard Knight helmet"
     checkModel(manifest, entry, kind)
@@ -78,9 +77,9 @@ for player in 0 ..< FactionCount:
       doAssert entry.preset.selected("Right hand") == "Medieval crossbow"
       doAssert UnitTable[player][kind].splash > 0
     if kind == SummonUnit:
-      doAssert entry.skinRgb == [1'f, 0.36'f, 0.02'f]
+      doAssert entry.preset.selected("Headgear") == "Elemental grand laurel crown"
       for part in entry.preset.parts:
-        if part.category notin ["Body", "Face"]:
+        if part.category notin ["Body", "Face", "Headgear"]:
           doAssert part.item == "None", "Elemental has " & part.category
     echo player, " ", kind, ": model, scale and animations passed."
 

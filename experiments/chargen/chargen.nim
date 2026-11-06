@@ -6,7 +6,7 @@
 import
   std/[os, random, sets, strformat, strutils, tables, times],
   bumpy, chroma, gltf, silky, vmath,
-  polyworld/[animblend, chargen, toon], weights, lineups
+  polyworld/[animblend, chargen, toon], weights, lineups, lvd_presets
 
 when defined(takeScreenshot):
   import pixie
@@ -52,8 +52,9 @@ proc run() =
   ## Opens the modular character and its animation controls.
   let
     directory = getEnv("CHARGEN_LIBRARY", AssetDir)
-    manifest = readManifest(directory)
     builder = newAtlasBuilder(1024, 4)
+  var manifest = readManifest(directory)
+  manifest.addLvdPresets(directory)
   createDir(TempDir)
   builder.addDir(ThemeDir & "/", ThemeDir & "/")
   builder.addFont(ThemeDir / "IBMPlexSans-Regular.ttf", "H1", 28.0)
@@ -129,6 +130,7 @@ proc run() =
     hasGnomes = false
     hasGota = false
     hasGods = false
+    hasLvd = false
     hasGnomeParts = false
     speed = 1.0'f
     fade = 0.20'f
@@ -149,6 +151,8 @@ proc run() =
       hasGota = true
     if preset.group == "Gota Gods":
       hasGods = true
+    if preset.group == "LvD":
+      hasLvd = true
   for category in manifest.categories:
     for item in category.items:
       if item.alignment == GnomeOnly:
@@ -217,6 +221,7 @@ proc run() =
     if preset.pupilColor.len > 0:
       pupil = manifest.pupilColors.colorIndex(preset.pupilColor)
       pupilTint = manifest.pupilColors[pupil].rgb
+      customPupil = false
     if preset.group == "Gota Gods":
       distance = 7.5
       target = vec3(0.4, 1.85, 0)
@@ -615,6 +620,9 @@ proc run() =
         button "God presets":
           presetGroup =
             if presetGroup == "Gota Gods": "" else: "Gota Gods"
+      if hasLvd:
+        button "LvD presets":
+          presetGroup = if presetGroup == "LvD": "" else: "LvD"
       if presetGroup.len > 0:
         for i, preset in manifest.presets:
           if preset.group == presetGroup:

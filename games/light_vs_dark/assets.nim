@@ -37,7 +37,7 @@ const
   ]
   UnitNames*: array[UnitKind, string] = [
     "Peon", "Swordsman", "Archer", "Mage", "Armored knight", "Bomber",
-    "Cleric", "Fire elemental"
+    "Cleric", "Elemental"
   ]
   BuildingModelRoot* = DataRoot & "/terrain/lvd_buildings/models"
   FactionTextureRoot* = DataRoot & "/terrain/lvd_buildings/textures/factions"
@@ -101,8 +101,7 @@ proc readCharacterRoster*(
     if units.len != UnitKind.high.ord + 1:
       raise newException(ChargenError, "LvD roster needs all eight roles.")
     for kind in UnitKind:
-      if kind != SummonUnit:
-        units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      units[kind.ord].skinRgb = result.factions[player].skinRgb()
       let entry = units[kind.ord]
       if entry.kind != $kind:
         raise newException(ChargenError, "LvD roster is missing " & $kind)

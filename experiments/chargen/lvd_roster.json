@@ -317,9 +317,9 @@
       ]
     },
     {
-      "name": "Fire elemental",
+      "name": "Elemental",
       "previous": "Elemental / Daemon",
-      "notes": "Solid orange for every player.\nNo eyes, mouth, ears or clothing.",
+      "notes": "Team-colored body and grand Zeus laurel.\nNo eyes, mouth, ears or clothing.",
       "missing": "",
       "pose": "Idle_Loop",
       "height": 2.21,
@@ -351,20 +351,13 @@
         {
           "category": "Ears",
           "item": "None"
+        },
+        {
+          "category": "Headgear",
+          "item": "Elemental grand laurel crown"
         }
-      ],
-      "skin": "LvD Fire orange"
-    }
-  ],
-  "skins": [
-    {
-      "name": "LvD Fire orange",
-      "color": [
-        1.0,
-        0.36,
-        0.02,
-        1.0
       ]
     }
-  ]
+  ],
+  "skins": []
 }

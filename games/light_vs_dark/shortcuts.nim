@@ -31,7 +31,7 @@ const ShortcutLabels*: array[ShortcutAction, string] = [
   "Build Town Hall", "Build Farm", "Build Barracks", "Build Lumber Mill",
   "Build Tower", "Build Stables", "Build Church", "Build Blacksmith",
   "Train Peon", "Train Swordsman", "Train Archer", "Train Mage",
-  "Train Knight", "Train Catapult", "Train Cleric", "Train Summon / Fire elemental"
+  "Train Knight", "Train Catapult", "Train Cleric", "Train Elemental"
 ]
 
 proc shortcutLabel*(action: ShortcutAction): string = ShortcutLabels[action]

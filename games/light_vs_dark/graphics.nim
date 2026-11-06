@@ -393,7 +393,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       manifest = readManifest(ChargenLibrary)
       roster = readCharacterRoster(playerFactions)
     for player in 0 ..< run.world.players.len:
-      # The orange elemental's UI still identifies its owning faction.
+      # UI and every summoned body identify their owning faction.
       teamColors[player] = FactionColors[roster.factions[player]]
       if player >= FactionFiles.len:
         unitModels[player] = unitModels[player mod FactionFiles.len]

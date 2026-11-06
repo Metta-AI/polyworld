@@ -422,6 +422,15 @@ Renders, comparisons, build logs, and assembled intermediate exports belong in
 `tmp/chargen`. The original `experiments/modular_chars` utility and its assets
 remain separate.
 
+## LvD presets
+
+Open `LvD presets` in the Character panel to select any of the eight LvD
+roles in either of the two authored appearances. The viewer reads the game's
+`lvd.json` roster directly, including its default faction skin colors and
+the Elemental's enlarged gold Zeus-style laurel crown. Selecting an outfit
+keeps the current animation and playback state, like the other preset groups.
+If a custom `CHARGEN_LIBRARY` has no `lvd.json`, the LvD group is omitted.
+
 ## Gota heroes
 
 Use `Gota presets` or `Gnome presets` near the top of the Character panel to
