@@ -40,7 +40,8 @@ suite "Browser graphics loading gap":
       client.send(RoomMessage(kind: Ready,
         revision: relay.rooms[0].revision, hash: 42))
     pump()
-    clients[0].send(RoomMessage(kind: StartMatch))
+    clients[0].send(RoomMessage(kind: StartMatch,
+      revision: relay.rooms[0].revision, hash: 42))
     pump()
     pump() # Initial Catchup -> CaughtUp(0), before graphics loading.
     check not clients[0].catchupPending

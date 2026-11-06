@@ -1,5 +1,6 @@
 import
-  chroma, silky, vmath, windy,
+  bumpy, chroma, silky, vmath, windy,
+  polyworld/rooms,
   presets, generation/[maps, tiles]
 import polyworld/lobbies as sharedLobbies
 
@@ -15,6 +16,91 @@ type
     draft: DraftChoice
     previewConfig: MapConfig
     preview: TileGrid
+
+type KickMenu* = object
+  target*: uint32
+  at*: Vec2
+  room*: string
+  botSeat*: int = -1
+  local*: bool
+
+proc defaultGameName*(player: string): string =
+  ## Preserve the display name exactly, including punctuation and Unicode.
+  player & "'s game"
+
+proc canEditGameName*(snapshot: RoomMessage, self: uint32): bool =
+  ## Guests always see authoritative read-only settings.
+  snapshot.phase == Lobby and snapshot.participant == self
+
+proc canKick*(snapshot: RoomMessage, self, target: uint32): bool =
+  ## Match the relay's lobby-owner authorization, never offering self removal.
+  if snapshot.phase != Lobby or snapshot.participant != self or
+    target == 0 or target == self:
+      return false
+  for participant in snapshot.participants:
+    if participant.id == target:
+      return true
+
+proc openSeatContext*(menu: var KickMenu, snapshot: RoomMessage,
+    self: uint32, seatIndex: int, at: Vec2): bool =
+  ## Human actions target a participant; bot actions target exactly one seat.
+  menu = KickMenu()
+  if snapshot.phase != Lobby or snapshot.participant != self or
+    seatIndex notin 0 ..< snapshot.seats.len:
+    return false
+  let seat = snapshot.seats[seatIndex]
+  if seat.owner == 0:
+    return false
+  if seat.name == "Human":
+    if not snapshot.canKick(self, seat.owner):
+      return false
+  elif self != seat.owner and self != snapshot.participant:
+    return false
+  menu = KickMenu(target: seat.owner, room: snapshot.room, at: at,
+    botSeat: if seat.name == "Human": -1 else: seatIndex)
+  true
+
+proc openLocalBot*(menu: var KickMenu, seat: int, occupiedBot: bool,
+    at: Vec2): bool =
+  menu = KickMenu()
+  if occupiedBot and seat >= 0:
+    menu = KickMenu(target: 1, local: true, botSeat: seat, at: at)
+    return true
+
+proc contextLabel*(menu: KickMenu): string =
+  if menu.botSeat >= 0: "Remove bot" else: "Kick player"
+
+proc canUseContext*(menu: KickMenu, snapshot: RoomMessage, self: uint32): bool =
+  ## Revalidate the room, owner and slot kind against the latest snapshot.
+  if menu.local or menu.target == 0 or snapshot.room != menu.room or
+    snapshot.phase != Lobby or snapshot.participant != self:
+      return false
+  if menu.botSeat < 0:
+    return snapshot.canKick(self, menu.target)
+  if menu.botSeat >= snapshot.seats.len:
+    return false
+  let seat = snapshot.seats[menu.botSeat]
+  seat.owner == menu.target and seat.name != "Human" and
+    (self == seat.owner or self == snapshot.participant)
+
+proc contextCommand*(menu: KickMenu, snapshot: RoomMessage,
+    self: uint32): RoomMessage =
+  doAssert menu.canUseContext(snapshot, self)
+  if menu.botSeat >= 0:
+    RoomMessage(kind: ReleaseSeat, seat: uint32(menu.botSeat))
+  else:
+    RoomMessage(kind: KickParticipant, participant: menu.target)
+
+proc dismissKick*(menu: var KickMenu, mouse: Vec2, escape, pressed: bool) =
+  ## Keep inside clicks available for the popup button; dismiss outside presses.
+  if escape or (pressed and not overlaps(mouse, rect(menu.at, vec2(220, 52)))):
+    menu.target = 0
+
+proc lobbySeatBounds*(layout: LobbyLayout, index: int): Rect =
+  ## Use the same two-column geometry as the shared seat renderer.
+  let width = (layout.leftWidth - 60) / 2
+  rect(layout.left + vec2(20 + float32(index div 5) * (width + 20),
+    84 + float32(index mod 5) * 88), vec2(width, 78))
 
 proc drawMapPreview(sk: Silky, ui: var LobbyUi, config: MapConfig, at: Vec2) =
   ## Caches the real generated map, then draws a small terrain preview.
@@ -33,20 +119,32 @@ proc drawMapPreview(sk: Silky, ui: var LobbyUi, config: MapConfig, at: Vec2) =
   sk.lobbyLabel("Map seed " & $config.seed,
     at + vec2(164, 100), 260, tint = LobbyMuted)
 
+proc settingsFooter*(at: Vec2, height: float32, named: bool): tuple[map, advanced: Vec2] =
+  ## Anchor navigation to the panel, not the optional game-name content row.
+  (at + vec2(22, height - 114), at + vec2(22, height - 66))
+
 proc configPanel*(
     sk: Silky, window: Window, ui: var LobbyUi, config: var GotaConfig,
-    at: Vec2, width, height: float32, enabled: bool
+    at: Vec2, width, height: float32, enabled: bool,
+    gameName: ptr string = nil, showControls = true
 ): bool =
   ## Edits typed match controls without exposing the serialized room payload.
-  let before = config
+  let
+    before = config
+    page = if showControls: ui.configPage else: 0
   sk.lobbyPanel(at, vec2(width, height))
   let
-    p = at + vec2(22)
+    p = at + vec2(22, if gameName != nil: 66 else: 22)
     fieldWidth = width - 44
   sk.lobbyIcon("settings", p + vec2(0, 7))
   sk.lobbyLabel("MATCH SETTINGS", p + vec2(40, 0), fieldWidth - 40,
     "LobbyHeading")
-  if ui.configPage == 0:
+  if gameName != nil:
+    if enabled:
+      sk.lobbyInput(window, "matchGameName", gameName[], at + vec2(22, 10), width - 44)
+    else:
+      sk.lobbyLabel(gameName[], at + vec2(22, 10), width - 44)
+  if page == 0:
     sk.drawMapPreview(ui, config.mapPreset, p + vec2(0, 52))
     sk.lobbyNumber("Match seed", config.seed, p + vec2(0, 204),
       fieldWidth - 48, 0'i32, int32.high - 1, 1'i32, enabled)
@@ -79,7 +177,7 @@ proc configPanel*(
         p + vec2(0, 482), fieldWidth, tint = LobbyMuted)
       sk.lobbyLabel("Wait for LLM: " & $config.waitForLlm,
         p + vec2(0, 526), fieldWidth, tint = LobbyMuted)
-  elif ui.configPage == 1:
+  elif page == 1:
     sk.lobbyNumber("High ground", config.mapPreset.highSize,
       p + vec2(0, 56), fieldWidth, 450'f, 570'f, 1'f, enabled)
     sk.lobbyNumber("Castle size", config.mapPreset.castleSize,
@@ -114,14 +212,15 @@ proc configPanel*(
     if sk.lobbyButton("Reset map defaults", p + vec2(0, 316),
       fieldWidth, "terrain", enabled):
         config.mapPreset = defaultConfig()
-  if sk.lobbyButton(
-    if ui.configPage == 1: "Back to match settings" else: "Map generation",
-    p + vec2(0, height - 138), fieldWidth, "terrain"
-  ):
-    ui.configPage = if ui.configPage == 1: 0 else: 1
-  if sk.lobbyButton(
-    if ui.configPage == 2: "Back to match settings" else: "Advanced settings",
-    p + vec2(0, height - 90), fieldWidth, "settings"
-  ):
-    ui.configPage = if ui.configPage == 2: 0 else: 2
+  if showControls:
+    if sk.lobbyButton(
+      if ui.configPage == 1: "Back to match settings" else: "Map generation",
+      settingsFooter(at, height, gameName != nil).map, fieldWidth, "terrain"
+    ):
+      ui.configPage = if ui.configPage == 1: 0 else: 1
+    if sk.lobbyButton(
+      if ui.configPage == 2: "Back to match settings" else: "Advanced settings",
+      settingsFooter(at, height, gameName != nil).advanced, fieldWidth, "settings"
+    ):
+      ui.configPage = if ui.configPage == 2: 0 else: 2
   result = config != before

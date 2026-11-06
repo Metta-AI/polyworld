@@ -607,26 +607,39 @@ proc receive*(
     else:
       room.seats[message.seat] = Seat()
     relay.changed(room, rosterOnly = true)
-  of Ready:
+  of ReadyStatus:
+    if room.phase != Lobby or not room.controls(guest.id):
+      reject("Only lobby controllers can change ready status")
+    guest.ready = message.flag
+    relay.publish(room)
+  of Ready, Prepared:
     if room.phase != Lobby or message.revision != room.revision:
       reject("Ready refers to outdated room settings")
     if not room.controls(guest.id):
       reject("Only controllers can ready up")
-    guest.ready = true
+    if message.kind == Ready:
+      guest.ready = true
     guest.readyHash = message.hash
     guest.readyRevision = room.revision
     relay.publish(room)
   of StartMatch:
     if room.phase != Lobby or room.owner != guest.id:
       reject("Only the owner can start a lobby")
+    let hostPrepared = room.identity.game == "gods_of_the_arena"
+    if hostPrepared and message.revision != room.revision:
+      reject("Start refers to outdated room settings")
     var
       first = true
-      initialHash: uint64
+      initialHash = if hostPrepared: message.hash else: 0'u64
     for seat in room.seats:
       if seat.owner == 0:
         # These game adapters still require dense rosters when preparing worlds.
         if room.identity.game == "light_vs_dark":
           reject("Every game seat must have an owner")
+        continue
+      if hostPrepared:
+        # Peers validate BeginMatch and report tick zero independently.
+        first = false
         continue
       let controller = relay.guest(seat.owner)
       if controller.connection == 0 or not controller.ready:

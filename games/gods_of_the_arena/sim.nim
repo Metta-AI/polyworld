@@ -351,6 +351,7 @@ type
   GameSubmission* = object
     action*: ReplayAction
     mailbox*: bool
+    humanChat*: bool
     text*: string
   Game* = ref object
     ## One match session. World is the hashable sim; everything else is
@@ -6224,7 +6225,8 @@ proc newGame*(
     replayMode: bool,
     replayData: ReplayData,
     drafting = true,
-    draftMode = UniqueDraft
+    draftMode = UniqueDraft,
+    activeSeats: seq[int] = @[]
 ): Game =
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
@@ -6309,7 +6311,13 @@ proc newGame*(
     if replayMode:
       replayData.header.setup.heroes
     else:
-      liveHeroSetup(botCount)
+      block:
+        let all = liveHeroSetup(botCount)
+        var selected: seq[ReplayHero]
+        for i, hero in all:
+          if activeSeats.len == 0 or i in activeSeats:
+            selected.add hero
+        selected
   spawnHeroes(world, heroSetup)
   for hero in world.heroes:
     hero.drafted = true

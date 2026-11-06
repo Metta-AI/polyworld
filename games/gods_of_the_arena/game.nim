@@ -399,15 +399,30 @@ proc initializeLocalMatch*(
   options.pauseOnStart = false
   options.speed = 1
   clearPlayerCommands()
+  var activeSeats: seq[int]
+  var packedSources: seq[string]
+  var packedConfig = config
+  packedConfig.players = newSeq[PlayerConfig](HeroClassCount)
+  options.playerSlot = 0
+  for i in 0 ..< HeroClassCount:
+    if i == humanSeat or (i < sources.len and sources[i].len > 0):
+      if i == humanSeat:
+        options.playerSlot = int32(activeSeats.len + 1)
+      if i < config.players.len:
+        packedConfig.players[activeSeats.len] = config.players[i]
+      activeSeats.add i
+      packedSources.add(if i == humanSeat or i >= sources.len: "" else: sources[i])
+  if activeSeats.len == 0:
+    raise newException(GotaConfigError, "Assign a human or bot before starting")
   let map = generateMap(config.seed, config.mapPreset)
   run = newGame(
     map, config.spawnIntervalTicks, HeroClassCount, false, ReplayData(),
-    draftMode = config.draftMode
+    draftMode = config.draftMode, activeSeats = activeSeats
   )
-  run.loadBotSources(sources)
+  run.loadBotSources(packedSources)
   run.recorder = initReplayRecorder(
     currentSetup(run, uint32(config.maxTicks)), map.preset
   )
-  run.recorder.data.config = config
+  run.recorder.data.config = packedConfig
   run.recorder.data.config.playerSlot = options.playerSlot
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)

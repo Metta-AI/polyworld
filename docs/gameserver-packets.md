@@ -1,6 +1,6 @@
 # Gameserver packets
 
-Outer protocol **3**. [GotA payloads](../games/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
+Outer protocol **4**. [GotA payloads](../games/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
 
 One binary WebSocket message per packet at `/ws`. Fields are in wire order,
 little endian, without padding. `string` and `seq[T]` have a `uint32` length
@@ -13,7 +13,7 @@ Every packet starts with this header; the packet tables list only its body.
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
 | `magic` | `array[4, char]` | PWRM. |
-| `version` | `uint32` | Exactly 3. |
+| `version` | `uint32` | Exactly 4. |
 | `kind` | `uint32` | Packet ID below. |
 | `delivery` | `uint64` | Server delivery counter per connection, starting at 1; clients send 0. |
 | `match` | `uint32` | Match generation within room; starts at 0, increments on start. |
@@ -226,13 +226,17 @@ confirmation for the current revision; newcomers are never auto-readied.
 
 ## 11. StartMatch — Client → server
 
-Owner starts once all controllers are connected, ready for the current revision
-and hash-matched, with at least one controller. Galcon may leave potential seats
-empty; other adapters retain the dense-roster requirement.
+Owner-only start. GotA accepts a sparse, nonempty occupied roster without Ready
+clicks: the host prepares the current snapshot and supplies its initial hash.
+Peers prepare on BeginMatch, check its exact revision/hash before ticks, and
+report tick zero against the relay's immutable checkpoint. Missing reports do
+not block the clock; mismatches still desync. Other adapters retain their
+existing connected-controller, readiness and hash gates (including dense LvD).
 
-| Body | Size |
-| --- | --- |
-| None; header only | 64 bytes total |
+| Field | Nim wire type | Carries / rules |
+| --- | --- | --- |
+| `revision` | `uint32` | Required current revision for GotA; ignored by other startup policies. |
+| `hash` | `uint64` | Host-prepared initial hash for GotA; ignored by other startup policies. |
 
 ## 12. BeginMatch — Server → client
 
@@ -403,6 +407,26 @@ from the Lobby RoomState flag.
 Spectator membership changes publish snapshots without changing setup revision.
 Seat changes and controller renames require new revision-bound proofs even when
 ready intent is retained.
+
+## 31. Prepared — Client → server
+
+Automatically confirm a current controller's setup revision and initial hash
+without changing its cosmetic ready flag. Same body and validation as Ready.
+This opcode alone does not change an adapter's StartMatch policy.
+
+| Field | Nim wire type | Carries / rules |
+| --- | --- | --- |
+| `revision` | `uint32` | Must match current room revision. |
+| `hash` | `uint64` | Automatically prepared initial digest. |
+
+## 32. ReadyStatus — Client → server
+
+Change only the current lobby controller's displayed readiness. GotA uses this
+social-only flag independently of its host-prepared StartMatch.
+
+| Field | Nim wire type | Carries / rules |
+| --- | --- | --- |
+| `flag` | `uint32` | Ready = 1, unready = 0. |
 
 ## Shared rules
 

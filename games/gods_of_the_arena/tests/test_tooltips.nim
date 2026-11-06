@@ -30,3 +30,8 @@ doAssert "current attack target" in itemDetails(PoisonPotion).description
 doAssert "Stuns and roots" in itemDetails(PortalScroll).description
 doAssert ("Stun", "0.5s") in abilityDetails(FirebrandSword, 4).rows
 doAssert ("Healing", "375 HP") in abilityDetails(HealingBloom, 4).rows
+
+# Art-free timing/session regressions run with the ordinary GotA suite.
+{.push warning[UnusedImport]: off.}
+import test_tooltip_hover, test_tooltip_session, test_tooltip_routes
+{.pop.}

@@ -16,7 +16,16 @@ const
   PanelDraft = vec2(1048, 632)
   HeroCardSize = vec2(100, 126)
   HeroGap = 4.0'f
-  HeroTeamWidth = HeroCardSize.x * 5 + HeroGap * 4
+  HeroTeamGap = 34.0'f
+
+proc heroTeamWidth(count: int): float32 =
+  ## No cards means no reserved team width or inter-card gaps.
+  HeroCardSize.x * count.float32 + HeroGap * max(count - 1, 0).float32
+
+proc heroRibbonSize*(redCount, blueCount: int): Vec2 =
+  ## Keeps the original ten-hero dimensions, shrinking to occupied cards.
+  vec2(24 + heroTeamWidth(redCount) + HeroTeamGap +
+    heroTeamWidth(blueCount), PanelHeroes.y)
 
 type
   ClockPanels* = object
@@ -82,9 +91,10 @@ proc draftPanels*(size: Vec2): DraftPanels =
   result.selection = selected.takeRow(30, 2)
   result.role = selected.takeRest()
 
-proc scorePanel*(layout: GameUiLayout): GameUiPanel =
-  ## Moves the score below the hero roster when they cannot fit side by side.
-  let heroes = layout.panel(GameUiRegion.TopCenter, PanelHeroes)
+proc scorePanel*(layout: GameUiLayout,
+    heroSize = PanelHeroes): GameUiPanel =
+  ## Moves the score below the occupied hero roster on collision.
+  let heroes = layout.panel(GameUiRegion.TopCenter, heroSize)
   result = layout.panel(GameUiRegion.TopLeft, PanelScore)
   if result.overlaps(heroes, 48):
     result.origin.y = heroes.origin.y + heroes.size.y + 48
@@ -98,12 +108,15 @@ proc clockPanels*(panel: GameUiPanel): ClockPanels =
   result.caption = heading.take(vec2(72, 20))
   result.time = rows.takeRow(40)
 
-proc heroPanels*(panel: GameUiPanel): array[10, HeroPanels] =
-  ## Stacks two teams of portraits, player names, and paired meters.
+proc heroPanels*(panel: GameUiPanel, redCount = 5,
+    blueCount = 5): array[10, HeroPanels] =
+  ## Packs occupied cards on either side; array halves retain team identity.
+  let counts = [redCount, blueCount]
   var teams = panel.stack(LeftToRight, vec2(12, 5))
   for team in 0 ..< 2:
-    var cards = teams.takeColumn(HeroTeamWidth, 34).stack(LeftToRight)
-    for slot in 0 ..< 5:
+    var cards = teams.takeColumn(heroTeamWidth(counts[team]),
+      HeroTeamGap).stack(LeftToRight)
+    for slot in 0 ..< counts[team]:
       var card = cards.take(HeroCardSize, HeroGap).stack(TopToBottom)
       let i = team * 5 + slot
       card.indent = 14
@@ -112,6 +125,12 @@ proc heroPanels*(panel: GameUiPanel): array[10, HeroPanels] =
       result[i].name = card.takeRow(18)
       result[i].hp = card.takeRow(16, 1)
       result[i].mana = card.takeRow(16)
+
+proc heroVersusPanel*(panel: GameUiPanel, redCount: int): GameUiPanel =
+  ## Centers VS in the team divider, even when the teams are unequal.
+  GameUiPanel(origin: panel.origin +
+    vec2(12 + heroTeamWidth(redCount) + (HeroTeamGap - 26) / 2, 57),
+    size: vec2(26, 28))
 
 proc detailsPanels*(panel: GameUiPanel): DetailsPanels =
   ## Gives the portrait, identity, meters, and ability groups their own stacks.

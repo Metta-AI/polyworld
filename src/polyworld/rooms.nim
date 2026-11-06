@@ -1,7 +1,7 @@
 import std/[strutils]
 
 const
-  RoomProtocolVersion* = 3'u32
+  RoomProtocolVersion* = 4'u32
   RoomHeaderBytes* = 64
   MaxWireBytes* = 256 * 1024
   MaxPayloadBytes* = 64 * 1024
@@ -19,7 +19,7 @@ type
     ConfigureRoom, ClaimSeat, ReleaseSeat, Ready, StartMatch, BeginMatch,
     SubmitCommand, CommandAck, TickPacket, AppliedTick, Catchup, CaughtUp,
     ReportHash, MatchStatus, LeaveRoom, KickParticipant, ReturnLobby,
-    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch, ResizeRoom
+    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch, ResizeRoom, Prepared, ReadyStatus
   GameIdentity* = object
     game*: string
     gameplay*, protocol*: uint32
@@ -194,7 +194,7 @@ proc encode*(message: RoomMessage): string =
     result.putString(message.name)
   of ReleaseSeat:
     result.put32(message.seat)
-  of Ready:
+  of Ready, Prepared, StartMatch:
     result.put32(message.revision)
     result.put64(message.hash)
   of BeginMatch:
@@ -220,7 +220,7 @@ proc encode*(message: RoomMessage): string =
   of ReportHash, FinishMatch:
     result.put32(message.tick)
     result.put64(message.hash)
-  of PauseMatch:
+  of PauseMatch, ReadyStatus:
     result.put32(uint32(message.flag))
   of MatchStatus:
     result.put32(uint32(message.flag))
@@ -233,7 +233,7 @@ proc encode*(message: RoomMessage): string =
     result.put64(message.sequence)
   of Failure, AbortMatch:
     result.putString(message.detail)
-  of ListRooms, StartMatch, LeaveRoom, ReturnLobby, Keepalive:
+  of ListRooms, LeaveRoom, ReturnLobby, Keepalive:
     discard
   if result.len > MaxWireBytes:
     reject("Packet exceeds wire limit")
@@ -320,7 +320,7 @@ proc decode*(bytes: string): RoomMessage =
     result.name = reader.getString(96)
   of ReleaseSeat:
     result.seat = reader.get32()
-  of Ready:
+  of Ready, Prepared, StartMatch:
     result.revision = reader.get32()
     result.hash = reader.get64()
   of BeginMatch:
@@ -345,7 +345,7 @@ proc decode*(bytes: string): RoomMessage =
   of ReportHash, FinishMatch:
     result.tick = reader.get32()
     result.hash = reader.get64()
-  of PauseMatch:
+  of PauseMatch, ReadyStatus:
     let paused = reader.get32()
     if paused > 1:
       reject("Invalid pause flag")
@@ -364,7 +364,7 @@ proc decode*(bytes: string): RoomMessage =
     result.sequence = reader.get64()
   of Failure, AbortMatch:
     result.detail = reader.getString(4096)
-  of ListRooms, StartMatch, LeaveRoom, ReturnLobby, Keepalive:
+  of ListRooms, LeaveRoom, ReturnLobby, Keepalive:
     discard
   if reader.cursor != bytes.len:
     reject("Trailing packet bytes")

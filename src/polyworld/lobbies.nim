@@ -243,6 +243,10 @@ proc rosterPanel*(sk: Silky, layout: LobbyLayout) =
     layout.left + vec2(layout.leftWidth / 2 + 70, 22), 300,
     "LobbyHeading", LobbyBlue)
 
+proc seatBackgroundTint*(team: ColorRGBX, empty: bool): ColorRGBX =
+  ## Keep empty slots visibly neutral while occupied seats retain team colors.
+  if empty: rgbx(116, 116, 116, 255) else: team
+
 proc seatButton*(
     sk: Silky, layout: LobbyLayout, index: int,
     name, owner: string, human, empty, editable: bool
@@ -260,11 +264,12 @@ proc seatButton*(
     width,
     enabled = editable,
     height = 78,
-    tint = tint
+    tint = seatBackgroundTint(tint, empty)
   )
   sk.lobbyLabel($(index + 1), at + vec2(10, 19), 30, "LobbyBold", tint)
-  sk.lobbyIcon(icon, at + vec2(44, 22), 32, tint)
-  sk.lobbyLabel(name, at + vec2(88, 6), width - 130, "LobbyBold")
+  sk.lobbyIcon(icon, at + vec2(44, 22), 32, if empty: LobbyMuted else: tint)
+  sk.lobbyLabel(name, at + vec2(88, 6), width - 130, "LobbyBold",
+    if empty: LobbyMuted else: rgbx(240, 237, 225, 255))
   sk.lobbyLabel(owner, at + vec2(88, 37), width - 130,
     tint = LobbyMuted)
   sk.lobbyIcon("chevron_down", at + vec2(width - 34, 25), 22)

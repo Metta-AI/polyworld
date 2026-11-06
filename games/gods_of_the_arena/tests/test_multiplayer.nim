@@ -136,7 +136,8 @@ for client in clients:
     kind: Ready, revision: session.revision, hash: session.game.networkHash
   ))
 exchange()
-first.send(RoomMessage(kind: StartMatch))
+first.send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
+  hash: sessions[0].game.networkHash()))
 exchange()
 for session in sessions:
   doAssert session.client.events.len == 1
@@ -196,7 +197,7 @@ for iteration in 0 ..< 600:
   exchange()
   advanceClients()
   if relay.rooms[0].phase == rooms.Ended:
-    # Completion stops production, not lagging client playback.
+    # First controller completion stops production, not lagging client playback.
     var allFinished = true
     for session in sessions:
       if not session.finished:

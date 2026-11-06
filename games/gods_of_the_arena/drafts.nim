@@ -141,8 +141,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
       elif canPick: "Select a hero"
       else: name & " is picking"
     detail =
-      if not playing: "Paused. Press Space to resume."
-      elif selectedClass >= 0: HeroClass(selectedClass).heroSpec.role
+      if selectedClass >= 0: HeroClass(selectedClass).heroSpec.role
       else: "A random available hero is picked when time runs out."
     button = layout.confirm
   sk.drawLabel(title, layout.selection.origin, layout.selection.size,

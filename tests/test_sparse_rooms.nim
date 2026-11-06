@@ -31,9 +31,11 @@ proc send(relay: Relay, connection: int, message: RoomMessage) =
 
 echo "Testing roster readiness intent and current-revision setup proofs"
 var relay = Relay()
-let host = relay.connect(1, "gods_of_the_arena")
-let peer = relay.connect(2, "gods_of_the_arena")
-discard relay.connect(3, "gods_of_the_arena")
+# Generic readiness-consent policy; GotA's host-prepared policy is covered by
+# games/gods_of_the_arena/tests/test_cosmetic_start.nim.
+let host = relay.connect(1, "sparse-proof-test")
+let peer = relay.connect(2, "sparse-proof-test")
+discard relay.connect(3, "sparse-proof-test")
 relay.send(1, RoomMessage(kind: CreateRoom, name: "Sparse", number: 10, tickRate: 24))
 let sparse = relay.rooms[0]
 relay.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Human"))
