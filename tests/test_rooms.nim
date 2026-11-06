@@ -273,6 +273,9 @@ relay.send(2, RoomMessage(kind: LeaveRoom))
 doAssert hashRoom.seats == historicalSeats
 relay.send(9, RoomMessage(kind: ReturnLobby))
 doAssert hashRoom.seats[1].owner == 0
+# Reconnection preserves setup only while another connected watcher keeps it alive.
+discard relay.connect(11, "test-puzzle")
+relay.send(11, RoomMessage(kind: JoinRoom, room: hashRoom.id))
 let
   lobbySeats = hashRoom.seats
   lobbyRevision = hashRoom.revision

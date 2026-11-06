@@ -234,7 +234,50 @@ proc changed(relay: Relay, room: RelayRoom, rosterOnly = false) =
       relay.guest(id).ready = false
   relay.publish(room)
 
-proc disconnect*(relay: Relay, connection: int) =
+proc clearMembership(guest: Guest) =
+  ## Preparation, receipts and playback cursors belong to the old room only.
+  guest.room = ""
+  guest.ready = false
+  guest.recovering = false
+  guest.readyHash = 0
+  guest.readyRevision = 0
+  guest.applied = 0
+  guest.hashTick = 0
+  guest.finishTick = 0
+  guest.hash = 0
+  guest.finishHash = 0
+  guest.receipts.setLen(0)
+
+proc closeIfUnwatched(relay: Relay, room: RelayRoom): bool =
+  ## Seats and private bots have no residency independent of connected people.
+  for id in room.participants:
+    let guest = relay.guest(id)
+    if guest != nil and guest.room == room.id and guest.connection != 0:
+      return false
+  relay.logEvent("room.closed", room = room)
+  for guest in relay.guests:
+    if guest.room == room.id:
+      guest.clearMembership()
+  room.paused = false
+  room.deadline = 0
+  room.owner = 0
+  room.participants.setLen(0)
+  room.seats.setLen(0)
+  room.pending.setLen(0)
+  room.pendingBytes = 0
+  room.history.setLen(0)
+  room.historyBytes = 0
+  room.checkpoints.setLen(0)
+  room.payload = ""
+  room.detail = ""
+  room.pausedBy = ""
+  for i in 0 ..< relay.rooms.len:
+    if relay.rooms[i] == room:
+      relay.rooms.delete(i)
+      break
+  true
+
+proc disconnectConnection(relay: Relay, connection: int, preserveRoom = false) =
   ## Releases one connection without holding up the shared timeline.
   let guest = relay.connectionGuest(connection)
   if guest == nil:
@@ -244,11 +287,15 @@ proc disconnect*(relay: Relay, connection: int) =
   guest.deliveries.setLen(0)
   guest.unacknowledged = 0
   let room = relay.room(guest.room)
-  if room == nil:
+  if room == nil or (not preserveRoom and relay.closeIfUnwatched(room)):
     return
   if room.phase == Lobby:
     guest.ready = false
   relay.publish(room)
+
+proc disconnect*(relay: Relay, connection: int) =
+  ## Ordinary socket closure retires a room when its final watcher leaves.
+  relay.disconnectConnection(connection)
 
 proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
   ## Binds a new connection or restores an existing participant securely.
@@ -268,7 +315,8 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
     if guest.connection != 0:
       let oldConnection = guest.connection
       relay.outgoing.add Outgoing(connection: oldConnection, close: true)
-      relay.disconnect(oldConnection)
+      # A token-authenticated takeover is continuous presence, not abandonment.
+      relay.disconnectConnection(oldConnection, preserveRoom = true)
   else:
     if relay.guests.len >= MaxGuests:
       reject("Server participant limit reached")
@@ -347,8 +395,7 @@ proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
   ## Removes lobby membership and frees its seats without transferring bots.
   relay.logEvent("room.left", guest.connection, room,
     "player=" & $guest.id)
-  guest.room = ""
-  guest.receipts.setLen(0)
+  guest.clearMembership()
   var seatsChanged = false
   if room.phase == Lobby:
     for seat in room.seats.mitems:
@@ -362,6 +409,8 @@ proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
   if room.owner == guest.id and room.participants.len > 0:
     room.owner = room.participants[0]
   relay.send(guest, RoomMessage(kind: RoomState))
+  if relay.closeIfUnwatched(room):
+    return
   if seatsChanged:
     relay.changed(room, rosterOnly = true)
   else:
@@ -825,9 +874,8 @@ proc advance*(relay: Relay, now: float64) =
         relay.send(guest, packet)
     room.deadline = now + 1.0 / float64(room.tickRate)
   for i in countdown(relay.rooms.high, 0):
-    if relay.rooms[i].participants.len == 0:
-      relay.logEvent("room.closed", room = relay.rooms[i])
-      relay.rooms.delete(i)
+    # send() may retire a backpressured connection during this scheduler pass.
+    discard relay.closeIfUnwatched(relay.rooms[i])
   for i in countdown(relay.guests.high, 0):
     let guest = relay.guests[i]
     if guest.room.len == 0 and guest.connection == 0 and

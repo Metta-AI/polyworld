@@ -111,6 +111,7 @@ import
   test_worldtexts,
   test_rooms,
   test_room_codes,
+  test_room_cleanup,
   test_relay_async_hashes,
   test_relay_readiness,
   test_sparse_rooms,
