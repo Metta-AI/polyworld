@@ -265,7 +265,7 @@ git -C ../polyworld-buff push
 ```
 
 Review the generated changes before committing. GitHub Pages publishes the
-latest report at [GotA standings](https://metta-ai.github.io/polyworld-buff/GOTA/standings/).
+latest report at [GotA standings](https://softmax-universe.github.io/polyworld-buff/GOTA/standings/).
 This replaces the site's latest standings; the run folder preserves the local
 tournament. The runner updates local files and does not commit or push them.
 

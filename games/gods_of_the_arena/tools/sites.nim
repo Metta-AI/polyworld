@@ -4,7 +4,7 @@ import
 
 const
   DefaultSite* = Root.parentDir / "polyworld-buff"
-  SiteUrl = "https://metta-ai.github.io/polyworld-buff/"
+  SiteUrl = "https://softmax-universe.github.io/polyworld-buff/"
   StyleStart = "<style id=\"gota-site-style\">"
   DefaultStyles = staticRead(SourceDirectory / "standings.css")
   Assets* = [

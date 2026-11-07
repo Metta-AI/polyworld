@@ -8,13 +8,13 @@ and shared UI, with native and browser clients.
 
 Three games are built on the engine:
 
-- **[Gods of the Arena (GotA)](https://metta-ai.github.io/polyworld-buff/GOTA/)**:
+- **[Gods of the Arena (GotA)](https://softmax-universe.github.io/polyworld-buff/GOTA/)**:
   `MOBA`: Two teams of five heroes fight through lanes and jungle camps to destroy
   the enemy fort. Heroes gain levels, buy equipment, and use abilities.
-- **[Light vs Dark](https://metta-ai.github.io/polyworld-buff/LvD/)**:
+- **[Light vs Dark](https://softmax-universe.github.io/polyworld-buff/LvD/)**:
   `RTS`: Two opposing commanders gather resources, build armies, and battle for
   control of the map.
-- **[Call to Adventure](https://metta-ai.github.io/polyworld-buff/CTA/)**:
+- **[Call to Adventure](https://softmax-universe.github.io/polyworld-buff/CTA/)**:
   `ARPG`: Four heroes explore a dungeon, fight monsters, and collect treasure.
   Surviving heroes compete to return with the most gold.
 
